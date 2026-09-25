@@ -63,6 +63,44 @@ import org.apache.comet.{CometConf, CometExplainInfo}
  */
 class CometDppFallbackRepro3949Suite extends CometTestBase {
 
+  test("AQE coalescing a union sibling must not execute native scan DPP during planning") {
+    withTempDir { dir =>
+      withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+        spark
+          .range(4)
+          .selectExpr("id AS fact_id", "id % 2 AS fact_key")
+          .write
+          .partitionBy("fact_key")
+          .parquet(s"$dir/fact")
+        spark.range(2).selectExpr("id AS dim_id", "id AS dim_key").write.parquet(s"$dir/dim")
+      }
+      withTempView("aqe_fact", "aqe_dim") {
+        spark.read.parquet(s"$dir/fact").createOrReplaceTempView("aqe_fact")
+        spark.read.parquet(s"$dir/dim").createOrReplaceTempView("aqe_dim")
+        withSQLConf(
+          CometConf.COMET_NATIVE_SCAN_ENABLED.key -> "true",
+          CometConf.COMET_SCALA_UDF_CODEGEN_ENABLED.key -> "false",
+          "spark.comet.exec.union.enabled" -> "false",
+          "spark.sql.adaptive.enabled" -> "true",
+          "spark.sql.adaptive.coalescePartitions.enabled" -> "true",
+          "spark.sql.shuffle.partitions" -> "4",
+          "spark.sql.optimizer.dynamicPartitionPruning.enabled" -> "true") {
+          val df = sql("""
+            SELECT /*+ BROADCAST(d) */ cast(f.fact_id AS STRING) AS x
+            FROM aqe_fact f JOIN aqe_dim d ON f.fact_key = d.dim_key
+            WHERE d.dim_id < 1
+            UNION ALL
+            SELECT cast(sum(fact_id) AS STRING) FROM aqe_fact GROUP BY fact_key
+          """)
+          val initial = unwrapAqe(df.queryExecution.executedPlan)
+          assert(initial.toString.contains("CometNativeScan"), initial.toString)
+          assert(initial.toString.contains("dynamicpruning"), initial.toString)
+          checkAnswer(df, Seq(Row("0"), Row("2"), Row("2"), Row("4")))
+        }
+      }
+    }
+  }
+
   // ----------------------------------------------------------------------
   // Mechanism (synthetic): proves the AQE wrap flips the fallback decision.
   // ----------------------------------------------------------------------
