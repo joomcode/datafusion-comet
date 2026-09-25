@@ -35,6 +35,27 @@ class CometDateTimeUtilsSuite extends CometTestBase {
 
   import testImplicits._
 
+  test("date_trunc UTC alias compares natively with parquet timestamps") {
+    withSQLConf(
+      "spark.sql.session.timeZone" -> "Etc/UTC",
+      "spark.sql.parquet.outputTimestampType" -> "TIMESTAMP_MICROS",
+      "spark.comet.expression.TruncTimestamp.enabled" -> "true",
+      CometConf.COMET_SCALA_UDF_CODEGEN_ENABLED.key -> "false") {
+      withTempPath { dir =>
+        val input = Seq("2024-01-01 12:34:56", "2024-01-02 00:00:00", null)
+          .toDF("value")
+          .selectExpr("cast(value AS TIMESTAMP) AS ts")
+        val df = roundtripParquet(input, dir)
+        checkSparkAnswerAndOperator(
+          df.selectExpr(
+            "ts",
+            "date_trunc('DAY', ts) AS day",
+            "date_trunc('DAY', ts) < ts AS earlier"))
+        checkSparkAnswerAndOperator(df.where("date_trunc('DAY', ts) < ts"))
+      }
+    }
+  }
+
   private def roundtripParquet(df: DataFrame, tempDir: File): DataFrame = {
     val filename = new File(tempDir, s"dtutils_${System.currentTimeMillis()}.parquet").toString
     df.write.mode(SaveMode.Overwrite).parquet(filename)

@@ -79,10 +79,10 @@ class CometCodegenSourceSuite extends AnyFunSuite {
       Some("UTC"))
     val src = CometBatchKernelCodegen.generateSource(expr, IndexedSeq(spec)).body
     assert(
-      src.contains("if (this.col0.isNullAt(i))"),
+      src.contains("if (this.col0.isNullAt(i & this.col0_rowMask))"),
       s"expected short-circuit to use isNullAt for CometPlainVector-wrapped col0; got:\n$src")
     assert(
-      !src.contains("if (this.col0.isNull(i))"),
+      !src.contains("if (this.col0.isNull(i & this.col0_rowMask))"),
       s"expected no raw Arrow isNull on the CometPlainVector-wrapped col0; got:\n$src")
   }
 
@@ -110,7 +110,7 @@ class CometCodegenSourceSuite extends AnyFunSuite {
     val expr = Length(BoundReference(0, StringType, nullable = true))
     val src = gen(expr, nullableString)
     assert(
-      src.contains("case 0: return this.col0.isNull(this.rowIdx);"),
+      src.contains("case 0: return this.col0.isNull((this.rowIdx & this.col0_rowMask));"),
       s"expected nullable isNullAt to delegate to the Arrow vector; got:\n$src")
   }
 
@@ -125,12 +125,12 @@ class CometCodegenSourceSuite extends AnyFunSuite {
 
   test("NullIntolerant expression emits input-null short-circuit before ev.code") {
     // Upper is NullIntolerant (null in -> null out). Expect the default body to prepend
-    // `if (this.col0.isNull(i)) { setNull; } else { ... }` so null rows skip the whole
+    // `if (this.col0.isNull(i & this.col0_rowMask)) { setNull; } else { ... }` so null rows skip the whole
     // expression eval, not just the setNull write.
     val expr = Upper(BoundReference(0, StringType, nullable = true))
     val src = gen(expr, nullableString)
     assert(
-      src.contains("this.col0.isNull(i)"),
+      src.contains("this.col0.isNull(i & this.col0_rowMask)"),
       s"expected NullIntolerant short-circuit on input ordinal 0; got:\n$src")
     assert(
       src.contains("output.setNull(i);"),
@@ -144,7 +144,7 @@ class CometCodegenSourceSuite extends AnyFunSuite {
     val expr = Length(Upper(BoundReference(0, StringType, nullable = true)))
     val src = gen(expr, nullableString)
     assert(
-      src.contains("if (this.col0.isNull(i))"),
+      src.contains("if (this.col0.isNull(i & this.col0_rowMask))"),
       s"expected short-circuit on col0 when every node is NullIntolerant; got:\n$src")
   }
 
@@ -163,7 +163,8 @@ class CometCodegenSourceSuite extends AnyFunSuite {
           BoundReference(1, StringType, nullable = true))))
     val src = gen(expr, nullable1, nullable2)
     assert(
-      !src.contains("this.col0.isNull(i) || this.col1.isNull(i)"),
+      !src.contains(
+        "this.col0.isNull(i & this.col0_rowMask) || this.col1.isNull(i & this.col1_rowMask)"),
       "expected no pre-null short-circuit when Concat breaks the NullIntolerant chain; " +
         s"got:\n$src")
   }
@@ -190,10 +191,12 @@ class CometCodegenSourceSuite extends AnyFunSuite {
       BoundReference(1, IntegerType, nullable = true))
     val src = gen(expr, strCol, intCol)
     assert(
-      !src.contains("this.col0.isNull(i) || this.col1.isNullAt(i)"),
+      !src.contains(
+        "this.col0.isNull(i & this.col0_rowMask) || this.col1.isNullAt(i & this.col1_rowMask)"),
       s"expected no union-of-inputs short-circuit when a Cast sits under the root; got:\n$src")
     assert(
-      !src.contains("if (this.col0.isNull(i))") && !src.contains("if (this.col1.isNullAt(i))"),
+      !src.contains("if (this.col0.isNull(i & this.col0_rowMask))") && !src.contains(
+        "if (this.col1.isNullAt(i & this.col1_rowMask))"),
       s"expected no pre-eval input-null short-circuit at all for this shape; got:\n$src")
   }
 
@@ -222,7 +225,7 @@ class CometCodegenSourceSuite extends AnyFunSuite {
         BoundReference(0, IntegerType, nullable = true)))
     val src = gen(expr, intCol)
     assert(
-      !src.contains("if (this.col0.isNullAt(i))"),
+      !src.contains("if (this.col0.isNullAt(i & this.col0_rowMask))"),
       s"expected no short-circuit when a foldable subtree under the root can raise; got:\n$src")
   }
 
@@ -234,7 +237,7 @@ class CometCodegenSourceSuite extends AnyFunSuite {
       Upper(Substring(BoundReference(0, StringType, nullable = true), Literal(1), Literal(2)))
     val src = gen(expr, nullableString)
     assert(
-      src.contains("if (this.col0.isNull(i))"),
+      src.contains("if (this.col0.isNull(i & this.col0_rowMask))"),
       s"expected the single-ordinal short-circuit to survive a Literal-only argument list; got:\n$src")
   }
 
@@ -252,7 +255,8 @@ class CometCodegenSourceSuite extends AnyFunSuite {
       BoundReference(1, IntegerType, nullable = true))
     val src = gen(expr, intCol, intCol)
     assert(
-      src.contains("if (this.col0.isNullAt(i) || this.col1.isNullAt(i))"),
+      src.contains(
+        "if (this.col0.isNullAt(i & this.col0_rowMask) || this.col1.isNullAt(i & this.col1_rowMask))"),
       s"expected union-of-inputs short-circuit for a leaf-only two-input tree; got:\n$src")
   }
 
@@ -530,9 +534,9 @@ class CometCodegenSourceSuite extends AnyFunSuite {
     // The short-circuit must test every ordinal the tree reads, not just the first.
     assert(
       src.contains(
-        "if (this.col0.isNullAt(i) || this.col1.isNullAt(i) || " +
-          "this.col2.isNullAt(i) || this.col3.isNullAt(i) || this.col4.isNullAt(i) || " +
-          "this.col5.isNull(i))"),
+        "if (this.col0.isNullAt(i & this.col0_rowMask) || this.col1.isNullAt(i & this.col1_rowMask) || " +
+          "this.col2.isNullAt(i & this.col2_rowMask) || this.col3.isNullAt(i & this.col3_rowMask) || this.col4.isNullAt(i & this.col4_rowMask) || " +
+          "this.col5.isNull(i & this.col5_rowMask))"),
       s"expected the short-circuit to test all six ordinals; source:\n$formatted")
   }
 
@@ -566,7 +570,7 @@ class CometCodegenSourceSuite extends AnyFunSuite {
       "expected exactly one setNull site (the post-eval ev.isNull guard, with no short-circuit); " +
         s"found $setNullOccurrences. Source:\n$formatted")
     assert(
-      !src.contains("if (this.col0.isNull(i))"),
+      !src.contains("if (this.col0.isNull(i & this.col0_rowMask))"),
       s"expected no input-null short-circuit when a Cast sits under the root; source:\n$formatted")
   }
 
@@ -591,7 +595,7 @@ class CometCodegenSourceSuite extends AnyFunSuite {
     val result = CometBatchKernelCodegen.generateSource(expr, IndexedSeq(intCol))
     val src = result.body
     assert(
-      src.contains("if (this.col0.isNullAt(i))"),
+      src.contains("if (this.col0.isNullAt(i & this.col0_rowMask))"),
       s"expected input-null short-circuit for the single-input tree; got:\n$src")
     val setNullOccurrences = "output\\.setNull\\(i\\);".r.findAllIn(src).length
     assert(
