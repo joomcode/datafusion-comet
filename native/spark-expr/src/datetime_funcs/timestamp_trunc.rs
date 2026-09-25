@@ -66,7 +66,13 @@ impl TimestampTruncExpr {
         TimestampTruncExpr {
             child,
             format,
-            timezone: Arc::from(timezone),
+            // Spark/Arrow scan and literal timestamps use UTC. Preserve the canonical Arrow
+            // type for its Etc/UTC alias, otherwise native comparisons reject equal timezones.
+            timezone: Arc::from(if timezone == "Etc/UTC" {
+                "UTC".to_owned()
+            } else {
+                timezone
+            }),
         }
     }
 }
@@ -161,5 +167,41 @@ impl PhysicalExpr for TimestampTruncExpr {
             Arc::clone(&self.format),
             self.timezone.to_string(),
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::array::TimestampMicrosecondArray;
+    use arrow::datatypes::Field;
+    use datafusion::physical_expr::expressions::{Column, Literal};
+
+    #[test]
+    fn utc_alias_has_the_canonical_scan_timestamp_type() {
+        let timestamps = Arc::new(
+            TimestampMicrosecondArray::from(vec![Some(45_000_000_000), None]).with_timezone("UTC"),
+        );
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "ts",
+            DataType::Timestamp(Microsecond, Some("UTC".into())),
+            true,
+        )]));
+        let batch = RecordBatch::try_new(Arc::clone(&schema), vec![timestamps]).unwrap();
+        for timezone in ["UTC", "Etc/UTC"] {
+            let expr = TimestampTruncExpr::new(
+                Arc::new(Column::new("ts", 0)),
+                Arc::new(Literal::new(Utf8(Some("day".to_owned())))),
+                timezone.to_owned(),
+            );
+            assert_eq!(
+                expr.data_type(&schema).unwrap(),
+                schema.field(0).data_type().clone()
+            );
+            let actual = expr.evaluate(&batch).unwrap().into_array(2).unwrap();
+            let expected =
+                TimestampMicrosecondArray::from(vec![Some(0), None]).with_timezone("UTC");
+            assert_eq!(actual.as_ref(), &expected);
+        }
     }
 }

@@ -1005,6 +1005,10 @@ abstract class CometNativeExec extends CometExec {
     // broadcast plan.
     val (firstNonBroadcastPlanRDD, firstNonBroadcastPlanNumPartitions) =
       firstNonBroadcastPlan.get._1 match {
+        case plan: CometScanWithPlanData =>
+          // File counts are execution data, not a planning-time partitioning guarantee.
+          // findAllPlanData above has already resolved DPP and serialized the selected files.
+          (null.asInstanceOf[RDD[Any]], perPartitionByKey(plan.sourceKey).length)
         case plan: CometNativeExec =>
           (null.asInstanceOf[RDD[Any]], plan.outputPartitioning.numPartitions)
         case plan =>
