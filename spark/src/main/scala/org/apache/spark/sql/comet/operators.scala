@@ -1008,7 +1008,8 @@ abstract class CometNativeExec extends CometExec {
         case plan: CometScanWithPlanData =>
           // File counts are execution data, not a planning-time partitioning guarantee.
           // findAllPlanData above has already resolved DPP and serialized the selected files.
-          (null.asInstanceOf[RDD[Any]], perPartitionByKey(plan.sourceKey).length)
+          // Read the scan itself: the plan-data map omits scans with zero selected files.
+          (null.asInstanceOf[RDD[Any]], plan.perPartitionData.length)
         case plan: CometNativeExec =>
           (null.asInstanceOf[RDD[Any]], plan.outputPartitioning.numPartitions)
         case plan =>

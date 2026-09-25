@@ -63,6 +63,31 @@ import org.apache.comet.{CometConf, CometExplainInfo}
  */
 class CometDppFallbackRepro3949Suite extends CometTestBase {
 
+  test("native context preserves zero partitions after file pruning") {
+    withTempDir { dir =>
+      withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+        spark.range(2).selectExpr("id", "0 AS p").write.partitionBy("p").parquet(s"$dir/fact")
+      }
+      withTempView("empty_native_fact") {
+        spark.read.parquet(s"$dir/fact").createOrReplaceTempView("empty_native_fact")
+        for (adaptive <- Seq("false", "true")) {
+          withSQLConf(
+            CometConf.COMET_NATIVE_SCAN_ENABLED.key -> "true",
+            "spark.sql.adaptive.enabled" -> adaptive) {
+            val df = sql("SELECT id + 1 FROM empty_native_fact WHERE p = 99")
+            val plan = unwrapAqe(df.queryExecution.executedPlan)
+            assert(plan.toString.contains("CometProject"), plan.toString)
+            val scans = plan.collect { case scan: CometNativeScanExec => scan }
+            assert(scans.nonEmpty, plan.toString)
+            assert(scans.forall(_.perPartitionData.isEmpty))
+            checkAnswer(df, Seq.empty[Row])
+            checkAnswer(sql("SELECT count(id) FROM empty_native_fact WHERE p = 99"), Seq(Row(0L)))
+          }
+        }
+      }
+    }
+  }
+
   test("AQE coalescing a union sibling must not execute native scan DPP during planning") {
     withTempDir { dir =>
       withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
