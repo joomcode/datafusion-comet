@@ -435,7 +435,9 @@ impl ExternalSorter {
         debug!("Spilling sort data of ExternalSorter to disk whilst inserting");
 
         let batches_to_spill = std::mem::take(globally_sorted_batches);
-        self.reservation.free();
+        // COMET PATCH: keep the batches reserved until they are written, as
+        // apache/datafusion#24923 does. The reservation is released on return or error.
+        let _spill_reservation = self.reservation.take();
 
         let (in_progress_file, max_record_batch_size) =
             self.in_progress_spill_file.as_mut().ok_or_else(|| {

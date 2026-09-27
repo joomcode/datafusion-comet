@@ -200,3 +200,123 @@ async fn final_spill_merge_leaves_as_much_again_for_its_consumer() -> Result<()>
     assert_eq!(pool.reserved(), 0);
     Ok(())
 }
+
+/// Records the pool's reservation whenever batch data is written to a spill file.
+struct RecordingTempFileFactory {
+    pool: Arc<dyn MemoryPool>,
+    reserved_during_writes: Arc<parking_lot::Mutex<Vec<usize>>>,
+}
+
+impl datafusion_execution::TempFileFactory for RecordingTempFileFactory {
+    fn create_temp_file(
+        &self,
+        _description: &str,
+    ) -> Result<Arc<dyn datafusion_execution::SpillFile>> {
+        Ok(Arc::new(RecordingSpillFile {
+            pool: Arc::clone(&self.pool),
+            reserved_during_writes: Arc::clone(&self.reserved_during_writes),
+        }))
+    }
+}
+
+struct RecordingSpillFile {
+    pool: Arc<dyn MemoryPool>,
+    reserved_during_writes: Arc<parking_lot::Mutex<Vec<usize>>>,
+}
+
+impl datafusion_execution::SpillFile for RecordingSpillFile {
+    fn size(&self) -> Option<u64> {
+        Some(0)
+    }
+
+    fn read_stream(
+        &self,
+    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes>> + Send>>>
+    {
+        Ok(Box::pin(futures::stream::empty()))
+    }
+
+    fn open_writer(&self) -> Result<Box<dyn datafusion_execution::SpillWriter>> {
+        Ok(Box::new(RecordingSpillWriter {
+            pool: Arc::clone(&self.pool),
+            reserved_during_writes: Arc::clone(&self.reserved_during_writes),
+        }))
+    }
+}
+
+struct RecordingSpillWriter {
+    pool: Arc<dyn MemoryPool>,
+    reserved_during_writes: Arc<parking_lot::Mutex<Vec<usize>>>,
+}
+
+impl std::io::Write for RecordingSpillWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        // Skip the 4-byte continuation and length prefixes.
+        if buf.len() > 8 {
+            self.reserved_during_writes
+                .lock()
+                .push(self.pool.reserved());
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl datafusion_execution::SpillWriter for RecordingSpillWriter {
+    fn finish(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// Finding 3 of apache/datafusion#25804: `consume_and_spill_append` freed the sorted
+/// batches' reservation before writing them. The spill workspace still holds the
+/// buffered input until the spill ends, so the sorted batch must be reserved on top.
+#[tokio::test]
+async fn sorted_batches_stay_reserved_while_they_are_spilled() -> Result<()> {
+    let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(1024 * 1024));
+    let reserved_during_writes = Arc::new(parking_lot::Mutex::new(vec![]));
+    let disk_manager = datafusion_execution::disk_manager::DiskManagerBuilder::default()
+        .with_temp_file_factory(Arc::new(RecordingTempFileFactory {
+            pool: Arc::clone(&pool),
+            reserved_during_writes: Arc::clone(&reserved_during_writes),
+        }));
+    let runtime = RuntimeEnvBuilder::new()
+        .with_memory_pool(Arc::clone(&pool))
+        .with_disk_manager_builder(disk_manager)
+        .build_arc()?;
+    let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));
+    let expr: LexOrdering =
+        [PhysicalSortExpr::new_default(Arc::new(Column::new("x", 0)))].into();
+    let mut sorter = ExternalSorter::new(
+        0,
+        Arc::clone(&schema),
+        expr.clone(),
+        128,
+        0,
+        usize::MAX,
+        SpillCompression::Uncompressed,
+        &ExecutionPlanMetricsSet::new(),
+        runtime,
+    )?;
+    let batch = reversed_batch(&schema, 0)?;
+    let input = get_reserved_bytes_for_record_batch(&batch)?;
+    let sorted = get_reserved_bytes_for_record_batch(&sort_batch(&batch, &expr, None)?)?;
+    sorter.reservation.try_grow(input)?;
+    sorter.in_mem_batches.push(batch);
+
+    sorter.sort_and_spill_in_mem_batches().await?;
+
+    let reserved_during_writes = reserved_during_writes.lock();
+    assert!(!reserved_during_writes.is_empty());
+    assert!(
+        reserved_during_writes
+            .iter()
+            .all(|&reserved| reserved >= input + sorted),
+        "sorted batches must stay reserved while they are written: {reserved_during_writes:?}"
+    );
+    assert_eq!(pool.reserved(), 0);
+    Ok(())
+}
