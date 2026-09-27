@@ -1513,4 +1513,159 @@ class CometWindowExecSuite extends CometTestBase {
       checkSparkAnswerAndOperator(df)
     }
   }
+
+  // Shapes that previously ran in DataFusion's WindowAggExec, which buffers each partition in
+  // memory; they now run in the spilling PartitionAggregateWindowExec. Partitions include a
+  // NULL key, sizes 1 and 2 (smaller than the NTILE bucket counts), ORDER BY ties and NULLs,
+  // and NULL values.
+  private def withWindowSpillTable(f: => Unit): Unit = {
+    withTempDir { dir =>
+      val sizes = Seq[(Option[Int], Int)](
+        (None, 3),
+        (Some(1), 1),
+        (Some(2), 2),
+        (Some(3), 7),
+        (Some(4), 40),
+        (Some(5), 120))
+      var id = 0
+      val rows = sizes.flatMap { case (k, size) =>
+        (0 until size).map { i =>
+          id += 1
+          val o = if (i % 9 == 4) None else Some(i * 7 % 11)
+          val v = if (id * 5 % 7 == 0) None else Some(id * 13 % 17 - 8)
+          (id, k, o, v)
+        }
+      }
+      rows
+        .toDF("id", "k", "o", "v")
+        .repartition(3)
+        .write
+        .mode("overwrite")
+        .parquet(dir.toString)
+      spark.read.parquet(dir.toString).createOrReplaceTempView("window_spill")
+      f
+    }
+  }
+
+  private def assertNoSparkWindow(plan: SparkPlan): Unit = {
+    assertCometWindowExecExists(plan)
+    assert(collect(plan) { case w: SparkWindowExec => w }.isEmpty)
+  }
+
+  test("window: whole-partition FIRST/LAST/NTH_VALUE with and without IGNORE NULLS") {
+    withWindowSpillTable {
+      for (frame <- Seq(
+          "ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING",
+          "RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING")) {
+        val df = sql(s"""
+          SELECT id, k, o, v,
+            first_value(v) OVER w AS f,
+            first_value(v) IGNORE NULLS OVER w AS fi,
+            last_value(v) OVER w AS l,
+            last_value(v) IGNORE NULLS OVER w AS li,
+            first(v, true) OVER w AS first_agg,
+            last(v) OVER w AS last_agg,
+            nth_value(v, 2) OVER w AS n2,
+            nth_value(v, 2) IGNORE NULLS OVER w AS n2i,
+            nth_value(v, 50) OVER w AS n50
+          FROM window_spill
+          WINDOW w AS (PARTITION BY k ORDER BY o, id $frame)
+        """)
+        val (_, cometPlan) = checkSparkAnswerAndOperator(df)
+        assertNoSparkWindow(cometPlan)
+      }
+    }
+  }
+
+  test("window: NTILE, PERCENT_RANK and CUME_DIST with ties and small partitions") {
+    withWindowSpillTable {
+      for (order <- Seq("o", "o DESC NULLS LAST")) {
+        val df = sql(s"""
+          SELECT k, o,
+            PERCENT_RANK() OVER (PARTITION BY k ORDER BY $order) AS pr,
+            CUME_DIST() OVER (PARTITION BY k ORDER BY $order) AS cd
+          FROM window_spill
+        """)
+        val (_, cometPlan) = checkSparkAnswerAndOperator(df)
+        assertNoSparkWindow(cometPlan)
+      }
+      val df = sql("""
+        SELECT id, k, o,
+          NTILE(3) OVER (PARTITION BY k ORDER BY o, id) AS n3,
+          NTILE(4) OVER (PARTITION BY k ORDER BY o, id) AS n4,
+          NTILE(100) OVER (PARTITION BY k ORDER BY o, id) AS n100,
+          NTILE(2) OVER (ORDER BY o, id) AS n_global
+        FROM window_spill
+      """)
+      val (_, cometPlan) = checkSparkAnswerAndOperator(df)
+      assertNoSparkWindow(cometPlan)
+    }
+  }
+
+  test("window: mixed whole-partition, distribution and running expressions in one node") {
+    withWindowSpillTable {
+      val df = sql("""
+        SELECT id, k, o, v,
+          SUM(v) OVER (PARTITION BY k ORDER BY o, id
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS total,
+          first_value(v) IGNORE NULLS OVER (PARTITION BY k ORDER BY o, id
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS first_v,
+          NTILE(4) OVER (PARTITION BY k ORDER BY o, id) AS quartile,
+          CUME_DIST() OVER (PARTITION BY k ORDER BY o, id) AS cd,
+          ROW_NUMBER() OVER (PARTITION BY k ORDER BY o, id) AS rn,
+          SUM(v) OVER (PARTITION BY k ORDER BY o, id
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running,
+          MAX(v) OVER (PARTITION BY k ORDER BY o, id
+                       ROWS BETWEEN 1 PRECEDING AND UNBOUNDED FOLLOWING) AS max_after,
+          LAG(v) OVER (PARTITION BY k ORDER BY o, id) AS previous
+        FROM window_spill
+      """)
+      val (_, cometPlan) = checkSparkAnswerAndOperator(df)
+      assertNoSparkWindow(cometPlan)
+      // All expressions share one window specification, so Spark plans a single node.
+      assert(collect(cometPlan) { case w: CometWindowExec => w }.size == 1)
+    }
+  }
+
+  test("window: frames ending at UNBOUNDED FOLLOWING") {
+    withWindowSpillTable {
+      for ((frame, order) <- Seq(
+          ("ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING", "o, id"),
+          ("ROWS BETWEEN 2 PRECEDING AND UNBOUNDED FOLLOWING", "o, id"),
+          ("ROWS BETWEEN 3 FOLLOWING AND UNBOUNDED FOLLOWING", "o, id"),
+          ("RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING", "o"),
+          ("RANGE BETWEEN 2 PRECEDING AND UNBOUNDED FOLLOWING", "o"),
+          ("RANGE BETWEEN 2 PRECEDING AND UNBOUNDED FOLLOWING", "o DESC NULLS LAST"))) {
+        val aggregates = sql(s"""
+          SELECT id, k, o, v,
+            SUM(v) OVER w AS s,
+            COUNT(v) OVER w AS c,
+            COUNT(*) OVER w AS c_all,
+            MIN(v) OVER w AS mn,
+            MAX(v) OVER w AS mx,
+            AVG(v) OVER w AS av
+          FROM window_spill
+          WINDOW w AS (PARTITION BY k ORDER BY $order $frame)
+        """)
+        val (_, aggregatePlan) = checkSparkAnswerAndOperator(aggregates)
+        assertNoSparkWindow(aggregatePlan)
+        // Value functions over ROWS frames depend on the order of ORDER BY ties.
+        if (order.contains("id")) {
+          val values = sql(s"""
+            SELECT id, k, o, v,
+              first_value(v) OVER w AS f,
+              first_value(v) IGNORE NULLS OVER w AS fi,
+              last_value(v) OVER w AS l,
+              last_value(v) IGNORE NULLS OVER w AS li,
+              nth_value(v, 3) OVER w AS n3,
+              nth_value(v, 3) IGNORE NULLS OVER w AS n3i
+            FROM window_spill
+            WINDOW w AS (PARTITION BY k ORDER BY $order $frame)
+          """)
+          val (_, valuePlan) = checkSparkAnswerAndOperator(values)
+          assertNoSparkWindow(valuePlan)
+        }
+      }
+    }
+  }
 }
