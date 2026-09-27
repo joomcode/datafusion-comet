@@ -337,14 +337,27 @@ An operator that never calls `try_grow` is invisible to the pool no matter how m
 
 ### Whole-partition windows
 
-`PartitionAggregateWindowExec` handles full-partition `sum`, `avg`, `count`, `min`, and
-`max` frames. It updates the existing native accumulators incrementally and reserves the
-retained input batches. On reservation failure it spills those rows through DataFusion's
-spill manager, then replays one spill file at a time with the final aggregate columns.
-Only the current window partition is retained, and small partitions avoid disk entirely.
-Accumulator state is reserved separately. This preserves native execution without retaining
-an entire wide partition in memory. Other window frames continue to use DataFusion's existing
-window operators; this is not a general spill implementation for all window functions.
+`PartitionAggregateWindowExec` handles window expressions that cannot stream: full-partition
+`sum`, `avg`, `count`, `min`, `max`, `first_value`, `last_value` and `nth_value` frames (with
+or without `IGNORE NULLS`), `ntile`, `percent_rank`, `cume_dist`, and frames that end at
+`UNBOUNDED FOLLOWING` but start at `CURRENT ROW`, `N PRECEDING` or `N FOLLOWING`. It reserves
+the retained input batches of the current window partition and, on reservation failure, spills
+them through DataFusion's spill manager, then replays one spill file at a time with the window
+columns. Small partitions avoid disk entirely.
+
+Full-partition aggregates update the existing native accumulators incrementally, and value
+functions track the selected row while rows arrive. `ntile` and `percent_rank` are computed
+during the replay from the partition size counted on the first pass. `cume_dist` and frames
+ending at `UNBOUNDED FOLLOWING` use a reverse pass over a narrow copy of the spilled rows (ORDER
+BY keys and function arguments, written in reverse order next to each row spill file). That pass
+computes the value of the frame starting at every row; the values are buffered in a separate
+spillable reservation and read back at each row's frame start during the replay. Accumulator
+state is reserved separately and is not spillable.
+
+In a window node that mixes these with expressions that can stream (for example `row_number`,
+`lag` or running aggregates), the streaming expressions run in a `BoundedWindowAggExec` below
+`PartitionAggregateWindowExec`. `WindowAggExec`, which buffers whole partitions, remains only
+for expressions without a spilling implementation.
 
 ## Crossing the FFI boundary
 

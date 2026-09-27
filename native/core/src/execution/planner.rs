@@ -2417,7 +2417,7 @@ impl PhysicalPlanner {
                 // `evaluate_all_with_ignore_null` has a sign-wrap bug for `LEAD`
                 // that produces all-NULL output).
                 //
-                // Fall back to `WindowAggExec` otherwise. That covers
+                // The remaining expressions cannot stream. That covers
                 // `PERCENT_RANK` / `CUME_DIST` / `NTILE`
                 // (`!uses_bounded_memory()` — "Can not execute X in a streaming
                 // fashion") and keeps the Spark-compatible Comet UDAFs
@@ -2430,27 +2430,32 @@ impl PhysicalPlanner {
                 // trigger a retract call.
                 let window_expr = window_expr?;
                 let all_bounded = window_expr.iter().all(|e| e.uses_bounded_memory());
-                let window_agg: Arc<dyn ExecutionPlan> =
-                    if PartitionAggregateWindowExec::supports(&window_expr) {
-                        Arc::new(PartitionAggregateWindowExec::new(WindowAggExec::try_new(
-                            window_expr,
-                            Arc::clone(&child.native_plan),
-                            !partition_exprs.is_empty(),
-                        )?))
-                    } else if all_bounded {
-                        Arc::new(BoundedWindowAggExec::try_new(
-                            window_expr,
-                            Arc::clone(&child.native_plan),
-                            InputOrderMode::Sorted,
-                            !partition_exprs.is_empty(),
-                        )?)
-                    } else {
-                        Arc::new(WindowAggExec::try_new(
-                            window_expr,
-                            Arc::clone(&child.native_plan),
-                            !partition_exprs.is_empty(),
-                        )?)
-                    };
+                // Those go to `PartitionAggregateWindowExec`, which spills partition rows
+                // (and evaluates the bounded expressions of a mixed node below it) instead
+                // of buffering each partition in `WindowAggExec`. `WindowAggExec` remains
+                // only for expressions without a spilling implementation.
+                let ignore_nulls = wnd.window_expr.iter().map(|e| e.ignore_nulls).collect();
+                let window_agg: Arc<dyn ExecutionPlan> = if all_bounded {
+                    Arc::new(BoundedWindowAggExec::try_new(
+                        window_expr,
+                        Arc::clone(&child.native_plan),
+                        InputOrderMode::Sorted,
+                        !partition_exprs.is_empty(),
+                    )?)
+                } else if let Some(plan) = PartitionAggregateWindowExec::try_plan(
+                    window_expr.clone(),
+                    Arc::clone(&child.native_plan),
+                    !partition_exprs.is_empty(),
+                    ignore_nulls,
+                )? {
+                    plan
+                } else {
+                    Arc::new(WindowAggExec::try_new(
+                        window_expr,
+                        Arc::clone(&child.native_plan),
+                        !partition_exprs.is_empty(),
+                    )?)
+                };
 
                 // DataFusion's window functions don't always return the same Arrow
                 // type that Spark expects (e.g. `row_number` returns UInt64 while
