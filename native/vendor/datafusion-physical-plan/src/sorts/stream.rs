@@ -299,7 +299,14 @@ impl<T: CursorArray> FieldCursorStream<T> {
     fn convert_batch(&mut self, batch: &RecordBatch) -> Result<ArrayValues<T::Values>> {
         let value = self.sort.expr.evaluate(batch)?;
         let array = value.into_array(batch.num_rows())?;
-        let size_in_mem = array.get_buffer_memory_size();
+        // COMET PATCH: a column of the batch is charged with the batch, which the merge's
+        // `BatchBuilder` holds at least as long as this cursor. Reserve only a key that
+        // the sort expression computed.
+        let size_in_mem = if batch.columns().iter().any(|c| Arc::ptr_eq(c, &array)) {
+            0
+        } else {
+            array.get_buffer_memory_size()
+        };
         let array = array.as_any().downcast_ref::<T>().expect("field values");
         let array_reservation = self.reservation.new_empty();
         array_reservation.try_grow(size_in_mem)?;
@@ -674,6 +681,116 @@ mod tests {
         assert_eq!(kept(&stream), 0);
         assert_eq!(pool.reserved(), stream.converter.size());
         drop(stream);
+        assert_eq!(pool.reserved(), 0);
+        Ok(())
+    }
+
+    // COMET PATCH: finding 7 of apache/datafusion#25804.
+    #[derive(Debug)]
+    struct PeakPool {
+        inner: datafusion_execution::memory_pool::GreedyMemoryPool,
+        peak: std::sync::atomic::AtomicUsize,
+    }
+
+    impl std::fmt::Display for PeakPool {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "peak({})", self.inner)
+        }
+    }
+
+    impl datafusion_execution::memory_pool::MemoryPool for PeakPool {
+        fn name(&self) -> &str {
+            "peak"
+        }
+
+        fn grow(&self, reservation: &MemoryReservation, additional: usize) {
+            self.inner.grow(reservation, additional);
+            self.peak
+                .fetch_max(self.inner.reserved(), std::sync::atomic::Ordering::Relaxed);
+        }
+
+        fn shrink(&self, reservation: &MemoryReservation, shrink: usize) {
+            self.inner.shrink(reservation, shrink)
+        }
+
+        fn try_grow(
+            &self,
+            reservation: &MemoryReservation,
+            additional: usize,
+        ) -> Result<()> {
+            self.inner.try_grow(reservation, additional)?;
+            self.peak
+                .fetch_max(self.inner.reserved(), std::sync::atomic::Ordering::Relaxed);
+            Ok(())
+        }
+
+        fn reserved(&self) -> usize {
+            self.inner.reserved()
+        }
+    }
+
+    /// A single-column merge charges its sort key once, as part of the batch.
+    #[tokio::test]
+    async fn field_cursor_merge_counts_the_key_once() -> Result<()> {
+        use crate::memory::MemoryStream;
+        use crate::metrics::{BaselineMetrics, ExecutionPlanMetricsSet};
+        use crate::sorts::streaming_merge::StreamingMergeBuilder;
+        use arrow::array::Int64Array;
+        use datafusion_execution::memory_pool::{MemoryConsumer, MemoryPool};
+        use futures::TryStreamExt;
+
+        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, false)]));
+        let batch = |offset: i64| {
+            RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![Arc::new(Int64Array::from_iter_values(
+                    (0..10_000).map(|i| 2 * i + offset),
+                ))],
+            )
+            .unwrap()
+        };
+        let inputs = [batch(0), batch(1)];
+        let input_size: usize = inputs
+            .iter()
+            .map(crate::spill::get_record_batch_memory_size)
+            .sum();
+        let streams = inputs
+            .into_iter()
+            .map(|b| {
+                Box::pin(
+                    MemoryStream::try_new(vec![b], Arc::clone(&schema), None).unwrap(),
+                ) as SendableRecordBatchStream
+            })
+            .collect();
+        let peak = Arc::new(PeakPool {
+            inner: datafusion_execution::memory_pool::GreedyMemoryPool::new(usize::MAX),
+            peak: Default::default(),
+        });
+        let pool: Arc<dyn MemoryPool> = Arc::clone(&peak) as _;
+        let ordering =
+            LexOrdering::new(vec![PhysicalSortExpr::new_default(col("a", &schema)?)])
+                .unwrap();
+        let merged: Vec<RecordBatch> = StreamingMergeBuilder::new()
+            .with_streams(streams)
+            .with_schema(Arc::clone(&schema))
+            .with_expressions(&ordering)
+            .with_metrics(BaselineMetrics::new(&ExecutionPlanMetricsSet::new(), 0))
+            .with_batch_size(100_000)
+            .with_reservation(MemoryConsumer::new("merge").register(&pool))
+            .build()?
+            .try_collect()
+            .await?;
+        assert_eq!(
+            merged.iter().map(RecordBatch::num_rows).sum::<usize>(),
+            20_000
+        );
+        let peak = peak.peak.load(std::sync::atomic::Ordering::Relaxed);
+        // Both batches are buffered at once, and their keys are the same buffers.
+        assert!(peak >= input_size, "the batches are not accounted: {peak}");
+        assert!(
+            peak < input_size * 3 / 2,
+            "the key is counted twice: {peak} for {input_size}"
+        );
         assert_eq!(pool.reserved(), 0);
         Ok(())
     }
