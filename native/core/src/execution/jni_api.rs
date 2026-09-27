@@ -2492,6 +2492,7 @@ mod native_sort_spill_tests {
     use arrow::compute::SortOptions;
     use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
     use datafusion::common::{JoinType, NullEquality};
+    use datafusion::execution::memory_pool::{MemoryConsumer, MemoryLimit, MemoryReservation};
     use datafusion::execution::TaskContext;
     use datafusion::physical_expr::expressions::col;
     use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
@@ -2837,5 +2838,190 @@ mod native_sort_spill_tests {
                 Err(e) => panic!("sort-merge join failed instead of spilling: {e}\n{case:?}"),
             }
         }
+    }
+
+    /// Records the most the wrapped pool has had reserved.
+    #[derive(Debug)]
+    struct PeakPool {
+        inner: Arc<dyn MemoryPool>,
+        peak: std::sync::atomic::AtomicUsize,
+    }
+
+    impl PeakPool {
+        fn record(&self) {
+            self.peak
+                .fetch_max(self.inner.reserved(), std::sync::atomic::Ordering::Relaxed);
+        }
+
+        fn peak(&self) -> usize {
+            self.peak.load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    impl std::fmt::Display for PeakPool {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "peak({})", self.inner)
+        }
+    }
+
+    impl MemoryPool for PeakPool {
+        fn name(&self) -> &str {
+            "peak"
+        }
+
+        fn register(&self, consumer: &MemoryConsumer) {
+            self.inner.register(consumer)
+        }
+
+        fn unregister(&self, consumer: &MemoryConsumer) {
+            self.inner.unregister(consumer)
+        }
+
+        fn grow(&self, reservation: &MemoryReservation, additional: usize) {
+            self.inner.grow(reservation, additional);
+            self.record();
+        }
+
+        fn shrink(&self, reservation: &MemoryReservation, shrink: usize) {
+            self.inner.shrink(reservation, shrink)
+        }
+
+        fn try_grow(
+            &self,
+            reservation: &MemoryReservation,
+            additional: usize,
+        ) -> DataFusionResult<()> {
+            self.inner.try_grow(reservation, additional)?;
+            self.record();
+            Ok(())
+        }
+
+        fn reserved(&self) -> usize {
+            self.inner.reserved()
+        }
+
+        fn memory_limit(&self) -> MemoryLimit {
+            self.inner.memory_limit()
+        }
+    }
+
+    struct SortRun {
+        rows: usize,
+        /// Bytes Spark had granted when the sort produced its first batch, that is while
+        /// the final merge pass runs.
+        held_during_final_merge: usize,
+        peak_reserved: usize,
+        spill_count: usize,
+        spilled_rows: usize,
+    }
+
+    /// Sorts `source` by its first column in one task with a fixed Spark share, and checks
+    /// the output order and that all memory is handed back.
+    async fn sort_with_fixed_share(
+        source: Arc<dyn PartitionStream>,
+        share: usize,
+        executor_cores: usize,
+        batch_size: usize,
+    ) -> SortRun {
+        let off_heap_size = share * executor_cores;
+        let (pool, spark) = fair_unified_pool_with_fake_spark(off_heap_size, share);
+        let peak = Arc::new(PeakPool {
+            inner: pool,
+            peak: Default::default(),
+        });
+        let pool: Arc<dyn MemoryPool> = Arc::clone(&peak) as _;
+        let spill_dir = tempfile::tempdir().unwrap();
+        let spark_config =
+            HashMap::from([(SPARK_EXECUTOR_CORES.to_string(), executor_cores.to_string())]);
+        let session = prepare_datafusion_session_context(
+            batch_size,
+            Arc::clone(&pool),
+            vec![spill_dir.path().to_string_lossy().into_owned()],
+            u64::MAX,
+            1,
+            &spark_config,
+            &Operator::default(),
+            Some(off_heap_size),
+        )
+        .unwrap();
+        let schema = Arc::clone(source.schema());
+        let child = Arc::new(
+            StreamingTableExec::try_new(
+                Arc::clone(&schema),
+                vec![source],
+                None,
+                Vec::<LexOrdering>::new(),
+                false,
+                None,
+            )
+            .unwrap(),
+        );
+        let ordering = LexOrdering::new(vec![PhysicalSortExpr::new(
+            col(schema.field(0).name(), &schema).unwrap(),
+            SortOptions {
+                descending: false,
+                nulls_first: true,
+            },
+        )])
+        .unwrap();
+        let sort: Arc<dyn ExecutionPlan> = Arc::new(SortExec::new(ordering, child));
+
+        let mut stream = sort.execute(0, session.task_ctx()).unwrap();
+        let first = stream
+            .next()
+            .await
+            .expect("sorted output")
+            .unwrap_or_else(|e| panic!("native sort failed: {e}"));
+        let held_during_final_merge = spark.held();
+        let rest: SendableRecordBatchStream = Box::pin(RecordBatchStreamAdapter::new(
+            Arc::clone(&schema),
+            futures::stream::once(async { Ok(first) }).chain(stream),
+        ));
+        let rows = read_sorted(rest)
+            .await
+            .unwrap_or_else(|e| panic!("native sort failed: {e}"));
+        assert_eq!(pool.reserved(), 0, "memory still reserved after the sort");
+        assert_eq!(spark.held(), 0, "memory not handed back to Spark");
+        let metrics = sort.metrics().unwrap();
+        SortRun {
+            rows,
+            held_during_final_merge,
+            peak_reserved: peak.peak(),
+            spill_count: metrics.spill_count().unwrap_or(0),
+            spilled_rows: metrics.spilled_rows().unwrap_or(0),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn final_spill_merge_leaves_half_the_share_for_its_consumers() {
+        let case = SortSpillCase {
+            active_tasks_at_start: 8,
+            tasks_start_at_batch: usize::MAX,
+            num_batches: 240,
+            ..SortSpillCase::production()
+        };
+        // The share stays fixed, so the source never changes it.
+        let spark = fair_unified_pool_with_fake_spark(1, 1).1;
+        let source = Arc::new(ProductRows {
+            schema: product_schema(&case),
+            case: case.clone(),
+            spark,
+        });
+        let run = sort_with_fixed_share(
+            source,
+            case.task_share,
+            case.executor_cores,
+            case.batch_size,
+        )
+        .await;
+        assert_eq!(run.rows, case.input_rows * case.num_batches);
+        assert!(run.spill_count > 0, "sort did not spill");
+        assert!(run.peak_reserved <= case.task_share, "overcommitted");
+        assert!(
+            run.held_during_final_merge * 2 <= case.task_share,
+            "the final merge holds {} of a {} share",
+            run.held_during_final_merge,
+            case.task_share
+        );
     }
 }

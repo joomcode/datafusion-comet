@@ -124,6 +124,24 @@ impl SpillWorkspace {
         }
     }
 
+    /// Whether the parents could cover `extra` bytes more than the children and loans use
+    /// now. Asks the execution pool for any part not already reserved, and gives it back.
+    pub(super) fn can_grow(&self, extra: usize) -> bool {
+        let state = self.state.lock();
+        let Some(total) = state.used.checked_add(extra) else {
+            return false;
+        };
+        let missing = total.saturating_sub(state.reserved());
+        if missing == 0 {
+            return true;
+        }
+        if state.parents[0].try_grow(missing).is_err() {
+            return false;
+        }
+        state.parents[0].shrink(missing);
+        true
+    }
+
     /// Returns unused workspace to the execution pool, and every later release too.
     pub(super) fn close(&self) {
         let mut state = self.state.lock();
@@ -246,6 +264,20 @@ mod tests {
         drop(workspace);
         drop(pool);
         assert_eq!(parent.reserved(), 0);
+    }
+
+    #[test]
+    fn can_grow_counts_unused_workspace_and_leaves_reservations_unchanged() {
+        let (parent, workspace, child) = setup(100, 40);
+        child.grow(30);
+        assert!(workspace.can_grow(10));
+        assert_eq!(parent.reserved(), 40);
+        assert!(workspace.can_grow(70));
+        assert_eq!(parent.reserved(), 40);
+        assert!(!workspace.can_grow(71));
+        assert!(!workspace.can_grow(usize::MAX));
+        assert_eq!(parent.reserved(), 40);
+        assert_eq!(child.size(), 30);
     }
 
     #[test]

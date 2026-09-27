@@ -28,7 +28,7 @@ use std::task::{Context, Poll};
 
 use arrow::datatypes::SchemaRef;
 use datafusion_common::{Result, internal_err, resources_err};
-use datafusion_execution::memory_pool::MemoryReservation;
+use datafusion_execution::memory_pool::{MemoryPool, MemoryReservation};
 
 use crate::sorts::builder::try_grow_reservation_to_at_least;
 use crate::sorts::sort::get_reserved_bytes_for_record_batch_size;
@@ -358,9 +358,13 @@ impl MultiLevelMergeBuilder {
                         minimum_number_of_required_streams,
                         &mut memory_reservation,
                     )? {
-                    SpillFilesToMerge::Ready(sorted_spill_files, buffer_size) => {
-                        (sorted_spill_files, buffer_size)
-                    }
+                    // COMET PATCH: see `Self::bound_final_pass`.
+                    SpillFilesToMerge::Ready(sorted_spill_files, buffer_size) => self
+                        .bound_final_pass(
+                            sorted_spill_files,
+                            buffer_size,
+                            &mut memory_reservation,
+                        ),
                     // Not enough memory to seat 2 streams. Re-spill the blocking file
                     // smaller and retry. `get_sorted_spill_files_to_merge` already freed
                     // the reservation and `self.sorted_streams` is untouched, so the
@@ -573,6 +577,83 @@ impl MultiLevelMergeBuilder {
             .collect::<Vec<_>>();
 
         Ok(SpillFilesToMerge::Ready(spills, buffer_len))
+    }
+
+    /// COMET PATCH: keeps the final pass of a sort's spill merge from taking all the memory
+    /// the pool will grant, which leaves nothing for the operators that read its output
+    /// (apache/datafusion#25804, finding 9). Like the aggregate spill merges of
+    /// apache/datafusion#25383, the final pass runs only if the pool could grant as much
+    /// again as its buffers need, trying less read-ahead before more passes. Otherwise this
+    /// merges only enough of `files` now that the final pass would fit twice in what the
+    /// merge holds, and puts the rest back. The smallest merge, two runs, still runs
+    /// without the spare, and without read-ahead.
+    ///
+    /// `files` were selected for a pass with `buffer_len` read-ahead, and `reservation`
+    /// covers them. Applies only to a merge in a [`SpillWorkspace`], that is a sort's.
+    fn bound_final_pass(
+        &mut self,
+        mut files: Vec<(SortedSpillFile, usize)>,
+        buffer_len: usize,
+        reservation: &mut MemoryReservation,
+    ) -> (Vec<(SortedSpillFile, usize)>, usize) {
+        let Some(workspace) = self.workspace.clone() else {
+            return (files, buffer_len);
+        };
+        let is_final =
+            self.sorted_spill_files.is_empty() && self.sorted_streams.is_empty();
+        if !is_final || files.is_empty() {
+            return (files, buffer_len);
+        }
+        let needed = |files: &[(SortedSpillFile, usize)], buffer_len: usize| -> usize {
+            files
+                .iter()
+                .map(|(file, _)| {
+                    get_reserved_bytes_for_record_batch_size(
+                        file.max_record_batch_memory,
+                        file.max_record_batch_memory,
+                    ) * buffer_len
+                })
+                .sum()
+        };
+        let resize = |reservation: &mut MemoryReservation, size: usize| {
+            if reservation.size() > size {
+                reservation.shrink(reservation.size() - size);
+            }
+        };
+
+        let mut read_ahead = vec![buffer_len];
+        if buffer_len > 1 {
+            read_ahead.push(1);
+        }
+        for buffer_len in read_ahead {
+            let pass = needed(&files, buffer_len);
+            let spare = (2 * pass).saturating_sub(reservation.size());
+            if workspace.can_grow(spare) {
+                resize(reservation, pass);
+                return (files, buffer_len);
+            }
+        }
+        if files.len() <= 2 {
+            resize(reservation, needed(&files, 1));
+            return (files, 1);
+        }
+
+        let held = workspace.reserved();
+        let mut fits_twice = 0;
+        let mut total = 0;
+        for file in &files {
+            total += 2 * needed(std::slice::from_ref(file), 1);
+            if total > held {
+                break;
+            }
+            fits_twice += 1;
+        }
+        let merge_now = (files.len() + 1 - fits_twice.max(2)).max(2);
+        let mut rest = files.split_off(merge_now);
+        rest.append(&mut self.sorted_spill_files);
+        self.sorted_spill_files = rest;
+        resize(reservation, needed(&files, buffer_len));
+        (files, buffer_len)
     }
 
     /// Re-spill the spill file at `index` with half its batch size, putting it back

@@ -165,3 +165,38 @@ async fn spill_merge_keeps_its_headroom_across_passes() -> Result<()> {
     }
     Ok(())
 }
+
+/// Finding 9 of apache/datafusion#25804: the final pass of a spill merge used to grow
+/// until the pool refused, leaving nothing for the operators reading its output. It now
+/// runs only if the pool could grant as much again, and merges more passes otherwise.
+#[tokio::test]
+async fn final_spill_merge_leaves_as_much_again_for_its_consumer() -> Result<()> {
+    let pool_size = 44 * 1024;
+    let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(pool_size));
+    let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));
+    let mut sorter = new_sorter(&schema, &pool, 128, 4 * 1024)?;
+    let batches = 2000;
+    for i in 0..batches {
+        sorter.insert_batch(reversed_batch(&schema, i)?).await?;
+    }
+    assert!(
+        sorter.spill_count() >= 20,
+        "need more runs than one pass can seat"
+    );
+    let mut merge_stream = sorter.sort().await?;
+    drop(sorter);
+
+    let first = merge_stream.try_next().await?.expect("rows");
+    let merge = pool.reserved();
+    assert!(merge > 0, "the final pass reserves its buffers");
+    // An operator reading the output can reserve as much as the merge holds.
+    let consumer = MemoryConsumer::new("Downstream").register(&pool);
+    consumer.try_grow(merge)?;
+    drop(consumer);
+
+    let mut output = vec![first];
+    output.extend(merge_stream.try_collect::<Vec<_>>().await?);
+    assert_sorted_ints(&schema, &output, batches as usize * 100)?;
+    assert_eq!(pool.reserved(), 0);
+    Ok(())
+}
