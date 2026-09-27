@@ -70,3 +70,19 @@ pub(crate) fn create_memory_pool(
         MemoryPoolType::Unbounded => Arc::new(UnboundedMemoryPool::default()),
     }
 }
+
+#[cfg(test)]
+pub(crate) type SparkTaskLimitSetter = Arc<dyn Fn(usize) + Send + Sync>;
+
+#[cfg(test)]
+pub(crate) fn fair_unified_pool_with_fake_spark(
+    pool_size: usize,
+    spark_task_limit: usize,
+) -> (Arc<dyn MemoryPool>, SparkTaskLimitSetter) {
+    let spark = spark_memory::fake::FakeSpark::with(spark_task_limit);
+    let pool: Arc<dyn MemoryPool> = Arc::new(TrackConsumersPool::new(
+        CometFairMemoryPool::with_fake_spark(pool_size, spark.memory()),
+        NonZeroUsize::new(10).unwrap(),
+    ));
+    (pool, Arc::new(move |limit| spark.set_limit(limit)))
+}

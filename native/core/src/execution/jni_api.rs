@@ -2483,3 +2483,223 @@ mod tests {
         assert_eq!(pulls, 1);
     }
 }
+
+#[cfg(test)]
+mod native_sort_spill_tests {
+    use super::*;
+    use crate::execution::memory_pools::{fair_unified_pool_with_fake_spark, SparkTaskLimitSetter};
+    use arrow::array::{Float64Array, Int32Array, Int64Array, StringArray};
+    use arrow::compute::SortOptions;
+    use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+    use datafusion::execution::TaskContext;
+    use datafusion::physical_expr::expressions::col;
+    use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
+    use datafusion::physical_plan::sorts::sort::SortExec;
+    use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+    use datafusion::physical_plan::streaming::{PartitionStream, StreamingTableExec};
+    use datafusion::physical_plan::{ExecutionPlan, SendableRecordBatchStream};
+    use datafusion_comet_proto::spark_operator::Operator;
+
+    const MB: usize = 1024 * 1024;
+
+    #[derive(Clone, Debug)]
+    struct SortSpillCase {
+        executor_cores: usize,
+        task_share: usize,
+        active_tasks_at_start: usize,
+        active_tasks_later: usize,
+        tasks_start_at_batch: usize,
+        batch_size: usize,
+        input_rows: usize,
+        num_batches: usize,
+        title_len: usize,
+    }
+
+    struct ProductRows {
+        schema: SchemaRef,
+        case: SortSpillCase,
+        set_spark_task_limit: SparkTaskLimitSetter,
+    }
+
+    impl std::fmt::Debug for ProductRows {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("ProductRows")
+                .field("case", &self.case)
+                .finish()
+        }
+    }
+
+    fn product_schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("product_variant_id", DataType::Utf8, true),
+            Field::new("product_id", DataType::Utf8, true),
+            Field::new("store_id", DataType::Int64, true),
+            Field::new("price", DataType::Float64, true),
+            Field::new("quantity", DataType::Int32, true),
+            Field::new("title", DataType::Utf8, true),
+        ]))
+    }
+
+    fn mix(mut x: u64) -> u64 {
+        x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        x ^ (x >> 31)
+    }
+
+    fn product_batch(schema: &SchemaRef, case: &SortSpillCase, index: usize) -> RecordBatch {
+        let start = (index * case.input_rows) as u64;
+        let rows: Vec<u64> = (start..start + case.input_rows as u64).collect();
+        let variant = StringArray::from_iter_values(
+            rows.iter()
+                .map(|&r| format!("{:016x}{:08x}", mix(r), mix(r ^ 7) as u32)),
+        );
+        let product = StringArray::from_iter_values(
+            rows.iter()
+                .map(|&r| format!("{:016x}{:08x}", mix(r / 4), r as u32)),
+        );
+        let store = Int64Array::from_iter_values(rows.iter().map(|&r| (mix(r) % 50_000) as i64));
+        let price =
+            Float64Array::from_iter_values(rows.iter().map(|&r| (mix(r) % 100_000) as f64 / 100.0));
+        let quantity = Int32Array::from_iter_values(rows.iter().map(|&r| (r % 97) as i32));
+        let title = StringArray::from_iter_values(rows.iter().map(|&r| {
+            let len = case.title_len / 2 + (mix(r ^ 11) as usize % (case.title_len + 1));
+            let mut s = format!("title {r} ");
+            while s.len() < len {
+                s.push_str("lorem ipsum ");
+            }
+            s.truncate(len);
+            s
+        }));
+        RecordBatch::try_new(
+            Arc::clone(schema),
+            vec![
+                Arc::new(variant),
+                Arc::new(product),
+                Arc::new(store),
+                Arc::new(price),
+                Arc::new(quantity),
+                Arc::new(title),
+            ],
+        )
+        .unwrap()
+    }
+
+    impl PartitionStream for ProductRows {
+        fn schema(&self) -> &SchemaRef {
+            &self.schema
+        }
+
+        fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+            let schema = Arc::clone(&self.schema);
+            let case = self.case.clone();
+            let set_limit = Arc::clone(&self.set_spark_task_limit);
+            let off_heap_size = case.task_share * case.executor_cores;
+            Box::pin(RecordBatchStreamAdapter::new(
+                Arc::clone(&schema),
+                futures::stream::iter(0..case.num_batches).map(move |i| {
+                    if i == case.tasks_start_at_batch {
+                        set_limit(off_heap_size / case.active_tasks_later);
+                    }
+                    Ok(product_batch(&schema, &case, i))
+                }),
+            ))
+        }
+    }
+
+    async fn run_sort(case: &SortSpillCase) -> DataFusionResult<(usize, usize)> {
+        let off_heap_size = case.task_share * case.executor_cores;
+        let (pool, set_spark_task_limit) = fair_unified_pool_with_fake_spark(
+            off_heap_size,
+            off_heap_size / case.active_tasks_at_start,
+        );
+        let spill_dir = tempfile::tempdir().unwrap();
+        let spark_config = HashMap::from([(
+            SPARK_EXECUTOR_CORES.to_string(),
+            case.executor_cores.to_string(),
+        )]);
+        let session = prepare_datafusion_session_context(
+            case.batch_size,
+            Arc::clone(&pool),
+            vec![spill_dir.path().to_string_lossy().into_owned()],
+            u64::MAX,
+            1,
+            &spark_config,
+            &Operator::default(),
+            Some(off_heap_size),
+        )
+        .unwrap();
+
+        let schema = product_schema();
+        let source = Arc::new(ProductRows {
+            schema: Arc::clone(&schema),
+            case: case.clone(),
+            set_spark_task_limit,
+        });
+        let child = Arc::new(
+            StreamingTableExec::try_new(
+                Arc::clone(&schema),
+                vec![source],
+                None,
+                Vec::<LexOrdering>::new(),
+                false,
+                None,
+            )
+            .unwrap(),
+        );
+        let ordering = LexOrdering::new(vec![PhysicalSortExpr::new(
+            col("product_variant_id", &schema).unwrap(),
+            SortOptions {
+                descending: false,
+                nulls_first: true,
+            },
+        )])
+        .unwrap();
+        let sort = Arc::new(SortExec::new(ordering, child).with_fetch(None));
+
+        let mut stream = sort.execute(0, session.task_ctx())?;
+        let mut rows = 0;
+        let mut last: Option<String> = None;
+        while let Some(batch) = stream.next().await {
+            let batch = batch?;
+            let keys = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            for key in keys.iter() {
+                let key = key.unwrap();
+                if let Some(prev) = &last {
+                    assert!(prev.as_str() <= key, "output not sorted: {prev} > {key}");
+                }
+                last = Some(key.to_string());
+            }
+            rows += batch.num_rows();
+        }
+        drop(stream);
+        let spills = sort.metrics().and_then(|m| m.spill_count()).unwrap_or(0);
+        Ok((rows, spills))
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_spills_after_other_tasks_shrink_the_spark_share() {
+        let case = SortSpillCase {
+            executor_cores: 8,
+            task_share: 32 * MB,
+            active_tasks_at_start: 2,
+            active_tasks_later: 8,
+            tasks_start_at_batch: 45,
+            batch_size: 8192,
+            input_rows: 8192,
+            num_batches: 160,
+            title_len: 60,
+        };
+        match run_sort(&case).await {
+            Ok((rows, spills)) => {
+                assert_eq!(rows, case.input_rows * case.num_batches);
+                assert!(spills > 0, "sort did not spill");
+            }
+            Err(e) => panic!("native sort failed instead of spilling: {e}"),
+        }
+    }
+}

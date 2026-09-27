@@ -95,6 +95,13 @@ impl CometFairMemoryPool {
     }
 }
 
+#[cfg(test)]
+impl CometFairMemoryPool {
+    pub(super) fn with_fake_spark(pool_size: usize, spark: SparkMemory) -> Self {
+        Self::with_spark(spark, pool_size)
+    }
+}
+
 impl Display for CometFairMemoryPool {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         let state = self.state.lock();
