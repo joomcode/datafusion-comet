@@ -20,6 +20,7 @@
 
 use crate::metrics::BaselineMetrics;
 use crate::sorts::multi_level_merge::MultiLevelMergeBuilder;
+use crate::sorts::spill_workspace::SpillWorkspace;
 use crate::sorts::{
     merge::SortPreservingMergeStream,
     stream::{FieldCursorStream, RowCursorStream},
@@ -95,6 +96,8 @@ pub struct StreamingMergeBuilder<'a> {
     batch_size: Option<usize>,
     fetch: Option<usize>,
     reservation: Option<MemoryReservation>,
+    // COMET PATCH
+    spill_workspace: Option<Arc<SpillWorkspace>>,
     enable_round_robin_tie_breaker: bool,
 }
 
@@ -154,6 +157,13 @@ impl<'a> StreamingMergeBuilder<'a> {
         self
     }
 
+    /// COMET PATCH: the [`SpillWorkspace`] `reservation` belongs to. A merge of spill files
+    /// keeps it for all of its passes and closes it for the final one.
+    pub(super) fn with_spill_workspace(mut self, workspace: Arc<SpillWorkspace>) -> Self {
+        self.spill_workspace = Some(workspace);
+        self
+    }
+
     /// See [SortPreservingMergeExec::with_round_robin_repartition] for more
     /// information.
     ///
@@ -186,6 +196,7 @@ impl<'a> StreamingMergeBuilder<'a> {
             metrics,
             batch_size,
             reservation,
+            spill_workspace,
             fetch,
             expressions,
             enable_round_robin_tie_breaker,
@@ -226,6 +237,7 @@ impl<'a> StreamingMergeBuilder<'a> {
                 fetch,
                 enable_round_robin_tie_breaker,
             )
+            .with_spill_workspace(spill_workspace)
             .create_spillable_merge_stream());
         }
 

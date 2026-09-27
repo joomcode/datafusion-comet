@@ -32,6 +32,7 @@ use datafusion_execution::memory_pool::MemoryReservation;
 
 use crate::sorts::builder::try_grow_reservation_to_at_least;
 use crate::sorts::sort::get_reserved_bytes_for_record_batch_size;
+use crate::sorts::spill_workspace::SpillWorkspace;
 use crate::sorts::streaming_merge::{SortedSpillFile, StreamingMergeBuilder};
 use crate::stream::{ObservedStream, RecordBatchStreamAdapter};
 use datafusion_execution::{RecordBatchStream, SendableRecordBatchStream};
@@ -153,6 +154,9 @@ pub(crate) struct MultiLevelMergeBuilder {
     metrics: BaselineMetrics,
     batch_size: usize,
     reservation: MemoryReservation,
+    /// COMET PATCH: the pool `reservation` belongs to, when it is a [`SpillWorkspace`]. It
+    /// keeps what one pass releases for the next, and is closed for the final pass.
+    workspace: Option<Arc<SpillWorkspace>>,
     fetch: Option<usize>,
     enable_round_robin_tie_breaker: bool,
 }
@@ -191,9 +195,19 @@ impl MultiLevelMergeBuilder {
             metrics,
             batch_size,
             reservation,
+            workspace: None,
             enable_round_robin_tie_breaker,
             fetch,
         }
+    }
+
+    // COMET PATCH
+    pub(super) fn with_spill_workspace(
+        mut self,
+        workspace: Option<Arc<SpillWorkspace>>,
+    ) -> Self {
+        self.workspace = workspace;
+        self
     }
 
     pub(crate) fn create_spillable_merge_stream(self) -> SendableRecordBatchStream {
@@ -232,6 +246,11 @@ impl MultiLevelMergeBuilder {
                     self.sorted_streams.is_empty(),
                     "We should not have any sorted streams left"
                 );
+
+                // COMET PATCH: the final pass holds what it needs. Return the rest.
+                if let Some(workspace) = &self.workspace {
+                    workspace.close();
+                }
 
                 return Ok(stream);
             }

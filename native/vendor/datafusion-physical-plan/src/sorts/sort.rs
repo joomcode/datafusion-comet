@@ -361,6 +361,14 @@ impl ExternalSorter {
             // compete for pool memory. `take()` moves the bytes atomically
             // without releasing them back to the pool, so other partitions
             // cannot race to consume the freed memory.
+            // COMET PATCH: keep it, and whatever a merge pass adds, for every pass of the
+            // merge rather than only the first. See `SpillWorkspace`.
+            let headroom = self.merge_reservation.size();
+            let workspace = SpillWorkspace::new(vec![self.merge_reservation.take()]);
+            let reservation =
+                MemoryConsumer::new(self.merge_reservation.consumer().name())
+                    .register(&(Arc::clone(&workspace) as Arc<dyn MemoryPool>));
+            reservation.grow(headroom);
             StreamingMergeBuilder::new()
                 .with_sorted_spill_files(std::mem::take(&mut self.finished_spill_files))
                 .with_spill_manager(self.spill_manager.clone())
@@ -369,7 +377,8 @@ impl ExternalSorter {
                 .with_metrics(self.metrics.baseline.clone())
                 .with_batch_size(self.batch_size)
                 .with_fetch(None)
-                .with_reservation(self.merge_reservation.take())
+                .with_reservation(reservation)
+                .with_spill_workspace(workspace)
                 .build()
         } else {
             // Release the memory reserved for merge back to the pool so
@@ -1741,6 +1750,10 @@ impl SortExec {
         Ok(Arc::new(new_sort))
     }
 }
+
+// COMET PATCH
+#[cfg(test)]
+mod comet_memory_tests;
 
 #[cfg(test)]
 mod tests {
