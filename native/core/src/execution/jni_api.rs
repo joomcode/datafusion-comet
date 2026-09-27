@@ -668,7 +668,6 @@ pub unsafe extern "system" fn Java_org_apache_comet_Native_createPlan(
                 task_cpus as usize,
                 &spark_config,
                 &spark_plan,
-                (off_heap_mode != JNI_FALSE).then_some(memory_limit as usize),
             )?;
 
             let plan_creation_time = start.elapsed();
@@ -821,24 +820,7 @@ fn configure_skip_partial_aggregation(config: &mut SessionConfig, plan: &Operato
     }
 }
 
-/// DataFusion's fixed 10 MiB merge reserve can consume most of a small Spark task's
-/// share before the sorter admits its first batch. Cap this eager reservation at 1/32
-/// of the per-task budget. The spillable merge can grow it as needed; larger executors
-/// retain the upstream default. Explicit testing overrides are applied afterwards.
-fn configure_sort_spill_reservation(
-    config: &mut SessionConfig,
-    off_heap_limit: usize,
-    executor_cores: usize,
-    task_cpus: usize,
-) {
-    let concurrent_tasks = (executor_cores / task_cpus.max(1)).max(1);
-    let cap = (off_heap_limit / concurrent_tasks / 32).max(1);
-    let reservation = &mut config.options_mut().execution.sort_spill_reservation_bytes;
-    *reservation = (*reservation).min(cap);
-}
-
 /// Configure DataFusion session context.
-#[allow(clippy::too_many_arguments)]
 fn prepare_datafusion_session_context(
     batch_size: usize,
     memory_pool: Arc<dyn MemoryPool>,
@@ -847,7 +829,6 @@ fn prepare_datafusion_session_context(
     task_cpus: usize,
     spark_config: &HashMap<String, String>,
     spark_plan: &Operator,
-    off_heap_limit: Option<usize>,
 ) -> CometResult<SessionContext> {
     let paths = local_dirs.into_iter().map(PathBuf::from).collect();
     let disk_manager = DiskManagerBuilder::default()
@@ -864,11 +845,6 @@ fn prepare_datafusion_session_context(
         // its internal parallelism to the number of CPUs allocated to Spark Tasks. This can be
         // modified by changing spark.task.cpus in the Spark config.
         .with_batch_size(batch_size);
-
-    if let Some(limit) = off_heap_limit {
-        let executor_cores = spark_config.get_usize(SPARK_EXECUTOR_CORES, 1);
-        configure_sort_spill_reservation(&mut session_config, limit, executor_cores, task_cpus);
-    }
 
     // Translate the Comet-namespaced row-level pushdown flag into the equivalent
     // DataFusion session options. `pushdown_filters` enables the parquet reader's
@@ -1930,23 +1906,6 @@ mod tests {
     use datafusion_comet_proto::spark_operator::{HashAggregate, ShuffleWriter};
     use std::cell::Cell;
     use std::future::Future;
-
-    #[test]
-    fn sort_merge_reserve_scales_with_the_task_budget() {
-        let mut config = SessionConfig::new();
-        let default = config.options().execution.sort_spill_reservation_bytes;
-        configure_sort_spill_reservation(&mut config, 64 * 1024 * 1024, 2, 1);
-        assert_eq!(
-            config.options().execution.sort_spill_reservation_bytes,
-            1024 * 1024
-        );
-        let mut config = SessionConfig::new();
-        configure_sort_spill_reservation(&mut config, 8 * 1024 * 1024 * 1024, 4, 1);
-        assert_eq!(
-            config.options().execution.sort_spill_reservation_bytes,
-            default
-        );
-    }
 
     #[test]
     fn skip_partial_eligibility_is_fail_closed() {
