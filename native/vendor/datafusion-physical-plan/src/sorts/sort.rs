@@ -232,6 +232,9 @@ struct ExternalSorter {
     // ========================================================================
     /// Unsorted input batches stored in the memory buffer
     in_mem_batches: Vec<RecordBatch>,
+    /// COMET PATCH: the buffers of `in_mem_batches` already reserved, so that a buffer
+    /// they share, such as the parent of zero-copy slices, is reserved once.
+    in_mem_batches_memory: RecordBatchMemoryCounter,
 
     /// During external sorting, in-memory intermediate data will be appended to
     /// this file incrementally. Once finished, this file will be moved to [`Self::finished_spill_files`].
@@ -302,6 +305,7 @@ impl ExternalSorter {
         Ok(Self {
             schema,
             in_mem_batches: vec![],
+            in_mem_batches_memory: RecordBatchMemoryCounter::new(),
             in_progress_spill_file: None,
             finished_spill_files: vec![],
             expr,
@@ -634,6 +638,8 @@ impl ExternalSorter {
         is_output_stream: bool,
         coalesce_runs: bool,
     ) -> Result<SendableRecordBatchStream> {
+        // COMET PATCH: the buffered batches are consumed here.
+        self.in_mem_batches_memory = RecordBatchMemoryCounter::new();
         if self.in_mem_batches.is_empty() {
             let empty_stream =
                 Box::pin(EmptyRecordBatchStream::new(Arc::clone(&self.schema)));
@@ -683,12 +689,16 @@ impl ExternalSorter {
             batches
         };
 
+        // COMET PATCH: split the reservation as it was taken, a shared buffer with its
+        // first run.
+        let mut runs_memory = RecordBatchMemoryCounter::new();
         let streams = runs
             .into_iter()
             .map(|batch| {
-                let reservation = self
-                    .reservation
-                    .split(get_reserved_bytes_for_record_batch(&batch)?);
+                let size =
+                    reserved_bytes_counting_shared_buffers(&batch, &mut runs_memory)?;
+                let reservation =
+                    self.reservation.split(size.min(self.reservation.size()));
                 let input = self.sort_batch_stream(batch, reservation)?;
                 Ok(spawn_buffered(input, 1))
             })
@@ -750,9 +760,11 @@ impl ExternalSorter {
         flush(&mut group, &mut runs, &self.schema)?;
 
         // Realign the reservation: concatenation may shift the footprint slightly.
+        // COMET PATCH: count a buffer runs share once, as the caller splits it.
+        let mut runs_memory = RecordBatchMemoryCounter::new();
         let total: usize = runs
             .iter()
-            .map(get_reserved_bytes_for_record_batch)
+            .map(|run| reserved_bytes_counting_shared_buffers(run, &mut runs_memory))
             .sum::<Result<usize>>()?;
         self.reservation
             .try_resize(total)
@@ -775,11 +787,6 @@ impl ExternalSorter {
         batch: RecordBatch,
         reservation: MemoryReservation,
     ) -> Result<SendableRecordBatchStream> {
-        assert_eq!(
-            get_reserved_bytes_for_record_batch(&batch)?,
-            reservation.size()
-        );
-
         let schema = batch.schema();
         let expressions = self.expr.clone();
         let batch_size = self.batch_size;
@@ -845,7 +852,12 @@ impl ExternalSorter {
         &mut self,
         input: &RecordBatch,
     ) -> Result<()> {
-        let size = get_reserved_bytes_for_record_batch(input)?;
+        // COMET PATCH: reserve a buffer the buffered batches share once, as
+        // apache/datafusion#22862 does for the hash join build side.
+        let size = reserved_bytes_counting_shared_buffers(
+            input,
+            &mut self.in_mem_batches_memory,
+        )?;
 
         match self.reservation.try_grow(size) {
             Ok(_) => Ok(()),
@@ -856,6 +868,10 @@ impl ExternalSorter {
 
                 // Spill and try again.
                 self.sort_and_spill_in_mem_batches().await?;
+                let size = reserved_bytes_counting_shared_buffers(
+                    input,
+                    &mut self.in_mem_batches_memory,
+                )?;
                 self.reservation
                     .try_grow(size)
                     .map_err(Self::err_with_oom_context)
@@ -924,6 +940,19 @@ pub(crate) fn get_reserved_bytes_for_record_batch(batch: &RecordBatch) -> Result
             sliced_size,
         )
     })
+}
+
+/// COMET PATCH: [`get_reserved_bytes_for_record_batch`] for one of several batches
+/// held together, counting only the buffers `counter` has not counted yet in full.
+fn reserved_bytes_counting_shared_buffers(
+    batch: &RecordBatch,
+    counter: &mut RecordBatchMemoryCounter,
+) -> Result<usize> {
+    let sliced_size = batch.get_sliced_size()?;
+    Ok(get_reserved_bytes_for_record_batch_size(
+        counter.count_batch(batch),
+        sliced_size,
+    ))
 }
 
 impl Debug for ExternalSorter {

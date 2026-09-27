@@ -21,9 +21,10 @@
 use super::*;
 use crate::metrics::ExecutionPlanMetricsSet;
 use arrow::array::{
-    ArrayRef, AsArray, DictionaryArray, Int32Array, StringArray, StringViewArray,
+    ArrayRef, AsArray, DictionaryArray, Int32Array, Int64Array, StringArray,
+    StringViewArray,
 };
-use arrow::datatypes::{DataType, Field, Int32Type, Schema};
+use arrow::datatypes::{DataType, Field, Int32Type, Int64Type, Schema};
 use datafusion_execution::memory_pool::{GreedyMemoryPool, MemoryLimit};
 use datafusion_execution::runtime_env::RuntimeEnvBuilder;
 use datafusion_physical_expr::expressions::Column;
@@ -35,6 +36,22 @@ fn new_sorter(
     batch_size: usize,
     sort_spill_reservation_bytes: usize,
 ) -> Result<ExternalSorter> {
+    new_sorter_with_threshold(
+        schema,
+        pool,
+        batch_size,
+        sort_spill_reservation_bytes,
+        usize::MAX,
+    )
+}
+
+fn new_sorter_with_threshold(
+    schema: &SchemaRef,
+    pool: &Arc<dyn MemoryPool>,
+    batch_size: usize,
+    sort_spill_reservation_bytes: usize,
+    sort_in_place_threshold_bytes: usize,
+) -> Result<ExternalSorter> {
     let runtime = RuntimeEnvBuilder::new()
         .with_memory_pool(Arc::clone(pool))
         .build_arc()?;
@@ -44,7 +61,7 @@ fn new_sorter(
         [PhysicalSortExpr::new_default(Arc::new(Column::new("x", 0)))].into(),
         batch_size,
         sort_spill_reservation_bytes,
-        usize::MAX,
+        sort_in_place_threshold_bytes,
         SpillCompression::Uncompressed,
         &ExecutionPlanMetricsSet::new(),
         runtime,
@@ -376,6 +393,41 @@ async fn sorted_chunks_charge_shared_buffers_once() -> Result<()> {
             output.iter().map(RecordBatch::num_rows).sum::<usize>(),
             rows
         );
+        assert_eq!(pool.reserved(), 0);
+    }
+    Ok(())
+}
+
+/// Finding 5 of apache/datafusion#25804: each zero-copy slice of one parent batch, as
+/// `AggregateExec` emits for `EmitTo::All`, was charged the parent's whole buffer, so
+/// sorting 64 slices of a 512 KiB batch in 2 MiB spilled 21 times. Sorts them by
+/// concatenating and by merging the slices as runs.
+#[tokio::test]
+async fn slices_of_one_batch_reserve_the_parent_once() -> Result<()> {
+    let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int64, false)]));
+    let rows = 64 * 1024;
+    let parent = RecordBatch::try_new(
+        Arc::clone(&schema),
+        vec![Arc::new(Int64Array::from_iter_values(
+            (0..rows as i64).rev(),
+        ))],
+    )?;
+    let parent_bytes = get_record_batch_memory_size(&parent);
+    for threshold in [usize::MAX, 0] {
+        let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(4 * parent_bytes));
+        let mut sorter = new_sorter_with_threshold(&schema, &pool, 1024, 0, threshold)?;
+        for i in 0..64 {
+            sorter.insert_batch(parent.slice(i * 1024, 1024)).await?;
+        }
+        assert_eq!(sorter.spill_count(), 0);
+        // The parent once, and each slice's own rows.
+        assert_eq!(sorter.used(), 2 * parent_bytes);
+
+        let output: Vec<RecordBatch> = sorter.sort().await?.try_collect().await?;
+        drop(sorter);
+        let merged = concat_batches(&schema, &output)?;
+        let values = merged.column(0).as_primitive::<Int64Type>();
+        assert!(values.values().iter().copied().eq(0..rows as i64));
         assert_eq!(pool.reserved(), 0);
     }
     Ok(())
