@@ -432,3 +432,31 @@ async fn slices_of_one_batch_reserve_the_parent_once() -> Result<()> {
     }
     Ok(())
 }
+
+/// Finding 1 of apache/datafusion#25804, final in-memory merge: `sort()` returned the
+/// merge headroom to the pool before merging the buffered batches, so the merge's
+/// buffers had to win it back from a pool that no longer had it.
+#[tokio::test]
+async fn final_in_memory_merge_keeps_its_headroom() -> Result<()> {
+    let headroom = 16 * 1024;
+    let pool_size = headroom + 64 * 1024;
+    let stealing = StealingPool::new(pool_size);
+    let pool: Arc<dyn MemoryPool> = Arc::clone(&stealing) as _;
+    let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));
+    let mut sorter = new_sorter_with_threshold(&schema, &pool, 128, headroom, 0)?;
+    for i in 0..10 {
+        sorter.insert_batch(reversed_batch(&schema, i)?).await?;
+    }
+    assert_eq!(sorter.spill_count(), 0);
+    let merge_stream = sorter.sort().await?;
+    drop(sorter);
+
+    let contender = MemoryConsumer::new("CompetingPartition").register(&pool);
+    contender.try_grow(pool_size - pool.reserved())?;
+    stealing.arm();
+
+    let batches: Vec<RecordBatch> = merge_stream.try_collect().await?;
+    assert_sorted_ints(&schema, &batches, 10 * 100)?;
+    assert_eq!(pool.reserved(), contender.size() + stealing.stolen());
+    Ok(())
+}

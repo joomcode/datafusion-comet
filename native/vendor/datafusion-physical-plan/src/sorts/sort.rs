@@ -384,6 +384,21 @@ impl ExternalSorter {
                 .with_reservation(reservation)
                 .with_spill_workspace(workspace)
                 .build()
+        } else if self.in_mem_batches.len() > 1
+            && self.reservation.size() >= self.sort_in_place_threshold_bytes
+        {
+            // COMET PATCH: merge inside the memory the sorter holds, and keep the merge
+            // headroom for the merge's cursors and buffers instead of returning it to the
+            // pool and asking for it again. Released run memory beyond it goes back to the
+            // pool, and growth is charged to the merge. See `SpillWorkspace`.
+            let buffered = self.reservation.size();
+            let headroom = self.merge_reservation.size();
+            let workspace = SpillWorkspace::new(vec![
+                self.merge_reservation.take(),
+                self.reservation.take(),
+            ]);
+            workspace.keep_at_most(headroom);
+            self.in_mem_sort_stream_in_workspace(&workspace, buffered, true, true)
         } else {
             // Release the memory reserved for merge back to the pool so
             // there is some left when `in_mem_sort_stream` requests an
@@ -513,21 +528,11 @@ impl ExternalSorter {
         workspace: &Arc<SpillWorkspace>,
         buffered: usize,
     ) -> Result<()> {
-        let pool = Arc::clone(workspace) as Arc<dyn MemoryPool>;
-        let runs =
-            MemoryConsumer::new(self.reservation.consumer().name()).register(&pool);
-        runs.grow(buffered);
-        let sorter_reservation = std::mem::replace(&mut self.reservation, runs);
-        let merge_reservation =
-            std::mem::replace(&mut self.merge_reservation, self.reservation.new_empty());
-        let sorted_stream = self.in_mem_sort_stream(
-            false,
+        let mut sorted_stream = self.in_mem_sort_stream_in_workspace(
+            workspace, buffered, false,
             // No coalescing on the spill path: it raises per-run peak memory.
             false,
-        );
-        self.reservation = sorter_reservation;
-        self.merge_reservation = merge_reservation;
-        let mut sorted_stream = sorted_stream?;
+        )?;
         // After `in_mem_sort_stream()` is constructed, all `in_mem_batches` is taken
         // to construct a globally sorted stream.
         assert_or_internal_err!(
@@ -571,6 +576,28 @@ impl ExternalSorter {
         );
 
         Ok(())
+    }
+
+    /// COMET PATCH: [`Self::in_mem_sort_stream`] with the `buffered` bytes of the sorter's
+    /// reservation, and the merge's, taken from `workspace`.
+    fn in_mem_sort_stream_in_workspace(
+        &mut self,
+        workspace: &Arc<SpillWorkspace>,
+        buffered: usize,
+        is_output_stream: bool,
+        coalesce_runs: bool,
+    ) -> Result<SendableRecordBatchStream> {
+        let pool = Arc::clone(workspace) as Arc<dyn MemoryPool>;
+        let runs =
+            MemoryConsumer::new(self.reservation.consumer().name()).register(&pool);
+        runs.grow(buffered);
+        let sorter_reservation = std::mem::replace(&mut self.reservation, runs);
+        let merge_reservation =
+            std::mem::replace(&mut self.merge_reservation, self.reservation.new_empty());
+        let sorted_stream = self.in_mem_sort_stream(is_output_stream, coalesce_runs);
+        self.reservation = sorter_reservation;
+        self.merge_reservation = merge_reservation;
+        sorted_stream
     }
 
     /// Consumes in_mem_batches returning a sorted stream of

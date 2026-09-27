@@ -39,7 +39,8 @@ use parking_lot::Mutex;
 /// This pool keeps the reservations it is built from, which remain charged to the
 /// execution pool, and lets its child reservations share them. Children release into the
 /// workspace, and only usage beyond it grows the first parent reservation, under the
-/// execution pool's limits. [`Self::close`] ends the retention.
+/// execution pool's limits. [`Self::close`] ends the retention, and [`Self::keep_at_most`]
+/// limits it.
 #[derive(Debug)]
 pub(super) struct SpillWorkspace {
     state: Mutex<State>,
@@ -51,8 +52,8 @@ struct State {
     parents: Vec<MemoryReservation>,
     /// Total size of the child reservations and loans.
     used: usize,
-    /// Whether released bytes stay reserved in the parents.
-    retain: bool,
+    /// How many unused bytes stay reserved in the parents.
+    keep: usize,
 }
 
 impl State {
@@ -74,10 +75,7 @@ impl State {
     }
 
     fn trim(&mut self) {
-        if self.retain {
-            return;
-        }
-        let mut excess = self.reserved() - self.used;
+        let mut excess = (self.reserved() - self.used).saturating_sub(self.keep);
         for parent in self.parents.iter().rev() {
             let shrink = excess.min(parent.size());
             parent.shrink(shrink);
@@ -108,7 +106,7 @@ impl SpillWorkspace {
             state: Mutex::new(State {
                 parents,
                 used: 0,
-                retain: true,
+                keep: usize::MAX,
             }),
         })
     }
@@ -144,8 +142,14 @@ impl SpillWorkspace {
 
     /// Returns unused workspace to the execution pool, and every later release too.
     pub(super) fn close(&self) {
+        self.keep_at_most(0);
+    }
+
+    /// Returns unused workspace beyond `bytes` to the execution pool, now and on every
+    /// later release.
+    pub(super) fn keep_at_most(&self, bytes: usize) {
         let mut state = self.state.lock();
-        state.retain = false;
+        state.keep = bytes;
         state.trim();
     }
 
@@ -278,6 +282,24 @@ mod tests {
         assert!(!workspace.can_grow(usize::MAX));
         assert_eq!(parent.reserved(), 40);
         assert_eq!(child.size(), 30);
+    }
+
+    #[test]
+    fn keep_at_most_returns_only_unused_bytes_beyond_the_limit() {
+        let (parent, workspace, child) = setup(100, 60);
+        child.grow(30);
+        workspace.keep_at_most(20);
+        assert_eq!(parent.reserved(), 50);
+        child.shrink(25);
+        assert_eq!(parent.reserved(), 25);
+        child.try_grow(15).unwrap();
+        assert_eq!(parent.reserved(), 25);
+        child.try_grow(10).unwrap();
+        assert_eq!(parent.reserved(), 30);
+        drop(child);
+        assert_eq!(parent.reserved(), 20);
+        drop(workspace);
+        assert_eq!(parent.reserved(), 0);
     }
 
     #[test]
