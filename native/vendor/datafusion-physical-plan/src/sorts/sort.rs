@@ -42,6 +42,7 @@ use crate::metrics::{
 };
 use crate::projection::{ProjectionExec, make_with_child, update_ordering};
 use crate::sorts::IncrementalSortIterator;
+use crate::sorts::spill_workspace::SpillWorkspace;
 use crate::sorts::streaming_merge::{SortedSpillFile, StreamingMergeBuilder};
 use crate::spill::get_record_batch_memory_size;
 use crate::spill::in_progress_spill_file::InProgressSpillFile;
@@ -67,7 +68,7 @@ use datafusion_common::{
     unwrap_or_internal_err,
 };
 use datafusion_execution::TaskContext;
-use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
+use datafusion_execution::memory_pool::{MemoryConsumer, MemoryPool, MemoryReservation};
 use datafusion_execution::runtime_env::RuntimeEnv;
 use datafusion_physical_expr::LexOrdering;
 use datafusion_physical_expr::PhysicalExpr;
@@ -472,17 +473,46 @@ impl ExternalSorter {
             "in_mem_batches must not be empty when attempting to sort and spill"
         );
 
-        // Release the memory reserved for merge back to the pool so
-        // there is some left when `in_mem_sort_stream` requests an
-        // allocation. At the end of this function, memory will be
-        // reserved again for the next spill.
-        self.merge_reservation.free();
+        // COMET PATCH: merge in the memory already held for the buffered batches and the
+        // merge instead of returning it to the pool and requesting it again, which fails
+        // once the pool cannot grant what the sorter held. See `SpillWorkspace`.
+        let buffered = self.reservation.size();
+        let workspace = SpillWorkspace::new(vec![
+            self.reservation.take(),
+            self.merge_reservation.take(),
+        ]);
+        let result = self
+            .merge_and_spill_in_mem_batches(&workspace, buffered)
+            .await;
+        workspace.close();
+        result?;
 
-        let mut sorted_stream = self.in_mem_sort_stream(
+        // Reserve headroom for next sort/merge
+        self.reserve_memory_for_merge()?;
+
+        Ok(())
+    }
+
+    async fn merge_and_spill_in_mem_batches(
+        &mut self,
+        workspace: &Arc<SpillWorkspace>,
+        buffered: usize,
+    ) -> Result<()> {
+        let pool = Arc::clone(workspace) as Arc<dyn MemoryPool>;
+        let runs =
+            MemoryConsumer::new(self.reservation.consumer().name()).register(&pool);
+        runs.grow(buffered);
+        let sorter_reservation = std::mem::replace(&mut self.reservation, runs);
+        let merge_reservation =
+            std::mem::replace(&mut self.merge_reservation, self.reservation.new_empty());
+        let sorted_stream = self.in_mem_sort_stream(
             false,
             // No coalescing on the spill path: it raises per-run peak memory.
             false,
-        )?;
+        );
+        self.reservation = sorter_reservation;
+        self.merge_reservation = merge_reservation;
+        let mut sorted_stream = sorted_stream?;
         // After `in_mem_sort_stream()` is constructed, all `in_mem_batches` is taken
         // to construct a globally sorted stream.
         assert_or_internal_err!(
@@ -501,6 +531,8 @@ impl ExternalSorter {
                 // Although the reservation is not enough, the batch is
                 // already in memory, so it's okay to combine it with previously
                 // sorted batches, and spill together.
+                // COMET PATCH: account for it in unused workspace while it is written.
+                let _loan = workspace.borrow(sorted_size);
                 globally_sorted_batches.push(batch);
                 self.consume_and_spill_append(&mut globally_sorted_batches)?; // reservation is freed in spill()
             } else {
@@ -522,9 +554,6 @@ impl ExternalSorter {
             buffers_cleared_property,
             "in_mem_batches and globally_sorted_batches should be cleared before"
         );
-
-        // Reserve headroom for next sort/merge
-        self.reserve_memory_for_merge()?;
 
         Ok(())
     }

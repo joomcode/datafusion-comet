@@ -71,18 +71,35 @@ pub(crate) fn create_memory_pool(
     }
 }
 
+/// Controls the [`spark_memory::fake::FakeSpark`] behind [`fair_unified_pool_with_fake_spark`].
 #[cfg(test)]
-pub(crate) type SparkTaskLimitSetter = Arc<dyn Fn(usize) + Send + Sync>;
+#[derive(Clone)]
+pub(crate) struct FakeSparkTask {
+    spark: Arc<spark_memory::fake::FakeSpark>,
+}
+
+#[cfg(test)]
+impl FakeSparkTask {
+    /// Sets how much the task may hold in total, as Spark's share for one task.
+    pub(crate) fn set_limit(&self, limit: usize) {
+        self.spark.set_limit(limit);
+    }
+
+    /// Bytes Spark has granted to the task and not yet been handed back.
+    pub(crate) fn held(&self) -> usize {
+        self.spark.held()
+    }
+}
 
 #[cfg(test)]
 pub(crate) fn fair_unified_pool_with_fake_spark(
     pool_size: usize,
     spark_task_limit: usize,
-) -> (Arc<dyn MemoryPool>, SparkTaskLimitSetter) {
+) -> (Arc<dyn MemoryPool>, FakeSparkTask) {
     let spark = spark_memory::fake::FakeSpark::with(spark_task_limit);
     let pool: Arc<dyn MemoryPool> = Arc::new(TrackConsumersPool::new(
         CometFairMemoryPool::with_fake_spark(pool_size, spark.memory()),
         NonZeroUsize::new(10).unwrap(),
     ));
-    (pool, Arc::new(move |limit| spark.set_limit(limit)))
+    (pool, FakeSparkTask { spark })
 }

@@ -2487,13 +2487,15 @@ mod tests {
 #[cfg(test)]
 mod native_sort_spill_tests {
     use super::*;
-    use crate::execution::memory_pools::{fair_unified_pool_with_fake_spark, SparkTaskLimitSetter};
-    use arrow::array::{Float64Array, Int32Array, Int64Array, StringArray};
+    use crate::execution::memory_pools::{fair_unified_pool_with_fake_spark, FakeSparkTask};
+    use arrow::array::{ArrayRef, Float64Array, Int32Array, Int64Array, StringArray};
     use arrow::compute::SortOptions;
     use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+    use datafusion::common::{JoinType, NullEquality};
     use datafusion::execution::TaskContext;
     use datafusion::physical_expr::expressions::col;
     use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
+    use datafusion::physical_plan::joins::SortMergeJoinExec;
     use datafusion::physical_plan::sorts::sort::SortExec;
     use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
     use datafusion::physical_plan::streaming::{PartitionStream, StreamingTableExec};
@@ -2512,13 +2514,40 @@ mod native_sort_spill_tests {
         batch_size: usize,
         input_rows: usize,
         num_batches: usize,
+        /// Average length of the `title` column; 0 leaves the column out.
         title_len: usize,
+    }
+
+    impl SortSpillCase {
+        /// Six million product rows sorted by `product_variant_id` while the executor goes
+        /// from two active tasks to eight.
+        fn production() -> Self {
+            Self {
+                executor_cores: 8,
+                task_share: 32 * MB,
+                active_tasks_at_start: 2,
+                active_tasks_later: 8,
+                tasks_start_at_batch: 45,
+                batch_size: 8192,
+                input_rows: 8192,
+                num_batches: 160,
+                title_len: 60,
+            }
+        }
+
+        fn four_to_eight_tasks_at(batch: usize) -> Self {
+            Self {
+                active_tasks_at_start: 4,
+                tasks_start_at_batch: batch,
+                ..Self::production()
+            }
+        }
     }
 
     struct ProductRows {
         schema: SchemaRef,
         case: SortSpillCase,
-        set_spark_task_limit: SparkTaskLimitSetter,
+        spark: FakeSparkTask,
     }
 
     impl std::fmt::Debug for ProductRows {
@@ -2529,15 +2558,18 @@ mod native_sort_spill_tests {
         }
     }
 
-    fn product_schema() -> SchemaRef {
-        Arc::new(Schema::new(vec![
+    fn product_schema(case: &SortSpillCase) -> SchemaRef {
+        let mut fields = vec![
             Field::new("product_variant_id", DataType::Utf8, true),
             Field::new("product_id", DataType::Utf8, true),
             Field::new("store_id", DataType::Int64, true),
             Field::new("price", DataType::Float64, true),
             Field::new("quantity", DataType::Int32, true),
-            Field::new("title", DataType::Utf8, true),
-        ]))
+        ];
+        if case.title_len > 0 {
+            fields.push(Field::new("title", DataType::Utf8, true));
+        }
+        Arc::new(Schema::new(fields))
     }
 
     fn mix(mut x: u64) -> u64 {
@@ -2562,27 +2594,27 @@ mod native_sort_spill_tests {
         let price =
             Float64Array::from_iter_values(rows.iter().map(|&r| (mix(r) % 100_000) as f64 / 100.0));
         let quantity = Int32Array::from_iter_values(rows.iter().map(|&r| (r % 97) as i32));
-        let title = StringArray::from_iter_values(rows.iter().map(|&r| {
-            let len = case.title_len / 2 + (mix(r ^ 11) as usize % (case.title_len + 1));
-            let mut s = format!("title {r} ");
-            while s.len() < len {
-                s.push_str("lorem ipsum ");
-            }
-            s.truncate(len);
-            s
-        }));
-        RecordBatch::try_new(
-            Arc::clone(schema),
-            vec![
-                Arc::new(variant),
-                Arc::new(product),
-                Arc::new(store),
-                Arc::new(price),
-                Arc::new(quantity),
-                Arc::new(title),
-            ],
-        )
-        .unwrap()
+        let mut columns: Vec<ArrayRef> = vec![
+            Arc::new(variant),
+            Arc::new(product),
+            Arc::new(store),
+            Arc::new(price),
+            Arc::new(quantity),
+        ];
+        if case.title_len > 0 {
+            columns.push(Arc::new(StringArray::from_iter_values(rows.iter().map(
+                |&r| {
+                    let len = case.title_len / 2 + (mix(r ^ 11) as usize % (case.title_len + 1));
+                    let mut s = format!("title {r} ");
+                    while s.len() < len {
+                        s.push_str("lorem ipsum ");
+                    }
+                    s.truncate(len);
+                    s
+                },
+            ))));
+        }
+        RecordBatch::try_new(Arc::clone(schema), columns).unwrap()
     }
 
     impl PartitionStream for ProductRows {
@@ -2593,13 +2625,13 @@ mod native_sort_spill_tests {
         fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
             let schema = Arc::clone(&self.schema);
             let case = self.case.clone();
-            let set_limit = Arc::clone(&self.set_spark_task_limit);
+            let spark = self.spark.clone();
             let off_heap_size = case.task_share * case.executor_cores;
             Box::pin(RecordBatchStreamAdapter::new(
                 Arc::clone(&schema),
                 futures::stream::iter(0..case.num_batches).map(move |i| {
                     if i == case.tasks_start_at_batch {
-                        set_limit(off_heap_size / case.active_tasks_later);
+                        spark.set_limit(off_heap_size / case.active_tasks_later);
                     }
                     Ok(product_batch(&schema, &case, i))
                 }),
@@ -2607,34 +2639,12 @@ mod native_sort_spill_tests {
         }
     }
 
-    async fn run_sort(case: &SortSpillCase) -> DataFusionResult<(usize, usize)> {
-        let off_heap_size = case.task_share * case.executor_cores;
-        let (pool, set_spark_task_limit) = fair_unified_pool_with_fake_spark(
-            off_heap_size,
-            off_heap_size / case.active_tasks_at_start,
-        );
-        let spill_dir = tempfile::tempdir().unwrap();
-        let spark_config = HashMap::from([(
-            SPARK_EXECUTOR_CORES.to_string(),
-            case.executor_cores.to_string(),
-        )]);
-        let session = prepare_datafusion_session_context(
-            case.batch_size,
-            Arc::clone(&pool),
-            vec![spill_dir.path().to_string_lossy().into_owned()],
-            u64::MAX,
-            1,
-            &spark_config,
-            &Operator::default(),
-            Some(off_heap_size),
-        )
-        .unwrap();
-
-        let schema = product_schema();
+    fn sort_plan(case: &SortSpillCase, spark: &FakeSparkTask) -> Arc<SortExec> {
+        let schema = product_schema(case);
         let source = Arc::new(ProductRows {
             schema: Arc::clone(&schema),
             case: case.clone(),
-            set_spark_task_limit,
+            spark: spark.clone(),
         });
         let child = Arc::new(
             StreamingTableExec::try_new(
@@ -2655,9 +2665,11 @@ mod native_sort_spill_tests {
             },
         )])
         .unwrap();
-        let sort = Arc::new(SortExec::new(ordering, child).with_fetch(None));
+        Arc::new(SortExec::new(ordering, child).with_fetch(None))
+    }
 
-        let mut stream = sort.execute(0, session.task_ctx())?;
+    /// Reads a sort's output, checking that its keys come in order, and returns the rows.
+    async fn read_sorted(mut stream: SendableRecordBatchStream) -> DataFusionResult<usize> {
         let mut rows = 0;
         let mut last: Option<String> = None;
         while let Some(batch) = stream.next().await {
@@ -2676,30 +2688,154 @@ mod native_sort_spill_tests {
             }
             rows += batch.num_rows();
         }
-        drop(stream);
-        let spills = sort.metrics().and_then(|m| m.spill_count()).unwrap_or(0);
-        Ok((rows, spills))
+        Ok(rows)
+    }
+
+    /// Runs `plan` in one task's session, checks that its output is sorted on the first
+    /// column and that all memory is handed back, and returns the rows it produced.
+    async fn run_in_task(
+        case: &SortSpillCase,
+        plan: impl FnOnce(&FakeSparkTask) -> Arc<dyn ExecutionPlan>,
+    ) -> DataFusionResult<(usize, Arc<dyn ExecutionPlan>)> {
+        let off_heap_size = case.task_share * case.executor_cores;
+        let (pool, spark) = fair_unified_pool_with_fake_spark(
+            off_heap_size,
+            off_heap_size / case.active_tasks_at_start,
+        );
+        let spill_dir = tempfile::tempdir().unwrap();
+        let spark_config = HashMap::from([(
+            SPARK_EXECUTOR_CORES.to_string(),
+            case.executor_cores.to_string(),
+        )]);
+        let session = prepare_datafusion_session_context(
+            case.batch_size,
+            Arc::clone(&pool),
+            vec![spill_dir.path().to_string_lossy().into_owned()],
+            u64::MAX,
+            1,
+            &spark_config,
+            &Operator::default(),
+            Some(off_heap_size),
+        )
+        .unwrap();
+
+        let plan = plan(&spark);
+        let rows = read_sorted(plan.execute(0, session.task_ctx())?).await?;
+        assert_eq!(
+            pool.reserved(),
+            0,
+            "memory still reserved after the plan finished"
+        );
+        assert_eq!(spark.held(), 0, "memory not handed back to Spark");
+        Ok((rows, plan))
+    }
+
+    fn spill_count(plan: &Arc<dyn ExecutionPlan>) -> usize {
+        plan.metrics().and_then(|m| m.spill_count()).unwrap_or(0)
+    }
+
+    async fn assert_sort_spills(case: SortSpillCase) {
+        match run_in_task(&case, |spark| {
+            sort_plan(&case, spark) as Arc<dyn ExecutionPlan>
+        })
+        .await
+        {
+            Ok((rows, sort)) => {
+                assert_eq!(rows, case.input_rows * case.num_batches, "{case:?}");
+                assert!(spill_count(&sort) > 0, "sort did not spill: {case:?}");
+            }
+            Err(e) => panic!("native sort failed instead of spilling: {e}\n{case:?}"),
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn native_sort_spills_after_other_tasks_shrink_the_spark_share() {
-        let case = SortSpillCase {
-            executor_cores: 8,
-            task_share: 32 * MB,
-            active_tasks_at_start: 2,
-            active_tasks_later: 8,
-            tasks_start_at_batch: 45,
-            batch_size: 8192,
-            input_rows: 8192,
-            num_batches: 160,
-            title_len: 60,
-        };
-        match run_sort(&case).await {
-            Ok((rows, spills)) => {
-                assert_eq!(rows, case.input_rows * case.num_batches);
-                assert!(spills > 0, "sort did not spill");
+        assert_sort_spills(SortSpillCase::production()).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_spills_when_the_share_halves_early_or_late() {
+        for batch in [20, 25, 50] {
+            assert_sort_spills(SortSpillCase::four_to_eight_tasks_at(batch)).await;
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_spills_with_output_batches_smaller_than_its_runs() {
+        assert_sort_spills(SortSpillCase {
+            batch_size: 4096,
+            ..SortSpillCase::four_to_eight_tasks_at(25)
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_spills_many_small_input_batches() {
+        assert_sort_spills(SortSpillCase {
+            input_rows: 1024,
+            num_batches: 1280,
+            tasks_start_at_batch: 200,
+            ..SortSpillCase::four_to_eight_tasks_at(25)
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_spills_when_the_key_is_most_of_the_row() {
+        assert_sort_spills(SortSpillCase {
+            title_len: 0,
+            num_batches: 240,
+            ..SortSpillCase::four_to_eight_tasks_at(25)
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_spills_with_a_fixed_share() {
+        assert_sort_spills(SortSpillCase {
+            active_tasks_at_start: 8,
+            ..SortSpillCase::production()
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn both_sorts_of_a_sort_merge_join_spill_after_the_share_shrinks() {
+        for batch in [20, 80] {
+            let case = SortSpillCase::four_to_eight_tasks_at(batch);
+            let plan = |spark: &FakeSparkTask| -> Arc<dyn ExecutionPlan> {
+                let left: Arc<dyn ExecutionPlan> = sort_plan(&case, spark);
+                let right: Arc<dyn ExecutionPlan> = sort_plan(&case, spark);
+                let on = vec![(
+                    col("product_variant_id", &left.schema()).unwrap(),
+                    col("product_variant_id", &right.schema()).unwrap(),
+                )];
+                Arc::new(
+                    SortMergeJoinExec::try_new(
+                        left,
+                        right,
+                        on,
+                        None,
+                        JoinType::Inner,
+                        vec![SortOptions {
+                            descending: false,
+                            nulls_first: true,
+                        }],
+                        NullEquality::NullEqualsNothing,
+                    )
+                    .unwrap(),
+                )
+            };
+            match run_in_task(&case, plan).await {
+                Ok((rows, join)) => {
+                    // Every key is unique and both sides read the same rows.
+                    assert_eq!(rows, case.input_rows * case.num_batches);
+                    for sort in join.children() {
+                        assert!(spill_count(sort) > 0, "sort did not spill");
+                    }
+                }
+                Err(e) => panic!("sort-merge join failed instead of spilling: {e}\n{case:?}"),
             }
-            Err(e) => panic!("native sort failed instead of spilling: {e}"),
         }
     }
 }

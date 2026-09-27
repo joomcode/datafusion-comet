@@ -25,6 +25,8 @@ pub mod partial_sort;
 pub mod partitioned_topk;
 pub mod sort;
 pub mod sort_preserving_merge;
+// COMET PATCH
+mod spill_workspace;
 mod stream;
 pub mod streaming_merge;
 
