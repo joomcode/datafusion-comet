@@ -48,7 +48,6 @@ use crate::spill::get_record_batch_memory_size;
 use crate::spill::in_progress_spill_file::InProgressSpillFile;
 use crate::spill::spill_manager::{GetSlicedSize, SpillManager};
 use crate::statistics::{ChildStats, StatisticsArgs};
-use crate::stream::ReservationStream;
 use crate::stream::{ObservedStream, RecordBatchStreamAdapter};
 use crate::topk::TopK;
 use crate::topk::TopKDynamicFilters;
@@ -63,6 +62,7 @@ use arrow::compute::{concat_batches, lexsort_to_indices, take_arrays};
 use arrow::datatypes::SchemaRef;
 use datafusion_common::config::SpillCompression;
 use datafusion_common::tree_node::TreeNodeRecursion;
+use datafusion_common::utils::memory::RecordBatchMemoryCounter;
 use datafusion_common::{
     DataFusionError, Result, assert_or_internal_err, internal_datafusion_err,
     unwrap_or_internal_err,
@@ -767,8 +767,8 @@ impl ExternalSorter {
     /// sorted data and the target batch size.
     /// For single-batch output cases, `reservation` will be freed immediately after sorting,
     /// as the batch will be output and is expected to be reserved by the consumer of the stream.
-    /// For multi-batch output cases, `reservation` will be grown to match the actual
-    /// size of sorted output, and as each batch is output, its memory will be freed from the reservation.
+    /// For multi-batch output cases, `reservation` covers the sorted output,
+    /// releasing its memory as each batch is output.
     /// (This leads to the same behaviour, as futures are only evaluated when polled by the consumer.)
     fn sort_batch_stream(
         &self,
@@ -790,26 +790,31 @@ impl ExternalSorter {
             // Sort the batch immediately and get all output batches
             let sorted_batches = sort_batch_chunked(&batch, &expressions, batch_size)?;
 
-            // Resize the reservation to match the actual sorted output size.
-            // Using try_resize avoids a release-then-reacquire cycle, which
-            // matters for MemoryPool implementations where grow/shrink have
-            // non-trivial cost (e.g. JNI calls in Comet).
-            let total_sorted_size: usize = sorted_batches
+            // COMET PATCH: charge each buffer the chunks share (dictionary values, view
+            // data) once, to the last chunk holding it, since it is freed with that
+            // chunk. Ported from apache/datafusion#25800.
+            let mut counter = RecordBatchMemoryCounter::new();
+            let mut sizes: Vec<usize> = sorted_batches
                 .iter()
-                .map(get_record_batch_memory_size)
-                .sum();
+                .rev()
+                .map(|batch| counter.count_batch(batch))
+                .collect();
+            sizes.reverse();
             reservation
-                .try_resize(total_sorted_size)
+                .try_resize(counter.memory_usage())
                 .map_err(Self::err_with_oom_context)?;
 
-            // Wrap in ReservationStream to hold the reservation
-            Result::<_, DataFusionError>::Ok(Box::pin(ReservationStream::new(
+            let batches =
+                sorted_batches
+                    .into_iter()
+                    .zip(sizes)
+                    .map(move |(batch, size)| {
+                        reservation.shrink(size);
+                        Ok(batch)
+                    });
+            Result::<_, DataFusionError>::Ok(Box::pin(RecordBatchStreamAdapter::new(
                 Arc::clone(&schema),
-                Box::pin(RecordBatchStreamAdapter::new(
-                    Arc::clone(&schema),
-                    futures::stream::iter(sorted_batches.into_iter().map(Ok)),
-                )),
-                reservation,
+                futures::stream::iter(batches),
             )) as SendableRecordBatchStream)
         })
         .try_flatten();

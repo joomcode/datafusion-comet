@@ -20,7 +20,9 @@
 
 use super::*;
 use crate::metrics::ExecutionPlanMetricsSet;
-use arrow::array::{AsArray, Int32Array};
+use arrow::array::{
+    ArrayRef, AsArray, DictionaryArray, Int32Array, StringArray, StringViewArray,
+};
 use arrow::datatypes::{DataType, Field, Int32Type, Schema};
 use datafusion_execution::memory_pool::{GreedyMemoryPool, MemoryLimit};
 use datafusion_execution::runtime_env::RuntimeEnvBuilder;
@@ -318,5 +320,63 @@ async fn sorted_batches_stay_reserved_while_they_are_spilled() -> Result<()> {
         "sorted batches must stay reserved while they are written: {reserved_during_writes:?}"
     );
     assert_eq!(pool.reserved(), 0);
+    Ok(())
+}
+
+/// Finding 6 of apache/datafusion#25804: the chunks `sort_batch_stream` sorts a batch
+/// into share its view data or dictionary values, which were charged once per chunk.
+/// Sorts one batch in a pool that holds only its reservation, in four chunks.
+#[tokio::test]
+async fn sorted_chunks_charge_shared_buffers_once() -> Result<()> {
+    let rows = 4096;
+    let long = |i: usize| format!("row-{i:08}-{}", "x".repeat(87));
+    let views: ArrayRef =
+        Arc::new(StringViewArray::from_iter_values((0..rows).rev().map(long)));
+    let dictionary: ArrayRef = Arc::new(DictionaryArray::new(
+        Int32Array::from_iter_values((0..rows as i32).rev().map(|i| i % 1024)),
+        Arc::new(StringArray::from_iter_values((0..1024).map(long))),
+    ));
+    for values in [views, dictionary] {
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "x",
+            values.data_type().clone(),
+            false,
+        )]));
+        let batch = RecordBatch::try_new(Arc::clone(&schema), vec![values])?;
+        let shared = match batch.column(0).data_type() {
+            DataType::Utf8View => batch
+                .column(0)
+                .as_string_view()
+                .data_buffers()
+                .iter()
+                .map(|buffer| buffer.capacity())
+                .sum(),
+            _ => batch
+                .column(0)
+                .as_any_dictionary()
+                .values()
+                .to_data()
+                .buffers()[1]
+                .capacity(),
+        };
+        let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(
+            get_reserved_bytes_for_record_batch(&batch)?,
+        ));
+        let mut sorter = new_sorter(&schema, &pool, 1024, 0)?;
+        sorter.insert_batch(batch).await?;
+        let mut stream = sorter.sort().await?;
+        drop(sorter);
+
+        let mut output = vec![stream.try_next().await?.expect("rows")];
+        // The chunks still to come hold the shared buffer, so it stays reserved.
+        assert!(pool.reserved() >= shared);
+        output.extend(stream.try_collect::<Vec<_>>().await?);
+        assert_eq!(output.len(), 4);
+        assert_eq!(
+            output.iter().map(RecordBatch::num_rows).sum::<usize>(),
+            rows
+        );
+        assert_eq!(pool.reserved(), 0);
+    }
     Ok(())
 }

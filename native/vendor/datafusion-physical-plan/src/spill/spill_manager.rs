@@ -23,11 +23,12 @@ use crate::{common::spawn_buffered, metrics::SpillMetrics};
 use arrow::array::{BinaryViewArray, GenericByteViewArray, StringViewArray};
 use arrow::datatypes::{ByteViewType, SchemaRef};
 use arrow::record_batch::RecordBatch;
-use datafusion_common::{DataFusionError, Result, config::SpillCompression};
+use datafusion_common::{DataFusionError, HashSet, Result, config::SpillCompression};
 use datafusion_execution::SendableRecordBatchStream;
 use datafusion_execution::runtime_env::RuntimeEnv;
 use datafusion_execution::spill_file::SpillFile;
 use std::borrow::Borrow;
+use std::num::NonZero;
 use std::sync::Arc;
 
 /// The `SpillManager` is responsible for the following tasks:
@@ -210,14 +211,16 @@ impl SpillManager {
 
 pub(crate) trait GetSlicedSize {
     /// Returns the size of the `RecordBatch` when sliced.
-    /// Note: if multiple arrays or even a single array share the same data buffers, we may double count each buffer.
-    /// Therefore, make sure we call gc() or gc_view_arrays() before using this method.
+    /// A view data buffer listed more than once, in one array or across arrays, is counted once.
     fn get_sliced_size(&self) -> Result<usize>;
 }
 
 impl GetSlicedSize for RecordBatch {
     fn get_sliced_size(&self) -> Result<usize> {
         let mut total = 0;
+        // COMET PATCH: a view data buffer listed more than once, in one array or across
+        // arrays, is counted once, as in apache/datafusion#25800.
+        let mut counted_view_buffers = HashSet::new();
         for array in self.columns() {
             let data = array.to_data();
             total += data.get_slice_memory_size()?;
@@ -231,20 +234,24 @@ impl GetSlicedSize for RecordBatch {
             // "bytes needed if we materialized exactly this slice into fresh buffers".
             // This is a workaround until https://github.com/apache/arrow-rs/issues/8230
             if let Some(sv) = array.as_any().downcast_ref::<StringViewArray>() {
-                total += byte_view_data_buffer_size(sv);
+                total += byte_view_data_buffer_size(sv, &mut counted_view_buffers);
             }
             if let Some(bv) = array.as_any().downcast_ref::<BinaryViewArray>() {
-                total += byte_view_data_buffer_size(bv);
+                total += byte_view_data_buffer_size(bv, &mut counted_view_buffers);
             }
         }
         Ok(total)
     }
 }
 
-fn byte_view_data_buffer_size<T: ByteViewType>(array: &GenericByteViewArray<T>) -> usize {
+fn byte_view_data_buffer_size<T: ByteViewType>(
+    array: &GenericByteViewArray<T>,
+    counted: &mut HashSet<NonZero<usize>>,
+) -> usize {
     array
         .data_buffers()
         .iter()
+        .filter(|buffer| counted.insert(buffer.data_ptr().addr()))
         .map(|buffer| buffer.capacity())
         .sum()
 }
@@ -404,6 +411,30 @@ mod tests {
         // The sliced size should be larger than sliced views buffer size
         assert!(views_sliced_size < half_batch.get_sliced_size().unwrap());
 
+        Ok(())
+    }
+
+    #[test]
+    fn sliced_size_counts_repeated_view_buffers_once() -> Result<()> {
+        let array = StringViewArray::from(vec!["x".repeat(100)]);
+        let buffer = array.data_buffers()[0].clone();
+        // `concat` of view arrays that share a buffer lists it once per input
+        let repeated = StringViewArray::try_new(
+            array.views().clone(),
+            vec![buffer.clone(); 3],
+            None,
+        )?;
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("a", DataType::Utf8View, false),
+            Field::new("b", DataType::Utf8View, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![Arc::new(repeated.clone()), Arc::new(repeated)],
+        )?;
+
+        let views_size = 2 * size_of::<u128>();
+        assert_eq!(batch.get_sliced_size()?, views_size + buffer.capacity());
         Ok(())
     }
 }
