@@ -549,6 +549,13 @@ impl MultiLevelMergeBuilder {
                             // We couldn't even reserve a single stream - one record batch
                             // is larger than the whole merge budget. That's the lone-batch
                             // case, not the 2-stream merge skew we rescue here - surface it.
+                            // COMET PATCH: unless it can be split. Re-spilling needs less
+                            // than a merge stream, and a merge that consumed a split run
+                            // writes batches of at most its rows. Splitting fails if the
+                            // batch has a single row or the re-spill cannot be reserved.
+                            if self.workspace.is_some() {
+                                return Ok(SpillFilesToMerge::SplitThenRetry(0));
+                            }
                             return Err(err);
                         }
 
@@ -691,13 +698,19 @@ impl MultiLevelMergeBuilder {
         let old_max = target.max_record_batch_memory;
 
         // Reserve enough to hold a single stream of this file while we re-spill it.
+        // COMET PATCH: read it without read-ahead, which held up to three batches while
+        // two were reserved, and reserve what the re-spill holds: the batch read and
+        // one half of it encoded for the new file. A batch too wide to reserve twice
+        // can then still be split.
         let reservation = self.reservation.new_empty();
-        reservation
-            .try_grow(get_reserved_bytes_for_record_batch_size(old_max, old_max))?;
+        reservation.try_grow(get_reserved_bytes_for_record_batch_size(
+            old_max,
+            old_max.div_ceil(2),
+        ))?;
 
         let source = self
             .spill_manager
-            .read_spill_as_stream(target.file, Some(old_max))?;
+            .read_spill_as_stream_unbuffered(target.file, Some(old_max))?;
         // Re-spill with half the batch size: slice every batch in two. The spill
         // writer owns the batch layout, we only change how many rows per batch.
         let mut halved: SendableRecordBatchStream =

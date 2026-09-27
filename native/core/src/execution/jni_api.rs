@@ -2488,7 +2488,7 @@ mod tests {
 mod native_sort_spill_tests {
     use super::*;
     use crate::execution::memory_pools::{fair_unified_pool_with_fake_spark, FakeSparkTask};
-    use arrow::array::{ArrayRef, Float64Array, Int32Array, Int64Array, StringArray};
+    use arrow::array::{ArrayRef, BinaryArray, Float64Array, Int32Array, Int64Array, StringArray};
     use arrow::compute::SortOptions;
     use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
     use datafusion::common::{JoinType, NullEquality};
@@ -2905,6 +2905,50 @@ mod native_sort_spill_tests {
         }
     }
 
+    /// Rows like the cube job's: a short key and a wide binary sketch.
+    #[derive(Debug)]
+    struct WideRows {
+        schema: SchemaRef,
+        rows_per_batch: usize,
+        num_batches: usize,
+        sketch_len: usize,
+    }
+
+    impl WideRows {
+        fn batch(&self, index: usize) -> RecordBatch {
+            let start = (index * self.rows_per_batch) as u64;
+            let rows: Vec<u64> = (start..start + self.rows_per_batch as u64).collect();
+            let key = StringArray::from_iter_values(
+                rows.iter()
+                    .map(|&r| format!("{:016x}{:08x}", mix(r), mix(r ^ 7) as u32)),
+            );
+            let sketch = BinaryArray::from_iter_values(rows.iter().map(|&r| {
+                (0..self.sketch_len as u64)
+                    .map(|i| mix(r.wrapping_mul(31).wrapping_add(i)) as u8)
+                    .collect::<Vec<u8>>()
+            }));
+            RecordBatch::try_new(
+                Arc::clone(&self.schema),
+                vec![Arc::new(key), Arc::new(sketch)],
+            )
+            .unwrap()
+        }
+    }
+
+    impl PartitionStream for WideRows {
+        fn schema(&self) -> &SchemaRef {
+            &self.schema
+        }
+
+        fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+            let batches: Vec<_> = (0..self.num_batches).map(|i| Ok(self.batch(i))).collect();
+            Box::pin(RecordBatchStreamAdapter::new(
+                Arc::clone(&self.schema),
+                futures::stream::iter(batches),
+            ))
+        }
+    }
+
     struct SortRun {
         rows: usize,
         /// Bytes Spark had granted when the sort produced its first batch, that is while
@@ -3023,5 +3067,44 @@ mod native_sort_spill_tests {
             run.held_during_final_merge,
             case.task_share
         );
+    }
+
+    /// Scaled down from the cube job: ~4 KiB rows, so a full output batch of `batch_size`
+    /// rows is larger than the task's whole share, and every spill run is a single batch.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_of_rows_wider_than_the_share_per_batch_stays_accounted() {
+        let share = 2 * MB;
+        let batch_size = 512;
+        let sketch_len = 4608;
+        let (rows_per_batch, num_batches) = (96, 24);
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("key", DataType::Utf8, false),
+            Field::new("sketch", DataType::Binary, false),
+        ]));
+        let source = Arc::new(WideRows {
+            schema,
+            rows_per_batch,
+            num_batches,
+            sketch_len,
+        });
+        assert!(batch_size * sketch_len > share);
+        let run = sort_with_fixed_share(source, share, 8, batch_size).await;
+        assert_eq!(run.rows, rows_per_batch * num_batches);
+        assert!(
+            run.spill_count >= 8,
+            "need many spills: {}",
+            run.spill_count
+        );
+        assert!(
+            run.spilled_rows > run.rows,
+            "need a multi-pass merge: {} rows spilled",
+            run.spilled_rows
+        );
+        assert!(
+            run.peak_reserved <= share,
+            "overcommitted: peak {} for a {share} share",
+            run.peak_reserved
+        );
+        assert!(run.held_during_final_merge <= share);
     }
 }
