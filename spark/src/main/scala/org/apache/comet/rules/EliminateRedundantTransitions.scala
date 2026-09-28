@@ -281,7 +281,7 @@ case class EliminateRedundantTransitions(session: SparkSession)
    * CometNativeColumnarToRowExec. Variant uses Spark's conversion; other unsupported schemas use
    * CometColumnarToRowExec.
    */
-  private def createColumnarToRowExec(child: SparkPlan): SparkPlan = {
+  private[rules] def createColumnarToRowExec(child: SparkPlan): SparkPlan = {
     val schema = child.schema
     // TODO: Remove this fallback once Comet columnar-to-row conversion supports Variant getters
     // and Spark's Variant UnsafeRow encoding.

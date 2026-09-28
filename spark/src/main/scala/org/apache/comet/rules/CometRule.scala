@@ -40,6 +40,7 @@ object CometRule {
   def postColumnarRules(session: SparkSession, wholePlan: Boolean = false): Seq[Rule[SparkPlan]] =
     Seq(
       RevertNativeForTransitionHeavyStages(session, wholePlan),
+      RevertIsolatedNativeOperators(session),
       EliminateRedundantTransitions(session))
 
   /**

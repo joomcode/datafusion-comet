@@ -569,6 +569,16 @@ subset of operators for eliminating conversion overhead across the stage. A stag
 native aggregate whose intermediate buffer Spark cannot exchange with Comet across a stage boundary, because
 reverting it would split that aggregate between the two engines.
 
+### Reverting Single Operators
+
+`spark.comet.exec.revertIsolatedOperators.enabled=true` applies the same idea to one operator at a time and keeps the
+rest of the stage native. Comet reverts a native operator whose output goes straight to a Spark operator through a
+columnar-to-row transition when either every input of that operator comes from Spark rows through a row-to-columnar
+transition, so reverting it removes both transitions, or the operator is a sort. Spark sorts row pointers and writes
+each spilled row once, while the native sort moves wide rows through every sort, spill and merge step before they are
+converted to rows for the Spark consumer anyway. The columnar-to-row transition then moves below the Spark sort, and
+the sort's native producer, such as a native shuffle read, is unchanged. Aggregates are never reverted.
+
 ### Wide or Deeply Nested Schemas
 
 The cost of each conversion also grows sharply with schema shape: for wide or deeply nested schemas,
