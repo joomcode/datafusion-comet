@@ -335,7 +335,13 @@ Native operators reserve through DataFusion's `MemoryConsumer` / `MemoryReservat
 
 An operator that never calls `try_grow` is invisible to the pool no matter how much memory it uses.
 
-### Whole-partition windows
+### Sort and whole-partition windows
+
+The sort merge reservation is capped at 1/32 of the configured off-heap budget per
+concurrent Spark task (executor cores divided by task CPUs), up to DataFusion's default.
+This leaves room for input batches on small executors; the spillable merge can grow its
+reservation when it needs more. It does not increase the memory pool or suppress allocation
+failures. An individual batch still has to fit the available execution budget.
 
 `PartitionAggregateWindowExec` handles window expressions that cannot stream: full-partition
 `sum`, `avg`, `count`, `min`, `max`, `first_value`, `last_value` and `nth_value` frames (with
