@@ -317,6 +317,30 @@ object CometShuffleExchangeExec
     if (shuffleSupported(op).isDefined) Compatible() else Unsupported()
   }
 
+  override def convert(
+      op: ShuffleExchangeExec,
+      builder: OperatorOuterClass.Operator.Builder,
+      childOp: OperatorOuterClass.Operator*): Option[OperatorOuterClass.Operator] = {
+    super.convert(op, builder, childOp: _*).map { input =>
+      // This describes the exchange's output, not its writer. Choose direct read on the first
+      // planning pass too: an already-native parent can retain this input across AQE, so relying
+      // on CometExchangeSink to replace it later leaves a native -> JVM -> native Arrow roundtrip.
+      if (CometConf.COMET_SHUFFLE_DIRECT_READ_ENABLED.get(op.conf)) {
+        val scan = input.getScan
+        input.toBuilder
+          .clearScan()
+          .setShuffleScan(
+            OperatorOuterClass.ShuffleScan
+              .newBuilder()
+              .setSource(scan.getSource)
+              .addAllFields(scan.getFieldsList))
+          .build()
+      } else {
+        input
+      }
+    }
+  }
+
   /**
    * Whether a round-robin exchange over `child` places rows positionally
    * (`RoundRobinStrategy::RowGroups` in `PhysicalPlanner::create_partitioning`), and with what

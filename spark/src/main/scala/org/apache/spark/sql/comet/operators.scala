@@ -936,10 +936,9 @@ abstract class CometNativeExec extends CometExec {
     }
 
     // The protobuf is the source of truth for whether a slot is a ShuffleScan or a regular
-    // Scan: `CometExchangeSink.shouldUseShuffleScan` only fires for AQE wrappers
-    // (`ShuffleQueryStageExec`), so a bare non-AQE `CometShuffleExchangeExec` always serializes
-    // as a regular Scan regardless of `COMET_SHUFFLE_DIRECT_READ_ENABLED`. Driving the JVM
-    // dispatch from `shuffleScanIndices` instead of the conf keeps the two aligned.
+    // Scan. Both the initial exchange conversion and AQE stage conversion choose that input
+    // representation. Driving the JVM dispatch from `shuffleScanIndices` instead of the current
+    // conf keeps it aligned with the serialized plan, including across AQE replanning.
     val shuffleScanIndices = findShuffleScanIndices(nativeOp)
 
     def isBroadcastInput(plan: SparkPlan): Boolean = plan match {

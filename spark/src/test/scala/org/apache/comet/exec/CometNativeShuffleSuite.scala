@@ -39,7 +39,7 @@ import org.apache.spark.sql.{CometTestBase, DataFrame, Dataset, Row}
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
 import org.apache.spark.sql.catalyst.plans.logical.LocalRelation
 import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
-import org.apache.spark.sql.comet.{CometExec, CometLocalTableScanExec, CometMetricNode, CometScanWrapper, CometSparkToColumnarExec, CometTakeOrderedAndProjectExec}
+import org.apache.spark.sql.comet.{CometExec, CometLocalTableScanExec, CometMetricNode, CometScanWrapper, CometSortExec, CometSparkToColumnarExec, CometTakeOrderedAndProjectExec}
 import org.apache.spark.sql.comet.execution.arrow.CometArrowStream
 import org.apache.spark.sql.comet.execution.shuffle.{CometNativeShuffle, CometShuffleExchangeExec}
 import org.apache.spark.sql.execution.LocalTableScanExec
@@ -1344,6 +1344,41 @@ class CometNativeShuffleSuite extends CometTestBase with AdaptiveSparkPlanHelper
         // Just collect and verify - simpler test
         val result = shuffled.collect()
         assert(result.length == 50, s"Expected 50 rows after filter, got ${result.length}")
+      }
+    }
+  }
+
+  for {
+    mode <- Seq("jvm", "native")
+    aqe <- Seq(false, true)
+    direct <- Seq(false, true)
+  } {
+    test(s"shuffle direct read retains initial sort input: mode=$mode aqe=$aqe direct=$direct") {
+      withSQLConf(
+        CometConf.COMET_SHUFFLE_MODE.key -> mode,
+        CometConf.COMET_SHUFFLE_DIRECT_READ_ENABLED.key -> direct.toString,
+        "spark.sql.adaptive.enabled" -> aqe.toString,
+        "spark.sql.adaptive.coalescePartitions.enabled" -> "true",
+        "spark.sql.shuffle.partitions" -> "4") {
+        val data = (0 until 256).map { i =>
+          (i, i % 7, if (i % 11 == 0) null else Array.fill[Byte](8192)((i % 13).toByte))
+        }
+        withParquetTable(data, "direct_sort_input") {
+          val df = sql("SELECT * FROM direct_sort_input")
+            .repartition(col("_2"))
+            .sortWithinPartitions(col("_1"))
+          val initialPlan = df.queryExecution.executedPlan
+          val (_, finalPlan) = checkSparkAnswer(df)
+          Seq(initialPlan, finalPlan).foreach { plan =>
+            val sorts = collect(plan) { case sort: CometSortExec => sort }
+            assert(sorts.nonEmpty, plan.treeString)
+            sorts.foreach { sort =>
+              val scans = sort.nativeOp.getChildrenList
+              assert(scans.size() == 1, sort.nativeOp.toString)
+              assert(scans.get(0).hasShuffleScan == direct, sort.nativeOp.toString)
+            }
+          }
+        }
       }
     }
   }
