@@ -528,6 +528,8 @@ jobs:
               org.apache.comet.exec.CometEmptyRelationExecSuite
               org.apache.comet.exec.CometInMemoryCacheSuite
               org.apache.comet.exec.CometInMemoryCacheKryoSuite
+              org.apache.spark.sql.comet.CometBroadcastKryoPayloadSuite
+              org.apache.spark.sql.comet.CometBroadcastDefaultKryoSuite
               org.apache.comet.exec.CometGenerateExecSuite
               org.apache.comet.exec.CometWindowExecSuite
               org.apache.comet.exec.CometJoinSuite
