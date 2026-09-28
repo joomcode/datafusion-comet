@@ -216,6 +216,8 @@ impl ShuffleScanExec {
             };
             timer.stop();
 
+            crate::execution::jni_api::log_batch_memory("shuffle_decode_native", &batch);
+
             let num_rows = batch.num_rows();
 
             // Extract column arrays, unpacking any dictionary-encoded columns.

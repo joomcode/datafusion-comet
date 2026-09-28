@@ -330,6 +330,22 @@ fn memory_usage() -> MemoryUsage {
     }
 }
 
+/// Temporary, opt-in measurements at the unreserved scan/FFI boundaries. Count shared
+/// IPC buffers once: summing array sizes would count a single IPC body per column.
+pub(crate) fn log_batch_memory(boundary: &str, batch: &RecordBatch) {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ENABLED.get_or_init(|| std::env::var("COMET_DEBUG_BATCH_MEMORY").as_deref() == Ok("1")) {
+        return;
+    }
+    let bytes =
+        datafusion::common::utils::memory::RecordBatchMemoryCounter::new().count_batch(batch);
+    if bytes >= 16 * 1024 * 1024 {
+        let usage = memory_usage();
+        info!("Comet batch memory: boundary={boundary} rows={} bytes={bytes} allocated={} reserved={}",
+            batch.num_rows(), usage.native_allocated, usage.pools_reserved);
+    }
+}
+
 fn parse_usize_env_var(name: &str) -> Option<usize> {
     std::env::var_os(name).and_then(|n| n.to_str().and_then(|s| s.parse::<usize>().ok()))
 }
@@ -970,6 +986,7 @@ fn prepare_output(
     let schema_addrs = &*schema_addrs;
 
     let output_schema = output_batch.schema();
+    log_batch_memory("ffi_output", &output_batch);
     let results = output_batch.columns();
     let num_rows = output_batch.num_rows();
 
@@ -1689,6 +1706,7 @@ fn decode_shuffle_block(
     } else {
         read_ipc_compressed(slice)?
     };
+    log_batch_memory("shuffle_decode_jvm", &batch);
     prepare_output(env, array_addrs, schema_addrs, batch, false)
 }
 
