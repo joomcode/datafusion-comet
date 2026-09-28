@@ -26,7 +26,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use arrow::datatypes::SchemaRef;
+use arrow::datatypes::{DataType, SchemaRef};
 use datafusion_common::{Result, internal_err, resources_err};
 use datafusion_execution::memory_pool::{MemoryPool, MemoryReservation};
 
@@ -506,23 +506,26 @@ impl MultiLevelMergeBuilder {
         // those bytes cover the first N spill files without additional pool
         // allocation, preventing starvation under memory pressure.
         let mut total_needed: usize = 0;
+        let mut largest_batch: usize = 0;
 
         for (spill, _) in &self.sorted_spill_files {
             if number_of_spills_to_read_for_current_phase >= max_spill_files {
                 break;
             }
 
-            let per_spill = get_reserved_bytes_for_record_batch_size(
-                spill.max_record_batch_memory,
-                // Size will be the same as the sliced size, bc it is a spilled batch.
-                spill.max_record_batch_memory,
-            ) * buffer_len;
+            // COMET PATCH: see `Self::run_merge_memory`.
+            let per_spill =
+                self.run_merge_memory(spill.max_record_batch_memory, buffer_len);
             total_needed += per_spill;
+            largest_batch = largest_batch.max(spill.max_record_batch_memory);
 
             // For memory pools that are not shared this is good, for other
             // this is not and there should be some upper limit to memory
             // reservation so we won't starve the system.
-            match try_grow_reservation_to_at_least(reservation, total_needed) {
+            match try_grow_reservation_to_at_least(
+                reservation,
+                total_needed + self.crossing_batch_memory(largest_batch),
+            ) {
                 Ok(_) => {
                     number_of_spills_to_read_for_current_phase += 1;
                 }
@@ -611,17 +614,6 @@ impl MultiLevelMergeBuilder {
         if !is_final || files.is_empty() {
             return (files, buffer_len);
         }
-        let needed = |files: &[(SortedSpillFile, usize)], buffer_len: usize| -> usize {
-            files
-                .iter()
-                .map(|(file, _)| {
-                    get_reserved_bytes_for_record_batch_size(
-                        file.max_record_batch_memory,
-                        file.max_record_batch_memory,
-                    ) * buffer_len
-                })
-                .sum()
-        };
         let resize = |reservation: &mut MemoryReservation, size: usize| {
             if reservation.size() > size {
                 reservation.shrink(reservation.size() - size);
@@ -633,7 +625,7 @@ impl MultiLevelMergeBuilder {
             read_ahead.push(1);
         }
         for buffer_len in read_ahead {
-            let pass = needed(&files, buffer_len);
+            let pass = self.pass_memory(&files, buffer_len);
             let spare = (2 * pass).saturating_sub(reservation.size());
             if workspace.can_grow(spare) {
                 resize(reservation, pass);
@@ -641,16 +633,18 @@ impl MultiLevelMergeBuilder {
             }
         }
         if files.len() <= 2 {
-            resize(reservation, needed(&files, 1));
+            resize(reservation, self.pass_memory(&files, 1));
             return (files, 1);
         }
 
         let held = workspace.reserved();
         let mut fits_twice = 0;
-        let mut total = 0;
-        for file in &files {
-            total += 2 * needed(std::slice::from_ref(file), 1);
-            if total > held {
+        let mut runs = 0;
+        let mut largest_batch = 0;
+        for (file, _) in &files {
+            runs += self.run_merge_memory(file.max_record_batch_memory, 1);
+            largest_batch = largest_batch.max(file.max_record_batch_memory);
+            if 2 * (runs + self.crossing_batch_memory(largest_batch)) > held {
                 break;
             }
             fits_twice += 1;
@@ -659,8 +653,83 @@ impl MultiLevelMergeBuilder {
         let mut rest = files.split_off(merge_now);
         rest.append(&mut self.sorted_spill_files);
         self.sorted_spill_files = rest;
-        resize(reservation, needed(&files, buffer_len));
+        resize(reservation, self.pass_memory(&files, buffer_len));
         (files, buffer_len)
+    }
+
+    /// COMET PATCH: what a merge pass reading `files` with `buffer_len` batches of
+    /// read-ahead holds. See [`Self::run_merge_memory`].
+    fn pass_memory(
+        &self,
+        files: &[(SortedSpillFile, usize)],
+        buffer_len: usize,
+    ) -> usize {
+        let runs: usize = files
+            .iter()
+            .map(|(file, _)| {
+                self.run_merge_memory(file.max_record_batch_memory, buffer_len)
+            })
+            .sum();
+        let largest_batch = files
+            .iter()
+            .map(|(file, _)| file.max_record_batch_memory)
+            .max()
+            .unwrap_or(0);
+        runs + self.crossing_batch_memory(largest_batch)
+    }
+
+    /// COMET PATCH: what a merge pass holds for a spilled run whose largest batch takes
+    /// `max_record_batch_memory`, read with `buffer_len` batches of read-ahead. DataFusion
+    /// reserves twice the batch per read-ahead slot, which leaves out the batch the merge
+    /// holds while `spawn_buffered` refills the read-ahead, and the rows the merge's cursor
+    /// encodes the batch's sort key into, which a row cursor keeps two buffers of
+    /// (apache/datafusion#25804, finding 8, and apache/datafusion#23760). A sort's merge
+    /// reserves the read-ahead, the merge's batch and its rows, estimated at a batch per
+    /// buffer as DataFusion does. Other merges are unchanged.
+    fn run_merge_memory(
+        &self,
+        max_record_batch_memory: usize,
+        buffer_len: usize,
+    ) -> usize {
+        if self.workspace.is_none() {
+            return get_reserved_bytes_for_record_batch_size(
+                max_record_batch_memory,
+                // Size will be the same as the sliced size, bc it is a spilled batch.
+                max_record_batch_memory,
+            ) * buffer_len;
+        }
+        let row_buffers = if self.merge_uses_row_cursor() { 2 } else { 1 };
+        max_record_batch_memory * (buffer_len + 1 + row_buffers)
+    }
+
+    /// COMET PATCH: the merge's output builder keeps the batch a stream's cursor has just
+    /// left until its rows are output, so a sort's merge pass also reserves one more of
+    /// its largest batches. See [`Self::run_merge_memory`].
+    fn crossing_batch_memory(&self, largest_batch: usize) -> usize {
+        if self.workspace.is_none() {
+            0
+        } else {
+            largest_batch
+        }
+    }
+
+    /// COMET PATCH: whether the merge compares rows, which `StreamingMergeBuilder` does
+    /// unless it sorts on one primitive or string/binary column.
+    fn merge_uses_row_cursor(&self) -> bool {
+        let [sort] = self.expr.as_ref() else {
+            return true;
+        };
+        !sort.expr.data_type(&self.schema).is_ok_and(|data_type| {
+            data_type.is_primitive()
+                || matches!(
+                    data_type,
+                    DataType::Utf8
+                        | DataType::Utf8View
+                        | DataType::LargeUtf8
+                        | DataType::Binary
+                        | DataType::LargeBinary
+                )
+        })
     }
 
     /// Re-spill the spill file at `index` with half its batch size, putting it back
@@ -1136,6 +1205,88 @@ mod tests {
              {max_batch_rows} rows"
         );
 
+        Ok(())
+    }
+
+    /// COMET PATCH: finding 8 of apache/datafusion#25804. A sort's merge pass reserves for
+    /// each run its read-ahead, the batch the merge holds and that batch's rows, two
+    /// buffers of them for a row cursor, and once the batch its builder keeps when a
+    /// cursor moves on. Falls back to less read-ahead when that does not fit.
+    #[test]
+    fn sort_merge_pass_reserves_what_the_merge_holds() -> Result<()> {
+        for (columns, row_buffers) in [(1, 1), (2, 2)] {
+            let schema = Arc::new(Schema::new(
+                (0..columns)
+                    .map(|i| Field::new(format!("c{i}"), DataType::Int64, false))
+                    .collect::<Vec<_>>(),
+            ));
+            let expr = LexOrdering::new((0..columns).map(|i| {
+                PhysicalSortExpr::new_default(Arc::new(Column::new(&format!("c{i}"), i)))
+            }))
+            .unwrap();
+            let env = Arc::new(RuntimeEnv::default());
+            let spill_manager = build_spill_manager(&env, &schema);
+            let files = (0..2)
+                .map(|_| {
+                    let batch = RecordBatch::try_new(
+                        Arc::clone(&schema),
+                        (0..columns)
+                            .map(|_| Arc::new(Int64Array::from_iter_values(0..1024)) as _)
+                            .collect(),
+                    )?;
+                    let (file, max_record_batch_memory) = spill_manager
+                        .spill_record_batch_iter_and_return_max_batch_memory(
+                            std::iter::once(Ok(batch)),
+                            "test input run",
+                        )?
+                        .expect("spill should produce a file");
+                    Ok(SortedSpillFile {
+                        file,
+                        max_record_batch_memory,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let m = files[0].max_record_batch_memory;
+            let per_run = |buffer_len: usize| m * (buffer_len + 1 + row_buffers);
+
+            for (limit, buffer_len) in [(usize::MAX, 2), (2 * per_run(1) + m, 1)] {
+                let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(limit));
+                let workspace = SpillWorkspace::new(vec![
+                    MemoryConsumer::new("sorter").register(&pool),
+                ]);
+                let workspace_pool = Arc::clone(&workspace) as Arc<dyn MemoryPool>;
+                let files = files
+                    .iter()
+                    .map(|file| SortedSpillFile {
+                        file: Arc::clone(&file.file),
+                        max_record_batch_memory: file.max_record_batch_memory,
+                    })
+                    .collect();
+                let mut builder = MultiLevelMergeBuilder::new(
+                    spill_manager.clone(),
+                    Arc::clone(&schema),
+                    files,
+                    vec![],
+                    expr.clone(),
+                    BaselineMetrics::new(&ExecutionPlanMetricsSet::new(), 0),
+                    1024,
+                    MemoryConsumer::new("merge").register(&workspace_pool),
+                    None,
+                    false,
+                )
+                .with_spill_workspace(Some(workspace));
+                let mut reservation =
+                    MemoryConsumer::new("merge pass").register(&workspace_pool);
+                let SpillFilesToMerge::Ready(spills, read_ahead) =
+                    builder.get_sorted_spill_files_to_merge(2, 2, &mut reservation)?
+                else {
+                    panic!("two runs should fit");
+                };
+                assert_eq!(spills.len(), 2);
+                assert_eq!(read_ahead, buffer_len, "{columns} columns");
+                assert_eq!(reservation.size(), 2 * per_run(buffer_len) + m);
+            }
+        }
         Ok(())
     }
 
