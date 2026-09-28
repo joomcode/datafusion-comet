@@ -678,14 +678,16 @@ object CometConf extends ShimCometConf {
     conf("spark.comet.shuffle.jvm.batchSize")
       .withAlternative("spark.comet.columnar.shuffle.batch.size")
       .category(CATEGORY_SHUFFLE)
-      .doc("Batch size when writing out sorted spill files on the native side. Note that " +
-        "this should not be larger than batch size (i.e., `spark.comet.batchSize`). Otherwise " +
-        "it will produce larger batches than expected in the native operator after shuffle.")
+      .doc("Batch size when writing out sorted spill files on the native side. " +
+        "The effective size is capped by `spark.comet.batchSize`.")
       .intConf
-      .checkValue(
-        v => v <= COMET_BATCH_SIZE.get(),
-        "Should not be larger than batch size `spark.comet.batchSize`")
+      // Config defaults are validated while this object initializes. Reading a session's
+      // batch size here makes even a valid batchSize=512 fail on the default value 8192.
+      .checkValue(v => v > 0, "Shuffle batch size must be positive")
       .createWithDefault(8192)
+
+  def shuffleJvmBatchSize: Int =
+    math.min(COMET_SHUFFLE_JVM_BATCH_SIZE.get(), COMET_BATCH_SIZE.get())
 
   val COMET_SHUFFLE_NATIVE_WRITE_BUFFER_SIZE: ConfigEntry[Long] =
     conf("spark.comet.shuffle.native.writeBufferSize")

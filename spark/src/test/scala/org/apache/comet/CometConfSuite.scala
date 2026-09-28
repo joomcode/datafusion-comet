@@ -25,6 +25,21 @@ import org.apache.spark.sql.internal.SQLConf
 
 class CometConfSuite extends AnyFunSuite {
 
+  test("small batch size initializes CometConf and caps the JVM shuffle default") {
+    val conf = new SQLConf
+    conf.setConfString("spark.comet.batchSize", "512")
+    SQLConf.withExistingConf(conf) {
+      assert(CometConf.COMET_BATCH_SIZE.get() == 512)
+      assert(CometConf.shuffleJvmBatchSize == 512)
+      conf.setConfString("spark.comet.shuffle.jvm.batchSize", "128")
+      assert(CometConf.shuffleJvmBatchSize == 128)
+      conf.setConfString("spark.comet.shuffle.jvm.batchSize", "1024")
+      assert(CometConf.shuffleJvmBatchSize == 512)
+      conf.setConfString("spark.comet.shuffle.jvm.batchSize", "0")
+      assertThrows[IllegalArgumentException](CometConf.shuffleJvmBatchSize)
+    }
+  }
+
   test("primary key wins over alternative when both are set") {
     val entry = CometConf
       .conf("spark.comet.testing.alias.primaryWins")
