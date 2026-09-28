@@ -26,10 +26,11 @@ import scala.concurrent.Promise
 import scala.jdk.CollectionConverters._
 import scala.util.control.NonFatal
 
+import org.apache.arrow.vector.{LargeVarBinaryVector, VarBinaryVector}
 import org.apache.spark.{broadcast, SparkException}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{Attribute, SortOrder, UnsafeProjection}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, BoundReference, SortOrder, UnsafeProjection}
 import org.apache.spark.sql.catalyst.expressions.codegen._
 import org.apache.spark.sql.catalyst.expressions.codegen.Block._
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
@@ -44,6 +45,8 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 import org.apache.spark.util.{SparkFatalException, Utils}
 import org.apache.spark.util.io.ChunkedByteBuffer
+
+import org.apache.comet.vector.CometPlainVector
 
 /**
  * Copied from Spark `ColumnarToRowExec`. Comet needs the fix for SPARK-50235 but cannot wait for
@@ -77,10 +80,11 @@ case class CometColumnarToRowExec(child: SparkPlan)
     // plan (this) in the closure.
     val localOutput = this.output
     child.executeColumnar().mapPartitionsInternal { batches =>
-      val toUnsafe = UnsafeProjection.create(localOutput, localOutput)
+      val projections = new CometBatchRowProjection(localOutput)
       batches.flatMap { batch =>
         numInputBatches += 1
         numOutputRows += batch.numRows()
+        val toUnsafe = projections.forBatch(batch)
         batch.rowIterator().asScala.map(toUnsafe)
       }
     }
@@ -302,4 +306,36 @@ case class CometColumnarToRowExec(child: SparkPlan)
 
   override protected def withNewChildInternal(newChild: SparkPlan): CometColumnarToRowExec =
     copy(child = newChild)
+}
+
+/** Partition-local projections for the non-codegen columnar-to-row boundary. */
+private[sql] final class CometBatchRowProjection(output: Seq[Attribute]) {
+  private val binaryOrdinals = output.indices.filter(i => output(i).dataType == BinaryType)
+  private lazy val ordinary = UnsafeProjection.create(output, output)
+
+  // Binary and String have identical UnsafeRow layouts. Only for this immediate physical copy,
+  // use getUTF8String as a borrowed byte span: CometPlainVector does not decode or validate UTF-8.
+  // UnsafeWriter copies the span into the row's heap buffer, avoiding getBinary's intermediate
+  // byte[]. No String-typed value escapes this projection and the plan's schema stays unchanged.
+  private lazy val borrowedBinary = UnsafeProjection.create(output.zipWithIndex.map {
+    case (attribute, i) =>
+      val physicalType = if (attribute.dataType == BinaryType) StringType else attribute.dataType
+      BoundReference(i, physicalType, attribute.nullable)
+  })
+
+  def forBatch(batch: ColumnarBatch): UnsafeProjection = {
+    // Check each batch: a partition can contain both Comet and Spark vectors. Dictionary,
+    // fixed-size binary, nested binary and other vector implementations retain the ordinary path.
+    val canBorrow = binaryOrdinals.nonEmpty && binaryOrdinals.forall { i =>
+      batch.column(i) match {
+        case vector: CometPlainVector =>
+          vector.getValueVector match {
+            case _: VarBinaryVector | _: LargeVarBinaryVector => true
+            case _ => false
+          }
+        case _ => false
+      }
+    }
+    if (canBorrow) borrowedBinary else ordinary
+  }
 }
