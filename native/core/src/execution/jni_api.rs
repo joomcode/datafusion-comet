@@ -3010,6 +3010,7 @@ mod native_sort_spill_tests {
 
     struct SortRun {
         rows: usize,
+        first_output_bytes: usize,
         /// Bytes Spark had granted when the sort produced its first batch, that is while
         /// the final merge pass runs.
         held_during_final_merge: usize,
@@ -3076,6 +3077,8 @@ mod native_sort_spill_tests {
             .expect("sorted output")
             .unwrap_or_else(|e| panic!("native sort failed: {e}"));
         let held_during_final_merge = spark.held();
+        let first_output_bytes =
+            datafusion::common::utils::memory::RecordBatchMemoryCounter::new().count_batch(&first);
         let rest: SendableRecordBatchStream = Box::pin(RecordBatchStreamAdapter::new(
             Arc::clone(&schema),
             futures::stream::once(async { Ok(first) }).chain(stream),
@@ -3088,6 +3091,7 @@ mod native_sort_spill_tests {
         let metrics = sort.metrics().unwrap();
         SortRun {
             rows,
+            first_output_bytes,
             held_during_final_merge,
             peak_reserved: peak.peak(),
             spill_count: metrics.spill_count().unwrap_or(0),
@@ -3125,6 +3129,42 @@ mod native_sort_spill_tests {
             "the final merge holds {} of a {} share",
             run.held_during_final_merge,
             case.task_share
+        );
+    }
+
+    /// A returned batch is owned by the downstream consumer, not the sort's pool
+    /// reservation. The JVM row consumer does not reserve this Arrow memory. Bound
+    /// that handoff by batch size rather than assuming the sort still accounts for it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn small_sort_batches_bound_the_unreserved_jvm_handoff() {
+        let source = Arc::new(WideRows {
+            schema: Arc::new(Schema::new(vec![
+                Field::new("key", DataType::Utf8, false),
+                Field::new("sketch", DataType::Binary, false),
+            ])),
+            rows_per_batch: 8192,
+            num_batches: 1,
+            sketch_len: 2048,
+        });
+        let large = sort_with_fixed_share(source.clone(), 64 * MB, 8, 8192).await;
+        let small = sort_with_fixed_share(source, 64 * MB, 8, 512).await;
+        assert_eq!(large.rows, 8192);
+        assert_eq!(small.rows, large.rows);
+        assert_eq!(large.spill_count, 0);
+        assert_eq!(small.spill_count, 0);
+        // The large batch remains alive at the handoff despite a zero pool balance.
+        assert_eq!(large.held_during_final_merge, 0);
+        assert!(large.first_output_bytes >= 16 * MB);
+        assert!(small.first_output_bytes < 2 * MB);
+        assert!(large.first_output_bytes > small.first_output_bytes * 15);
+        // The smaller batches not yet returned remain reserved by the sorter.
+        assert!(small.held_during_final_merge >= 15 * MB);
+        eprintln!(
+            "sort handoff: large={}B reserved={}B; small={}B reserved={}B",
+            large.first_output_bytes,
+            large.held_during_final_merge,
+            small.first_output_bytes,
+            small.held_during_final_merge
         );
     }
 
