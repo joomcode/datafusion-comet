@@ -101,7 +101,7 @@ fn benchmark(c: &mut Criterion) {
     });
     keys_group.finish();
 
-    for width in [32, 192 * 1024] {
+    for width in [32, 4096, 192 * 1024] {
         let input = input(width);
         let views: Vec<_> = input
             .iter()

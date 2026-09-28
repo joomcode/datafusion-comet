@@ -25,6 +25,9 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
+mod wide_payload;
+use wide_payload::WideBinaryPayload;
+
 use crate::common::spawn_buffered;
 use crate::execution_plan::{
     Boundedness, CardinalityEffect, EmissionType, has_same_children_properties,
@@ -1526,26 +1529,82 @@ impl ExecutionPlan for SortExec {
                 )))
             }
             (false, None) => {
-                let mut sorter = ExternalSorter::new(
-                    partition,
-                    input.schema(),
-                    self.expr.clone(),
-                    context.session_config().batch_size(),
-                    execution_options.sort_spill_reservation_bytes,
-                    execution_options.sort_in_place_threshold_bytes,
-                    context.session_config().spill_compression(),
-                    &self.metrics_set,
-                    context.runtime_env(),
-                )?;
+                let expr = self.expr.clone();
+                let metrics = self.metrics_set.clone();
+                let batch_size = context.session_config().batch_size();
+                let merge_bytes =
+                    execution_options.sort_spill_reservation_bytes;
+                let in_place_bytes =
+                    execution_options.sort_in_place_threshold_bytes;
+                let compression = context.session_config().spill_compression();
+                let runtime = context.runtime_env();
                 Ok(Box::pin(RecordBatchStreamAdapter::new(
                     self.schema(),
                     futures::stream::once(async move {
+                        // COMET PATCH: choose once per partition, before buffering or spilling.
+                        // Only wide non-key binary payloads use views. The public schema and
+                        // sort expressions remain unchanged; all output is materialized Binary.
+                        let first = loop {
+                            match input.next().await.transpose()? {
+                                Some(batch) if batch.num_rows() == 0 => {
+                                    continue;
+                                }
+                                batch => break batch,
+                            }
+                        };
+                        let payload = first.as_ref().and_then(|batch| {
+                            WideBinaryPayload::select(batch, &expr, input.schema())
+                        });
+                        let schema = payload
+                            .as_ref()
+                            .map(|payload| Arc::clone(payload.view_schema()))
+                            .unwrap_or_else(|| input.schema());
+                        let mut sorter = ExternalSorter::new(
+                            partition,
+                            schema,
+                            expr,
+                            batch_size,
+                            merge_bytes,
+                            in_place_bytes,
+                            compression,
+                            &metrics,
+                            runtime,
+                        )?;
+                        if let Some(batch) = first {
+                            sorter
+                                .insert_batch(WideBinaryPayload::encode(
+                                    &payload, batch,
+                                )?)
+                                .await?;
+                        }
                         while let Some(batch) = input.next().await {
-                            let batch = batch?;
+                            let batch =
+                                WideBinaryPayload::encode(&payload, batch?)?;
                             sorter.insert_batch(batch).await?;
                         }
                         drop(input);
-                        sorter.sort().await
+                        let sorted = sorter.sort().await?;
+                        match payload {
+                            None => Ok::<_, DataFusionError>(sorted),
+                            Some(payload) => {
+                                let schema =
+                                    Arc::clone(payload.original_schema());
+                                let elapsed = sorter
+                                    .metrics
+                                    .baseline
+                                    .elapsed_compute()
+                                    .clone();
+                                let output = sorted.map(move |batch| {
+                                    // Include final materialization in the sort's compute cost.
+                                    let _timer = elapsed.timer();
+                                    payload.decode(batch?)
+                                });
+                                Ok(Box::pin(RecordBatchStreamAdapter::new(
+                                    schema, output,
+                                ))
+                                    as SendableRecordBatchStream)
+                            }
+                        }
                     })
                     .try_flatten(),
                 )))

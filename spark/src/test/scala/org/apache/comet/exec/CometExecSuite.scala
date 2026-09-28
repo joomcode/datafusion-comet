@@ -3064,6 +3064,31 @@ class CometExecSuite extends CometTestBase {
     spark.sessionState.functionRegistry.dropFunction(funcId_bloom_filter_agg)
   }
 
+  test("sort wide binary payload preserves values across the native boundary") {
+    // Disable Parquet dictionary encoding so the wide Binary sort path is exercised.
+    // Nulls and distinct payloads catch a view retaining the wrong backing buffer.
+    withTempDir { dir =>
+      val path = new Path(dir.toURI.toString, "wide-sort").toString
+      val rows = (0 until 384).map { i =>
+        val payload = if (i % 7 == 0) null else Array.fill[Byte](8192)((i % 251).toByte)
+        (i, payload)
+      }
+      spark
+        .createDataFrame(rows)
+        .coalesce(1)
+        .write
+        .option("parquet.enable.dictionary", "false")
+        .parquet(path)
+      withSQLConf(
+        CometConf.COMET_BATCH_SIZE.key -> "32",
+        "spark.comet.exec.sort.enabled" -> "true",
+        "spark.comet.exec.transitionRevert.enabled" -> "false") {
+        val query = spark.read.parquet(path).sortWithinPartitions($"_1".desc)
+        checkSparkAnswerAndOperator(query, Seq(classOf[CometSortExec]))
+      }
+    }
+  }
+
   test("sort (non-global)") {
     withParquetTable((0 until 5).map(i => (i, i + 1)), "tbl") {
       val df = sql("SELECT * FROM tbl").sortWithinPartitions($"_1".desc)
