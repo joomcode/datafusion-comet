@@ -226,6 +226,18 @@ fn run_benchmark(
     rows: &[Vec<u8>],
     num_top_level_fields: usize,
 ) {
+    run_benchmark_with_ratio(group, name, param, schema, rows, num_top_level_fields, 1.0)
+}
+
+fn run_benchmark_with_ratio(
+    group: &mut criterion::BenchmarkGroup<criterion::measurement::WallTime>,
+    name: &str,
+    param: &str,
+    schema: &[ArrowDataType],
+    rows: &[Vec<u8>],
+    num_top_level_fields: usize,
+    prefer_dictionary_ratio: f64,
+) {
     let num_rows = rows.len();
 
     let spark_rows: Vec<SparkUnsafeRow> = rows
@@ -255,7 +267,7 @@ fn run_benchmark(
                 size_ptr,
                 schema,
                 tmp.path().to_str().unwrap().to_string(),
-                1.0,
+                prefer_dictionary_ratio,
                 false,
                 0,
                 None,
@@ -377,6 +389,55 @@ fn benchmark_map_conversion(c: &mut Criterion) {
     group.finish();
 }
 
+fn build_wide_binary_row(key: i64, payload: &[u8]) -> Vec<u8> {
+    let bitset = SparkUnsafeRow::get_row_bitset_width(2);
+    let fixed = bitset + 2 * INT64_SIZE;
+    let padded = payload.len().div_ceil(8) * 8;
+    let mut data = vec![0u8; fixed + padded];
+    data[bitset..bitset + INT64_SIZE].copy_from_slice(&key.to_le_bytes());
+    write_pointer(&mut data, bitset + INT64_SIZE, fixed, payload.len());
+    data[fixed..fixed + payload.len()].copy_from_slice(payload);
+    data
+}
+
+/// Wide Binary column (HLL-sketch-like) through the JVM shuffle row converter,
+/// comparing the dictionary builder (ratio 10.0, the default) with plain builders (1.0).
+fn benchmark_wide_binary(c: &mut Criterion) {
+    let mut group = c.benchmark_group("wide_binary");
+    group.sample_size(10);
+    const NUM_ROWS: usize = 256;
+    let schema = vec![ArrowDataType::Int64, ArrowDataType::Binary];
+
+    for payload_size in [64 * 1024, 192 * 1024] {
+        for distinct in [NUM_ROWS, 16] {
+            let rows: Vec<Vec<u8>> = (0..NUM_ROWS)
+                .map(|i| {
+                    let v = (i % distinct) as u64;
+                    let payload: Vec<u8> = (0..payload_size)
+                        .map(|j| {
+                            ((j as u64).wrapping_mul(2654435761) ^ v.wrapping_mul(40503)) as u8
+                        })
+                        .collect();
+                    build_wide_binary_row(i as i64, &payload)
+                })
+                .collect();
+            for ratio in [1.0, 10.0] {
+                run_benchmark_with_ratio(
+                    &mut group,
+                    &format!("ratio_{ratio}"),
+                    &format!("{}KiB_distinct_{distinct}", payload_size / 1024),
+                    &schema,
+                    &rows,
+                    2,
+                    ratio,
+                );
+            }
+        }
+    }
+
+    group.finish();
+}
+
 fn config() -> Criterion {
     Criterion::default()
 }
@@ -387,6 +448,7 @@ criterion_group! {
     targets = benchmark_primitive_columns,
               benchmark_struct_conversion,
               benchmark_list_conversion,
-              benchmark_map_conversion
+              benchmark_map_conversion,
+              benchmark_wide_binary
 }
 criterion_main!(benches);

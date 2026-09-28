@@ -34,10 +34,11 @@ use arrow::array::{
         TimestampMicrosecondBuilder,
     },
     types::Int32Type,
-    Array, ArrayRef, RecordBatch, RecordBatchOptions,
+    Array, ArrayRef, AsArray, DictionaryArray, GenericByteArray, RecordBatch, RecordBatchOptions,
 };
+use arrow::buffer::{OffsetBuffer, ScalarBuffer};
 use arrow::compute::cast;
-use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use arrow::datatypes::{BinaryType, ByteArrayType, DataType, Field, Schema, TimeUnit, Utf8Type};
 use arrow::error::ArrowError;
 use datafusion::physical_plan::metrics::Time;
 use datafusion_comet_jni_bridge::errors::CometError;
@@ -1465,7 +1466,10 @@ fn builder_to_array(
                 Ok(Arc::new(dict_array))
             } else {
                 // If the dictionary is not efficient, we convert it to a plain string array.
-                Ok(cast(&dict_array, &DataType::Utf8)?)
+                match unique_dictionary_to_plain::<Utf8Type>(&dict_array) {
+                    Some(array) => Ok(array),
+                    None => Ok(cast(&dict_array, &DataType::Utf8)?),
+                }
             }
         }
         DataType::Binary if prefer_dictionary_ratio > 1.0 => {
@@ -1484,11 +1488,49 @@ fn builder_to_array(
                 Ok(Arc::new(dict_array))
             } else {
                 // If the dictionary is not efficient, we convert it to a plain string array.
-                Ok(cast(&dict_array, &DataType::Binary)?)
+                match unique_dictionary_to_plain::<BinaryType>(&dict_array) {
+                    Some(array) => Ok(array),
+                    None => Ok(cast(&dict_array, &DataType::Binary)?),
+                }
             }
         }
         _ => Ok(builder.finish()),
     }
+}
+
+/// Reuses the dictionary values buffer as a plain array when every non-null key refers to a
+/// distinct value in insertion order, avoiding the copy made by `cast`.
+fn unique_dictionary_to_plain<T: ByteArrayType<Offset = i32>>(
+    dict_array: &DictionaryArray<Int32Type>,
+) -> Option<ArrayRef> {
+    let keys = dict_array.keys();
+    let values = dict_array.values().as_bytes_opt::<T>()?;
+    if values.null_count() != 0 || values.len() != keys.len() - keys.null_count() {
+        return None;
+    }
+    let value_offsets = values.value_offsets();
+    let mut offsets = Vec::with_capacity(keys.len() + 1);
+    offsets.push(value_offsets[0]);
+    let mut next = 0usize;
+    for i in 0..keys.len() {
+        if keys.is_valid(i) {
+            if keys.value(i) as usize != next {
+                return None;
+            }
+            next += 1;
+        }
+        offsets.push(value_offsets[next]);
+    }
+    let offsets = OffsetBuffer::new(ScalarBuffer::from(offsets));
+    // SAFETY: every offset is a value boundary of the already validated `values` array.
+    let array = unsafe {
+        GenericByteArray::<T>::new_unchecked(
+            offsets,
+            values.values().clone(),
+            keys.nulls().cloned(),
+        )
+    };
+    Some(Arc::new(array))
 }
 
 fn make_batch(arrays: Vec<ArrayRef>, row_count: usize) -> Result<RecordBatch, ArrowError> {
@@ -1504,6 +1546,44 @@ fn make_batch(arrays: Vec<ArrayRef>, row_count: usize) -> Result<RecordBatch, Ar
 
 #[cfg(test)]
 mod test {
+    #[test]
+    fn unique_binary_dictionary_matches_cast() {
+        let mut builder = BinaryDictionaryBuilder::<Int32Type>::new();
+        builder.append_value(b"a1".as_slice());
+        builder.append_null();
+        builder.append_value(b"".as_slice());
+        builder.append_value(vec![7u8; 70000].as_slice());
+        builder.append_null();
+        let dict = builder.finish();
+        let plain = unique_dictionary_to_plain::<BinaryType>(&dict).expect("unique values");
+        let expected = cast(&dict, &DataType::Binary).unwrap();
+        assert_eq!(plain.to_data(), expected.to_data());
+        assert_eq!(plain.null_count(), 2);
+    }
+
+    #[test]
+    fn unique_string_dictionary_matches_cast() {
+        let mut builder = StringDictionaryBuilder::<Int32Type>::new();
+        builder.append_null();
+        builder.append_value("x");
+        builder.append_value("привет");
+        let dict = builder.finish();
+        let plain = unique_dictionary_to_plain::<Utf8Type>(&dict).expect("unique values");
+        assert_eq!(
+            plain.to_data(),
+            cast(&dict, &DataType::Utf8).unwrap().to_data()
+        );
+    }
+
+    #[test]
+    fn repeated_dictionary_values_are_not_reused() {
+        let mut builder = BinaryDictionaryBuilder::<Int32Type>::new();
+        builder.append_value(b"a".as_slice());
+        builder.append_value(b"b".as_slice());
+        builder.append_value(b"a".as_slice());
+        assert!(unique_dictionary_to_plain::<BinaryType>(&builder.finish()).is_none());
+    }
+
     use arrow::datatypes::Fields;
 
     use super::*;
