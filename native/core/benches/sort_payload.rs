@@ -20,9 +20,9 @@
 //! Both pipelines return identical, materialized Binary arrays. The view pipeline must
 //! pay for conversion at both boundaries; it cannot win by returning a different format.
 
-use arrow::array::{Array, ArrayRef, BinaryArray, Int32Array, UInt32Array};
+use arrow::array::{Array, ArrayRef, BinaryArray, DictionaryArray, Int32Array, UInt32Array};
 use arrow::compute::{cast, interleave, lexsort_to_indices, take, SortColumn};
-use arrow::datatypes::DataType;
+use arrow::datatypes::{DataType, Int32Type};
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use std::hint::black_box;
 use std::sync::Arc;
@@ -143,5 +143,71 @@ fn benchmark(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, benchmark);
+// ShuffleScanExec currently expands dictionaries before the sort sees the batch.
+// Measure that boundary too: timing only Binary -> View omits this earlier copy.
+fn dictionary_benchmark(c: &mut Criterion) {
+    let order = UInt32Array::from_iter_values((0..ROWS as u32).rev());
+    let merge_order: Vec<_> = (0..ROWS)
+        .flat_map(|row| (0..RUNS).map(move |run| (run, row)))
+        .collect();
+    for width in [32, 64 * 1024] {
+        let input: Vec<ArrayRef> = (0..RUNS)
+            .map(|run| {
+                let values: Vec<_> = (0..16)
+                    .map(|value| {
+                        let mut bytes = vec![(value + run * 16) as u8; width];
+                        bytes[..8].copy_from_slice(&((value + run * 16) as u64).to_le_bytes());
+                        bytes
+                    })
+                    .collect();
+                let values = Arc::new(BinaryArray::from_iter_values(values.iter()));
+                let keys = Int32Array::from_iter(
+                    (0..ROWS).map(|row| (row % 7 != 0).then_some((row % 16) as i32)),
+                );
+                Arc::new(DictionaryArray::<Int32Type>::try_new(keys, values).unwrap()) as ArrayRef
+            })
+            .collect();
+        let current = || {
+            let expanded: Vec<_> = input
+                .iter()
+                .map(|a| cast(a, &DataType::Binary).unwrap())
+                .collect();
+            pipeline(&expanded, &order, &merge_order, width >= 4096)
+        };
+        let direct = || pipeline(&input, &order, &merge_order, true);
+        let expected = current();
+        let actual = direct();
+        for (expected, actual) in expected.iter().zip(&actual) {
+            assert_eq!(expected.to_data(), actual.to_data());
+        }
+        drop((expected, actual));
+        let binary = cast(&input[0], &DataType::Binary).unwrap();
+        let view = cast(&input[0], &DataType::BinaryView).unwrap();
+        eprintln!(
+            "dictionary payload width={width} rows={ROWS} retained bytes: dictionary={} binary={} view={}",
+            input[0].get_buffer_memory_size(),
+            binary.get_buffer_memory_size(),
+            view.get_buffer_memory_size()
+        );
+        let mut group = c.benchmark_group(format!("sort_dictionary_{width}b"));
+        group.sample_size(10);
+        group.warm_up_time(Duration::from_secs(1));
+        group.measurement_time(Duration::from_secs(3));
+        for (name, ty) in [
+            ("unpack_binary", DataType::Binary),
+            ("unpack_view", DataType::BinaryView),
+        ] {
+            group.bench_function(name, |b| {
+                b.iter(|| black_box(cast(black_box(&input[0]), &ty).unwrap()))
+            });
+        }
+        group.bench_function("current_expand_then_sort", |b| {
+            b.iter(|| black_box(current()))
+        });
+        group.bench_function("direct_view_then_sort", |b| b.iter(|| black_box(direct())));
+        group.finish();
+    }
+}
+
+criterion_group!(benches, benchmark, dictionary_benchmark);
 criterion_main!(benches);
