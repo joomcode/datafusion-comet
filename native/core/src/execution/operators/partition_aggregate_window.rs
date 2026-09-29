@@ -21,7 +21,9 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use arrow::array::{Array, ArrayRef, Float64Array, RecordBatch, UInt32Array, UInt64Array};
-use arrow::compute::{cast, interleave, take_record_batch, SortColumn, SortOptions};
+use arrow::compute::{
+    cast, concat_batches, interleave, take, take_record_batch, SortColumn, SortOptions,
+};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::common::utils::{compare_rows, evaluate_partition_ranges, get_row_at_idx};
@@ -118,6 +120,21 @@ impl Spec {
     fn reverse(&self) -> bool {
         matches!(self.kind, Kind::CumeDist | Kind::Suffix { .. })
     }
+
+    /// Whether the value is the same for every row of the partition.
+    fn constant(&self) -> bool {
+        matches!(self.kind, Kind::Aggregate(_) | Kind::Value { .. })
+    }
+}
+
+/// Input rows waiting to be processed, in input order.
+#[derive(Debug)]
+enum Pending {
+    /// Rows of one partition that may extend over other batches, processed row by row.
+    Rows(Vec<ScalarValue>, RecordBatch),
+    /// Whole partitions, all within this batch, at `ranges` of it. Evaluated at once when
+    /// every expression is constant within a partition.
+    Partitions(RecordBatch, Vec<Range<usize>>),
 }
 
 fn aggregate_of(expr: &Arc<dyn WindowExpr>) -> Option<Arc<AggregateFunctionExpr>> {
@@ -440,6 +457,11 @@ impl ExecutionPlan for PartitionAggregateWindowExec {
             keys: self.window.partition_by_sort_keys()?,
             order_by,
             pending: VecDeque::new(),
+            constant: self.specs.iter().all(Spec::constant),
+            target_rows: context.session_config().batch_size().max(1),
+            buffered: vec![],
+            buffered_rows: 0,
+            ready: VecDeque::new(),
             current_key: None,
             num_rows: 0,
             accumulators: vec![],
@@ -454,7 +476,7 @@ impl ExecutionPlan for PartitionAggregateWindowExec {
             reverse,
         };
         let stream = stream::try_unfold(state, |mut state| async move {
-            Ok(state.next_batch().await?.map(|batch| (batch, state)))
+            Ok(state.next_coalesced().await?.map(|batch| (batch, state)))
         });
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
     }
@@ -1089,7 +1111,7 @@ struct WindowState {
     specs: Vec<Spec>,
     keys: Vec<PhysicalSortExpr>,
     order_by: Vec<PhysicalSortExpr>,
-    pending: VecDeque<(Vec<ScalarValue>, RecordBatch)>,
+    pending: VecDeque<Pending>,
     current_key: Option<Vec<ScalarValue>>,
     num_rows: usize,
     accumulators: Vec<Option<Box<dyn Accumulator>>>,
@@ -1107,6 +1129,14 @@ struct WindowState {
     /// ORDER BY key and start index of the current percent_rank peer group.
     rank: Option<(Vec<ScalarValue>, usize)>,
     reverse: Option<ReverseState>,
+    /// Every expression is constant within a partition, so partitions inside one input batch
+    /// are evaluated together.
+    constant: bool,
+    /// Output batches smaller than half of this are concatenated up to it.
+    target_rows: usize,
+    buffered: Vec<RecordBatch>,
+    buffered_rows: usize,
+    ready: VecDeque<RecordBatch>,
 }
 
 impl WindowState {
@@ -1444,6 +1474,154 @@ impl WindowState {
         Ok(columns)
     }
 
+    /// Queues `batch`, split at its partition `ranges`. When every expression is constant
+    /// within a partition, the partitions that begin and end inside the batch are queued
+    /// together; only the first, which may continue the partition in progress, and the last,
+    /// which may continue into the next batch, are processed row by row.
+    fn split(
+        &mut self,
+        batch: &RecordBatch,
+        keys: &[SortColumn],
+        ranges: Vec<Range<usize>>,
+    ) -> Result<()> {
+        let key_at = |row: usize| {
+            keys.iter()
+                .map(|k| ScalarValue::try_from_array(&k.values, row))
+                .collect::<Result<Vec<_>>>()
+        };
+        let rows = |range: &Range<usize>| -> Result<Pending> {
+            Ok(Pending::Rows(
+                key_at(range.start)?,
+                batch.slice(range.start, range.end - range.start),
+            ))
+        };
+        if !self.constant || ranges.len() < 2 {
+            for range in &ranges {
+                let pending = rows(range)?;
+                self.pending.push_back(pending);
+            }
+            return Ok(());
+        }
+        let continues = match &self.current_key {
+            Some(current) => *current == key_at(ranges[0].start)?,
+            None => false,
+        };
+        let first = usize::from(continues);
+        let last = ranges.len() - 1;
+        if continues {
+            let pending = rows(&ranges[0])?;
+            self.pending.push_back(pending);
+        }
+        if first < last {
+            let start = ranges[first].start;
+            let end = ranges[last - 1].end;
+            let relative = ranges[first..last]
+                .iter()
+                .map(|r| r.start - start..r.end - start)
+                .collect();
+            self.pending.push_back(Pending::Partitions(
+                batch.slice(start, end - start),
+                relative,
+            ));
+        }
+        let pending = rows(&ranges[last])?;
+        self.pending.push_back(pending);
+        Ok(())
+    }
+
+    /// Output rows of whole partitions at `ranges` of `batch`, with the value of every
+    /// expression computed once per partition.
+    fn evaluate_partitions(
+        &self,
+        batch: &RecordBatch,
+        ranges: &[Range<usize>],
+    ) -> Result<RecordBatch> {
+        let mut indices = Vec::with_capacity(batch.num_rows());
+        for (i, range) in ranges.iter().enumerate() {
+            indices.extend(std::iter::repeat_n(i as u32, range.len()));
+        }
+        let indices = UInt32Array::from(indices);
+        let mut columns = batch.columns().to_vec();
+        for spec in &self.specs {
+            let args = spec
+                .args
+                .iter()
+                .map(|e| e.evaluate(batch)?.into_array(batch.num_rows()))
+                .collect::<Result<Vec<_>>>()?;
+            let slice = |range: &Range<usize>| {
+                args.iter()
+                    .map(|a| a.slice(range.start, range.len()))
+                    .collect::<Vec<_>>()
+            };
+            let mut values = Vec::with_capacity(ranges.len());
+            for range in ranges {
+                values.push(match &spec.kind {
+                    Kind::Aggregate(aggregate) => {
+                        let mut accumulator = aggregate.create_accumulator()?;
+                        accumulator.update_batch(&slice(range))?;
+                        accumulator.evaluate()?
+                    }
+                    Kind::Value { kind, ignore_nulls } => {
+                        let mut value = ValueState {
+                            kind: *kind,
+                            ignore_nulls: *ignore_nulls,
+                            seen: 0,
+                            value: None,
+                        };
+                        value.update(&slice(range)[0])?;
+                        match value.value {
+                            Some(v) => v,
+                            None => ScalarValue::try_from(&spec.data_type)?,
+                        }
+                    }
+                    _ => return Err(internal_datafusion_err!("not a constant window expression")),
+                });
+            }
+            let values = ScalarValue::iter_to_array(values)?;
+            columns.push(take(values.as_ref(), &indices, None)?);
+        }
+        Ok(RecordBatch::try_new(Arc::clone(&self.schema), columns)?)
+    }
+
+    /// Output batches, with small ones concatenated up to `target_rows`. A partition whose
+    /// rows are replayed one input slice at a time would otherwise produce a batch per
+    /// partition, each paying the fixed cost of every operator downstream.
+    async fn next_coalesced(&mut self) -> Result<Option<RecordBatch>> {
+        loop {
+            if let Some(batch) = self.ready.pop_front() {
+                return Ok(Some(batch));
+            }
+            match self.next_batch().await? {
+                Some(batch) if batch.num_rows() * 2 >= self.target_rows => {
+                    return match self.flush()? {
+                        Some(buffered) => {
+                            self.ready.push_back(batch);
+                            Ok(Some(buffered))
+                        }
+                        None => Ok(Some(batch)),
+                    };
+                }
+                Some(batch) => {
+                    self.buffered_rows += batch.num_rows();
+                    self.buffered.push(batch);
+                    if self.buffered_rows >= self.target_rows {
+                        return self.flush();
+                    }
+                }
+                None => return self.flush(),
+            }
+        }
+    }
+
+    fn flush(&mut self) -> Result<Option<RecordBatch>> {
+        if self.buffered.is_empty() {
+            return Ok(None);
+        }
+        let batches = std::mem::take(&mut self.buffered);
+        self.buffered_rows = 0;
+        Ok(Some(concat_batches(&self.schema, &batches)?))
+    }
+
     async fn next_batch(&mut self) -> Result<Option<RecordBatch>> {
         loop {
             if self.emitting {
@@ -1473,21 +1651,35 @@ impl WindowState {
                 self.result.clear();
                 self.emitting = false;
             }
-            if let Some((key, batch)) = self.pending.pop_front() {
-                if self
-                    .current_key
-                    .as_ref()
-                    .is_some_and(|current| *current != key)
-                {
-                    self.pending.push_front((key, batch));
-                    self.finish_partition().await?;
+            match self.pending.pop_front() {
+                Some(Pending::Rows(key, batch)) => {
+                    if self
+                        .current_key
+                        .as_ref()
+                        .is_some_and(|current| *current != key)
+                    {
+                        self.pending.push_front(Pending::Rows(key, batch));
+                        self.finish_partition().await?;
+                        continue;
+                    }
+                    if self.current_key.is_none() {
+                        self.start_partition(key)?;
+                    }
+                    self.append(batch)?;
                     continue;
                 }
-                if self.current_key.is_none() {
-                    self.start_partition(key)?;
+                Some(Pending::Partitions(batch, ranges)) => {
+                    if self.current_key.is_some() {
+                        // The partition in progress ends where these begin.
+                        self.pending.push_front(Pending::Partitions(batch, ranges));
+                        self.finish_partition().await?;
+                        continue;
+                    }
+                    let output = self.evaluate_partitions(&batch, &ranges)?;
+                    self.baseline.record_output(output.num_rows());
+                    return Ok(Some(output));
                 }
-                self.append(batch)?;
-                continue;
+                None => {}
             }
             match if self.input_done {
                 None
@@ -1504,14 +1696,8 @@ impl WindowState {
                         .iter()
                         .map(|k| k.evaluate_to_sort_column(&batch))
                         .collect::<Result<Vec<_>>>()?;
-                    for range in evaluate_partition_ranges(batch.num_rows(), &keys)? {
-                        let key = keys
-                            .iter()
-                            .map(|k| ScalarValue::try_from_array(&k.values, range.start))
-                            .collect::<Result<Vec<_>>>()?;
-                        self.pending
-                            .push_back((key, batch.slice(range.start, range.end - range.start)));
-                    }
+                    let ranges = evaluate_partition_ranges(batch.num_rows(), &keys)?;
+                    self.split(&batch, &keys, ranges)?;
                 }
                 None if self.current_key.is_some() => {
                     self.input_done = true;
@@ -2123,5 +2309,211 @@ mod tests {
             assert_eq!(int(10), vec![Some(4), Some(4), Some(3), Some(3)]);
         }
         Ok(())
+    }
+
+    /// Many small partitions (the first with a NULL key), sorted by key and `ord`, in batches
+    /// of `chunk` rows.
+    fn small_partitions(chunk: usize) -> Result<(Arc<dyn ExecutionPlan>, usize)> {
+        let mut rows = vec![];
+        let mut i = 0i64;
+        for (p, size) in [1, 1, 2, 1, 3, 1, 8, 1, 1, 20, 1, 2, 1, 1, 5, 1]
+            .into_iter()
+            .cycle()
+            .take(160)
+            .enumerate()
+        {
+            for j in 0..size {
+                let key = (p > 0).then_some(p as i64);
+                let value = ((i * 5) % 7 != 0).then_some(i * 13 % 17 - 8);
+                rows.push((key, Some(j), value));
+                i += 1;
+            }
+        }
+        let batch = RecordBatch::try_new(
+            schema(),
+            vec![
+                Arc::new(Int64Array::from_iter(rows.iter().map(|r| r.0))),
+                Arc::new(Int64Array::from_iter(rows.iter().map(|r| r.1))),
+                Arc::new(Int64Array::from_iter(rows.iter().map(|r| r.2))),
+                Arc::new(StringArray::from(vec!["p"; rows.len()])),
+            ],
+        )?;
+        let batches = (0..rows.len())
+            .step_by(chunk)
+            .map(|start| batch.slice(start, chunk.min(rows.len() - start)))
+            .collect::<Vec<_>>();
+        let ordering = LexOrdering::new(vec![sort("key", false), sort("ord", false)]);
+        let config = MemorySourceConfig::try_new(&[batches], schema(), None)?
+            .try_with_sort_information(vec![ordering.unwrap()])?;
+        Ok((Arc::new(DataSourceExec::new(Arc::new(config))), rows.len()))
+    }
+
+    /// Partitions within an input batch are evaluated together, and partitions crossing batch
+    /// boundaries row by row; both must match `WindowAggExec`, with and without spilling, and
+    /// the output must be concatenated instead of a batch per partition.
+    #[tokio::test]
+    async fn small_partitions_within_and_across_batches() -> Result<()> {
+        let n = |n: i64| lit(ScalarValue::Int64(Some(n)));
+        let exprs = [
+            expr("sum", vec![col("value")], whole()),
+            expr("count", vec![col("value")], whole()),
+            expr("min", vec![col("value")], whole()),
+            expr("max", vec![col("value")], whole()),
+            expr("first_value", vec![col("value")], whole()),
+            ignoring_nulls(expr("last_value", vec![col("value")], whole())),
+            expr("nth_value", vec![col("value"), n(2)], whole()),
+            ignoring_nulls(expr("nth_value", vec![col("value"), n(3)], whole())),
+        ];
+        let window = build(&exprs, true, false)?;
+        let ignore_nulls = exprs.iter().map(|e| e.ignore_nulls).collect::<Vec<_>>();
+        for chunk in [1, 2, 3, 7, 64, 4096] {
+            let (input, num_rows) = small_partitions(chunk)?;
+            let reference: Arc<dyn ExecutionPlan> = Arc::new(WindowAggExec::try_new(
+                window.clone(),
+                Arc::clone(&input),
+                true,
+            )?);
+            let (ctx, _) = context(LARGE)?;
+            let expected = concat_batches(
+                &reference.schema(),
+                &datafusion::physical_plan::collect(reference, ctx.task_ctx()).await?,
+            )?;
+            let plan = PartitionAggregateWindowExec::try_plan(
+                window.clone(),
+                input,
+                true,
+                ignore_nulls.clone(),
+            )?
+            .expect("spilling window plan");
+            for budget in [LARGE, 16_000] {
+                let (actual, _) = run(&plan, budget).await?;
+                assert_eq!(actual.num_rows(), num_rows);
+                for (i, field) in expected.schema().fields().iter().enumerate() {
+                    assert_eq!(
+                        actual.column(i).as_ref(),
+                        expected.column(i).as_ref(),
+                        "column {} chunk={chunk} budget={budget}",
+                        field.name()
+                    );
+                }
+            }
+            let (ctx, _) = context(LARGE)?;
+            let batches = datafusion::physical_plan::collect(plan, ctx.task_ctx()).await?;
+            // Fewer rows than one output batch: concatenated, not a batch per partition.
+            assert!(num_rows < ctx.task_ctx().session_config().batch_size());
+            assert!(
+                batches.len() <= 2,
+                "chunk={chunk}: {} output batches for {num_rows} rows",
+                batches.len()
+            );
+        }
+        Ok(())
+    }
+
+    /// Measures a whole-partition `sum`/`count` over a wide input with many small window
+    /// partitions: time and output batch count, against DataFusion's `WindowAggExec`.
+    #[tokio::test]
+    #[ignore]
+    async fn bench_many_small_partitions() -> Result<()> {
+        use datafusion::functions_aggregate::count::count_udaf;
+        use datafusion::physical_plan::windows::WindowAggExec;
+        const ROWS: usize = 193_536;
+        const WIDE: usize = 125;
+        for rows_per_key in [1usize, 10, 1000] {
+            let mut fields = vec![Field::new("key", DataType::Int64, false)];
+            for i in 0..WIDE {
+                fields.push(Field::new(format!("c{i}"), DataType::Int64, true));
+            }
+            let schema = Arc::new(Schema::new(fields));
+            let mut batches = vec![];
+            for start in (0..ROWS).step_by(8192) {
+                let end = (start + 8192).min(ROWS);
+                let mut columns: Vec<ArrayRef> = vec![Arc::new(Int64Array::from_iter_values(
+                    (start..end).map(|r| (r / rows_per_key) as i64),
+                ))];
+                for i in 0..WIDE {
+                    columns.push(Arc::new(Int64Array::from_iter_values(
+                        (start..end).map(|r| (r * 31 + i) as i64),
+                    )));
+                }
+                batches.push(RecordBatch::try_new(Arc::clone(&schema), columns)?);
+            }
+            let window = |schema: &SchemaRef| -> Result<Vec<Arc<dyn WindowExpr>>> {
+                let frame = Arc::new(whole());
+                let partition_by = vec![col_in("key", schema)];
+                Ok(vec![
+                    create_window_expr(
+                        &WindowFunctionDefinition::AggregateUDF(sum_udaf()),
+                        "sum".to_string(),
+                        &[col_in("c0", schema)],
+                        &partition_by,
+                        &[],
+                        Arc::clone(&frame),
+                        Arc::clone(schema),
+                        false,
+                        false,
+                        None,
+                    )?,
+                    create_window_expr(
+                        &WindowFunctionDefinition::AggregateUDF(count_udaf()),
+                        "count".to_string(),
+                        &[col_in("c1", schema)],
+                        &partition_by,
+                        &[],
+                        frame,
+                        Arc::clone(schema),
+                        false,
+                        false,
+                        None,
+                    )?,
+                ])
+            };
+            let source = || -> Result<Arc<dyn ExecutionPlan>> {
+                let ordering = LexOrdering::new(vec![PhysicalSortExpr::new(
+                    col_in("key", &schema),
+                    SortOptions::default(),
+                )])
+                .unwrap();
+                let config =
+                    MemorySourceConfig::try_new(&[batches.clone()], Arc::clone(&schema), None)?
+                        .try_with_sort_information(vec![ordering])?;
+                Ok(Arc::new(DataSourceExec::new(Arc::new(config))))
+            };
+            let plans: Vec<(&str, Arc<dyn ExecutionPlan>)> = vec![
+                (
+                    "PartitionAggregateWindowExec",
+                    PartitionAggregateWindowExec::try_plan(
+                        window(&schema)?,
+                        source()?,
+                        true,
+                        vec![false, false],
+                    )?
+                    .expect("planned"),
+                ),
+                (
+                    "WindowAggExec",
+                    Arc::new(WindowAggExec::try_new(window(&schema)?, source()?, true)?),
+                ),
+            ];
+            for (name, plan) in plans {
+                let (ctx, _pool) = context(usize::MAX / 2)?;
+                let started = std::time::Instant::now();
+                let mut output = plan.execute(0, ctx.task_ctx())?;
+                let (mut out_batches, mut out_rows) = (0usize, 0usize);
+                while let Some(batch) = output.next().await {
+                    out_batches += 1;
+                    out_rows += batch?.num_rows();
+                }
+                println!(
+                    "BENCH rows_per_key={rows_per_key} {name}: {:?}, {out_rows} rows in {out_batches} batches",
+                    started.elapsed()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn col_in(name: &str, schema: &SchemaRef) -> Arc<dyn PhysicalExpr> {
+        datafusion::physical_expr::expressions::col(name, schema).unwrap()
     }
 }
