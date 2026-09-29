@@ -617,19 +617,6 @@ object CometConf extends ShimCometConf {
       .checkValue(_ >= 0, "Must be >= 0.")
       .createWithDefault(2)
 
-  val COMET_EXEC_REVERT_ISOLATED_OPERATORS_ENABLED: ConfigEntry[Boolean] =
-    conf(s"$COMET_EXEC_CONFIG_PREFIX.revertIsolatedOperators.enabled")
-      .category(CATEGORY_EXEC)
-      .doc(
-        "When enabled, Comet reverts a single native operator to Spark when its output goes " +
-          "straight to a Spark operator through a columnar-to-row transition and it gains " +
-          "nothing from running natively: either every input comes from Spark rows through a " +
-          "row-to-columnar transition, so the revert removes both transitions, or the " +
-          "operator is a sort, which Spark performs on row pointers without moving the rows. " +
-          "Unlike spark.comet.exec.transitionRevert.enabled, the rest of the stage stays native.")
-      .booleanConf
-      .createWithDefault(false)
-
   val COMET_SHUFFLE_COMPRESSION_CODEC: ConfigEntry[String] =
     conf("spark.comet.shuffle.compression.codec")
       .withAlternative(s"$COMET_EXEC_CONFIG_PREFIX.shuffle.compression.codec")
