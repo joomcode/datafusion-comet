@@ -342,7 +342,9 @@ object BoundaryFormats extends Logging with CometTypeShim {
       case _ =>
         val candidates = mutable.ArrayBuffer.empty[(Format, Int, HashImpl)]
         val keep = input.consumer.isEmpty
-        if (current == NativeShuffle && producerIsComet) {
+        if (current == NativeShuffle && producerIsComet &&
+          !CometShuffleExchangeExec.hasWideDecimalHashKey(
+            exchangeOf(boundary).outputPartitioning)) {
           candidates += ((
             NativeShuffle,
             conversionsInto(input.consumer, NativeShuffle),
