@@ -617,6 +617,20 @@ object CometConf extends ShimCometConf {
       .checkValue(_ >= 0, "Must be >= 0.")
       .createWithDefault(2)
 
+  val COMET_EXEC_UNIFY_STAGE_ENGINES_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.unifyStageEngines.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "When enabled, Comet runs each query stage wholly natively or wholly in Spark: a stage " +
+          "that mixes Comet and Spark operators runs in Spark, not counting leaf scans and " +
+          "writes. Each shuffle then takes the format its two sides need: a Spark shuffle " +
+          "between Spark stages, a native shuffle after a Comet stage, and a columnar shuffle " +
+          "from a Spark stage into a Comet one, so data changes format only where the engine " +
+          "changes. Stages whose reverting would be unsafe, such as native aggregates whose " +
+          "buffers Spark cannot exchange, stay as converted.")
+      .booleanConf
+      .createWithDefault(false)
+
   val COMET_EXEC_REVERT_ISOLATED_OPERATORS_ENABLED: ConfigEntry[Boolean] =
     conf(s"$COMET_EXEC_CONFIG_PREFIX.revertIsolatedOperators.enabled")
       .category(CATEGORY_EXEC)

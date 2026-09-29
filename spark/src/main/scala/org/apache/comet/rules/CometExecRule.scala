@@ -134,6 +134,13 @@ object CometExecRule {
    */
   val SKIP_COMET_BROADCAST_TAG: org.apache.spark.sql.catalyst.trees.TreeNodeTag[Unit] =
     org.apache.spark.sql.catalyst.trees.TreeNodeTag[Unit]("comet.skipCometBroadcast")
+
+  /**
+   * Tag set on an operator that [[UnifyStageEngines]] placed in a Spark stage. The operator is
+   * left in Spark when AQE runs the conversion again on each query stage, where the rest of the
+   * stage it was classified with is no longer visible.
+   */
+  val KEEP_ON_SPARK_TAG: TreeNodeTag[Unit] = TreeNodeTag[Unit]("comet.keepOnSpark")
 }
 
 /**
@@ -339,6 +346,9 @@ case class CometExecRule(session: SparkSession)
   // spotless:on
   private def transform(plan: SparkPlan): SparkPlan = {
     def convertNode(op: SparkPlan): SparkPlan = op match {
+      case op if op.getTagValue(CometExecRule.KEEP_ON_SPARK_TAG).isDefined =>
+        op
+
       // Scan marker produced by an optional, out-of-tree scan contrib (e.g. contrib/delta).
       // Matched by trait (no compile-time dependency on the contrib) and present only when that
       // contrib is on the classpath. The marker carries its own serde handler and typically wraps

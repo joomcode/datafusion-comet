@@ -139,17 +139,23 @@ case class CometRule(session: SparkSession, queryStagePrep: Boolean = false)
 
   private val scanRule = CometScanRule(session)
   private val execRule = CometExecRule(session)
+  private val unifyRule = UnifyStageEngines(session)
 
   override def apply(plan: SparkPlan): SparkPlan = {
     if (planOnlyApplies(plan)) {
       reportPlanOnlyCoverage(plan)
       plan
     } else {
-      convert(plan)
+      // Under AQE the columnar rule sees one query stage at a time; only query-stage preparation
+      // sees the consumers of the stage boundaries that UnifyStageEngines decides on.
+      convert(plan, wholePlan = queryStagePrep || !conf.adaptiveExecutionEnabled)
     }
   }
 
-  private def convert(plan: SparkPlan): SparkPlan = execRule.apply(scanRule.apply(plan))
+  private def convert(plan: SparkPlan, wholePlan: Boolean): SparkPlan = {
+    val converted = execRule.apply(scanRule.apply(plan))
+    if (wholePlan) unifyRule.apply(converted) else converted
+  }
 
   /** Mirrors the conversion rules' own guards; plan-only is scoped to exec being enabled. */
   private def planOnlyApplies(plan: SparkPlan): Boolean =
@@ -180,7 +186,7 @@ case class CometRule(session: SparkSession, queryStagePrep: Boolean = false)
    *   false for subquery plans, which Spark prepares without `ReuseExchangeAndSubquery`.
    */
   private def buildPreview(plan: SparkPlan, topLevel: Boolean): SparkPlan = {
-    val converted = convert(previewSubqueriesOf(plan))
+    val converted = convert(previewSubqueriesOf(plan), wholePlan = true)
     val withTransitions =
       ApplyColumnarRulesAndInsertTransitions(Seq.empty, outputsColumnar = false).apply(converted)
     val preview = CometRule

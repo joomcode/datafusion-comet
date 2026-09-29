@@ -118,7 +118,7 @@ case class RevertNativeForTransitionHeavyStages(session: SparkSession, wholePlan
     case _ => false
   }
 
-  private def hasUnsafeMixedAggregateAtStageBoundary(stagePlan: SparkPlan): Boolean = {
+  private[rules] def hasUnsafeMixedAggregateAtStageBoundary(stagePlan: SparkPlan): Boolean = {
     def reachesBoundaryBeforeAggregate(plan: SparkPlan): Boolean = plan match {
       case _ if isStageBoundary(plan) => true
       case _: CometHashAggregateExec => false
