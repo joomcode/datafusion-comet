@@ -680,6 +680,39 @@ object CometConf extends ShimCometConf {
       .stringConf
       .createWithDefault("")
 
+  val COMET_EXEC_SORT_WIDE_ROW_FALLBACK_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.wideRowFallback.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "When enabled, a sort that Comet converted runs in Spark instead when its rows are " +
+          "wide, its sort key is a small part of the row, and a Spark operator reads its " +
+          "output. The native sort copies every row when sorting a batch, when spilling and " +
+          "when merging, while Spark sorts pointers to rows. The row width comes from the " +
+          "runtime statistics of the query stage the sort reads, or from the schema. A sort " +
+          "read by a native operator stays native.")
+      .booleanConf
+      .createWithDefault(false)
+
+  val COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MIN_AVG_ROW_BYTES: ConfigEntry[Long] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.wideRowFallback.minAvgRowBytes")
+      .category(CATEGORY_EXEC)
+      .doc("Average size in bytes of a sort's input row above which the row is wide, for " +
+        "spark.comet.exec.sort.wideRowFallback.enabled.")
+      .longConf
+      .checkValue(_ >= 0, "Must be >= 0.")
+      .createWithDefault(2048L)
+
+  val COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MAX_KEY_FRACTION: ConfigEntry[Double] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.wideRowFallback.maxKeyFraction")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "Share of a sort's input row, estimated from the default sizes of the column types, " +
+          "taken by its sort keys below which the key is narrow, for " +
+          "spark.comet.exec.sort.wideRowFallback.enabled.")
+      .doubleConf
+      .checkValue(v => v >= 0 && v <= 1, "Must be between 0 and 1.")
+      .createWithDefault(0.2)
+
   val COMET_SHUFFLE_COMPRESSION_CODEC: ConfigEntry[String] =
     conf("spark.comet.shuffle.compression.codec")
       .withAlternative(s"$COMET_EXEC_CONFIG_PREFIX.shuffle.compression.codec")

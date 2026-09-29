@@ -597,6 +597,18 @@ operator, for example `SortExec=-2`. Operators only move from Comet to Spark; sc
 whose buffers Spark cannot read keep their engine. Shuffle and broadcast formats then follow as with
 `spark.comet.exec.boundaryFormats.enabled`.
 
+### Sorts of Wide Rows
+
+The native sort copies every row when it sorts a batch, when it spills and when it merges spills, while Spark sorts
+pointers with key prefixes. For wide rows with a short sort key the copies dominate. Set
+`spark.comet.exec.sort.wideRowFallback.enabled=true` to run such a sort in Spark when a Spark operator reads it:
+its average input row is larger than `spark.comet.exec.sort.wideRowFallback.minAvgRowBytes` (default `2048`) and its
+key takes less than `spark.comet.exec.sort.wideRowFallback.maxKeyFraction` (default `0.2`) of the row. The row size
+comes from the runtime statistics of the query stage the sort reads under AQE, and otherwise from the default sizes of
+the column types; the key share always comes from the column types. A sort read by a native operator, such as a
+sort-merge join or a window, stays native, since running it in Spark would add two conversions. With
+`spark.comet.exec.boundaryFormats.enabled`, the shuffle formats around the sort then follow its engine.
+
 ### Wide or Deeply Nested Schemas
 
 The cost of each conversion also grows sharply with schema shape: for wide or deeply nested schemas,

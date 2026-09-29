@@ -209,6 +209,7 @@ jobs:
               org.apache.comet.rules.RevertNativeForTransitionHeavyStagesSuite
               org.apache.comet.rules.ChooseBoundaryFormatsSuite
               org.apache.comet.rules.CostBasedEngineChoiceSuite
+              org.apache.comet.rules.WideRowSortFallbackSuite
               org.apache.spark.sql.CometTPCDSQuerySuite
               org.apache.spark.sql.CometTPCDSQueryTestSuite
               org.apache.spark.sql.CometTPCHQuerySuite

@@ -134,8 +134,8 @@ object CometRule {
  *
  * @param queryStagePrep
  *   true for the `injectQueryStagePrepRule` instance, which sees the whole initial plan under
- *   AQE. Plan-only reporting reads it, and the whole-plan rules ([[CostBasedEngineChoice]],
- *   [[ChooseBoundaryFormats]]) run only on whole plans.
+ *   AQE. Plan-only reporting reads it, and the whole-plan rules ([[WideRowSortFallback]],
+ *   [[CostBasedEngineChoice]], [[ChooseBoundaryFormats]]) run only on whole plans.
  */
 case class CometRule(session: SparkSession, queryStagePrep: Boolean = false)
     extends Rule[SparkPlan] {
@@ -144,6 +144,7 @@ case class CometRule(session: SparkSession, queryStagePrep: Boolean = false)
   private val execRule = CometExecRule(session)
   private val engineRule = CostBasedEngineChoice(session)
   private val boundaryRule = ChooseBoundaryFormats(session)
+  private val sortRule = WideRowSortFallback(session)
 
   override def apply(plan: SparkPlan): SparkPlan = {
     if (planOnlyApplies(plan)) {
@@ -172,7 +173,7 @@ case class CometRule(session: SparkSession, queryStagePrep: Boolean = false)
       // dynamic partition pruning builds around it, so its engine is kept.
       val keepRoot = CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.get(conf) &&
         CometRule.inSubqueryPlanning
-      boundaryRule.apply(engineRule.apply(converted, keepRoot))
+      boundaryRule.apply(engineRule.apply(sortRule.apply(converted), keepRoot))
     } else {
       converted
     }
