@@ -549,6 +549,19 @@ object CometShuffleExchangeExec
   }
 
   /**
+   * Whether Comet's JVM columnar shuffle can run `s` over its current child, for rules that pick
+   * shuffle formats after conversion. The same checks as the columnar path of
+   * [[shuffleSupported]], but pure: does not tag the node.
+   */
+  def columnarShuffleAvailable(s: ShuffleExchangeExec): Boolean =
+    isCometShuffleEnabledReason(s).isEmpty &&
+      !isCometCelebornShuffleManagerEnabled(s.conf) &&
+      (isCometPlan(s.child) ||
+        CometConf.COMET_SHUFFLE_CONVERT_FROM_SPARK_PLAN_ENABLED.get(s.conf)) &&
+      !stageContainsDPPScan(s) &&
+      columnarShuffleFailureReasons(s).isEmpty
+
+  /**
    * Reasons the native shuffle path cannot handle this shuffle. Empty means native is supported.
    * Pure: does not tag the node.
    */

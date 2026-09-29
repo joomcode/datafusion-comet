@@ -569,6 +569,20 @@ subset of operators for eliminating conversion overhead across the stage. A stag
 native aggregate whose intermediate buffer Spark cannot exchange with Comet across a stage boundary, because
 reverting it would split that aggregate between the two engines.
 
+### Shuffle Formats from Both Sides
+
+Comet picks each shuffle's format from its producer: a native shuffle after a native operator and, with
+`spark.comet.shuffle.convertFromSparkPlan.enabled`, Comet's columnar shuffle after a Spark operator, whatever
+reads it. When a Spark operator reads that columnar shuffle too, rows are converted to Arrow when written and back
+to rows when read, for nothing. Set `spark.comet.exec.boundaryFormats.enabled=true` to pick each shuffle and
+broadcast format from the engines on both of its sides: a Spark shuffle between two Spark operators, a columnar
+shuffle from a Spark operator into a native one, a native shuffle after a native operator, and a Spark broadcast
+for a Spark join. No operator changes engine. The shuffles read in one stage, such as the inputs of a sort-merge
+join, are not split between Comet's and Spark's hash functions unless their key types hash alike in both
+(booleans, integers, floating point, strings, binary, dates, timestamps, and decimals up to precision 18). For
+other keys, a native input can instead be written by a Spark shuffle, or by Comet's columnar shuffle when a native
+operator reads it.
+
 ### Wide or Deeply Nested Schemas
 
 The cost of each conversion also grows sharply with schema shape: for wide or deeply nested schemas,

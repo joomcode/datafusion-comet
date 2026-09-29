@@ -617,6 +617,20 @@ object CometConf extends ShimCometConf {
       .checkValue(_ >= 0, "Must be >= 0.")
       .createWithDefault(2)
 
+  val COMET_EXEC_BOUNDARY_FORMATS_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.boundaryFormats.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "When enabled, Comet picks the format of each shuffle and broadcast from the engines " +
+          "on both of its sides instead of from its producer alone. A shuffle between two " +
+          "Spark operators then stays a Spark shuffle instead of a Comet columnar shuffle, " +
+          "which would convert rows to Arrow when writing and back to rows when reading. The " +
+          "inputs of an operator that needs co-partitioned inputs, such as a sort-merge join, " +
+          "are never split between Comet's and Spark's hash functions unless their keys hash " +
+          "alike in both.")
+      .booleanConf
+      .createWithDefault(false)
+
   val COMET_SHUFFLE_COMPRESSION_CODEC: ConfigEntry[String] =
     conf("spark.comet.shuffle.compression.codec")
       .withAlternative(s"$COMET_EXEC_CONFIG_PREFIX.shuffle.compression.codec")
