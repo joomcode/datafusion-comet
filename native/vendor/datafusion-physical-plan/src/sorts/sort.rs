@@ -25,7 +25,9 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
+mod late_materialize;
 mod wide_payload;
+use late_materialize::LateMaterialization;
 use wide_payload::WideBinaryPayload;
 
 use crate::common::spawn_buffered;
@@ -271,6 +273,10 @@ struct ExternalSorter {
     /// How much memory to reserve for performing in-memory sort/merges
     /// prior to spilling.
     sort_spill_reservation_bytes: usize,
+    /// COMET PATCH
+    late_materialization: Option<LateMaterialization>,
+    late_spilled_run_bytes: usize,
+    late_merge_batch_size: usize,
 }
 
 impl ExternalSorter {
@@ -320,7 +326,19 @@ impl ExternalSorter {
             batch_size,
             sort_spill_reservation_bytes,
             sort_in_place_threshold_bytes,
+            late_materialization: None,
+            late_spilled_run_bytes: 0,
+            late_merge_batch_size: batch_size,
         })
+    }
+
+    /// COMET PATCH
+    fn with_late_materialization(
+        mut self,
+        late_materialization: Option<LateMaterialization>,
+    ) -> Self {
+        self.late_materialization = late_materialization;
+        self
     }
 
     /// Appends an unsorted [`RecordBatch`] to `in_mem_batches`
@@ -382,7 +400,7 @@ impl ExternalSorter {
                 .with_schema(Arc::clone(&self.schema))
                 .with_expressions(&self.expr.clone())
                 .with_metrics(self.metrics.baseline.clone())
-                .with_batch_size(self.batch_size)
+                .with_batch_size(self.late_merge_batch_size)
                 .with_fetch(None)
                 .with_reservation(reservation)
                 .with_spill_workspace(workspace)
@@ -547,10 +565,11 @@ impl ExternalSorter {
         // sort-preserving merge and incrementally append to spill files.
         let mut globally_sorted_batches: Vec<RecordBatch> = vec![];
 
+        let late = self.late_materialization.is_some();
         while let Some(batch) = sorted_stream.next().await {
             let batch = batch?;
             let sorted_size = get_reserved_bytes_for_record_batch(&batch)?;
-            if self.reservation.try_grow(sorted_size).is_err() {
+            if late || self.reservation.try_grow(sorted_size).is_err() {
                 // Although the reservation is not enough, the batch is
                 // already in memory, so it's okay to combine it with previously
                 // sorted batches, and spill together.
@@ -679,6 +698,35 @@ impl ExternalSorter {
         // The elapsed compute timer is updated when the value is dropped.
         // There is no need for an explicit call to drop.
         let elapsed_compute = self.metrics.baseline.elapsed_compute().clone();
+
+        // COMET PATCH
+        if self.late_materialization.is_some()
+            && LateMaterialization::applies_to(&self.in_mem_batches)
+        {
+            let rows_per_batch = if is_output_stream {
+                LateMaterialization::output_rows(&self.in_mem_batches, self.batch_size)?
+            } else {
+                self.late_spilled_run_bytes =
+                    self.late_spilled_run_bytes.max(self.reservation.size());
+                let rows = LateMaterialization::spill_rows(
+                    &self.in_mem_batches,
+                    self.late_spilled_run_bytes,
+                    self.batch_size,
+                )?;
+                self.late_merge_batch_size = self.late_merge_batch_size.min(rows);
+                rows
+            };
+            let stream = LateMaterialization::sort_stream(
+                Arc::clone(&self.schema),
+                std::mem::take(&mut self.in_mem_batches),
+                self.expr.clone(),
+                rows_per_batch,
+                self.reservation.take(),
+                elapsed_compute,
+            );
+            return Ok(self.observe_if_output(stream, is_output_stream));
+        }
+
         let _timer = elapsed_compute.timer();
 
         // Please pay attention that any operation inside of `in_mem_sort_stream` will
@@ -884,10 +932,7 @@ impl ExternalSorter {
     ) -> Result<()> {
         // COMET PATCH: reserve a buffer the buffered batches share once, as
         // apache/datafusion#22862 does for the hash join build side.
-        let size = reserved_bytes_counting_shared_buffers(
-            input,
-            &mut self.in_mem_batches_memory,
-        )?;
+        let size = self.reserved_bytes_for_batch(input)?;
 
         match self.reservation.try_grow(size) {
             Ok(_) => Ok(()),
@@ -898,14 +943,22 @@ impl ExternalSorter {
 
                 // Spill and try again.
                 self.sort_and_spill_in_mem_batches().await?;
-                let size = reserved_bytes_counting_shared_buffers(
-                    input,
-                    &mut self.in_mem_batches_memory,
-                )?;
+                let size = self.reserved_bytes_for_batch(input)?;
                 self.reservation
                     .try_grow(size)
                     .map_err(Self::err_with_oom_context)
             }
+        }
+    }
+
+    /// COMET PATCH
+    fn reserved_bytes_for_batch(&mut self, input: &RecordBatch) -> Result<usize> {
+        match &self.late_materialization {
+            Some(late) => late.reserved_bytes(input, &mut self.in_mem_batches_memory),
+            None => reserved_bytes_counting_shared_buffers(
+                input,
+                &mut self.in_mem_batches_memory,
+            ),
         }
     }
 
@@ -1559,6 +1612,13 @@ impl ExecutionPlan for SortExec {
                             .as_ref()
                             .map(|payload| Arc::clone(payload.view_schema()))
                             .unwrap_or_else(|| input.schema());
+                        let first = first
+                            .map(|batch| WideBinaryPayload::encode(&payload, batch))
+                            .transpose()?;
+                        let late = match &first {
+                            Some(batch) => LateMaterialization::select(batch, &expr)?,
+                            None => None,
+                        };
                         let mut sorter = ExternalSorter::new(
                             partition,
                             schema,
@@ -1569,13 +1629,10 @@ impl ExecutionPlan for SortExec {
                             compression,
                             &metrics,
                             runtime,
-                        )?;
+                        )?
+                        .with_late_materialization(late);
                         if let Some(batch) = first {
-                            sorter
-                                .insert_batch(WideBinaryPayload::encode(
-                                    &payload, batch,
-                                )?)
-                                .await?;
+                            sorter.insert_batch(batch).await?;
                         }
                         while let Some(batch) = input.next().await {
                             let batch =

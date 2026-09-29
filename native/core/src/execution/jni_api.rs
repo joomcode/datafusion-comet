@@ -3134,7 +3134,8 @@ mod native_sort_spill_tests {
 
     /// A returned batch is owned by the downstream consumer, not the sort's pool
     /// reservation. The JVM row consumer does not reserve this Arrow memory. Bound
-    /// that handoff by batch size rather than assuming the sort still accounts for it.
+    /// that handoff by batch size, and wide rows by bytes whatever the batch size,
+    /// rather than assuming the sort still accounts for it.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn small_sort_batches_bound_the_unreserved_jvm_handoff() {
         let source = Arc::new(WideRows {
@@ -3152,12 +3153,10 @@ mod native_sort_spill_tests {
         assert_eq!(small.rows, large.rows);
         assert_eq!(large.spill_count, 0);
         assert_eq!(small.spill_count, 0);
-        // The large batch remains alive at the handoff despite a zero pool balance.
-        assert_eq!(large.held_during_final_merge, 0);
-        assert!(large.first_output_bytes >= 16 * MB);
+        assert!(large.first_output_bytes <= 5 * MB);
         assert!(small.first_output_bytes < 2 * MB);
-        assert!(large.first_output_bytes > small.first_output_bytes * 15);
-        // The smaller batches not yet returned remain reserved by the sorter.
+        // The batches not yet returned remain reserved by the sorter.
+        assert!(large.held_during_final_merge >= 11 * MB);
         assert!(small.held_during_final_merge >= 15 * MB);
         eprintln!(
             "sort handoff: large={}B reserved={}B; small={}B reserved={}B",
@@ -3175,7 +3174,7 @@ mod native_sort_spill_tests {
         let share = 2 * MB;
         let batch_size = 512;
         let sketch_len = 4608;
-        let (rows_per_batch, num_batches) = (96, 24);
+        let (rows_per_batch, num_batches) = (96, 96);
         let schema = Arc::new(Schema::new(vec![
             Field::new("key", DataType::Utf8, false),
             Field::new("sketch", DataType::Binary, false),
