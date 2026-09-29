@@ -696,6 +696,51 @@ class DeltaScanContribSuite extends CometDeltaTestBase {
   }
 
   test(
+    "gcsHadoopOnlyAuthReason passes ADC-equivalent service-account enable and auth type keys") {
+    val conf = new Configuration(false)
+    conf.set("google.cloud.auth.service.account.enable", "true")
+    conf.set("fs.gs.auth.service.account.enable", "TRUE")
+    conf.set("fs.gs.auth.type", "COMPUTE_ENGINE")
+    assert(
+      DeltaScanSupport
+        .gcsHadoopOnlyAuthReason(conf, Seq(new URI("gs://mybucket/part-0.parquet")))
+        .isEmpty)
+    conf.set("fs.gs.auth.type", "APPLICATION_DEFAULT")
+    assert(
+      DeltaScanSupport
+        .gcsHadoopOnlyAuthReason(conf, Seq(new URI("gs://mybucket/part-0.parquet")))
+        .isEmpty)
+  }
+
+  test(
+    "gcsHadoopOnlyAuthReason still declines a service-account keyfile next to enable=true, " +
+      "and declines enable=false or a non-ADC auth type") {
+    val withKeyfile = new Configuration(false)
+    withKeyfile.set("google.cloud.auth.service.account.enable", "true")
+    withKeyfile.set("google.cloud.auth.service.account.json.keyfile", "/secret/svc-key.json")
+    val reason = DeltaScanSupport.gcsHadoopOnlyAuthReason(
+      withKeyfile,
+      Seq(new URI("gs://mybucket/part-0.parquet")))
+    assert(reason.isDefined)
+    assert(reason.get.contains("google.cloud.auth.service.account.json.keyfile"))
+    assert(!reason.get.contains("google.cloud.auth.service.account.enable"))
+
+    val disabled = new Configuration(false)
+    disabled.set("google.cloud.auth.service.account.enable", "false")
+    assert(
+      DeltaScanSupport
+        .gcsHadoopOnlyAuthReason(disabled, Seq(new URI("gs://mybucket/part-0.parquet")))
+        .exists(_.contains("google.cloud.auth.service.account.enable")))
+
+    val keyfileType = new Configuration(false)
+    keyfileType.set("fs.gs.auth.type", "SERVICE_ACCOUNT_JSON_KEYFILE")
+    assert(
+      DeltaScanSupport
+        .gcsHadoopOnlyAuthReason(keyfileType, Seq(new URI("gs://mybucket/part-0.parquet")))
+        .exists(_.contains("fs.gs.auth.type")))
+  }
+
+  test(
     "gcsHadoopOnlyAuthReason does not fire for s3a/file URIs even when fs.gs.auth.* is set " +
       "(scheme-scoped)") {
     val conf = new Configuration(false)

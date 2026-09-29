@@ -1724,6 +1724,17 @@ object DeltaScanSupport {
   private def isGcsAuthKey(key: String): Boolean =
     (key.startsWith("fs.gs.") || key.startsWith("google.cloud.")) && key.contains("auth")
 
+  private val GcsServiceAccountEnableKeys =
+    Set("fs.gs.auth.service.account.enable", "google.cloud.auth.service.account.enable")
+
+  private val GcsAdcAuthTypes = Set("COMPUTE_ENGINE", "APPLICATION_DEFAULT")
+
+  private def isGcsAdcEquivalent(key: String, value: String): Boolean = {
+    val v = value.trim
+    (GcsServiceAccountEnableKeys.contains(key) && v.equalsIgnoreCase("true")) ||
+    (key == "fs.gs.auth.type" && GcsAdcAuthTypes.contains(v.toUpperCase(java.util.Locale.ROOT)))
+  }
+
   /**
    * True when `uri`'s scheme is `gs` (case-insensitive) -- the ONLY scheme object_store's
    * `ObjectStoreScheme::parse` (parquet_support.rs) routes to `GoogleCloudStorage`; `gcs` is not
@@ -1762,7 +1773,7 @@ object DeltaScanSupport {
       .collect {
         case entry
             if isGcsAuthKey(entry.getKey) && entry.getValue != null &&
-              entry.getValue.nonEmpty =>
+              entry.getValue.nonEmpty && !isGcsAdcEquivalent(entry.getKey, entry.getValue) =>
           entry.getKey
       }
       .toSeq
