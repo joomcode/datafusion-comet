@@ -583,6 +583,20 @@ join, are not split between Comet's and Spark's hash functions unless their key 
 other keys, a native input can instead be written by a Spark shuffle, or by Comet's columnar shuffle when a native
 operator reads it.
 
+### Cost-Based Engine Choice
+
+`spark.comet.exec.costBasedEngines.enabled=true` decides, for each operator Comet converted, whether it runs
+natively or in Spark by minimizing one cost over the whole plan: every native operator earns
+`spark.comet.exec.costBasedEngines.cometOperatorWeight` (default `-1`, against
+`spark.comet.exec.costBasedEngines.sparkOperatorWeight`, default `0`), and every row/columnar conversion, inside a
+stage or at a shuffle or broadcast, costs `spark.comet.exec.costBasedEngines.conversionWeight` (default `1`). For
+example, a native sort between a columnar shuffle from a Spark aggregate and a Spark aggregate costs `-1 + 1 + 1`
+and runs in Spark, together with a Spark shuffle, while a native filter and project feeding a Spark aggregate
+stay native. `spark.comet.exec.costBasedEngines.cometOperatorWeights` overrides the native weight per Spark
+operator, for example `SortExec=-2`. Operators only move from Comet to Spark; scans, writes, and native aggregates
+whose buffers Spark cannot read keep their engine. Shuffle and broadcast formats then follow as with
+`spark.comet.exec.boundaryFormats.enabled`.
+
 ### Wide or Deeply Nested Schemas
 
 The cost of each conversion also grows sharply with schema shape: for wide or deeply nested schemas,

@@ -631,6 +631,55 @@ object CometConf extends ShimCometConf {
       .booleanConf
       .createWithDefault(false)
 
+  val COMET_EXEC_COST_BASED_ENGINES_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "When enabled, Comet decides which converted operators run natively by minimizing a " +
+          "cost over the whole plan: each native operator earns " +
+          "spark.comet.exec.costBasedEngines.cometOperatorWeight, and each row/columnar " +
+          "conversion, inside a stage or at a shuffle or broadcast, costs " +
+          "spark.comet.exec.costBasedEngines.conversionWeight. An operator reverted to Spark " +
+          "stays in Spark for the rest of the query. Shuffle and broadcast formats then follow " +
+          "the engines on both sides, as with spark.comet.exec.boundaryFormats.enabled.")
+      .booleanConf
+      .createWithDefault(false)
+
+  val COMET_EXEC_COST_BASED_ENGINES_COMET_WEIGHT: ConfigEntry[Double] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.cometOperatorWeight")
+      .category(CATEGORY_EXEC)
+      .doc("Cost of running one operator natively, for " +
+        "spark.comet.exec.costBasedEngines.enabled. Negative values favor native execution.")
+      .doubleConf
+      .createWithDefault(-1.0)
+
+  val COMET_EXEC_COST_BASED_ENGINES_SPARK_WEIGHT: ConfigEntry[Double] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.sparkOperatorWeight")
+      .category(CATEGORY_EXEC)
+      .doc("Cost of running in Spark one operator that Comet could run natively, for " +
+        "spark.comet.exec.costBasedEngines.enabled.")
+      .doubleConf
+      .createWithDefault(0.0)
+
+  val COMET_EXEC_COST_BASED_ENGINES_CONVERSION_WEIGHT: ConfigEntry[Double] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.conversionWeight")
+      .category(CATEGORY_EXEC)
+      .doc("Cost of one row-to-columnar or columnar-to-row conversion, for " +
+        "spark.comet.exec.costBasedEngines.enabled.")
+      .doubleConf
+      .checkValue(_ >= 0, "Must be >= 0.")
+      .createWithDefault(1.0)
+
+  val COMET_EXEC_COST_BASED_ENGINES_OPERATOR_WEIGHTS: ConfigEntry[String] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.cometOperatorWeights")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "Per-operator overrides of spark.comet.exec.costBasedEngines.cometOperatorWeight, as " +
+          "comma-separated `<Spark operator>=<weight>` pairs such as `SortExec=-0.5`. The " +
+          "operator is named by the class of the Spark operator that Comet converted.")
+      .stringConf
+      .createWithDefault("")
+
   val COMET_SHUFFLE_COMPRESSION_CODEC: ConfigEntry[String] =
     conf("spark.comet.shuffle.compression.codec")
       .withAlternative(s"$COMET_EXEC_CONFIG_PREFIX.shuffle.compression.codec")

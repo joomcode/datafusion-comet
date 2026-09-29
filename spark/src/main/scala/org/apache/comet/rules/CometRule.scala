@@ -72,6 +72,9 @@ object CometRule {
         within(classOf[InsertAdaptiveSparkPlan], "compileSubquery"))
   }
 
+  /** Whether Spark is preparing a subquery's plan, read off the call stack. */
+  private[rules] def inSubqueryPlanning: Boolean = planningContext().subquery
+
   /**
    * Whether plan-only mode should report `plan`, marking it reported if so.
    *
@@ -131,14 +134,15 @@ object CometRule {
  *
  * @param queryStagePrep
  *   true for the `injectQueryStagePrepRule` instance, which sees the whole initial plan under
- *   AQE. Plan-only reporting reads it, and the whole-plan rules ([[ChooseBoundaryFormats]]) run
- *   only on whole plans.
+ *   AQE. Plan-only reporting reads it, and the whole-plan rules ([[CostBasedEngineChoice]],
+ *   [[ChooseBoundaryFormats]]) run only on whole plans.
  */
 case class CometRule(session: SparkSession, queryStagePrep: Boolean = false)
     extends Rule[SparkPlan] {
 
   private val scanRule = CometScanRule(session)
   private val execRule = CometExecRule(session)
+  private val engineRule = CostBasedEngineChoice(session)
   private val boundaryRule = ChooseBoundaryFormats(session)
 
   override def apply(plan: SparkPlan): SparkPlan = {
@@ -146,15 +150,32 @@ case class CometRule(session: SparkSession, queryStagePrep: Boolean = false)
       reportPlanOnlyCoverage(plan)
       plan
     } else {
-      // Under AQE the columnar rule sees one query stage at a time. Only query-stage preparation
-      // sees the consumers of the stage boundaries that the whole-plan rules decide on.
-      convert(plan, wholePlan = queryStagePrep || !conf.adaptiveExecutionEnabled)
+      convert(plan, wholePlan = isWholePlan(plan))
     }
   }
 
+  /**
+   * Whether `plan` is a whole plan, holding the consumers of its stage boundaries that the
+   * whole-plan rules decide on. Under AQE the columnar rule sees one query stage at a time,
+   * rooted at its exchange, or the result stage over materialized stages; query-stage preparation
+   * sees the whole plan. A plan that AQE does not apply to, such as one without exchanges,
+   * reaches the columnar rule whole.
+   */
+  private def isWholePlan(plan: SparkPlan): Boolean =
+    queryStagePrep || !conf.adaptiveExecutionEnabled ||
+      !(plan.isInstanceOf[Exchange] || plan.exists(_.isInstanceOf[QueryStageExec]))
+
   private def convert(plan: SparkPlan, wholePlan: Boolean): SparkPlan = {
     val converted = execRule.apply(scanRule.apply(plan))
-    if (wholePlan) boundaryRule.apply(converted) else converted
+    if (wholePlan) {
+      // The root of a subquery feeds an operator outside this plan, such as the broadcast that
+      // dynamic partition pruning builds around it, so its engine is kept.
+      val keepRoot = CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.get(conf) &&
+        CometRule.inSubqueryPlanning
+      boundaryRule.apply(engineRule.apply(converted, keepRoot))
+    } else {
+      converted
+    }
   }
 
   /** Mirrors the conversion rules' own guards; plan-only is scoped to exec being enabled. */
