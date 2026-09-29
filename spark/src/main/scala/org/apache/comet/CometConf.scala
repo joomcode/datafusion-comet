@@ -684,12 +684,15 @@ object CometConf extends ShimCometConf {
     conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.wideRowFallback.enabled")
       .category(CATEGORY_EXEC)
       .doc(
-        "When enabled, a sort that Comet converted runs in Spark instead when its rows are " +
-          "wide, its sort key is a small part of the row, and a Spark operator reads its " +
-          "output. The native sort copies every row when sorting a batch, when spilling and " +
-          "when merging, while Spark sorts pointers to rows. The row width comes from the " +
-          "runtime statistics of the query stage the sort reads, or from the schema. A sort " +
-          "read by a native operator stays native.")
+        "When enabled, a sort that Comet converted runs in Spark instead when a Spark " +
+          "operator reads its output and its rows are wide: a column outside the sort key has " +
+          "a binary, array or map type, or a struct type holding one, or the rows are larger " +
+          "than spark.comet.exec.sort.wideRowFallback.minAvgRowBytes on average with a sort " +
+          "key that is a small part of the row. The native sort copies every row when sorting " +
+          "a batch, when spilling and when merging, while Spark sorts pointers to rows. The " +
+          "row width comes from the runtime statistics of the query stage the sort reads, or " +
+          "from the schema. A sort read by a native operator stays native, and a sort moved " +
+          "to Spark stays there when AQE re-plans the query.")
       .booleanConf
       .createWithDefault(false)
 
@@ -700,15 +703,26 @@ object CometConf extends ShimCometConf {
         "spark.comet.exec.sort.wideRowFallback.enabled.")
       .longConf
       .checkValue(_ >= 0, "Must be >= 0.")
-      .createWithDefault(2048L)
+      .createWithDefault(1024L)
+
+  val COMET_EXEC_SORT_WIDE_ROW_FALLBACK_VARIABLE_WIDTH_TYPES_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.wideRowFallback.variableWidthTypes.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "Whether spark.comet.exec.sort.wideRowFallback.enabled also moves a sort to Spark, " +
+          "whatever its row size, when a column outside its sort key has a binary, array or " +
+          "map type, or a struct type holding one. The decision needs no statistics, so it " +
+          "is made on the initial plan and the shuffle formats around the sort follow it.")
+      .booleanConf
+      .createWithDefault(true)
 
   val COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MAX_KEY_FRACTION: ConfigEntry[Double] =
     conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.wideRowFallback.maxKeyFraction")
       .category(CATEGORY_EXEC)
       .doc(
         "Share of a sort's input row, estimated from the default sizes of the column types, " +
-          "taken by its sort keys below which the key is narrow, for " +
-          "spark.comet.exec.sort.wideRowFallback.enabled.")
+          "taken by its sort keys below which the key is narrow, for the row size condition " +
+          "of spark.comet.exec.sort.wideRowFallback.enabled.")
       .doubleConf
       .checkValue(v => v >= 0 && v <= 1, "Must be between 0 and 1.")
       .createWithDefault(0.2)

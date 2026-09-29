@@ -20,10 +20,12 @@
 package org.apache.comet.rules
 
 import org.apache.spark.sql.{CometTestBase, DataFrame}
-import org.apache.spark.sql.comet.{CometSortExec, CometSortMergeJoinExec, CometWindowExec}
+import org.apache.spark.sql.comet.{CometPlan, CometSortExec, CometSortMergeJoinExec, CometWindowExec}
+import org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec
 import org.apache.spark.sql.execution.{ColumnarToRowTransition, RowToColumnarTransition, SortExec, SparkPlan}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, QueryStageExec}
 import org.apache.spark.sql.execution.aggregate.SortAggregateExec
+import org.apache.spark.sql.execution.exchange.ShuffleExchangeExec
 import org.apache.spark.sql.execution.joins.SortMergeJoinExec
 import org.apache.spark.sql.execution.window.WindowExec
 import org.apache.spark.sql.expressions.Window
@@ -37,6 +39,8 @@ class WideRowSortFallbackSuite extends CometTestBase {
   private val flag = CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_ENABLED.key
   private val minAvgRowBytes = CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MIN_AVG_ROW_BYTES.key
   private val maxKeyFraction = CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MAX_KEY_FRACTION.key
+  private val variableWidthTypes =
+    CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_VARIABLE_WIDTH_TYPES_ENABLED.key
 
   private def withTable(payloadBytes: Int)(f: => Unit): Unit = {
     withTempPath { dir =>
@@ -227,6 +231,226 @@ class WideRowSortFallbackSuite extends CometTestBase {
         val plan = run(sparkWindow)
         assert(WideRowSortFallback(spark).apply(plan) eq plan)
         assert(cometSorts(plan).size == 1 && sparkSorts(plan).isEmpty, s"plan:\n$plan")
+      }
+    }
+  }
+
+  private def withPayload(payloads: String*)(f: => Unit): Unit = {
+    withTempPath { dir =>
+      spark
+        .range(2000)
+        .selectExpr(Seq("cast(id % 97 AS int) AS k", "id AS v") ++ payloads: _*)
+        .write
+        .parquet(dir.getCanonicalPath)
+      spark.read.parquet(dir.getCanonicalPath).createOrReplaceTempView("t")
+      withTempView("t")(f)
+    }
+  }
+
+  private def initialPlan(df: DataFrame): SparkPlan = df.queryExecution.executedPlan match {
+    case a: AdaptiveSparkPlanExec => a.executedPlan
+    case other => other
+  }
+
+  private def sparkWindowOver(table: String, partition: String, order: String): DataFrame =
+    spark
+      .table(table)
+      .withColumn("rn", row_number().over(Window.partitionBy(partition).orderBy(order)))
+
+  private val variableWidthPayloads = Seq(
+    "binary" -> "cast(concat('b', cast(id AS string)) AS binary) AS x",
+    "array" -> "array(id, id + 1) AS x",
+    "map" -> "map(cast(id % 5 AS int), id) AS x",
+    "struct with binary" ->
+      "named_struct('i', cast(id AS int), 'b', cast(cast(id AS string) AS binary)) AS x",
+    "struct with array" -> "named_struct('i', cast(id AS int), 'a', array(id)) AS x")
+
+  variableWidthPayloads.foreach { case (name, payload) =>
+    test(s"a sort with a $name column outside its key runs in Spark on the initial plan") {
+      withPayload(payload) {
+        withSQLConf(
+          (Seq(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true", flag -> "true") ++
+            sparkWindowConfs): _*) {
+          val initial = initialPlan(sparkWindowOver("t", "k", "v"))
+          assert(sparkSorts(initial).size == 1 && cometSorts(initial).isEmpty, s"$initial")
+          assert(
+            sparkSorts(initial).forall(_.getTagValue(CometExecRule.KEEP_ON_SPARK_TAG).isDefined),
+            s"plan:\n$initial")
+          val plan = run(sparkWindowOver("t", "k", "v"))
+          assert(sparkSorts(plan).size == 1 && cometSorts(plan).isEmpty, s"plan:\n$plan")
+        }
+        withSQLConf(
+          (Seq(
+            SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
+            flag -> "true",
+            variableWidthTypes -> "false") ++ sparkWindowConfs): _*) {
+          val plan = run(sparkWindowOver("t", "k", "v"))
+          assert(sparkSorts(plan).isEmpty, s"plan:\n$plan")
+        }
+      }
+    }
+  }
+
+  test("variable-width payload types without statistics also move the sort without AQE") {
+    withPayload(variableWidthPayloads.head._2) {
+      withSQLConf(
+        (Seq(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "true") ++
+          sparkWindowConfs): _*) {
+        val plan = run(sparkWindowOver("t", "k", "v"))
+        assert(sparkSorts(plan).size == 1 && cometSorts(plan).isEmpty, s"plan:\n$plan")
+      }
+    }
+  }
+
+  test("a struct of fixed-width fields does not count as variable width") {
+    withPayload("named_struct('i', cast(id AS int), 'l', id) AS x") {
+      withSQLConf(
+        (Seq(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true", flag -> "true") ++
+          sparkWindowConfs): _*) {
+        val initial = initialPlan(sparkWindowOver("t", "k", "v"))
+        assert(cometSorts(initial).size == 1 && sparkSorts(initial).isEmpty, s"$initial")
+        val plan = run(sparkWindowOver("t", "k", "v"))
+        assert(cometSorts(plan).size == 1 && sparkSorts(plan).isEmpty, s"plan:\n$plan")
+      }
+    }
+  }
+
+  test("a string payload does not count as variable width") {
+    narrow {
+      withSQLConf(
+        (Seq(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true", flag -> "true") ++
+          sparkWindowConfs): _*) {
+        val initial = initialPlan(sparkWindow)
+        assert(cometSorts(initial).size == 1 && sparkSorts(initial).isEmpty, s"$initial")
+        val plan = run(sparkWindow)
+        assert(cometSorts(plan).size == 1 && sparkSorts(plan).isEmpty, s"plan:\n$plan")
+      }
+    }
+  }
+
+  test("variable-width types only in the sort key do not move the sort") {
+    withPayload("cast(concat('b', cast(id % 11 AS string)) AS binary) AS x") {
+      withSQLConf(
+        (Seq(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true") ++ sparkWindowConfs): _*) {
+        val (off, on) = offAndOn()(run(sparkWindowOver("t", "x", "v")))
+        assert(cometSorts(off).size == 1, s"plan:\n$off")
+        assert(cometSorts(on).size == 1 && sparkSorts(on).isEmpty, s"plan:\n$on")
+      }
+    }
+  }
+
+  test("the row size threshold defaults to 1024 bytes from the stage statistics") {
+    assert(
+      CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MIN_AVG_ROW_BYTES.defaultValue.get == 1024L)
+    Seq(700 -> false, 1400 -> true).foreach { case (payloadBytes, toSpark) =>
+      withTable(payloadBytes) {
+        withSQLConf(
+          (Seq(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true", flag -> "true") ++
+            sparkWindowConfs): _*) {
+          val initial = initialPlan(sparkWindow)
+          assert(cometSorts(initial).size == 1, s"$payloadBytes bytes:\n$initial")
+          val plan = run(sparkWindow)
+          val sorts = if (toSpark) sparkSorts(plan) else cometSorts(plan)
+          assert(sorts.size == 1, s"$payloadBytes bytes:\n$plan")
+          val stageRow = nodes(plan)
+            .collectFirst { case s: QueryStageExec => s }
+            .flatMap(WideRowSortFallback.runtimeAvgRowBytes)
+          assert(stageRow.exists(b => (b > 1024) == toSpark), s"row bytes $stageRow:\n$plan")
+        }
+      }
+    }
+  }
+
+  test("variable-width payloads read by a native sort-merge join stay native") {
+    withPayload("cast(concat('b', cast(id AS string)) AS binary) AS x", "array(id) AS y") {
+      withSQLConf(
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
+        SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+        SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+        flag -> "true") {
+        val query = "SELECT a.k, a.x, a.y, b.x FROM t a JOIN t b ON a.k = b.k"
+        val initial = initialPlan(sql(query))
+        assert(cometSorts(initial).size == 2 && sparkSorts(initial).isEmpty, s"$initial")
+        val plan = run(sql(query))
+        assert(nodes(plan).exists(_.isInstanceOf[CometSortMergeJoinExec]), s"plan:\n$plan")
+        assert(cometSorts(plan).size == 2 && sparkSorts(plan).isEmpty, s"plan:\n$plan")
+      }
+    }
+  }
+
+  test("variable-width payloads read by a native window stay native") {
+    withPayload("cast(concat('b', cast(id AS string)) AS binary) AS x") {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true", flag -> "true") {
+        val plan = run(sparkWindowOver("t", "k", "v"))
+        assert(nodes(plan).exists(_.isInstanceOf[CometWindowExec]), s"plan:\n$plan")
+        assert(cometSorts(plan).size == 1 && sparkSorts(plan).isEmpty, s"plan:\n$plan")
+      }
+    }
+  }
+
+  test("a sort moved to Spark stays there when AQE re-plans with narrower statistics") {
+    val empties = (1 to 10).map(i => s"'' AS e$i")
+    withPayload(empties: _*) {
+      val threshold = 150
+      withSQLConf(
+        (Seq(
+          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
+          flag -> "true",
+          minAvgRowBytes -> threshold.toString) ++ sparkWindowConfs): _*) {
+        val initial = initialPlan(sparkWindowOver("t", "k", "v"))
+        val initialSort = sparkSorts(initial)
+        assert(initialSort.size == 1 && cometSorts(initial).isEmpty, s"plan:\n$initial")
+        val plan = run(sparkWindowOver("t", "k", "v"))
+        val sorts = sparkSorts(plan)
+        assert(sorts.size == 1 && cometSorts(plan).isEmpty, s"plan:\n$plan")
+        val stageRow = nodes(plan)
+          .collectFirst { case s: QueryStageExec => s }
+          .flatMap(WideRowSortFallback.runtimeAvgRowBytes)
+        assert(stageRow.exists(_ <= threshold), s"row bytes $stageRow:\n$plan")
+      }
+    }
+  }
+
+  private def boundaryChain(plan: SparkPlan): Seq[SparkPlan] = {
+    val aggregates = nodes(plan).collect { case a: SortAggregateExec => a }
+    val finalAggregate = aggregates.head
+    def down(node: SparkPlan): Seq[SparkPlan] = node match {
+      case _: SortAggregateExec if node ne finalAggregate => Seq(node)
+      case s: QueryStageExec => s +: down(s.plan)
+      case other => other +: other.children.flatMap(down)
+    }
+    down(finalAggregate)
+  }
+
+  test("a Spark sort aggregate over a variable-width buffer gets a Spark shuffle on both sides") {
+    withPayload("cast(id % 1000 AS double) AS d") {
+      withSQLConf(
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
+        SQLConf.USE_OBJECT_HASH_AGG.key -> "false",
+        CometConf.COMET_EXEC_BOUNDARY_FORMATS_ENABLED.key -> "true",
+        flag -> "true") {
+        val query =
+          "SELECT k, percentile_approx(d, 0.5) AS p, count(*) AS c, sum(v) AS s FROM t GROUP BY k"
+        val initial = initialPlan(sql(query))
+        val initialChain = boundaryChain(initial)
+        assert(
+          initialChain.exists(_.isInstanceOf[SortExec]) &&
+            initialChain.exists(_.isInstanceOf[ShuffleExchangeExec]) &&
+            !initialChain.exists(n => n.isInstanceOf[CometPlan]),
+          s"plan:\n$initial")
+        val plan = run(sql(query))
+        val chain = boundaryChain(plan)
+        assert(nodes(plan).count(_.isInstanceOf[SortAggregateExec]) == 2, s"plan:\n$plan")
+        assert(chain.exists(_.isInstanceOf[SortExec]), s"plan:\n$plan")
+        assert(chain.exists(_.isInstanceOf[ShuffleExchangeExec]), s"plan:\n$plan")
+        assert(
+          !chain.exists {
+            case _: CometShuffleExchangeExec | _: ColumnarToRowTransition |
+                _: RowToColumnarTransition | _: CometPlan =>
+              true
+            case _ => false
+          },
+          s"chain ${chain.map(_.nodeName).mkString(" <- ")}:\n$plan")
       }
     }
   }
