@@ -216,6 +216,9 @@ mod ordered_partial_stream;
 mod partial_reduce_stream;
 mod single_stream;
 mod skip_partial;
+// COMET PATCH: tests for an aggregate whose first reservation fails and spills.
+#[cfg(test)]
+mod starved_spill_tests;
 mod topk;
 
 /// Returns true if TopK aggregation data structures support the provided key and value types.

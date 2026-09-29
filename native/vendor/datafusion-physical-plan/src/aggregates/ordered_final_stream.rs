@@ -607,9 +607,21 @@ impl OrderedFinalAggregateStream {
 
         // Spilling shrinks the aggregate table and releases its accumulated
         // memory. Update the reservation accordingly.
-        if let Err(e) = self.reservation.try_resize(table.memory_size()) {
-            result =
-                Err(e.context("Decreasing allocation after spilling should succeed"));
+        // COMET PATCH: the emptied table still holds its group values' and accumulators'
+        // initial buffers, a few KiB for a string key. When the pool refused this
+        // aggregate its first reservation, the reservation is below that, so the resize
+        // grows it and fails for the reason the table spilled. That memory is already
+        // allocated and no longer grows with the input, so record it with the infallible
+        // `resize` and carry on: the next batch that does not fit spills again. A table
+        // that still has groups keeps DataFusion's error.
+        let remaining = table.memory_size();
+        if let Err(e) = self.reservation.try_resize(remaining) {
+            if table.is_empty() {
+                self.reservation.resize(remaining);
+            } else {
+                result =
+                    Err(e.context("Decreasing allocation after spilling should succeed"));
+            }
         }
 
         timer.done();
