@@ -560,7 +560,6 @@ jobs:
               org.apache.comet.rules.CometEmptyRelationExecRuleSuite
               org.apache.comet.rules.RevertNativeForTransitionHeavyStagesSuite
               org.apache.comet.rules.RevertIsolatedNativeOperatorsSuite
-              org.apache.comet.rules.UnifyStageEnginesSuite
               org.apache.spark.sql.CometTPCDSQuerySuite
               org.apache.spark.sql.CometTPCDSQueryTestSuite
               org.apache.spark.sql.CometTPCHQuerySuite

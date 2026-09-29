@@ -579,18 +579,6 @@ each spilled row once, while the native sort moves wide rows through every sort,
 converted to rows for the Spark consumer anyway. The columnar-to-row transition then moves below the Spark sort, and
 the sort's native producer, such as a native shuffle read, is unchanged. Aggregates are never reverted.
 
-### One Engine per Stage
-
-`spark.comet.exec.unifyStageEngines.enabled=true` decides the engine per query stage instead of per operator. A stage
-whose operators all run natively stays native; a stage that mixes Comet and Spark operators runs wholly in Spark.
-Leaf scans and writes do not count, since a native scan read through one columnar-to-row transition costs what
-Spark's vectorized reader does. Each shuffle then takes the format its two sides need: a Spark shuffle between two
-Spark stages, a native shuffle after a native stage, and a columnar shuffle from a Spark stage into a native one, so
-data changes format only where the engine changes. Without it, `spark.comet.shuffle.convertFromSparkPlan.enabled`
-converts rows to Arrow and back at every shuffle between Spark stages. A stage keeps its converted plan when
-reverting it is unsafe, for example a native aggregate whose buffer Spark cannot exchange across the stage boundary,
-a native write, or a build side feeding a native broadcast join.
-
 ### Wide or Deeply Nested Schemas
 
 The cost of each conversion also grows sharply with schema shape: for wide or deeply nested schemas,
