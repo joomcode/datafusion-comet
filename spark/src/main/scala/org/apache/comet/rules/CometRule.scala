@@ -58,9 +58,9 @@ object CometRule {
   private val PLAN_ONLY_REPORTED: TreeNodeTag[Unit] = TreeNodeTag[Unit]("comet.planOnlyReported")
 
   /** Where in Spark's planning the rule is running, read off the call stack. */
-  private[rules] case class PlanningContext(replanning: Boolean, subquery: Boolean)
+  private case class PlanningContext(replanning: Boolean, subquery: Boolean)
 
-  private[rules] def planningContext(): PlanningContext = {
+  private def planningContext(): PlanningContext = {
     val frames = Thread.currentThread().getStackTrace
     def within(cls: Class[_], method: String): Boolean =
       frames.exists(f => f.getMethodName == method && f.getClassName == cls.getName)
@@ -173,7 +173,7 @@ case class CometRule(session: SparkSession, queryStagePrep: Boolean = false)
       // dynamic partition pruning builds around it, so its engine is kept.
       val keepRoot = CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.get(conf) &&
         CometRule.inSubqueryPlanning
-      boundaryRule.apply(engineRule.apply(sortRule.apply(converted, queryStagePrep), keepRoot))
+      boundaryRule.apply(engineRule.apply(sortRule.apply(converted), keepRoot))
     } else {
       converted
     }

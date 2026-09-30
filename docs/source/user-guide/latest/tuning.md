@@ -611,13 +611,14 @@ its rows are wide in one of two ways:
   `true`) turns this condition off.
 - Its average input row is larger than `spark.comet.exec.sort.wideRowFallback.minAvgRowBytes` (default `1024`) and
   its key takes less than `spark.comet.exec.sort.wideRowFallback.maxKeyFraction` (default `0.2`) of the row. The row
-  size comes from the runtime statistics of the query stage the sort reads under AQE, and otherwise from the default
-  sizes of the column types; the key share always comes from the column types.
+  size is the larger of the runtime statistics of the query stage the sort reads under AQE and the default sizes of
+  the column types; the key share always comes from the column types.
 
 A sort read by a native operator, such as a sort-merge join or a window, stays native, since running it in Spark would
 add two conversions. A sort moved to Spark stays in Spark when AQE re-plans the query, even if the runtime statistics
-then show narrower rows, since the shuffle feeding it may already be written for Spark. With
-`spark.comet.exec.boundaryFormats.enabled`, the shuffle formats around the sort then follow its engine.
+then show narrower rows, since both conditions hold again on every later plan of the query once they held on an
+earlier one. With `spark.comet.exec.boundaryFormats.enabled`, the shuffle formats around the sort then follow its
+engine.
 
 ### Wide or Deeply Nested Schemas
 

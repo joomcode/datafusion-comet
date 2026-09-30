@@ -690,9 +690,9 @@ object CometConf extends ShimCometConf {
           "than spark.comet.exec.sort.wideRowFallback.minAvgRowBytes on average with a sort " +
           "key that is a small part of the row. The native sort copies every row when sorting " +
           "a batch, when spilling and when merging, while Spark sorts pointers to rows. The " +
-          "row width comes from the runtime statistics of the query stage the sort reads, or " +
-          "from the schema. A sort read by a native operator stays native, and a sort moved " +
-          "to Spark stays there when AQE re-plans the query.")
+          "row width is the larger of the runtime statistics of the query stage the sort " +
+          "reads and the estimate from the schema. A sort read by a native operator stays " +
+          "native, and a sort moved to Spark stays there when AQE re-plans the query.")
       .booleanConf
       .createWithDefault(false)
 

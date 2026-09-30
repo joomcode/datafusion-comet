@@ -19,11 +19,15 @@
 
 package org.apache.comet.rules
 
+import java.util.concurrent.{Callable, Executors, TimeUnit}
+
+import scala.collection.JavaConverters._
+
 import org.apache.spark.sql.{CometTestBase, DataFrame}
 import org.apache.spark.sql.comet.{CometPlan, CometSortExec, CometSortMergeJoinExec, CometWindowExec}
 import org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec
 import org.apache.spark.sql.execution.{ColumnarToRowTransition, RowToColumnarTransition, SortExec, SparkPlan}
-import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, QueryStageExec}
+import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AQEShuffleReadExec, QueryStageExec, ShuffleQueryStageExec}
 import org.apache.spark.sql.execution.aggregate.SortAggregateExec
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeExec
 import org.apache.spark.sql.execution.joins.SortMergeJoinExec
@@ -422,35 +426,161 @@ class WideRowSortFallbackSuite extends CometTestBase {
     down(finalAggregate)
   }
 
-  test("a Spark sort aggregate over a variable-width buffer gets a Spark shuffle on both sides") {
-    withPayload("cast(id % 1000 AS double) AS d") {
+  private val cubeQueries = Seq(
+    "a percentile_approx buffer" ->
+      "SELECT k, percentile_approx(d, 0.5) AS p, count(*) AS c, sum(v) AS s FROM t GROUP BY k",
+    "a percentile_approx buffer and a binary payload" ->
+      ("SELECT k, percentile_approx(d, 0.5) AS p, max(x) AS m, count(*) AS c, sum(v) AS s " +
+        "FROM t GROUP BY k"))
+
+  cubeQueries.foreach { case (name, query) =>
+    test(s"a Spark sort aggregate over $name gets a Spark shuffle on both sides") {
+      withPayload(
+        "cast(id % 1000 AS double) AS d",
+        "cast(concat('b', cast(id AS string)) AS binary) AS x") {
+        withSQLConf(
+          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
+          SQLConf.USE_OBJECT_HASH_AGG.key -> "false",
+          CometConf.COMET_EXEC_BOUNDARY_FORMATS_ENABLED.key -> "true",
+          flag -> "true") {
+          val initial = initialPlan(sql(query))
+          val initialChain = boundaryChain(initial)
+          assert(
+            initialChain.exists(_.isInstanceOf[SortExec]) &&
+              initialChain.exists(_.isInstanceOf[ShuffleExchangeExec]) &&
+              !initialChain.exists(n => n.isInstanceOf[CometPlan]),
+            s"plan:\n$initial")
+          Seq(1, 2).foreach { _ =>
+            val plan = run(sql(query))
+            val chain = boundaryChain(plan)
+            assert(nodes(plan).count(_.isInstanceOf[SortAggregateExec]) == 2, s"plan:\n$plan")
+            assert(chain.exists(_.isInstanceOf[SortExec]), s"plan:\n$plan")
+            assert(chain.exists(_.isInstanceOf[ShuffleExchangeExec]), s"plan:\n$plan")
+            assert(
+              !chain.exists {
+                case _: CometShuffleExchangeExec | _: ColumnarToRowTransition |
+                    _: RowToColumnarTransition | _: CometPlan =>
+                  true
+                case _ => false
+              },
+              s"chain ${chain.map(_.nodeName).mkString(" <- ")}:\n$plan")
+          }
+        }
+      }
+    }
+  }
+
+  test("a sort over a Spark shuffle stays in Spark when AQE re-plans with narrower statistics") {
+    val empties = (1 to 10).map(i => s"'' AS e$i")
+    withPayload(empties: _*) {
+      val threshold = 150
       withSQLConf(
-        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
-        SQLConf.USE_OBJECT_HASH_AGG.key -> "false",
-        CometConf.COMET_EXEC_BOUNDARY_FORMATS_ENABLED.key -> "true",
-        flag -> "true") {
-        val query =
-          "SELECT k, percentile_approx(d, 0.5) AS p, count(*) AS c, sum(v) AS s FROM t GROUP BY k"
-        val initial = initialPlan(sql(query))
-        val initialChain = boundaryChain(initial)
+        (Seq(
+          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
+          CometConf.COMET_EXEC_BOUNDARY_FORMATS_ENABLED.key -> "true",
+          CometConf.COMET_EXEC_PROJECT_ENABLED.key -> "false",
+          flag -> "true",
+          minAvgRowBytes -> threshold.toString) ++ sparkWindowConfs): _*) {
+        def query: DataFrame =
+          spark
+            .table("t")
+            .withColumn("k", col("k") + 1)
+            .withColumn("rn", row_number().over(Window.partitionBy("k").orderBy("v")))
+        val initial = initialPlan(query)
+        assert(sparkSorts(initial).size == 1 && cometSorts(initial).isEmpty, s"plan:\n$initial")
         assert(
-          initialChain.exists(_.isInstanceOf[SortExec]) &&
-            initialChain.exists(_.isInstanceOf[ShuffleExchangeExec]) &&
-            !initialChain.exists(n => n.isInstanceOf[CometPlan]),
+          sparkSorts(initial).head.child.isInstanceOf[ShuffleExchangeExec],
           s"plan:\n$initial")
-        val plan = run(sql(query))
-        val chain = boundaryChain(plan)
-        assert(nodes(plan).count(_.isInstanceOf[SortAggregateExec]) == 2, s"plan:\n$plan")
-        assert(chain.exists(_.isInstanceOf[SortExec]), s"plan:\n$plan")
-        assert(chain.exists(_.isInstanceOf[ShuffleExchangeExec]), s"plan:\n$plan")
+        val plan = run(query)
+        val sorts = sparkSorts(plan)
+        assert(sorts.size == 1 && cometSorts(plan).isEmpty, s"plan:\n$plan")
+        val stage = sorts.head.collectFirst { case s: ShuffleQueryStageExec => s }
+        assert(stage.exists(_.shuffle.isInstanceOf[ShuffleExchangeExec]), s"plan:\n$plan")
         assert(
-          !chain.exists {
-            case _: CometShuffleExchangeExec | _: ColumnarToRowTransition |
-                _: RowToColumnarTransition | _: CometPlan =>
-              true
-            case _ => false
-          },
-          s"chain ${chain.map(_.nodeName).mkString(" <- ")}:\n$plan")
+          sorts.head.collectFirst { case r: AQEShuffleReadExec => r }.nonEmpty,
+          s"plan:\n$plan")
+        assert(
+          stage.flatMap(WideRowSortFallback.runtimeAvgRowBytes).exists(_ <= threshold),
+          s"plan:\n$plan")
+        assert(transitions(plan) == 1, s"plan:\n$plan")
+      }
+    }
+  }
+
+  test("concurrent queries in one session get their own sort engines") {
+    withTempPath { dir =>
+      val wideDir = s"${dir.getCanonicalPath}/wide"
+      val narrowDir = s"${dir.getCanonicalPath}/narrow"
+      val emptiesDir = s"${dir.getCanonicalPath}/empties"
+      spark
+        .range(2000)
+        .selectExpr(
+          "cast(id % 97 AS int) AS k",
+          "id AS v",
+          "cast(concat('b', cast(id AS string)) AS binary) AS x")
+        .write
+        .parquet(wideDir)
+      spark
+        .range(2000)
+        .selectExpr("cast(id % 97 AS int) AS k", "id AS v", "id * 2 AS x")
+        .write
+        .parquet(narrowDir)
+      spark
+        .range(2000)
+        .selectExpr(Seq("cast(id % 97 AS int) AS k", "id AS v") ++
+          (1 to 10).map(i => s"'' AS e$i"): _*)
+        .write
+        .parquet(emptiesDir)
+      spark.read.parquet(wideDir).createOrReplaceTempView("cw")
+      spark.read.parquet(narrowDir).createOrReplaceTempView("cn")
+      spark.read.parquet(emptiesDir).createOrReplaceTempView("ce")
+      withTempView("cw", "cn", "ce") {
+        withSQLConf(
+          (Seq(
+            SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
+            flag -> "true",
+            minAvgRowBytes -> "150") ++ sparkWindowConfs): _*) {
+          val queries = Seq("cw" -> true, "cn" -> false, "ce" -> true)
+          queries.foreach { case (table, _) => run(sparkWindowOver(table, "k", "v")) }
+          def rows(df: DataFrame): Seq[String] =
+            df.collect()
+              .map(
+                _.toSeq
+                  .map {
+                    case bytes: Array[Byte] => bytes.toSeq
+                    case other => other
+                  }
+                  .mkString(","))
+              .sorted
+              .toSeq
+          val answers = queries.map { case (table, _) =>
+            table -> rows(sparkWindowOver(table, "k", "v"))
+          }.toMap
+          val pool = Executors.newFixedThreadPool(8)
+          try {
+            val tasks = (0 until 48).map { i =>
+              val (table, wideRows) = queries(i % queries.size)
+              new Callable[Option[String]] {
+                override def call(): Option[String] = {
+                  val df = sparkWindowOver(table, "k", "v")
+                  val answer = rows(df)
+                  val plan = df.queryExecution.executedPlan
+                  val engineOk =
+                    if (wideRows) sparkSorts(plan).size == 1 && cometSorts(plan).isEmpty
+                    else cometSorts(plan).size == 1 && sparkSorts(plan).isEmpty
+                  if (!engineOk) Some(s"$table:\n$plan")
+                  else if (answer != answers(table)) Some(s"$table: wrong answer")
+                  else None
+                }
+              }
+            }
+            val failures = pool.invokeAll(tasks.asJava).asScala.flatMap(_.get())
+            assert(failures.isEmpty, failures.mkString("\n"))
+          } finally {
+            pool.shutdown()
+            pool.awaitTermination(1, TimeUnit.MINUTES)
+          }
+        }
       }
     }
   }
