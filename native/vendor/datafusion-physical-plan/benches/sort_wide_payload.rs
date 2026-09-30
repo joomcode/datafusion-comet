@@ -98,10 +98,13 @@ fn schema(keys: Keys) -> SchemaRef {
     Arc::new(Schema::new(fields))
 }
 
-fn input(keys: Keys, width: usize) -> Vec<RecordBatch> {
+fn input(keys: Keys, width: usize, per_batch: usize) -> Vec<RecordBatch> {
     let schema = schema(keys);
     let rows = PAYLOAD_BYTES / width;
-    let per_batch = (INPUT_BATCH_BYTES / width).clamp(16, BATCH_SIZE);
+    let per_batch = match per_batch {
+        0 => (INPUT_BATCH_BYTES / width).clamp(16, BATCH_SIZE),
+        rows => rows,
+    };
     let mut state = 0x9E37_79B9_7F4A_7C15_u64;
     let mut next = move || {
         state ^= state << 13;
@@ -285,24 +288,27 @@ fn main() {
         .build()
         .unwrap();
     println!(
-        "{:<8} {:>6} {:<9} {:>9} {:>8} {:>7} {:>7} {:>9}",
-        "keys", "width", "case", "ms", "MB/s", "alloc/x", "spills", "spill MB"
+        "{:<8} {:>6} {:>5} {:<7} {:>9} {:>8} {:>7} {:>7} {:>9}",
+        "keys", "width", "rows", "case", "ms", "MB/s", "alloc/x", "spills", "spill MB"
     );
     let cases = [
-        (Keys::Long, 32),
-        (Keys::Long, 128),
-        (Keys::Long, 1024),
-        (Keys::Long, 4096),
-        (Keys::Long, 16384),
-        (Keys::Long, 65536),
-        (Keys::IntLong, 1024),
-        (Keys::IntLong, 16384),
+        (Keys::Long, 32, 0),
+        (Keys::Long, 128, 0),
+        (Keys::Long, 1024, 0),
+        (Keys::Long, 4096, 0),
+        (Keys::Long, 16384, 0),
+        (Keys::Long, 65536, 0),
+        (Keys::IntLong, 1024, 0),
+        (Keys::IntLong, 16384, 0),
+        (Keys::Long, 1024, 8),
+        (Keys::IntLong, 16384, 8),
     ];
-    for (keys, width) in cases {
+    for (keys, width, per_batch) in cases {
         if width > max_width {
             continue;
         }
-        let batches = input(keys, width);
+        let batches = input(keys, width, per_batch);
+        let per_batch = batches[0].num_rows();
         let bytes: usize = batches.iter().map(|b| b.get_array_memory_size()).sum();
         let rows: usize = batches.iter().map(RecordBatch::num_rows).sum();
         let limited = bytes / 4;
@@ -318,15 +324,22 @@ fn main() {
             let m = match m {
                 Ok(m) => m,
                 Err(e) => {
-                    println!("{:<8} {:>6} {:<9} failed: {e}", keys.name(), width, case);
+                    println!(
+                        "{:<8} {:>6} {:>5} {:<7} failed: {e}",
+                        keys.name(),
+                        width,
+                        per_batch,
+                        case
+                    );
                     continue;
                 }
             };
             assert_eq!(m.rows, rows);
             println!(
-                "{:<8} {:>6} {:<9} {:>9.1} {:>8.0} {:>7.2} {:>7} {:>9.1}",
+                "{:<8} {:>6} {:>5} {:<7} {:>9.1} {:>8.0} {:>7.2} {:>7} {:>9.1}",
                 keys.name(),
                 width,
+                per_batch,
                 case,
                 m.time.as_secs_f64() * 1e3,
                 bytes as f64 / 1e6 / m.time.as_secs_f64(),

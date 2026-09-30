@@ -19,12 +19,15 @@
 
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, RecordBatch, RecordBatchOptions, UInt32Array};
+use arrow::array::{
+    Array, ArrayData, ArrayRef, RecordBatch, RecordBatchOptions, UInt32Array,
+};
 use arrow::compute::{
     SortColumn, concat, interleave, lexsort_to_indices, take_record_batch,
 };
 use arrow::datatypes::SchemaRef;
 use arrow::row::{RowConverter, Rows, SortField};
+use datafusion_common::HashMap;
 use datafusion_common::Result;
 use datafusion_common::utils::memory::RecordBatchMemoryCounter;
 use datafusion_execution::memory_pool::MemoryReservation;
@@ -229,11 +232,28 @@ struct Gather {
     batches: Vec<RecordBatch>,
     starts: Vec<usize>,
     remaining: Vec<usize>,
+    buffers: Vec<Vec<usize>>,
+    owners: HashMap<usize, (usize, usize)>,
+    live_bytes: usize,
+    slots: Vec<usize>,
     order: UInt32Array,
     cursor: usize,
     rows_per_batch: usize,
     reservation: MemoryReservation,
     elapsed_compute: Time,
+}
+
+fn collect_buffers(data: &ArrayData, buffers: &mut Vec<(usize, usize)>) {
+    for buffer in data.buffers() {
+        buffers.push((buffer.data_ptr().as_ptr() as usize, buffer.capacity()));
+    }
+    if let Some(nulls) = data.nulls() {
+        let buffer = nulls.inner().inner();
+        buffers.push((buffer.data_ptr().as_ptr() as usize, buffer.capacity()));
+    }
+    for child in data.child_data() {
+        collect_buffers(child, buffers);
+    }
 }
 
 impl Gather {
@@ -247,34 +267,64 @@ impl Gather {
     ) -> Result<Self> {
         let order = sort_order(&batches, ordering)?;
         let mut starts = Vec::with_capacity(batches.len());
+        let mut buffers = Vec::with_capacity(batches.len());
+        let mut owners: HashMap<usize, (usize, usize)> = HashMap::new();
+        let mut live_bytes = 0;
         let mut rows = 0;
         for batch in &batches {
             starts.push(rows);
             rows += batch.num_rows();
+            let mut found = vec![];
+            for column in batch.columns() {
+                collect_buffers(&column.to_data(), &mut found);
+            }
+            found.sort_unstable();
+            found.dedup_by_key(|(ptr, _)| *ptr);
+            for &(ptr, capacity) in &found {
+                let owner = owners.entry(ptr).or_insert_with(|| {
+                    live_bytes += capacity;
+                    (0, capacity)
+                });
+                owner.0 += 1;
+            }
+            buffers.push(found.into_iter().map(|(ptr, _)| ptr).collect());
         }
         let mut gather = Self {
             schema,
             remaining: batches.iter().map(RecordBatch::num_rows).collect(),
+            slots: vec![usize::MAX; batches.len()],
             batches,
             starts,
+            buffers,
+            owners,
+            live_bytes,
             order,
             cursor: 0,
             rows_per_batch,
             reservation,
             elapsed_compute,
         };
-        gather.release();
+        gather.shrink();
         Ok(gather)
     }
 
-    fn release(&mut self) {
-        let mut counter = RecordBatchMemoryCounter::new();
-        for batch in &self.batches {
-            counter.count_batch(batch);
-        }
-        let needed = counter.memory_usage() + self.order.get_array_memory_size();
+    fn shrink(&mut self) {
+        let needed = self.live_bytes + self.order.get_array_memory_size();
         if self.reservation.size() > needed {
             self.reservation.shrink(self.reservation.size() - needed);
+        }
+    }
+
+    fn finish(&mut self, batch: usize) {
+        self.batches[batch] = RecordBatch::new_empty(Arc::clone(&self.schema));
+        for ptr in std::mem::take(&mut self.buffers[batch]) {
+            if let Some(owner) = self.owners.get_mut(&ptr) {
+                owner.0 -= 1;
+                if owner.0 == 0 {
+                    self.live_bytes -= owner.1;
+                    self.owners.remove(&ptr);
+                }
+            }
         }
     }
 
@@ -284,44 +334,59 @@ impl Gather {
         let end = (self.cursor + self.rows_per_batch).min(self.order.len());
         let order = self.order.slice(self.cursor, end - self.cursor);
         self.cursor = end;
-        let indices: Vec<(usize, usize)> = order
-            .values()
-            .iter()
-            .map(|&row| {
-                let row = row as usize;
-                let batch = self.starts.partition_point(|&start| start <= row) - 1;
-                (batch, row - self.starts[batch])
-            })
-            .collect();
+        let mut finished = vec![];
         let batch = if self.batches.len() == 1 {
-            take_record_batch(&self.batches[0], &order)?
+            let batch = take_record_batch(&self.batches[0], &order)?;
+            self.remaining[0] -= order.len();
+            if self.remaining[0] == 0 {
+                finished.push(0);
+            }
+            batch
         } else {
+            let mut used = vec![];
+            let indices: Vec<(usize, usize)> = order
+                .values()
+                .iter()
+                .map(|&row| {
+                    let row = row as usize;
+                    let batch = self.starts.partition_point(|&start| start <= row) - 1;
+                    if self.slots[batch] == usize::MAX {
+                        self.slots[batch] = used.len();
+                        used.push(batch);
+                    }
+                    (self.slots[batch], row - self.starts[batch])
+                })
+                .collect();
             let columns = (0..self.schema.fields().len())
                 .map(|column| {
-                    let arrays: Vec<&dyn Array> = self
-                        .batches
+                    let arrays: Vec<&dyn Array> = used
                         .iter()
-                        .map(|batch| batch.column(column).as_ref())
+                        .map(|&batch| self.batches[batch].column(column).as_ref())
                         .collect();
                     interleave(&arrays, &indices)
                 })
                 .collect::<std::result::Result<Vec<_>, _>>()?;
+            for &batch in &used {
+                self.slots[batch] = usize::MAX;
+            }
+            for &(slot, _) in &indices {
+                let batch = used[slot];
+                self.remaining[batch] -= 1;
+                if self.remaining[batch] == 0 {
+                    finished.push(batch);
+                }
+            }
             RecordBatch::try_new_with_options(
                 Arc::clone(&self.schema),
                 columns,
                 &RecordBatchOptions::new().with_row_count(Some(indices.len())),
             )?
         };
-        let mut finished = false;
-        for &(batch, _) in &indices {
-            self.remaining[batch] -= 1;
-            if self.remaining[batch] == 0 {
-                self.batches[batch] = RecordBatch::new_empty(Arc::clone(&self.schema));
-                finished = true;
+        if !finished.is_empty() {
+            for batch in finished {
+                self.finish(batch);
             }
-        }
-        if finished {
-            self.release();
+            self.shrink();
         }
         Ok(batch)
     }
@@ -721,6 +786,26 @@ mod tests {
         assert_sorted_permutation(&input, &output, &two_keys());
         assert_eq!(pool.reserved(), 0);
         assert!(pool.peak() <= bytes / 12);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn many_tiny_input_batches_match_the_reference() -> Result<()> {
+        let input = batches(600, 3, 1024, false);
+        let bytes: usize = input.iter().map(RecordBatch::get_array_memory_size).sum();
+        let (output, _) = sort(&input, two_keys(), context(None, 8192, 1 << 20)).await?;
+        assert_sorted_permutation(&input, &output, &two_keys());
+        let pool = PeakPool::new(bytes / 3);
+        let (output, metrics) = sort(
+            &input,
+            two_keys(),
+            context(Some(Arc::clone(&pool) as _), 8192, 1 << 20),
+        )
+        .await?;
+        assert!(metrics.spill_count().unwrap() > 0);
+        assert_sorted_permutation(&input, &output, &two_keys());
+        assert_eq!(pool.reserved(), 0);
+        assert!(pool.peak() <= bytes / 3);
         Ok(())
     }
 
