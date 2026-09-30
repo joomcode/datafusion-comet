@@ -17,6 +17,7 @@
 
 pub mod cancellation;
 mod error;
+mod ffi_offsets;
 pub mod offset_extents;
 mod query_context;
 mod schema;
@@ -26,6 +27,7 @@ mod utf8;
 mod utils;
 
 pub use error::{decimal_overflow_error, SparkError, SparkErrorWithContext, SparkResult};
+pub use ffi_offsets::zero_offsets;
 pub use query_context::{create_query_context_map, QueryContext, QueryContextMap};
 pub use schema::{cast_and_stamp_schema, widen_nested_nullability};
 pub use struct_nulls::{child_with_parent_nulls, children_with_parent_nulls};
