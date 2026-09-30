@@ -106,13 +106,17 @@ struct ReusableRows {
     /// buffer stays reserved after its cursor, which gets an empty reservation, is
     /// dropped. Follows apache/datafusion#25372.
     reservation: MemoryReservation,
+    /// COMET PATCH
+    kept: usize,
 }
 
 impl ReusableRows {
     // return a Rows for writing,
     // does not clone if the existing rows can be reused
     fn take_next(&mut self, stream_idx: usize) -> Result<Rows> {
-        Arc::try_unwrap(self.inner[stream_idx][1].take().unwrap()).map_err(|_| {
+        let rows = self.inner[stream_idx][1].take().unwrap();
+        self.kept -= rows.size();
+        Arc::try_unwrap(rows).map_err(|_| {
             internal_datafusion_err!(
                 "Rows from RowCursorStream is still in use by consumer"
             )
@@ -120,12 +124,15 @@ impl ReusableRows {
     }
     // save the Rows
     fn save(&mut self, stream_idx: usize, rows: &Arc<Rows>) -> Result<()> {
-        self.inner[stream_idx][1] = Some(Arc::clone(rows));
+        self.kept += rows.size();
+        if let Some(old) = self.inner[stream_idx][1].replace(Arc::clone(rows)) {
+            self.kept -= old.size();
+        }
         // swap the current with the previous one, so that the next poll can reuse the Rows from the previous poll
         let [a, b] = &mut self.inner[stream_idx];
         mem::swap(a, b);
         // COMET PATCH: reserve the buffer before the cursor gets it.
-        self.reservation.try_resize(self.kept_size())
+        self.reservation.try_resize(self.kept)
     }
 
     // COMET PATCH: a finished stream keeps only the rows its last cursors still hold.
@@ -135,23 +142,13 @@ impl ReusableRows {
                 .as_ref()
                 .is_some_and(|rows| Arc::strong_count(rows) == 1)
             {
-                *slot = None;
+                self.kept -= slot.take().unwrap().size();
             }
         }
-        let kept = self.kept_size();
+        let kept = self.kept;
         if kept < self.reservation.size() {
             self.reservation.shrink(self.reservation.size() - kept);
         }
-    }
-
-    // COMET PATCH
-    fn kept_size(&self) -> usize {
-        self.inner
-            .iter()
-            .flatten()
-            .flatten()
-            .map(|rows| rows.size())
-            .sum()
     }
 }
 
@@ -199,9 +196,11 @@ impl RowCursorStream {
                 Some(Arc::new(converter.empty_rows(0, 0))),
             ]);
         }
+        let kept = rows.iter().flatten().flatten().map(|r| r.size()).sum();
         let rows = ReusableRows {
             inner: rows,
             reservation: reservation.new_empty(),
+            kept,
         };
         Ok(Self {
             converter,
@@ -666,10 +665,12 @@ mod tests {
         drop(first);
         let other = poll(&mut stream, 1).unwrap();
         assert_eq!(pool.reserved(), stream.converter.size() + kept(&stream));
+        assert_eq!(stream.rows.kept, kept(&stream));
         drop(second);
         drop(other);
         assert!(kept(&stream) > 0);
         assert_eq!(pool.reserved(), stream.converter.size() + kept(&stream));
+        assert_eq!(stream.rows.kept, kept(&stream));
 
         // A finished stream lets go of the rows no cursor holds.
         drop(poll(&mut stream, 0).unwrap());
@@ -682,6 +683,130 @@ mod tests {
         assert_eq!(pool.reserved(), stream.converter.size());
         drop(stream);
         assert_eq!(pool.reserved(), 0);
+        Ok(())
+    }
+
+    /// The count of the rows `RowCursorStream` keeps follows every reuse, replacement
+    /// and release of them, whichever cursors the merge still holds.
+    #[test]
+    fn row_cursor_stream_counts_the_rows_it_keeps() -> Result<()> {
+        use datafusion_execution::memory_pool::{
+            GreedyMemoryPool, MemoryConsumer, MemoryPool,
+        };
+        let (schema, expressions, _) = two_column_streams(0, 0);
+        let partitions = 32;
+        let streams = (0..partitions)
+            .map(|p| {
+                let (_, _, mut streams) = two_column_streams(1, p % 5);
+                streams.pop().unwrap()
+            })
+            .collect();
+        let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(1 << 30));
+        let reservation = MemoryConsumer::new("merge").register(&pool);
+        let mut stream =
+            RowCursorStream::try_new(&schema, &expressions, streams, reservation)?;
+        let kept = |stream: &RowCursorStream| -> usize {
+            stream
+                .rows
+                .inner
+                .iter()
+                .flatten()
+                .flatten()
+                .map(|rows| rows.size())
+                .sum()
+        };
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        let mut held: Vec<Option<RowValues>> = (0..partitions).map(|_| None).collect();
+        let mut finished = vec![false; partitions];
+        let mut state = 7u64;
+        while finished.iter().any(|f| !f) {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let idx = (state >> 33) as usize % partitions;
+            if (state >> 20).is_multiple_of(3) {
+                held[idx] = None;
+            }
+            match stream.poll_next(&mut cx, idx) {
+                Poll::Ready(Some(Ok((cursor, _)))) => {
+                    held[idx] = Some(cursor);
+                    assert_eq!(pool.reserved(), stream.converter.size() + kept(&stream));
+                }
+                Poll::Ready(None) => finished[idx] = true,
+                other => panic!("unexpected poll result {other:?}"),
+            }
+            assert_eq!(stream.rows.kept, kept(&stream));
+            assert!(pool.reserved() <= stream.converter.size() + kept(&stream));
+        }
+        held.clear();
+        for idx in 0..partitions {
+            assert!(matches!(stream.poll_next(&mut cx, idx), Poll::Ready(None)));
+            assert_eq!(stream.rows.kept, kept(&stream));
+        }
+        assert_eq!(stream.rows.kept, 0);
+        assert_eq!(pool.reserved(), stream.converter.size());
+        Ok(())
+    }
+
+    /// A merge of many single-row streams takes time linear in the number of streams.
+    #[tokio::test]
+    async fn merge_of_many_single_row_streams_is_linear() -> Result<()> {
+        use crate::memory::MemoryStream;
+        use crate::metrics::{BaselineMetrics, ExecutionPlanMetricsSet};
+        use crate::sorts::streaming_merge::StreamingMergeBuilder;
+        use arrow::array::StringArray;
+        use futures::TryStreamExt;
+
+        let (schema, expressions, _) = two_column_streams(0, 0);
+        let merge = |partitions: usize| {
+            let schema = Arc::clone(&schema);
+            let expressions = expressions.clone();
+            async move {
+                let streams = (0..partitions)
+                    .map(|p| {
+                        let batch = RecordBatch::try_new(
+                            Arc::clone(&schema),
+                            vec![
+                                Arc::new(Int32Array::from(vec![
+                                    (p * 7919 % partitions) as i32,
+                                ])),
+                                Arc::new(StringArray::from(vec!["x"])),
+                            ],
+                        )
+                        .unwrap();
+                        Box::pin(
+                            MemoryStream::try_new(vec![batch], Arc::clone(&schema), None)
+                                .unwrap(),
+                        ) as SendableRecordBatchStream
+                    })
+                    .collect();
+                let start = std::time::Instant::now();
+                let merged: Vec<RecordBatch> = StreamingMergeBuilder::new()
+                    .with_streams(streams)
+                    .with_schema(Arc::clone(&schema))
+                    .with_expressions(&expressions)
+                    .with_metrics(BaselineMetrics::new(
+                        &ExecutionPlanMetricsSet::new(),
+                        0,
+                    ))
+                    .with_batch_size(8192)
+                    .with_bypass_mempool()
+                    .build()?
+                    .try_collect()
+                    .await?;
+                assert_eq!(
+                    merged.iter().map(RecordBatch::num_rows).sum::<usize>(),
+                    partitions
+                );
+                Ok::<_, DataFusionError>(start.elapsed())
+            }
+        };
+        let small = merge(4_000).await?;
+        let large = merge(64_000).await?;
+        assert!(
+            large < small * 64 + std::time::Duration::from_secs(2),
+            "16 times the streams took {large:?} against {small:?}"
+        );
         Ok(())
     }
 
