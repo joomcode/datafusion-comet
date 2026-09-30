@@ -19,12 +19,13 @@
 //! reproductions in apache/datafusion#25804.
 
 use super::*;
-use crate::metrics::ExecutionPlanMetricsSet;
+use crate::metrics::{ExecutionPlanMetricsSet, MetricsSet};
 use arrow::array::{
     ArrayRef, AsArray, DictionaryArray, Int32Array, Int64Array, StringArray,
     StringViewArray,
 };
 use arrow::datatypes::{DataType, Field, Int32Type, Int64Type, Schema};
+use datafusion_execution::config::SessionConfig;
 use datafusion_execution::memory_pool::{GreedyMemoryPool, MemoryLimit};
 use datafusion_execution::runtime_env::RuntimeEnvBuilder;
 use datafusion_physical_expr::expressions::Column;
@@ -458,5 +459,200 @@ async fn final_in_memory_merge_keeps_its_headroom() -> Result<()> {
     let batches: Vec<RecordBatch> = merge_stream.try_collect().await?;
     assert_sorted_ints(&schema, &batches, 10 * 100)?;
     assert_eq!(pool.reserved(), contender.size() + stealing.stolen());
+    Ok(())
+}
+
+fn single_row_batches(
+    rows: usize,
+    payload_bytes: usize,
+) -> Result<(SchemaRef, Vec<RecordBatch>)> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("k", DataType::Int32, false),
+        Field::new("s", DataType::Utf8, true),
+        Field::new("p", DataType::Int64, false),
+        Field::new("w", DataType::Utf8, false),
+    ]));
+    let batches = (0..rows)
+        .map(|i| {
+            let s = (i % 7 != 0).then(|| format!("s{}", (i * 31) % 97));
+            RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![
+                    Arc::new(Int32Array::from(vec![((i * 7919) % 211) as i32])),
+                    Arc::new(StringArray::from(vec![s])),
+                    Arc::new(Int64Array::from(vec![i as i64])),
+                    Arc::new(StringArray::from(vec!["w".repeat(payload_bytes)])),
+                ],
+            )
+        })
+        .collect::<std::result::Result<_, _>>()?;
+    Ok((schema, batches))
+}
+
+fn two_key_ordering(schema: &SchemaRef) -> Result<LexOrdering> {
+    Ok([
+        PhysicalSortExpr::new_default(crate::expressions::col("k", schema)?),
+        PhysicalSortExpr::new_default(crate::expressions::col("s", schema)?),
+    ]
+    .into())
+}
+
+fn assert_sorted_rows(
+    schema: &SchemaRef,
+    input: &[RecordBatch],
+    output: &[RecordBatch],
+) -> Result<()> {
+    let ordering = two_key_ordering(schema)?;
+    let expected = sort_batch(&concat_batches(schema, input)?, &ordering, None)?;
+    let actual = concat_batches(schema, output)?;
+    assert_eq!(actual.num_rows(), expected.num_rows());
+    assert_eq!(actual.column(0), expected.column(0));
+    assert_eq!(actual.column(1), expected.column(1));
+    let mut payload: Vec<i64> = actual
+        .column(2)
+        .as_primitive::<Int64Type>()
+        .values()
+        .to_vec();
+    payload.sort_unstable();
+    assert_eq!(payload, (0..expected.num_rows() as i64).collect::<Vec<_>>());
+    Ok(())
+}
+
+async fn sort_single_row_batches(
+    rows: usize,
+    payload_bytes: usize,
+    memory_limit: Option<usize>,
+    sort_spill_reservation_bytes: usize,
+) -> Result<(SchemaRef, Vec<RecordBatch>, Vec<RecordBatch>, MetricsSet)> {
+    let (schema, input) = single_row_batches(rows, payload_bytes)?;
+    let mut config = SessionConfig::new().with_batch_size(1024);
+    config.options_mut().execution.sort_in_place_threshold_bytes = 1024;
+    config.options_mut().execution.sort_spill_reservation_bytes =
+        sort_spill_reservation_bytes;
+    let mut runtime = RuntimeEnvBuilder::new();
+    if let Some(limit) = memory_limit {
+        runtime = runtime.with_memory_limit(limit, 1.0);
+    }
+    let task_ctx = Arc::new(
+        TaskContext::default()
+            .with_session_config(config)
+            .with_runtime(runtime.build_arc()?),
+    );
+    let source = crate::test::TestMemoryExec::try_new_exec(
+        std::slice::from_ref(&input),
+        Arc::clone(&schema),
+        None,
+    )?;
+    let sort = Arc::new(SortExec::new(two_key_ordering(&schema)?, source));
+    let output = crate::collect(
+        Arc::clone(&sort) as Arc<dyn ExecutionPlan>,
+        Arc::clone(&task_ctx),
+    )
+    .await?;
+    assert_eq!(task_ctx.runtime_env().memory_pool.reserved(), 0);
+    Ok((schema, input, output, sort.metrics().unwrap()))
+}
+
+/// Single-row input batches are sorted as runs of the batch size.
+#[tokio::test]
+async fn single_row_batches_sort_in_memory() -> Result<()> {
+    for payload_bytes in [0, 200] {
+        let (schema, input, output, metrics) =
+            sort_single_row_batches(5000, payload_bytes, None, 64 * 1024).await?;
+        assert_eq!(metrics.spill_count(), Some(0));
+        assert_sorted_rows(&schema, &input, &output)?;
+    }
+    Ok(())
+}
+
+/// Single-row input batches that spill are coalesced before each spill, and the spill
+/// files merge in several passes.
+#[tokio::test]
+async fn single_row_batches_sort_with_multi_pass_spill_merge() -> Result<()> {
+    let rows = 20_000;
+    for (payload_bytes, memory_limit) in [(0, 96 * 1024), (200, 512 * 1024)] {
+        let (schema, input, output, metrics) =
+            sort_single_row_batches(rows, payload_bytes, Some(memory_limit), 16 * 1024)
+                .await?;
+        assert!(metrics.spill_count().unwrap() >= 8, "{metrics}");
+        assert!(
+            metrics.spilled_rows().unwrap() > rows,
+            "the spill files merge in one pass: {metrics}"
+        );
+        assert_sorted_rows(&schema, &input, &output)?;
+    }
+    Ok(())
+}
+
+/// Small batches are reserved while they wait, and the batch they are concatenated into
+/// is reserved as any buffered batch in their place.
+#[tokio::test]
+async fn small_batches_are_reserved_until_they_are_coalesced() -> Result<()> {
+    let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(1 << 30));
+    let (schema, input) = single_row_batches(3000, 0)?;
+    let runtime = RuntimeEnvBuilder::new()
+        .with_memory_pool(Arc::clone(&pool))
+        .build_arc()?;
+    let mut sorter = ExternalSorter::new(
+        0,
+        Arc::clone(&schema),
+        two_key_ordering(&schema)?,
+        1024,
+        0,
+        1024,
+        SpillCompression::Uncompressed,
+        &ExecutionPlanMetricsSet::new(),
+        runtime,
+    )?;
+    for (i, batch) in input.iter().enumerate() {
+        sorter.insert_batch(batch.clone()).await?;
+        assert_eq!(sorter.in_mem_batches.len(), (i + 1) / 1024);
+        assert_eq!(sorter.small_batches.len(), (i + 1) % 1024);
+        let mut in_mem = RecordBatchMemoryCounter::new();
+        let buffered: usize = sorter
+            .in_mem_batches
+            .iter()
+            .map(|batch| reserved_bytes_counting_shared_buffers(batch, &mut in_mem))
+            .sum::<Result<usize>>()?;
+        let mut small = RecordBatchMemoryCounter::new();
+        let waiting: usize = sorter
+            .small_batches
+            .iter()
+            .map(|batch| reserved_bytes_counting_shared_buffers(batch, &mut small))
+            .sum::<Result<usize>>()?;
+        assert_eq!(sorter.small_batches_reserved, waiting);
+        assert_eq!(sorter.reservation.size(), buffered + waiting);
+        assert_eq!(pool.reserved(), buffered + waiting);
+    }
+    let output: Vec<RecordBatch> = sorter.sort().await?.try_collect().await?;
+    drop(sorter);
+    assert_eq!(pool.reserved(), 0);
+    assert_sorted_rows(&schema, &input, &output)
+}
+
+/// A batch of views keeps its buffers when concatenated, so view batches stay as they
+/// arrive.
+#[tokio::test]
+async fn small_view_batches_are_not_coalesced() -> Result<()> {
+    let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(1 << 30));
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("x", DataType::Int32, false),
+        Field::new("v", DataType::Utf8View, false),
+    ]));
+    let mut sorter = new_sorter(&schema, &pool, 1024, 0)?;
+    for i in 0..10 {
+        let batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(Int32Array::from(vec![i])),
+                Arc::new(StringViewArray::from(vec![
+                    "a value longer than twelve bytes",
+                ])),
+            ],
+        )?;
+        sorter.insert_batch(batch).await?;
+    }
+    assert_eq!(sorter.in_mem_batches.len(), 10);
+    assert!(sorter.small_batches.is_empty());
     Ok(())
 }
