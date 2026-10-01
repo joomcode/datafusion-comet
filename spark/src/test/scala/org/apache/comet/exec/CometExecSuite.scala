@@ -2584,6 +2584,22 @@ class CometExecSuite extends CometTestBase {
     }
   }
 
+  test("pooled columnar-to-row projections stay correct across schemas and self-joins") {
+    withSQLConf(
+      SQLConf.WHOLESTAGE_CODEGEN_ENABLED.key -> "false",
+      SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+      SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+      CometConf.COMET_EXEC_SORT_MERGE_JOIN_ENABLED.key -> "false") {
+      withParquetTable((0 until 200).map(i => (i % 17, s"v$i", i.toLong * 3)), "t") {
+        for (_ <- 0 until 2) {
+          checkSparkAnswer(sql("SELECT a._1, a._2, b._3 FROM t a JOIN t b ON a._1 = b._1"))
+          checkSparkAnswer(sql("SELECT _2, _1 FROM t WHERE _1 > 3"))
+          checkSparkAnswer(sql("SELECT _3, named_struct('k', _1, 's', _2) FROM t"))
+        }
+      }
+    }
+  }
+
   test("Comet native metrics: HashJoin") {
     withParquetTable((0 until 5).map(i => (i, i + 1)), "t1") {
       withParquetTable((0 until 5).map(i => (i, i + 1)), "t2") {

@@ -25,9 +25,10 @@ import org.scalatest.funsuite.AnyFunSuite
 
 import org.apache.arrow.memory.RootAllocator
 import org.apache.arrow.vector.{FieldVector, FixedSizeBinaryVector, IntVector, LargeVarBinaryVector, VarBinaryVector}
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, UnsafeProjection}
+import org.apache.spark.TaskContext
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, BoundReference, UnsafeProjection}
 import org.apache.spark.sql.execution.vectorized.{ConstantColumnVector, OnHeapColumnVector}
-import org.apache.spark.sql.types.{BinaryType, IntegerType}
+import org.apache.spark.sql.types.{BinaryType, IntegerType, LongType, StringType, StructField, StructType}
 import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 
 import org.apache.comet.vector.{CometDictionary, CometDictionaryVector, CometPlainVector}
@@ -165,6 +166,71 @@ class CometBatchRowProjectionSuite extends AnyFunSuite {
     } finally {
       batches.foreach(_.close())
       allocator.close()
+    }
+  }
+
+  private def inTask[T](f: => T): T = {
+    val context = TaskContext.empty()
+    TaskContext.setTaskContext(context)
+    try f
+    finally {
+      context.markTaskCompleted(None)
+      TaskContext.unset()
+    }
+  }
+
+  test("tasks reuse generated projections and never share one within a task") {
+    val references = Seq(BoundReference(0, LongType, nullable = false))
+    val (first, second) = inTask {
+      val a = CometBatchRowProjection.acquire(references)
+      val b = CometBatchRowProjection.acquire(references)
+      assert(a ne b)
+      (a, b)
+    }
+    assert(CometBatchRowProjection.pooled(references) >= 2)
+    inTask {
+      val reused = CometBatchRowProjection.acquire(references)
+      assert((reused eq first) || (reused eq second))
+      val other = CometBatchRowProjection.acquire(references)
+      assert(other ne reused)
+    }
+  }
+
+  test("pooled projections keep rows of different schemas apart") {
+    val point = StructType(Seq(StructField("x", IntegerType), StructField("y", StringType)))
+    val schemas = Seq(
+      Seq(AttributeReference("a", IntegerType)(), AttributeReference("b", StringType)()),
+      Seq(AttributeReference("b", StringType)(), AttributeReference("a", IntegerType)()),
+      Seq(
+        AttributeReference("p", point)(),
+        AttributeReference("n", LongType, nullable = false)()))
+    def batch(output: Seq[AttributeReference], start: Int): ColumnarBatch = {
+      val columns = output.map { a =>
+        val v = new OnHeapColumnVector(3, a.dataType)
+        (0 until 3).foreach { i =>
+          a.dataType match {
+            case IntegerType => if (i == 1) v.putNull(i) else v.putInt(i, start + i)
+            case LongType => v.putLong(i, (start + i).toLong * 7)
+            case StringType => v.putByteArray(i, s"s${start + i}".getBytes("UTF-8"))
+            case _: StructType =>
+              v.getChild(0).putInt(i, start - i)
+              v.getChild(1).putByteArray(i, s"y$i".getBytes("UTF-8"))
+          }
+        }
+        v: ColumnVector
+      }
+      new ColumnarBatch(columns.toArray, 3)
+    }
+    for (round <- 0 until 3; output <- schemas) {
+      val input = batch(output, round * 10)
+      try {
+        val expected = UnsafeProjection.create(output, output)
+        val rows = inTask {
+          val projection = new CometBatchRowProjection(output).forBatch(input)
+          input.rowIterator().asScala.map(row => projection(row).copy()).toVector
+        }
+        assert(rows == input.rowIterator().asScala.map(row => expected(row).copy()).toVector)
+      } finally input.close()
     }
   }
 }
