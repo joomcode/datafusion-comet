@@ -52,6 +52,7 @@ import com.google.common.base.Objects
 import org.apache.comet.{CometConf, CometExplainInfo}
 import org.apache.comet.CometConf.{COMET_SHUFFLE_ENABLED, COMET_SHUFFLE_MODE}
 import org.apache.comet.CometSparkSessionExtensions.{cometCelebornShuffleFallbackReason, hasFallbackReason, isCometCelebornShuffleManagerEnabled, isCometShuffleManagerEnabled, isSpark40Plus, withFallbackReasons}
+import org.apache.comet.rules.WideRowShuffleFallback
 import org.apache.comet.serde.{Compatible, OperatorOuterClass, QueryPlanSerde, SupportLevel, Unsupported}
 import org.apache.comet.serde.operator.CometSink
 import org.apache.comet.shims.{CometTypeShim, ShimCometShuffleExchangeExec}
@@ -492,6 +493,13 @@ object CometShuffleExchangeExec
       case None =>
     }
 
+    WideRowShuffleFallback.fallbackReason(s) match {
+      case Some(reason) =>
+        withFallbackReasons(s, Set(reason))
+        return None
+      case None =>
+    }
+
     // A Comet shuffle wrapped around a stage that still contains a Spark FileSourceScanExec
     // with DPP produces inefficient row<->columnar transitions. This only happens when the
     // scan fell back to Spark (e.g., AQE DPP on Spark 3.4, or unsupported scan type).
@@ -556,6 +564,7 @@ object CometShuffleExchangeExec
    */
   def columnarShuffleAvailable(s: ShuffleExchangeExec): Boolean =
     isCometShuffleEnabledReason(s).isEmpty &&
+      WideRowShuffleFallback.fallbackReason(s).isEmpty &&
       !isCometCelebornShuffleManagerEnabled(s.conf) &&
       (isCometPlan(s.child) ||
         CometConf.COMET_SHUFFLE_CONVERT_FROM_SPARK_PLAN_ENABLED.get(s.conf)) &&

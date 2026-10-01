@@ -413,6 +413,19 @@ object CometConf extends ShimCometConf {
       .booleanConf
       .createWithDefault(true)
 
+  val COMET_SHUFFLE_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS: ConfigEntry[Int] =
+    conf("spark.comet.shuffle.wideRowFallback.minLeafColumns")
+      .category(CATEGORY_SHUFFLE)
+      .doc(
+        "Number of leaf columns outside the partitioning key at or above which a shuffle " +
+          "stays a Spark shuffle instead of a Comet native or columnar shuffle, whose cost " +
+          "grows with rows times leaf columns. A struct counts the leaves of its fields, an " +
+          "array the leaves of its element, a map the leaves of its key and value, and any " +
+          "other type one. 0 disables the rule.")
+      .intConf
+      .checkValue(_ >= 0, "Must be >= 0.")
+      .createWithDefault(0)
+
   val COMET_SHUFFLE_MODE: ConfigEntry[String] = conf("spark.comet.shuffle.mode")
     .withAlternative(s"$COMET_EXEC_CONFIG_PREFIX.shuffle.mode")
     .category(CATEGORY_SHUFFLE)
