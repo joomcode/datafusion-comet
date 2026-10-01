@@ -74,8 +74,29 @@ class WideRowShuffleFallbackSuite extends CometTestBase {
           AttributeReference("c", MapType(StringType, point))())) == 8)
   }
 
-  test("the rule is off by default") {
-    assert(CometConf.COMET_SHUFFLE_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS.defaultValue.contains(0))
+  test("the threshold defaults to 50 leaf columns") {
+    assert(CometConf.COMET_SHUFFLE_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS.defaultValue.contains(50))
+  }
+
+  test("by default a shuffle moves to Spark at 50 payload leaves, not at 49") {
+    Seq(49 -> true, 50 -> false).foreach { case (leaves, comet) =>
+      withTempPath { dir =>
+        spark
+          .range(1000)
+          .selectExpr("cast(id % 37 AS int) AS k" +: (1 to leaves).map(i =>
+            s"cast(id + $i AS int) AS c$i"): _*)
+          .write
+          .parquet(dir.getCanonicalPath)
+        spark.read.parquet(dir.getCanonicalPath).createOrReplaceTempView("n")
+        withTempView("n") {
+          bothAqeModes {
+            val plan = run(spark.table("n").repartition(7, col("k")))
+            assert(cometShuffles(plan).nonEmpty == comet, s"$leaves leaves:\n$plan")
+            assert(sparkShuffles(plan).isEmpty == comet, s"$leaves leaves:\n$plan")
+          }
+        }
+      }
+    }
   }
 
   private def withTable(f: => Unit): Unit = {

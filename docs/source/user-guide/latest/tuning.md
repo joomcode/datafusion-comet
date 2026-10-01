@@ -600,25 +600,17 @@ whose buffers Spark cannot read keep their engine. Shuffle and broadcast formats
 ### Sorts of Wide Rows
 
 The native sort copies every row when it sorts a batch, when it spills and when it merges spills, while Spark sorts
-pointers with key prefixes. For wide rows with a short sort key the copies dominate. Set
-`spark.comet.exec.sort.wideRowFallback.enabled=true` to run such a sort in Spark when a Spark operator reads it and
-its rows are wide in one of two ways:
-
-- A column outside the sort key has a variable-width type: binary, array, map, or a struct holding one of these at
-  any depth. Strings and structs of fixed-width types do not count. Aggregate buffers of typed imperative aggregates,
-  such as sketches, are binary. This needs no statistics, so the sort moves to Spark on the initial plan and the
-  shuffle formats around it follow. `spark.comet.exec.sort.wideRowFallback.variableWidthTypes.enabled` (default
-  `true`) turns this condition off.
-- Its average input row is larger than `spark.comet.exec.sort.wideRowFallback.minAvgRowBytes` (default `1024`) and
-  its key takes less than `spark.comet.exec.sort.wideRowFallback.maxKeyFraction` (default `0.2`) of the row. The row
-  size is the larger of the runtime statistics of the query stage the sort reads under AQE and the default sizes of
-  the column types; the key share always comes from the column types.
+pointers with key prefixes. For wide rows the copies dominate. Set `spark.comet.exec.sort.wideRowFallback.enabled=true`
+to run a sort in Spark when a Spark operator reads it and its input has at least
+`spark.comet.exec.sort.wideRowFallback.minLeafColumns` (default `50`) leaf columns outside the sort key. A struct
+counts the leaves of its fields, an array the leaves of its element, a map the leaves of its key and value, and any
+other type one. Columns referenced by the sort key are not counted. The decision reads only the schema, so it is
+made on the initial plan, every later plan of the query makes the same one, and the shuffle formats around the sort
+follow it.
 
 A sort read by a native operator, such as a sort-merge join or a window, stays native, since running it in Spark would
-add two conversions. A sort moved to Spark stays in Spark when AQE re-plans the query, even if the runtime statistics
-then show narrower rows, since both conditions hold again on every later plan of the query once they held on an
-earlier one. With `spark.comet.exec.boundaryFormats.enabled`, the shuffle formats around the sort then follow its
-engine.
+add two conversions. With `spark.comet.exec.boundaryFormats.enabled`, the shuffle formats around the sort then follow
+its engine.
 
 ### Wide or Deeply Nested Schemas
 

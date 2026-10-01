@@ -424,7 +424,7 @@ object CometConf extends ShimCometConf {
           "other type one. 0 disables the rule.")
       .intConf
       .checkValue(_ >= 0, "Must be >= 0.")
-      .createWithDefault(0)
+      .createWithDefault(50)
 
   val COMET_SHUFFLE_MODE: ConfigEntry[String] = conf("spark.comet.shuffle.mode")
     .withAlternative(s"$COMET_EXEC_CONFIG_PREFIX.shuffle.mode")
@@ -710,47 +710,26 @@ object CometConf extends ShimCometConf {
       .category(CATEGORY_EXEC)
       .doc(
         "When enabled, a sort that Comet converted runs in Spark instead when a Spark " +
-          "operator reads its output and its rows are wide: a column outside the sort key has " +
-          "a binary, array or map type, or a struct type holding one, or the rows are larger " +
-          "than spark.comet.exec.sort.wideRowFallback.minAvgRowBytes on average with a sort " +
-          "key that is a small part of the row. The native sort copies every row when sorting " +
-          "a batch, when spilling and when merging, while Spark sorts pointers to rows. The " +
-          "row width is the larger of the runtime statistics of the query stage the sort " +
-          "reads and the estimate from the schema. A sort read by a native operator stays " +
-          "native, and a sort moved to Spark stays there when AQE re-plans the query.")
+          "operator reads its output and its rows have at least " +
+          "spark.comet.exec.sort.wideRowFallback.minLeafColumns leaf columns outside the sort " +
+          "key. The native sort copies every row when sorting a batch, when spilling and when " +
+          "merging, while Spark sorts pointers to rows. The decision reads only the schema, so " +
+          "every plan of a query makes the same one. A sort read by a native operator stays " +
+          "native.")
       .booleanConf
       .createWithDefault(false)
 
-  val COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MIN_AVG_ROW_BYTES: ConfigEntry[Long] =
-    conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.wideRowFallback.minAvgRowBytes")
-      .category(CATEGORY_EXEC)
-      .doc("Average size in bytes of a sort's input row above which the row is wide, for " +
-        "spark.comet.exec.sort.wideRowFallback.enabled.")
-      .longConf
-      .checkValue(_ >= 0, "Must be >= 0.")
-      .createWithDefault(1024L)
-
-  val COMET_EXEC_SORT_WIDE_ROW_FALLBACK_VARIABLE_WIDTH_TYPES_ENABLED: ConfigEntry[Boolean] =
-    conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.wideRowFallback.variableWidthTypes.enabled")
+  val COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS: ConfigEntry[Int] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.wideRowFallback.minLeafColumns")
       .category(CATEGORY_EXEC)
       .doc(
-        "Whether spark.comet.exec.sort.wideRowFallback.enabled also moves a sort to Spark, " +
-          "whatever its row size, when a column outside its sort key has a binary, array or " +
-          "map type, or a struct type holding one. The decision needs no statistics, so it " +
-          "is made on the initial plan and the shuffle formats around the sort follow it.")
-      .booleanConf
-      .createWithDefault(true)
-
-  val COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MAX_KEY_FRACTION: ConfigEntry[Double] =
-    conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.wideRowFallback.maxKeyFraction")
-      .category(CATEGORY_EXEC)
-      .doc(
-        "Share of a sort's input row, estimated from the default sizes of the column types, " +
-          "taken by its sort keys below which the key is narrow, for the row size condition " +
-          "of spark.comet.exec.sort.wideRowFallback.enabled.")
-      .doubleConf
-      .checkValue(v => v >= 0 && v <= 1, "Must be between 0 and 1.")
-      .createWithDefault(0.2)
+        "Number of leaf columns outside the sort key at or above which the rows of a sort " +
+          "are wide, for spark.comet.exec.sort.wideRowFallback.enabled. A struct counts the " +
+          "leaves of its fields, an array the leaves of its element, a map the leaves of its " +
+          "key and value, and any other type one.")
+      .intConf
+      .checkValue(_ >= 1, "Must be >= 1.")
+      .createWithDefault(50)
 
   val COMET_SHUFFLE_COMPRESSION_CODEC: ConfigEntry[String] =
     conf("spark.comet.shuffle.compression.codec")

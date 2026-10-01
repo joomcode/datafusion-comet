@@ -21,12 +21,10 @@ package org.apache.comet.rules
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet}
+import org.apache.spark.sql.catalyst.expressions.AttributeSet
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.comet.{CometSortExec, CometSparkToColumnarExec}
 import org.apache.spark.sql.execution.{ColumnarToRowTransition, SortExec, SparkPlan}
-import org.apache.spark.sql.execution.adaptive.{AQEShuffleReadExec, QueryStageExec}
-import org.apache.spark.sql.types.{ArrayType, BinaryType, DataType, MapType, StructType}
 
 import org.apache.comet.CometConf
 import org.apache.comet.CometSparkSessionExtensions.withFallbackReason
@@ -39,16 +37,13 @@ case class WideRowSortFallback(session: SparkSession) extends Rule[SparkPlan] wi
       !CometConf.COMET_EXEC_ENABLED.get(conf)) {
       return plan
     }
-    val thresholds = WideRowSortFallback.Thresholds(
-      CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MIN_AVG_ROW_BYTES.get(conf),
-      CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MAX_KEY_FRACTION.get(conf),
-      CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_VARIABLE_WIDTH_TYPES_ENABLED.get(conf))
+    val minLeaves = CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS.get(conf)
     var changed = false
 
     def visit(node: SparkPlan): SparkPlan = {
       val children = node.children.map(visit).map {
         case sort: CometSortExec if readsRows(node) && WideRowSortFallback.revertible(sort) =>
-          WideRowSortFallback.fallbackReason(sort, thresholds) match {
+          WideRowSortFallback.fallbackReason(sort, minLeaves) match {
             case Some(why) =>
               changed = true
               WideRowSortFallback.revert(sort, why)
@@ -71,79 +66,28 @@ case class WideRowSortFallback(session: SparkSession) extends Rule[SparkPlan] wi
 
 object WideRowSortFallback extends Logging {
 
-  val reason = "Wide rows with a narrow sort key: Spark sorts row pointers"
-
-  val variableWidthReason =
-    "Variable-width columns outside the sort key: Spark sorts row pointers"
-
-  case class Thresholds(minAvgRowBytes: Long, maxKeyFraction: Double, variableWidthTypes: Boolean)
-
   private[rules] def revertible(sort: CometSortExec): Boolean =
     sort.originalPlan.isInstanceOf[SortExec]
 
-  def runtimeAvgRowBytes(input: SparkPlan): Option[Double] = input match {
-    case stage: QueryStageExec =>
-      stage.computeStats().flatMap { stats =>
-        stats.rowCount.filter(_ > 0).map(rows => stats.sizeInBytes.toDouble / rows.toDouble)
-      }
-    case read: AQEShuffleReadExec => runtimeAvgRowBytes(read.child)
-    case _ => None
-  }
-
-  def schemaBytes(attributes: Seq[Attribute]): Long =
-    attributes.map(_.dataType.defaultSize.toLong).sum
-
-  def avgRowBytes(sort: CometSortExec): Double =
-    math.max(
-      runtimeAvgRowBytes(sort.child).getOrElse(0.0),
-      schemaBytes(sort.child.output).toDouble)
-
-  def keyFraction(sort: CometSortExec): Double = {
-    val keyBytes = sort.sortOrder.map(_.child.dataType.defaultSize.toLong).sum
-    keyBytes.toDouble / math.max(schemaBytes(sort.child.output), 1L).toDouble
-  }
-
-  def variableWidth(dataType: DataType): Boolean = dataType match {
-    case BinaryType | _: ArrayType | _: MapType => true
-    case struct: StructType => struct.fields.exists(f => variableWidth(f.dataType))
-    case _ => false
-  }
-
-  def variableWidthPayload(sort: CometSortExec): Seq[Attribute] = {
+  def payloadLeaves(sort: CometSortExec): Int = {
     val keys = AttributeSet(sort.sortOrder.flatMap(_.references))
-    sort.child.output.filter(a => !keys.contains(a) && variableWidth(a.dataType))
+    LeafColumns.count(sort.child.output.filterNot(keys.contains))
   }
 
-  def wideRowNarrowKey(
-      sort: CometSortExec,
-      minAvgRowBytes: Long,
-      maxKeyFraction: Double): Boolean = {
-    val rowBytes = avgRowBytes(sort)
-    val fraction = keyFraction(sort)
-    val decided = rowBytes > minAvgRowBytes && fraction < maxKeyFraction
-    if (decided) {
-      logInfo(
-        f"$reason: average row $rowBytes%.0f bytes, key $fraction%.3f of the row, " +
-          s"sort ${sort.sortOrder.mkString(", ")}")
-    }
-    decided
-  }
-
-  def fallbackReason(sort: CometSortExec, thresholds: Thresholds): Option[String] = {
-    lazy val payload = variableWidthPayload(sort)
-    if (thresholds.variableWidthTypes && payload.nonEmpty) {
-      logInfo(
-        s"$variableWidthReason: ${payload.mkString(", ")}, " +
-          s"sort ${sort.sortOrder.mkString(", ")}")
-      Some(variableWidthReason)
-    } else if (wideRowNarrowKey(sort, thresholds.minAvgRowBytes, thresholds.maxKeyFraction)) {
-      Some(reason)
+  def fallbackReason(sort: CometSortExec, minLeaves: Int): Option[String] = {
+    val leaves = payloadLeaves(sort)
+    if (leaves >= minLeaves) {
+      val why =
+        s"Wide rows: $leaves leaf columns outside the sort key, at least " +
+          s"${CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS.key}=$minLeaves"
+      logInfo(s"$why: sort ${sort.sortOrder.mkString(", ")}")
+      Some(why)
     } else {
       None
     }
   }
 
-  def revert(sort: CometSortExec, why: String = reason): SparkPlan = {
+  def revert(sort: CometSortExec, why: String): SparkPlan = {
     val input = sort.child match {
       case r2c: CometSparkToColumnarExec =>
         r2c.child.setTagValue(CometExecRule.KEEP_ON_SPARK_TAG, ())
