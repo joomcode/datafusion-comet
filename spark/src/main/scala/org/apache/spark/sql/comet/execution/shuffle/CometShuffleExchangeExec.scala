@@ -333,6 +333,7 @@ object CometShuffleExchangeExec
             OperatorOuterClass.ShuffleScan
               .newBuilder()
               .setSource(scan.getSource)
+              .setCoalesceBatches(CometConf.COMET_SHUFFLE_READ_COALESCE_ENABLED.get(op.conf))
               .addAllFields(scan.getFieldsList))
           .build()
       } else {

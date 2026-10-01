@@ -235,6 +235,23 @@ class Native extends NativeBase {
       tracingEnabled: Boolean,
       decoderHandle: Long): Long
 
+  @native def createShuffleReadCoalescer(batchSize: Int): Long
+
+  @native def releaseShuffleReadCoalescer(handle: Long): Unit
+
+  @native def pushShuffleBlock(
+      handle: Long,
+      shuffleBlock: ByteBuffer,
+      length: Int,
+      tracingEnabled: Boolean): Boolean
+
+  @native def finishShuffleRead(handle: Long): Boolean
+
+  @native def exportShuffleBatch(
+      handle: Long,
+      arrayAddrs: Array[Long],
+      schemaAddrs: Array[Long]): Long
+
   /**
    * Log the beginning of an event.
    * @param name

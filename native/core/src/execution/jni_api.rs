@@ -107,7 +107,8 @@ use tokio::sync::mpsc;
 use crate::execution::memory_pools::{create_memory_pool, parse_memory_pool_config};
 use crate::execution::operators::{ScanExec, ShuffleScanExec};
 use crate::execution::shuffle::{
-    decode_remote_shuffle_batch, read_ipc_compressed, CompressionCodec, ShuffleWriterExec,
+    decode_remote_shuffle_batch, read_ipc_compressed, CompressionCodec, ShuffleReadCoalescer,
+    ShuffleWriterExec,
 };
 use crate::execution::spark_plan::SparkPlan;
 
@@ -1708,6 +1709,117 @@ fn decode_shuffle_block(
     };
     log_batch_memory("shuffle_decode_jvm", &batch);
     prepare_output(env, array_addrs, schema_addrs, batch, false)
+}
+
+struct ShuffleReadState {
+    coalescer: ShuffleReadCoalescer,
+    ready: Option<RecordBatch>,
+}
+
+fn shuffle_read_state<'a>(handle: jlong) -> CometResult<&'a mut ShuffleReadState> {
+    unsafe { (handle as *mut ShuffleReadState).as_mut() }
+        .ok_or_else(|| CometError::Internal("Shuffle read coalescer is not initialized".to_owned()))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_apache_comet_Native_createShuffleReadCoalescer(
+    e: EnvUnowned,
+    _class: JClass,
+    batch_size: jint,
+) -> jlong {
+    try_unwrap_or_throw(&e, |_| {
+        let state = ShuffleReadState {
+            coalescer: ShuffleReadCoalescer::new(batch_size.max(1) as usize),
+            ready: None,
+        };
+        Ok(Box::into_raw(Box::new(state)) as jlong)
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// A nonzero handle must have been returned by `createShuffleReadCoalescer`, must not have been
+/// released, and must not be in use by a concurrent call.
+pub unsafe extern "system" fn Java_org_apache_comet_Native_releaseShuffleReadCoalescer(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) {
+    try_unwrap_or_throw(&e, |_| {
+        if handle != 0 {
+            drop(unsafe { Box::from_raw(handle as *mut ShuffleReadState) });
+        }
+        Ok(())
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The buffer must be valid for `length` bytes. `handle` must come from
+/// `createShuffleReadCoalescer` and must stay alive for the duration of this call.
+pub unsafe extern "system" fn Java_org_apache_comet_Native_pushShuffleBlock(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    byte_buffer: JByteBuffer,
+    length: jint,
+    tracing_enabled: jboolean,
+) -> jboolean {
+    try_unwrap_or_throw(&e, |env| {
+        with_trace("pushShuffleBlock", tracing_enabled != JNI_FALSE, || {
+            let state = shuffle_read_state(handle)?;
+            if state.ready.is_some() {
+                return Err(CometError::Internal(
+                    "Shuffle read coalescer has an unexported batch".to_owned(),
+                ));
+            }
+            let raw_pointer = env.get_direct_buffer_address(&byte_buffer)?;
+            let slice: &[u8] = unsafe { std::slice::from_raw_parts(raw_pointer, length as usize) };
+            let batch = read_ipc_compressed(slice)?;
+            state.ready = state.coalescer.push(batch)?;
+            Ok(state.ready.is_some() as jboolean)
+        })
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// `handle` must come from `createShuffleReadCoalescer` and must not have been released.
+pub unsafe extern "system" fn Java_org_apache_comet_Native_finishShuffleRead(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) -> jboolean {
+    try_unwrap_or_throw(&e, |_| {
+        let state = shuffle_read_state(handle)?;
+        if state.ready.is_none() {
+            state.ready = state.coalescer.finish()?;
+        }
+        Ok(state.ready.is_some() as jboolean)
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// `handle` must come from `createShuffleReadCoalescer` and must not have been released. The
+/// output addresses must point to allocated Arrow C structs.
+pub unsafe extern "system" fn Java_org_apache_comet_Native_exportShuffleBatch(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    array_addrs: JLongArray,
+    schema_addrs: JLongArray,
+) -> jlong {
+    try_unwrap_or_throw(&e, |env| {
+        let state = shuffle_read_state(handle)?;
+        match state.ready.take() {
+            Some(batch) => {
+                log_batch_memory("shuffle_decode_jvm", &batch);
+                prepare_output(env, array_addrs, schema_addrs, batch, false)
+            }
+            None => Ok(-1),
+        }
+    })
 }
 
 #[no_mangle]

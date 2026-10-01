@@ -401,6 +401,18 @@ object CometConf extends ShimCometConf {
       .booleanConf
       .createWithDefault(true)
 
+  val COMET_SHUFFLE_READ_COALESCE_ENABLED: ConfigEntry[Boolean] =
+    conf("spark.comet.shuffle.read.coalesce.enabled")
+      .category(CATEGORY_SHUFFLE)
+      .doc(
+        "When enabled, a Comet shuffle reader joins the small blocks it decodes into batches " +
+          "of spark.comet.batchSize rows before passing them on, both to JVM consumers and to " +
+          "native operators reading the shuffle directly. A map task writes one block per " +
+          "reduce partition, so with many partitions and wide rows a block holds a few rows " +
+          "and the per-batch cost of every column dominates the read.")
+      .booleanConf
+      .createWithDefault(true)
+
   val COMET_SHUFFLE_MODE: ConfigEntry[String] = conf("spark.comet.shuffle.mode")
     .withAlternative(s"$COMET_EXEC_CONFIG_PREFIX.shuffle.mode")
     .category(CATEGORY_SHUFFLE)

@@ -137,6 +137,7 @@ message ShuffleScan {
   repeated spark.spark_expression.DataType fields = 1;
   // Informational label for debug output (e.g., "CometShuffleExchangeExec [id=5]")
   string source = 2;
+  bool coalesce_batches = 3;
 }
 
 // Common data shared by all partitions in split mode (sent once at planning)

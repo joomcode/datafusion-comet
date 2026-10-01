@@ -2664,8 +2664,15 @@ impl PhysicalPlanner {
                         Some(inputs.remove(0))
                     };
 
-                let shuffle_scan =
-                    ShuffleScanExec::new(self.exec_context_id, input_source, data_types)?;
+                let coalesce_rows = scan
+                    .coalesce_batches
+                    .then(|| self.session_ctx.copied_config().batch_size());
+                let shuffle_scan = ShuffleScanExec::new(
+                    self.exec_context_id,
+                    input_source,
+                    data_types,
+                    coalesce_rows,
+                )?;
 
                 Ok((
                     vec![],
