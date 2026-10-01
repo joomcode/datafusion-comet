@@ -868,7 +868,8 @@ class CometDeltaNativeScanSuite extends CometDeltaTestBase {
         assert(scans.size == 1)
         val numFiles = scans.head.metrics.get("numFiles").map(_.value).getOrElse(0L)
         assert(numFiles == 1, s"expected a single data file, got $numFiles")
-        val numPartitions = scans.head.outputPartitioning.numPartitions
+        val numPartitions =
+          scans.head.asInstanceOf[CometDeltaNativeScanExec].perPartitionData.length
         assert(
           numPartitions > 1,
           "expected the single file to be split into more than one native partition, " +
@@ -2044,8 +2045,7 @@ class CometDeltaNativeScanSuite extends CometDeltaTestBase {
         case s: CometDeltaNativeScanExec => s
       }.head
 
-      // A real execution.ScalarSubquery instance (the exec-time class CometDeltaNativeScanExec
-      // itself matches against in hasUnevaluableSubqueryFilter), wrapping a never-executed
+      // A real execution.ScalarSubquery instance, wrapping a never-executed
       // SubqueryExec -- deliberately never run, so this is unresolved exactly as it would be
       // when AQE's mid-planning walk reaches this node ahead of subquery execution.
       val innerPlan = spark.range(1).selectExpr("id AS c").queryExecution.executedPlan
@@ -3798,6 +3798,86 @@ class CometDeltaNativeScanSuite extends CometDeltaTestBase {
         val rows = df.selectExpr("id", "cast(s.d as string)").collect().sortBy(_.getInt(0))
         assert(rows(0).getString(1) == "2020-06-01", s"got ${rows(0)}")
         assert(rows(1).isNullAt(1), s"got ${rows(1)}")
+      }
+    }
+  }
+
+  private def withinDeadline(what: String, seconds: Int)(body: => Unit): Unit = {
+    @volatile var failure: Option[Throwable] = None
+    val worker = new Thread(s"deadline-$what") {
+      override def run(): Unit =
+        try body
+        catch { case t: Throwable => failure = Some(t) }
+    }
+    worker.setDaemon(true)
+    worker.start()
+    worker.join(seconds * 1000L)
+    if (worker.isAlive) {
+      val stack = worker.getStackTrace.take(40).mkString("\n  ")
+      worker.interrupt()
+      worker.join(30000L)
+      fail(s"$what did not finish within $seconds s; it was at:\n  $stack")
+    }
+    failure.foreach(throw _)
+  }
+
+  test(
+    "scalar subquery data filter whose subquery prunes dynamically does not deadlock " +
+      "planning with boundary formats") {
+    withSQLConf(
+      SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
+      SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "100m",
+      CometConf.COMET_EXEC_BOUNDARY_FORMATS_ENABLED.key -> "true") {
+      withTempPath { dir =>
+        val mainPath = s"${dir.getAbsolutePath}/main"
+        val factPath = s"${dir.getAbsolutePath}/fact"
+        val dimPath = s"${dir.getAbsolutePath}/dim"
+        spark
+          .range(0, 1000)
+          .selectExpr("id", "id % 100 as v")
+          .write
+          .format("delta")
+          .save(mainPath)
+        spark
+          .range(0, 2000)
+          .selectExpr("id % 50 as v", "id % 10 as p")
+          .write
+          .format("delta")
+          .partitionBy("p")
+          .save(factPath)
+        spark
+          .range(0, 10)
+          .selectExpr("id as dp", "id as sel")
+          .write
+          .format("delta")
+          .save(dimPath)
+
+        val query =
+          s"SELECT id, v FROM delta.`$mainPath` WHERE v > (SELECT max(f.v) FROM " +
+            s"delta.`$factPath` f JOIN delta.`$dimPath` d ON f.p = d.dp WHERE d.sel < 2)"
+        val expected = spark.range(0, 1000).selectExpr("id", "id % 100 as v").where("v > 41")
+
+        withTable("ctas_dpp_scalar") {
+          withinDeadline("saveAsTable", 120) {
+            spark
+              .sql(query)
+              .write
+              .format("parquet")
+              .mode("overwrite")
+              .saveAsTable("ctas_dpp_scalar")
+          }
+          checkAnswer(spark.table("ctas_dpp_scalar"), expected)
+        }
+        withinDeadline("noop", 120) {
+          spark.sql(query).write.format("noop").mode("overwrite").save()
+        }
+        withinDeadline("collect", 120) {
+          val df = spark.sql(query)
+          checkAnswer(df, expected)
+          assert(
+            deltaNativeScans(df).exists(_.output.exists(_.name == "id")),
+            s"expected the main table to be read natively:\n${df.queryExecution.executedPlan}")
+        }
       }
     }
   }
