@@ -377,7 +377,12 @@ object Utils extends CometTypeShim with Logging {
                 targetRoot.allocateNew()
               }
               try {
-                VectorSchemaRootAppender.append(targetRoot, sourceRoot)
+                val normalized = sourceRoot.slice(0, sourceRoot.getRowCount)
+                try {
+                  VectorSchemaRootAppender.append(targetRoot, normalized)
+                } finally {
+                  normalized.close()
+                }
               } catch {
                 case e: IllegalArgumentException =>
                   logWarning(

@@ -1234,6 +1234,30 @@ class CometJoinSuite extends CometTestBase {
     }
   }
 
+  test("Broadcast coalescing keeps the values of build batches sliced from one native batch") {
+    withSQLConf(
+      SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+      SQLConf.SHUFFLE_PARTITIONS.key -> "1") {
+      withParquetTable((0 until 20000).map(i => (i, s"key_$i")), "sliced_build_src") {
+        withParquetTable((0 until 20000).map(i => (s"key_$i", i)), "sliced_probe") {
+          val query =
+            """SELECT /*+ BROADCAST(b) */ p._2, b.k
+              |FROM sliced_probe p
+              |JOIN (SELECT DISTINCT _2 AS k FROM sliced_build_src) b ON p._1 = b.k
+              |""".stripMargin
+          val (_, cometPlan) = checkSparkAnswerAndOperator(
+            sql(query),
+            Seq(classOf[CometBroadcastExchangeExec], classOf[CometBroadcastHashJoinExec]))
+          assert(sql(query).count() == 20000)
+
+          val broadcast = collect(cometPlan) { case b: CometBroadcastExchangeExec => b }.head
+          assert(broadcast.metrics("numCoalescedBatches").value > 1L)
+          assert(broadcast.metrics("numCoalescedRows").value == 20000L)
+        }
+      }
+    }
+  }
+
   test("Broadcast coalescing falls back for array field metadata mismatch") {
     withSQLConf(
       SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",

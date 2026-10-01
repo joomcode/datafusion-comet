@@ -20,6 +20,11 @@
 package org.apache.spark.sql.comet.util
 
 import org.apache.arrow.c.CDataDictionaryProvider
+import org.apache.arrow.memory.ArrowBuf
+import org.apache.arrow.vector.{BitVectorHelper, IntVector, VarCharVector}
+import org.apache.arrow.vector.complex.ListVector
+import org.apache.arrow.vector.ipc.message.ArrowFieldNode
+import org.apache.arrow.vector.types.pojo.{ArrowType, FieldType}
 import org.apache.spark.sql.CometTestBase
 import org.apache.spark.sql.execution.vectorized.ConstantColumnVector
 import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType, TimestampType}
@@ -56,6 +61,98 @@ class UtilsSuite extends CometTestBase {
 
     val decoded = coalesced.iterator.flatMap(b => Utils.decodeBatches(b, "test")).toSeq
     assert(decoded.map(_.numRows()).sum == expected)
+  }
+
+  test("coalesceBroadcastBatches rebases the offsets of batches sliced from one batch") {
+    val numRows = 12
+    val sliceLength = 4
+    val strings = (0 until numRows).map(i => s"value_$i")
+    val lists = (0 until numRows).map(i => (0 to i % 3).map(_ + i))
+
+    val parentStrings = new VarCharVector("s", CometArrowAllocator)
+    parentStrings.allocateNew()
+    strings.zipWithIndex.foreach { case (v, i) => parentStrings.setSafe(i, v.getBytes("UTF-8")) }
+    parentStrings.setValueCount(numRows)
+
+    val parentLists = ListVector.empty("l", CometArrowAllocator)
+    val writer = parentLists.getWriter
+    lists.zipWithIndex.foreach { case (values, i) =>
+      writer.setPosition(i)
+      writer.startList()
+      values.foreach(writer.integer().writeInt(_))
+      writer.endList()
+    }
+    parentLists.setValueCount(numRows)
+    val parentElements = parentLists.getDataVector.asInstanceOf[IntVector]
+
+    def allValid(length: Int): ArrowBuf = {
+      val validity = CometArrowAllocator.buffer(((length + 7) / 8).toLong)
+      (0 until length).foreach(i => BitVectorHelper.setBit(validity, i.toLong))
+      validity
+    }
+
+    def sliceOffsets(offsets: ArrowBuf, start: Int, length: Int): ArrowBuf =
+      offsets.slice(start.toLong * 4, (length + 1).toLong * 4)
+
+    val starts = 0 until numRows by sliceLength
+    val sliced = starts.map { start =>
+      val validity = allValid(sliceLength)
+      val stringSlice = new VarCharVector("s", CometArrowAllocator)
+      stringSlice.loadFieldBuffers(
+        new ArrowFieldNode(sliceLength, 0),
+        java.util.Arrays.asList(
+          validity,
+          sliceOffsets(parentStrings.getOffsetBuffer, start, sliceLength),
+          parentStrings.getDataBuffer))
+
+      val listSlice = ListVector.empty("l", CometArrowAllocator)
+      listSlice.addOrGetVector[IntVector](FieldType.nullable(new ArrowType.Int(32, true)))
+      listSlice.loadFieldBuffers(
+        new ArrowFieldNode(sliceLength, 0),
+        java.util.Arrays
+          .asList(validity, sliceOffsets(parentLists.getOffsetBuffer, start, sliceLength)))
+      val elementCount = parentElements.getValueCount
+      val elementValidity = allValid(elementCount)
+      listSlice.getDataVector.loadFieldBuffers(
+        new ArrowFieldNode(elementCount, 0),
+        java.util.Arrays.asList(elementValidity, parentElements.getDataBuffer))
+      elementValidity.close()
+      validity.close()
+      (stringSlice, listSlice)
+    }
+
+    try {
+      assert(sliced(1)._1.getOffsetBuffer.getInt(0) > 0)
+      assert(sliced(1)._2.getOffsetBuffer.getInt(0) > 0)
+      val batches = sliced.map { case (stringSlice, listSlice) =>
+        val provider = new CDataDictionaryProvider
+        new ColumnarBatch(
+          Array[ColumnVector](
+            CometVector.getVector(stringSlice, provider),
+            CometVector.getVector(listSlice, provider)),
+          sliceLength)
+      }
+      val bufs = Utils.serializeBatches(batches.iterator).map(_._2).toSeq.iterator
+      val (coalesced, batchCount, totalRows) = Utils.coalesceBroadcastBatches(bufs)
+      assert(batchCount == starts.size)
+      assert(totalRows == numRows)
+
+      val got = coalesced.iterator.flatMap { b =>
+        Utils.decodeBatches(b, "test").flatMap { out =>
+          (0 until out.numRows()).map { i =>
+            (out.column(0).getUTF8String(i).toString, out.column(1).getArray(i).toIntArray.toSeq)
+          }
+        }
+      }.toSeq
+      assert(got == strings.zip(lists))
+    } finally {
+      sliced.foreach { case (stringSlice, listSlice) =>
+        stringSlice.close()
+        listSlice.close()
+      }
+      parentLists.close()
+      parentStrings.close()
+    }
   }
 
   test("serializeBatches materializes ConstantColumnVector columns") {
