@@ -1109,6 +1109,39 @@ class CometJoinSuite extends CometTestBase {
     }
   }
 
+  test("SortMergeJoin with join filter keeps the streamed order for an aggregate on the key") {
+    withSQLConf(
+      CometConf.COMET_EXEC_SORT_MERGE_JOIN_ENABLED.key -> "true",
+      CometConf.COMET_EXEC_SORT_MERGE_JOIN_WITH_JOIN_FILTER_ENABLED.key -> "true",
+      CometConf.COMET_BATCH_SIZE.key -> "8",
+      SQLConf.SHUFFLE_PARTITIONS.key -> "1",
+      SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+      SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+      val unique = (0 until 7).map(k => (k, k, 3))
+      val skewed = for {
+        k <- 0 until 7
+        j <- 0 until (if (k < 5) 20 else 1)
+      } yield (k * 100 + j, k, j)
+      withParquetTable(unique, "tbl_u") {
+        withParquetTable(skewed, "tbl_s") {
+          val left = sql(
+            "SELECT tbl_u._1, tbl_u._2, count(tbl_s._1), sum(tbl_s._3) " +
+              "FROM tbl_u LEFT JOIN tbl_s ON tbl_u._2 = tbl_s._2 AND tbl_s._3 < tbl_u._3 " +
+              "GROUP BY tbl_u._1, tbl_u._2")
+          checkSparkAnswerAndOperator(left)
+          assert(left.collect().length == 7)
+
+          val right = sql(
+            "SELECT tbl_u._1, tbl_u._2, count(tbl_s._1), sum(tbl_s._3) " +
+              "FROM tbl_s RIGHT JOIN tbl_u ON tbl_u._2 = tbl_s._2 AND tbl_s._3 < tbl_u._3 " +
+              "GROUP BY tbl_u._1, tbl_u._2")
+          checkSparkAnswerAndOperator(right)
+          assert(right.collect().length == 7)
+        }
+      }
+    }
+  }
+
   test("full outer join") {
     withTempView("`left`", "`right`", "allNulls") {
       allNulls.createOrReplaceTempView("allNulls")
