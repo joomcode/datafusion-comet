@@ -560,6 +560,9 @@ single-node setups with fast NVMe drives, at the expense of increased disk space
 
 ## Reducing Row/Columnar Conversion Overhead
 
+The cost-based engine choice, described below, is the only rule in this section enabled by default. The other rules
+are disabled by default and are meant for plans where it is disabled.
+
 When a query stage contains many operators that fall back to Spark row-based execution, Comet may insert
 repeated columnar-to-row and row-to-columnar conversions that dominate stage runtime. Set
 `spark.comet.exec.transitionRevert.enabled=true` to have Comet revert the entire stage to Spark row execution
@@ -574,7 +577,8 @@ reverting it would split that aggregate between the two engines.
 Comet picks each shuffle's format from its producer: a native shuffle after a native operator and, with
 `spark.comet.shuffle.convertFromSparkPlan.enabled`, Comet's columnar shuffle after a Spark operator, whatever
 reads it. When a Spark operator reads that columnar shuffle too, rows are converted to Arrow when written and back
-to rows when read, for nothing. Set `spark.comet.exec.boundaryFormats.enabled=true` to pick each shuffle and
+to rows when read, for nothing. The cost-based engine choice already picks formats this way. With it disabled, set
+`spark.comet.exec.boundaryFormats.enabled=true` to pick each shuffle and
 broadcast format from the engines on both of its sides: a Spark shuffle between two Spark operators, a columnar
 shuffle from a Spark operator into a native one, a native shuffle after a native operator, and a Spark broadcast
 for a Spark join. No operator changes engine. The shuffles read in one stage, such as the inputs of a sort-merge
@@ -585,7 +589,7 @@ operator reads it.
 
 ### Cost-Based Engine Choice
 
-`spark.comet.exec.costBasedEngines.enabled=true` decides, for each operator Comet converted, whether it runs
+`spark.comet.exec.costBasedEngines.enabled`, enabled by default, decides, for each operator Comet converted, whether it runs
 natively or in Spark by minimizing one estimated time per row over the whole plan. Each priced operator costs a price
 per row from a table of measurements: `c0 + k0*L + k1*L*L` ns natively and `c0 + k*L` ns in Spark, where `L` is the
 number of leaf columns the operator processes and the coefficients depend on the operator class:
@@ -620,13 +624,15 @@ columns and costs.
 
 Operators only move from Comet to Spark; scans, writes, and native aggregates whose buffers Spark cannot read keep
 their engine. Shuffle and broadcast formats then follow as with `spark.comet.exec.boundaryFormats.enabled`, priced
-the same way. The wide-row rules `spark.comet.exec.sort.wideRowFallback.enabled` and
-`spark.comet.shuffle.wideRowFallback.minLeafColumns` do not run while the cost-based choice is enabled.
+the same way. The wide-row rules `spark.comet.exec.sort.wideRowFallback.enabled` (default `false`) and
+`spark.comet.shuffle.wideRowFallback.minLeafColumns` (default `0`, disabled) do not run while the cost-based choice is enabled. Set
+`spark.comet.exec.costBasedEngines.enabled=false` to leave each operator in the engine Comet's conversion chose.
 
 ### Sorts of Wide Rows
 
 The native sort copies every row when it sorts a batch, when it spills and when it merges spills, while Spark sorts
-pointers with key prefixes. For wide rows the copies dominate. Set `spark.comet.exec.sort.wideRowFallback.enabled=true`
+pointers with key prefixes. For wide rows the copies dominate. With the cost-based choice disabled, set
+`spark.comet.exec.sort.wideRowFallback.enabled=true`
 to run a sort in Spark when a Spark operator reads it and its input has at least
 `spark.comet.exec.sort.wideRowFallback.minLeafColumns` (default `50`) leaf columns outside the sort key. A struct
 counts the leaves of its fields, an array the leaves of its element, a map the leaves of its key and value, and any

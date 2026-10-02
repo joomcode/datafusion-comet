@@ -399,7 +399,8 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
       withSQLConf(
         SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
         CometConf.COMET_EXEC_PROJECT_ENABLED.key -> "false",
-        CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_ENABLED.key -> "true") {
+        CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_ENABLED.key -> "true",
+        CometConf.COMET_SHUFFLE_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS.key -> "50") {
         def query: DataFrame =
           spark
             .table("t60")

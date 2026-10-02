@@ -19,6 +19,7 @@
 
 package org.apache.comet.rules
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.{CometTestBase, DataFrame}
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
 import org.apache.spark.sql.comet.{CometNativeExec, CometSortExec}
@@ -35,6 +36,11 @@ import org.apache.comet.CometConf
 class WideRowShuffleFallbackSuite extends CometTestBase {
 
   private val minLeaves = CometConf.COMET_SHUFFLE_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS.key
+
+  override protected def sparkConf: SparkConf =
+    super.sparkConf
+      .set(minLeaves, "50")
+      .set(CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.key, "false")
 
   test("primitive, string and binary types are one leaf each") {
     Seq(
@@ -74,11 +80,11 @@ class WideRowShuffleFallbackSuite extends CometTestBase {
           AttributeReference("c", MapType(StringType, point))())) == 8)
   }
 
-  test("the threshold defaults to 50 leaf columns") {
-    assert(CometConf.COMET_SHUFFLE_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS.defaultValue.contains(50))
+  test("the rule is disabled by default") {
+    assert(CometConf.COMET_SHUFFLE_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS.defaultValue.contains(0))
   }
 
-  test("by default a shuffle moves to Spark at 50 payload leaves, not at 49") {
+  test("at a threshold of 50 a shuffle moves to Spark at 50 payload leaves, not at 49") {
     Seq(49 -> true, 50 -> false).foreach { case (leaves, comet) =>
       withTempPath { dir =>
         spark

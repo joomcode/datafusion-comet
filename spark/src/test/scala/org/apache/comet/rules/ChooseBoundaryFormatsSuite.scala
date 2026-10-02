@@ -19,6 +19,7 @@
 
 package org.apache.comet.rules
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.{CometTestBase, DataFrame}
 import org.apache.spark.sql.comet.CometNativeExec
 import org.apache.spark.sql.execution.{CommandResultExec, SparkPlan}
@@ -35,6 +36,9 @@ import org.apache.comet.rules.BoundaryTestHelpers._
 class ChooseBoundaryFormatsSuite extends CometTestBase {
 
   private val flag = CometConf.COMET_EXEC_BOUNDARY_FORMATS_ENABLED.key
+
+  override protected def sparkConf: SparkConf =
+    super.sparkConf.set(CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.key, "false")
 
   private def withTables(f: => Unit): Unit = {
     withTempPath { dir =>

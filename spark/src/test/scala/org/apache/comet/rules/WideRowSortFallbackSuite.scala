@@ -42,7 +42,9 @@ class WideRowSortFallbackSuite extends CometTestBase {
   private val shuffleMinLeaves = CometConf.COMET_SHUFFLE_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS.key
 
   override protected def sparkConf: SparkConf =
-    super.sparkConf.set(shuffleMinLeaves, "0")
+    super.sparkConf
+      .set(shuffleMinLeaves, "0")
+      .set(CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.key, "false")
 
   private def ints(n: Int, prefix: String = "c"): Seq[String] =
     (1 to n).map(i => s"cast(id + $i AS int) AS $prefix$i")
@@ -314,13 +316,11 @@ class WideRowSortFallbackSuite extends CometTestBase {
     }
   }
 
-  test("with the shuffle rule at its default a wide sort and its shuffle both run in Spark") {
+  test("with the shuffle rule at 50 leaf columns a wide sort and its shuffle both run in Spark") {
     wide {
       bothAqeModes {
         withSQLConf(
-          (Seq(
-            flag -> "true",
-            shuffleMinLeaves -> CometConf.COMET_SHUFFLE_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS.defaultValueString) ++
+          (Seq(flag -> "true", shuffleMinLeaves -> "50") ++
             sparkWindowConfs): _*) {
           val plan = run(sparkWindow)
           assert(inSpark(plan), s"plan:\n$plan")
