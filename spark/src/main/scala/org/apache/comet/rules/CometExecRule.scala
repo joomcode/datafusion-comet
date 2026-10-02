@@ -143,6 +143,14 @@ object CometExecRule {
   val KEEP_ON_SPARK_TAG: TreeNodeTag[Unit] = TreeNodeTag[Unit]("comet.keepOnSpark")
 
   /**
+   * Tag set on a native operator that [[CostBasedEngineChoice]] reverted to Spark. Like
+   * [[KEEP_ON_SPARK_TAG]] it leaves the operator in Spark on AQE's per-stage conversion, but the
+   * conversion of a whole plan ignores it, so that the choice is made again on every plan AQE
+   * re-optimizes, including the operators it carries over from the previous plan.
+   */
+  val ENGINE_CHOICE_SPARK_TAG: TreeNodeTag[Unit] = TreeNodeTag[Unit]("comet.engineChoiceSpark")
+
+  /**
    * Serializes the native plan of each block of adjacent native operators into its topmost
    * operator. Blocks that already hold a serialized plan are left as they are, so this can run
    * again after a rule has reverted some native operators to Spark and so made new block roots.
@@ -188,8 +196,12 @@ object CometExecRule {
 
 /**
  * Spark physical optimizer rule for replacing Spark operators with Comet operators.
+ *
+ * @param wholePlan
+ *   true when converting a whole plan, which converts again the operators tagged
+ *   [[CometExecRule.ENGINE_CHOICE_SPARK_TAG]] so that [[CostBasedEngineChoice]] decides them anew
  */
-case class CometExecRule(session: SparkSession)
+case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
     extends Rule[SparkPlan]
     with CometTypeShim
     with ShimSubqueryBroadcast {
@@ -390,6 +402,9 @@ case class CometExecRule(session: SparkSession)
   private def transform(plan: SparkPlan): SparkPlan = {
     def convertNode(op: SparkPlan): SparkPlan = op match {
       case op if op.getTagValue(CometExecRule.KEEP_ON_SPARK_TAG).isDefined =>
+        op
+
+      case op if !wholePlan && op.getTagValue(CometExecRule.ENGINE_CHOICE_SPARK_TAG).isDefined =>
         op
 
       // Scan marker produced by an optional, out-of-tree scan contrib (e.g. contrib/delta).

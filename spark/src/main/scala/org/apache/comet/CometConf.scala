@@ -662,11 +662,12 @@ object CometConf extends ShimCometConf {
       .category(CATEGORY_EXEC)
       .doc(
         "When enabled, Comet decides which converted operators run natively by minimizing an " +
-          "estimated time over the whole plan. Each operator, shuffle and columnar-to-row " +
-          "conversion costs its rows times a price per row that depends on the engine, the " +
-          "operator class and the number of leaf columns, taken from the table that " +
-          "spark.comet.exec.costBasedEngines.costTable overrides. An operator reverted to " +
-          "Spark stays in Spark for the rest of the query. Shuffle and broadcast formats then " +
+          "estimated time per row over the whole plan. Each operator, shuffle and " +
+          "columnar-to-row conversion costs a price per row that depends on the engine, the " +
+          "operator class and the leaf columns it processes, taken from the table that " +
+          "spark.comet.exec.costBasedEngines.costTable overrides, so the choice depends only on " +
+          "the schema and the shape of the plan. It is made again on every plan adaptive query " +
+          "execution re-optimizes. Shuffle and broadcast formats then " +
           "follow the engines on both sides, as with spark.comet.exec.boundaryFormats.enabled. " +
           "spark.comet.exec.sort.wideRowFallback.enabled and " +
           "spark.comet.shuffle.wideRowFallback.minLeafColumns are ignored while it is enabled.")
@@ -679,14 +680,20 @@ object CometConf extends ShimCometConf {
       .doc(
         "Overrides of the cost table of spark.comet.exec.costBasedEngines.enabled, as " +
           "semicolon-separated `<key>=<value>` entries, for example " +
-          "`shuffleWrite.flat.comet=50.3,0.221;shuffleWrite.flat.spark=303,67.07;" +
-          "oomRiskPenalty=2000`. A line is keyed `<class>.<form>.<engine>`: the class is " +
-          "shuffleWrite, shuffleRead, sort, rowLocal or c2r, the form flat or nested, and the " +
-          "engine comet, with `k0,k1` for a price of k0*L + k1*L*L ns per row, or spark, with " +
-          "`c0,k` for c0 + k*L ns per row, where L is the number of leaf columns outside the " +
-          "key. c2r has no spark line. The scalars are shuffleWritePartitionSlope and " +
-          "shuffleWritePartitionBase, which scale a Comet shuffle write by " +
-          "1 + slope * max(0, partitions / base - 1), and oomRiskPenalty, in ns per row. " +
+          "`shuffleWrite.flat.comet=250,50.3,0.221;shuffleWrite.flat.spark=303,67.07;" +
+          "filterPassThroughPerLeaf=0.5`. A line is keyed `<class>.<form>.<engine>`: the class " +
+          "is shuffleWrite, shuffleRead, sort, rowLocal, agg or c2r, the form flat or nested, " +
+          "and the engine comet, with `c0,k0,k1` for a price of c0 + k0*L + k1*L*L ns per row " +
+          "(or `k0,k1`, keeping c0), or spark, with `c0,k` for c0 + k*L ns per row, where L is " +
+          "the number of leaf columns the operator processes. A row whose leaves are a " +
+          "fraction f inside structs, arrays or maps costs (1 - f) times the flat price plus f " +
+          "times the nested one. c2r has no spark line. The scalars are " +
+          "shuffleWritePartitionSlope and shuffleWritePartitionBase, which scale a Comet " +
+          "shuffle write by 1 + slope * max(0, partitions / base - 1); " +
+          "filterPassThroughPerLeaf, in ns per row and output leaf of a filter; and " +
+          "shuffleReadPerByte.comet and shuffleReadPerByte.spark, in ns per byte read from a " +
+          "shuffle, over the estimated size of a Spark row, times cometShuffleBytesRatio for " +
+          "Comet. " +
           "Entries not given keep their defaults.")
       .stringConf
       .createWithDefault("")
@@ -696,7 +703,7 @@ object CometConf extends ShimCometConf {
       .category(CATEGORY_EXEC)
       .doc(
         "When enabled, spark.comet.exec.costBasedEngines.enabled logs, for each plan it " +
-          "decides, every operator with its class, form, leaf columns, rows and costs in both " +
+          "decides, every operator with its classes, leaf columns and costs in both " +
           "engines, and every conversion with its cost. It also logs them when " +
           "spark.comet.explain.fallback.enabled is set.")
       .booleanConf
@@ -707,9 +714,9 @@ object CometConf extends ShimCometConf {
       .category(CATEGORY_EXEC)
       .doc(
         "Cost of running natively one operator outside the cost table of " +
-          "spark.comet.exec.costBasedEngines.enabled, such as a shuffled hash join. It is not " +
-          "scaled by rows, so against the priced operators and conversions it only breaks " +
-          "ties. Negative values favor native execution.")
+          "spark.comet.exec.costBasedEngines.enabled, such as a shuffled hash join, in ns per " +
+          "row. Against the priced operators and conversions the default only breaks ties. " +
+          "Negative values favor native execution.")
       .doubleConf
       .createWithDefault(-1.0)
 

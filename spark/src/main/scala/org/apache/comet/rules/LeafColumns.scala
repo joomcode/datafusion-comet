@@ -40,10 +40,6 @@ object LeafColumns {
     case _ => false
   }
 
-  /** Leaves of the attributes whose type is a struct, an array or a map. */
-  def nestedCount(attributes: Seq[Attribute]): Int =
-    attributes.filter(a => isNested(a.dataType)).map(a => count(a.dataType)).sum
-
   /** The attributes that none of `keys` references. */
   def outside(attributes: Seq[Attribute], keys: Seq[Expression]): Seq[Attribute] = {
     val referenced = AttributeSet(keys.flatMap(_.references))

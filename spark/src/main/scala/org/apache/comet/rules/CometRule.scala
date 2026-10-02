@@ -135,13 +135,17 @@ object CometRule {
  * @param queryStagePrep
  *   true for the `injectQueryStagePrepRule` instance, which sees the whole initial plan under
  *   AQE. Plan-only reporting reads it, and the whole-plan rules ([[WideRowSortFallback]],
- *   [[CostBasedEngineChoice]], [[ChooseBoundaryFormats]]) run only on whole plans.
+ *   [[CostBasedEngineChoice]], [[ChooseBoundaryFormats]]) run only on whole plans. A whole plan
+ *   is converted with the operators [[CostBasedEngineChoice]] reverted on an earlier plan
+ *   converted again, so that the choice follows the shape of each plan AQE re-optimizes; the
+ *   per-stage conversion keeps them in Spark.
  */
 case class CometRule(session: SparkSession, queryStagePrep: Boolean = false)
     extends Rule[SparkPlan] {
 
   private val scanRule = CometScanRule(session)
   private val execRule = CometExecRule(session)
+  private val wholePlanExecRule = CometExecRule(session, wholePlan = true)
   private val engineRule = CostBasedEngineChoice(session)
   private val boundaryRule = ChooseBoundaryFormats(session)
   private val sortRule = WideRowSortFallback(session)
@@ -167,7 +171,8 @@ case class CometRule(session: SparkSession, queryStagePrep: Boolean = false)
       !(plan.isInstanceOf[Exchange] || plan.exists(_.isInstanceOf[QueryStageExec]))
 
   private def convert(plan: SparkPlan, wholePlan: Boolean): SparkPlan = {
-    val converted = execRule.apply(scanRule.apply(plan))
+    val exec = if (wholePlan) wholePlanExecRule else execRule
+    val converted = exec.apply(scanRule.apply(plan))
     if (wholePlan) {
       // The root of a subquery feeds an operator outside this plan, such as the broadcast that
       // dynamic partition pruning builds around it, so its engine is kept.

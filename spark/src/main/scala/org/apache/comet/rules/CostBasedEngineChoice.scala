@@ -22,15 +22,15 @@ package org.apache.comet.rules
 import java.util.IdentityHashMap
 
 import scala.collection.mutable
-import scala.util.control.NonFatal
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical.statsEstimation.EstimationUtils
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.comet.{CometExec, CometHashAggregateExec, CometIcebergWriteExec, CometNativeWriteExec, CometPlan, CometSparkToColumnarExec, CometWriteFilesExec}
-import org.apache.spark.sql.execution.{SortExec, SparkPlan}
-import org.apache.spark.sql.execution.adaptive.{AQEShuffleReadExec, QueryStageExec}
+import org.apache.spark.sql.execution.{ExpandExec, FilterExec, ProjectExec, SortExec, SparkPlan}
+import org.apache.spark.sql.execution.aggregate.BaseAggregateExec
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
 import org.apache.spark.sql.internal.SQLConf
 
@@ -40,20 +40,19 @@ import org.apache.comet.rules.BoundaryFormats._
 import org.apache.comet.serde.QueryPlanSerde
 
 /**
- * The cost of [[CostBasedEngineChoice]], in ns: rows times a price per row from
- * [[EngineCostTable]], for the operators it prices, the shuffles and the columnar-to-row
- * conversions. An operator of a class outside the table costs `cometOperatorWeight` when native
- * (or its per-operator override) and `sparkOperatorWeight` in Spark, not scaled by rows.
+ * The cost of [[CostBasedEngineChoice]], in ns per row: a price per row from [[EngineCostTable]]
+ * for the operators it prices, the shuffles and the columnar-to-row conversions. Every operator
+ * counts one row, so the engines are compared per row and the choice depends only on the schema
+ * and the shape of the plan. An operator of a class outside the table costs `cometOperatorWeight`
+ * when native (or its per-operator override) and `sparkOperatorWeight` in Spark.
  *
- * Widths: an operator's leaf columns are those of its output outside the columns its key
- * references (the sort order of a sort, the ordering a buffering operator requires of its input,
- * the partitioning of a shuffle), counted by [[LeafColumns]]; a conversion converts every leaf of
- * its rows.
- *
- * Rows ([[rows]]): the runtime statistics of a materialized query stage, its row count or else
- * its size over the estimated size of a row; else the row count of the operator's logical plan;
- * else the largest estimate among its children, so that operators inside a stage take the rows of
- * the stage's input; else 1, which compares the engines per row.
+ * Widths, counted by [[LeafColumns]]: a sort's leaf columns are those of its output outside its
+ * sort order, and those of a sort-merge join or window outside the ordering it requires of its
+ * input; a project's are those of the expressions it computes, not the attributes it passes
+ * through; a filter's are those its predicate references, plus a pass-through price over every
+ * leaf of its output; an aggregate's are those of its grouping keys plus one per aggregate
+ * function; a shuffle's and a conversion's are every leaf of the rows they move. Any other
+ * operator processes every leaf of its output. An expand costs its price once per projection.
  */
 class EngineCostModel(
     val table: EngineCostTable,
@@ -64,108 +63,91 @@ class EngineCostModel(
 
   import EngineCostTable._
 
-  private val rowEstimates = new IdentityHashMap[SparkPlan, java.lang.Double]()
-
-  def rows(plan: SparkPlan): Double = {
-    val known = rowEstimates.get(plan)
-    if (known != null) {
-      known
-    } else {
-      val estimate = runtimeRows(plan)
-        .orElse(logicalRows(plan))
-        .getOrElse(if (plan.children.isEmpty) 1.0 else plan.children.map(rows).max)
-      rowEstimates.put(plan, estimate)
-      estimate
-    }
+  private def sparkOperator(plan: SparkPlan): SparkPlan = plan match {
+    case op: CometExec => op.originalPlan
+    case other => other
   }
 
-  private def runtimeRows(plan: SparkPlan): Option[Double] = plan match {
-    case stage: QueryStageExec =>
-      stage.computeStats().map { stats =>
-        stats.rowCount.map(_.toDouble).getOrElse {
-          val rowSize = EstimationUtils.getSizePerRow(stage.output)
-          math.max(1.0, (stats.sizeInBytes / rowSize.max(1)).toDouble)
-        }
+  private def nameOf(plan: SparkPlan): String = sparkOperator(plan).getClass.getSimpleName
+
+  /** The classes the table prices `plan` as, a Spark operator or a native one Comet converted. */
+  def costClasses(plan: SparkPlan): Seq[CostClass] = operatorClasses.getOrElse(nameOf(plan), Nil)
+
+  private def passesThrough(expression: NamedExpression): Boolean = expression match {
+    case _: Attribute => true
+    case Alias(_: Attribute, _) => true
+    case _ => false
+  }
+
+  /** The leaf columns `plan` processes per row. */
+  def width(plan: SparkPlan): Width = sparkOperator(plan) match {
+    case sort: SortExec => widthOf(LeafColumns.outside(sort.output, sort.sortOrder))
+    case project: ProjectExec =>
+      widthOfTypes(project.projectList.filterNot(passesThrough).map(_.dataType))
+    case filter: FilterExec => widthOf(filter.condition.references.toSeq)
+    case agg: BaseAggregateExec =>
+      val keys = widthOfTypes(agg.groupingExpressions.map(_.dataType))
+      keys.copy(leaves = keys.leaves + agg.aggregateExpressions.size)
+    case other if costClasses(other) == Seq(CostClass.Sort) =>
+      widthOf(LeafColumns.outside(other.output, other.requiredChildOrdering.flatten))
+    case other => widthOf(other.output)
+  }
+
+  /** How many times `plan` processes each input row. */
+  def multiplier(plan: SparkPlan): Int = sparkOperator(plan) match {
+    case expand: ExpandExec => expand.projections.size
+    case _ => 1
+  }
+
+  /** ns per row of running `plan`, an operator the table prices, in `engine`. */
+  def operatorPrice(plan: SparkPlan, engine: Engine): Double = {
+    val w = width(plan)
+    val classes = costClasses(plan).map { c =>
+      engine match {
+        case Engine.Comet => table.comet(c, w)
+        case Engine.Spark => table.spark(c, w)
       }
-    case read: AQEShuffleReadExec => runtimeRows(read.child)
-    case _ => None
-  }
-
-  private def logicalRows(plan: SparkPlan): Option[Double] =
-    plan.logicalLink.flatMap { logical =>
-      try {
-        logical.stats.rowCount.map(_.toDouble)
-      } catch {
-        case NonFatal(_) => None
-      }
+    }.sum
+    val passThrough = sparkOperator(plan) match {
+      case filter: FilterExec => table.filterPassThroughPerLeaf * LeafColumns.count(filter.output)
+      case _ => 0.0
     }
-
-  private def nameOf(plan: SparkPlan): String = plan match {
-    case op: CometExec => op.originalPlan.getClass.getSimpleName
-    case other => other.getClass.getSimpleName
-  }
-
-  /** The class the table prices `op` as, a native operator Comet converted. */
-  def costClass(op: CometExec): Option[CostClass] = operatorClasses.get(nameOf(op))
-
-  /** The leaf columns `op` processes per row, outside its key. */
-  def width(op: CometExec): Width = {
-    val keys = op.originalPlan match {
-      case sort: SortExec => sort.sortOrder
-      case other if costClass(op).contains(CostClass.Sort) => other.requiredChildOrdering.flatten
-      case _ => Nil
-    }
-    widthOf(LeafColumns.outside(op.output, keys))
+    multiplier(plan) * classes + passThrough
   }
 
   /** Cost of running `op`, a native operator Comet converted, in `engine`. */
-  def operatorCost(op: CometExec, engine: Engine): Double = costClass(op) match {
-    case Some(c) =>
-      val perRow = engine match {
-        case Engine.Comet => table.comet(c, width(op))
-        case Engine.Spark => table.spark(c, width(op))
-      }
-      rows(op) * perRow
-    case None =>
+  def operatorCost(op: CometExec, engine: Engine): Double =
+    if (costClasses(op).nonEmpty) {
+      operatorPrice(op, engine)
+    } else {
       engine match {
         case Engine.Comet => cometOperatorWeights.getOrElse(nameOf(op), cometOperatorWeight)
         case Engine.Spark => sparkOperatorWeight
       }
-  }
+    }
 
   /** Cost of converting the output of `plan` between rows and Arrow once. */
-  def conversion(plan: SparkPlan): Double =
-    rows(plan) * table.comet(CostClass.C2R, widthOf(plan.output))
+  def conversion(plan: SparkPlan): Double = table.comet(CostClass.C2R, widthOf(plan.output))
 
-  /** A native operator holding memory, such as a sort or a hash aggregate. */
-  def holdsNativeMemory(plan: SparkPlan): Boolean =
-    plan.isInstanceOf[CometPlan] && nativeMemoryHolders.contains(nameOf(plan))
+  /** The leaf columns a shuffle moves per row, its partitioning key included. */
+  def shuffleWidth(boundary: SparkPlan): Width = widthOf(boundary.children.head.output)
 
-  /** An operator that holds memory when it runs in Spark, such as a sort or a window. */
-  def holdsSparkMemory(plan: SparkPlan): Boolean = sparkMemoryOperators.contains(nameOf(plan))
-
-  /** Cost of the risk of running out of memory with the rows of native `plan` in a stage. */
-  def oomRisk(plan: SparkPlan): Double = rows(plan) * table.oomRiskPenalty
-
-  /** The leaf columns a shuffle moves per row, outside its partitioning key. */
-  def shuffleWidth(boundary: SparkPlan): Width =
-    widthOf(
-      LeafColumns.outside(
-        boundary.children.head.output,
-        WideRowShuffleFallback.keyExpressions(boundary.outputPartitioning)))
+  /** The estimated size of a row of `boundary` as a Spark `UnsafeRow`, in bytes. */
+  def rowBytes(boundary: SparkPlan): Double =
+    EstimationUtils.getSizePerRow(boundary.children.head.output).toDouble
 
   /** Cost of writing and reading the shuffle `boundary` in `engine`. */
   def shuffleCost(boundary: SparkPlan, engine: Engine): Double = {
     val w = shuffleWidth(boundary)
-    val perRow = engine match {
+    engine match {
       case Engine.Comet =>
         val partitions = boundary.outputPartitioning.numPartitions
         table.comet(CostClass.ShuffleWrite, w) * table.shuffleWritePartitionFactor(partitions) +
-          table.comet(CostClass.ShuffleRead, w)
+          table.comet(CostClass.ShuffleRead, w) + table.cometShuffleReadBytes(rowBytes(boundary))
       case Engine.Spark =>
-        table.spark(CostClass.ShuffleWrite, w) + table.spark(CostClass.ShuffleRead, w)
+        table.spark(CostClass.ShuffleWrite, w) + table.spark(CostClass.ShuffleRead, w) +
+          table.sparkShuffleReadBytes(rowBytes(boundary))
     }
-    rows(boundary) * perRow
   }
 
   override def price(input: Input, format: Format, conversions: Int): Double = {
@@ -226,17 +208,11 @@ object EngineCostModel {
  *
  * A boundary costs the conversions of its format and, for a shuffle, writing and reading it in
  * the engine of its format, all priced by [[EngineCostModel]], which [[BoundaryFormats]] then
- * also uses to apply formats. A conversion from a native operator to a Spark consumer inside a
- * stage also costs [[EngineCostModel.oomRisk]] when a native operator holding memory is at or
- * below the native side and a Spark operator holding memory is at or above the Spark side, up to
- * the stage's boundaries or a row-to-columnar transition: the two engines then hold memory in one
- * task. Every operator below a native one in its stage is native, and every operator above a
- * Spark one is Spark, so the conversion is the one place the solver can see both sides and avoid
- * it by moving the whole stage to one engine.
+ * also uses to apply formats.
  *
  * With `spark.comet.exec.costBasedEngines.log.enabled` or `spark.comet.explain.fallback.enabled`,
- * every decided operator, shuffle and conversion is logged with its class, form, leaf columns,
- * rows and costs.
+ * every decided operator, shuffle and conversion is logged with its classes, leaf columns and
+ * costs.
  *
  * Algorithm: an exact dynamic program over the plan tree. Each operator gets two costs, the best
  * cost of everything feeding it given that it is native or not. A boundary contributes, for each
@@ -252,8 +228,11 @@ object EngineCostModel {
  * longer reused. Formats of identical exchanges are unified by [[BoundaryFormats.applyFormats]]
  * where one format suits every copy.
  *
- * Reverted operators are tagged [[CometExecRule.KEEP_ON_SPARK_TAG]] so AQE's per-stage conversion
- * leaves them in Spark. Runs on whole plans only, like [[ChooseBoundaryFormats]].
+ * Reverted operators are tagged [[CometExecRule.ENGINE_CHOICE_SPARK_TAG]] so AQE's per-stage
+ * conversion leaves them in Spark. Runs on whole plans only, like [[ChooseBoundaryFormats]]: the
+ * plan without AQE, and the initial plan and every re-optimization under AQE, where [[CometRule]]
+ * converts again the operators this rule reverted on an earlier plan, so that each plan is
+ * decided from its own shape.
  */
 case class CostBasedEngineChoice(session: SparkSession) extends Rule[SparkPlan] with Logging {
 
@@ -328,11 +307,11 @@ private[rules] object EngineSolver {
       node match {
         case r2c: CometSparkToColumnarExec if label.contains(Engine.Spark) =>
           val input = children.head
-          input.setTagValue(CometExecRule.KEEP_ON_SPARK_TAG, ())
+          input.setTagValue(CometExecRule.ENGINE_CHOICE_SPARK_TAG, ())
           input
         case op: CometExec if label.contains(Engine.Spark) =>
           val reverted = op.originalPlan.withNewChildren(children)
-          reverted.setTagValue(CometExecRule.KEEP_ON_SPARK_TAG, ())
+          reverted.setTagValue(CometExecRule.ENGINE_CHOICE_SPARK_TAG, ())
           withFallbackReason(reverted, reason)
         case _ =>
           if (unchanged) node else node.withNewChildren(children)
@@ -392,43 +371,6 @@ private[rules] class EngineSolver(model: EngineCostModel, fixedRoot: Option[Spar
     case _ => 0.0
   }
 
-  private val sparkMemoryAbove = new IdentityHashMap[SparkPlan, java.lang.Boolean]()
-  private val nativeMemoryBelow = new IdentityHashMap[SparkPlan, java.lang.Boolean]()
-
-  /**
-   * Whether `node` or an operator above it in its stage, up to a row-to-columnar transition,
-   * holds memory when it runs in Spark.
-   */
-  private def markSparkMemory(node: SparkPlan, above: Boolean): Unit = {
-    val here = above || model.holdsSparkMemory(node)
-    sparkMemoryAbove.put(node, here)
-    node.children.foreach { child =>
-      val reset = isBoundary(child) || node.isInstanceOf[CometSparkToColumnarExec]
-      markSparkMemory(child, !reset && here)
-    }
-  }
-
-  /** Whether `node` or an operator below it in its stage holds memory when native. */
-  private def holdsNativeMemoryBelow(node: SparkPlan): Boolean = {
-    val known = nativeMemoryBelow.get(node)
-    if (known != null) {
-      known
-    } else {
-      val result = model.holdsNativeMemory(node) || (!node
-        .isInstanceOf[CometSparkToColumnarExec] && node.children.exists(c =>
-        !isBoundary(c) && holdsNativeMemoryBelow(c)))
-      nativeMemoryBelow.put(node, result)
-      result
-    }
-  }
-
-  /** Cost of converting the output of native `child` for its Spark `parent` in one stage. */
-  private def conversionInStage(parent: SparkPlan, child: SparkPlan): Double = {
-    val risky = Option(sparkMemoryAbove.get(parent)).exists(_.booleanValue) &&
-      holdsNativeMemoryBelow(child)
-    model.conversion(child) + (if (risky) model.oomRisk(child) else 0.0)
-  }
-
   /** The engine `node` reads its inputs in, given its own engine. */
   private def consumerEngine(node: SparkPlan, engine: Engine): Engine = node match {
     case _: CometSparkToColumnarExec => Engine.Spark
@@ -443,7 +385,7 @@ private[rules] class EngineSolver(model: EngineCostModel, fixedRoot: Option[Spar
       childEngine: Engine): Double =
     (consumerEngine(parent, engine), childEngine) match {
       case (a, b) if a == b => 0.0
-      case (Engine.Spark, Engine.Comet) => conversionInStage(parent, child)
+      case (Engine.Spark, Engine.Comet) => model.conversion(child)
       case _ => Inf
     }
 
@@ -535,7 +477,6 @@ private[rules] class EngineSolver(model: EngineCostModel, fixedRoot: Option[Spar
   /** Labels for the whole plan, or `None` if no labelling is feasible. */
   def solve(plan: SparkPlan): Option[IdentityHashMap[SparkPlan, Engine]] = {
     val labels = new IdentityHashMap[SparkPlan, Engine]()
-    markSparkMemory(plan, above = false)
 
     def pick[T](options: Seq[(Engine, Double, T)], preferred: Engine): (Engine, Double, T) = {
       val min = options.map(_._2).min
@@ -597,23 +538,24 @@ private[rules] class EngineSolver(model: EngineCostModel, fixedRoot: Option[Spar
   def explain(plan: SparkPlan, labels: IdentityHashMap[SparkPlan, Engine]): String = {
     val lines = mutable.ArrayBuffer(f"total=$planCost%.1f")
     def label(node: SparkPlan): Engine = Option(labels.get(node)).getOrElse(current(node))
-    def describe(node: SparkPlan, w: EngineCostTable.Width, rows: Double): String =
-      f"${node.nodeName}#${node.id} form=${w.form} L=${w.leaves} rows=$rows%.0f"
+    def describe(node: SparkPlan, w: EngineCostTable.Width): String =
+      f"${node.nodeName}#${node.id} L=${w.leaves} nested=${w.nestedFraction}%.2f"
 
     def visit(node: SparkPlan, consumer: Option[Engine]): Unit = {
       val engine = label(node)
       node match {
         case op: CometExec if relabelable(op) =>
-          val costClass = model.costClass(op).map(_.name).getOrElse("unpriced")
-          lines += f"${describe(op, model.width(op), model.rows(op))} class=$costClass " +
+          val classes = model.costClasses(op)
+          val costClass = if (classes.isEmpty) "unpriced" else classes.mkString("+")
+          lines += f"${describe(op, model.width(op))} class=$costClass x${model.multiplier(op)} " +
             f"comet=${model.operatorCost(op, Engine.Comet)}%.1f " +
             f"spark=${model.operatorCost(op, Engine.Spark)}%.1f -> $engine"
         case r2c: CometSparkToColumnarExec if removableTransition(r2c) =>
           val kept = if (engine == Engine.Comet) "kept" else "removed"
-          lines += f"${describe(r2c, EngineCostTable.widthOf(r2c.output), model.rows(r2c))} " +
+          lines += f"${describe(r2c, EngineCostTable.widthOf(r2c.output))} " +
             f"class=c2r cost=${model.conversion(r2c)}%.1f -> $kept"
         case shuffle: ShuffleExchangeLike if isDecidable(shuffle) =>
-          lines += f"${describe(shuffle, model.shuffleWidth(shuffle), model.rows(shuffle))} " +
+          lines += f"${describe(shuffle, model.shuffleWidth(shuffle))} " +
             f"class=shuffle partitions=${shuffle.outputPartitioning.numPartitions} " +
             f"comet=${model.shuffleCost(shuffle, Engine.Comet)}%.1f " +
             f"spark=${model.shuffleCost(shuffle, Engine.Spark)}%.1f " +
@@ -625,8 +567,8 @@ private[rules] class EngineSolver(model: EngineCostModel, fixedRoot: Option[Spar
         if (!isBoundary(child) && consumerEngine(node, engine) == Engine.Spark &&
           label(child) == Engine.Comet) {
           val w = EngineCostTable.widthOf(child.output)
-          lines += f"conversion above ${describe(child, w, model.rows(child))} class=c2r " +
-            f"cost=${conversionInStage(node, child)}%.1f"
+          lines += f"conversion above ${describe(child, w)} class=c2r " +
+            f"cost=${model.conversion(child)}%.1f"
         }
         visit(child, Some(consumerEngine(node, engine)))
       }
@@ -635,7 +577,7 @@ private[rules] class EngineSolver(model: EngineCostModel, fixedRoot: Option[Spar
     visit(plan, None)
     if (!isBoundary(plan) && label(plan) == Engine.Comet) {
       val w = EngineCostTable.widthOf(plan.output)
-      lines += f"conversion of the output of ${describe(plan, w, model.rows(plan))} " +
+      lines += f"conversion of the output of ${describe(plan, w)} " +
         f"class=c2r cost=${model.conversion(plan)}%.1f"
     }
     lines.mkString("\n")
