@@ -109,6 +109,33 @@ class CometExecSuite extends CometTestBase {
     }
   }
 
+  test("SQLConf serde resolves the sort spill-before-output threshold") {
+    val key = CometConf.COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD.key
+    def entries = ConfigMap.parseFrom(CometExecIterator.serializeCometSQLConfs()).getEntriesMap
+    val conf = spark.sparkContext.getConf
+    val cores = entries.get("spark.executor.cores").toInt
+    val expected = if (conf.getBoolean("spark.memory.offHeap.enabled", false)) {
+      val tasks = math.max(cores / math.max(conf.getInt("spark.task.cpus", 1), 1), 1)
+      conf.getSizeAsBytes("spark.memory.offHeap.size", "0") / tasks / 4
+    } else {
+      0L
+    }
+    assert(entries.get(key) == expected.toString)
+    assert(
+      CometExecIterator.sortSpillBeforeOutputThreshold(
+        conf
+          .clone()
+          .set("spark.memory.offHeap.enabled", "true")
+          .set("spark.memory.offHeap.size", "12g"),
+        8) == 384L * 1024 * 1024)
+    withSQLConf(key -> "512m") {
+      assert(entries.get(key) == (512L * 1024 * 1024).toString)
+    }
+    withSQLConf(key -> "0") {
+      assert(entries.get(key) == "0")
+    }
+  }
+
   test("sample without replacement") {
     withParquetTable((0 until 1000).map(i => (i, i + 1)), "tbl") {
       val df = sql("SELECT * FROM tbl").sample(withReplacement = false, fraction = 0.3, seed = 42)

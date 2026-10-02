@@ -731,6 +731,21 @@ object CometConf extends ShimCometConf {
       .checkValue(_ >= 1, "Must be >= 1.")
       .createWithDefault(50)
 
+  val COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD: OptionalConfigEntry[Long] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.spillBeforeOutputThreshold")
+      .category(CATEGORY_EXEC)
+      .doc("A native sort whose whole input fits in memory spills it before producing output " +
+        "when it has reserved more than this many bytes, and then reads it back merging, so " +
+        "while its output is consumed it holds only the merge buffers instead of the whole " +
+        "input. Spark cannot make a native operator release memory, so a sort that keeps " +
+        "its input reserved while a Spark operator reading its output asks for memory " +
+        "starves that operator. When unset, it is a quarter of a task's share of " +
+        "spark.memory.offHeap.size, that is spark.memory.offHeap.size / (spark.executor.cores " +
+        "/ spark.task.cpus) / 4, in off-heap mode, and disabled in on-heap mode. 0 disables it.")
+      .bytesConf(ByteUnit.BYTE)
+      .checkValue(_ >= 0, "Must be >= 0.")
+      .createOptional
+
   val COMET_SHUFFLE_COMPRESSION_CODEC: ConfigEntry[String] =
     conf("spark.comet.shuffle.compression.codec")
       .withAlternative(s"$COMET_EXEC_CONFIG_PREFIX.shuffle.compression.codec")

@@ -36,6 +36,7 @@ use datafusion::execution::disk_manager::DiskManagerMode;
 use datafusion::execution::memory_pool::MemoryPool;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::logical_expr::ScalarUDF;
+use datafusion::physical_plan::sorts::sort::SpillBeforeOutputThreshold;
 use datafusion::{
     execution::disk_manager::DiskManagerBuilder,
     physical_plan::{display::DisplayableExecutionPlan, SendableRecordBatchStream},
@@ -118,7 +119,8 @@ use crate::execution::tracing::{
 
 use crate::execution::memory_pools::logging_pool::LoggingMemoryPool;
 use crate::execution::spark_config::{
-    SparkConfig, COMET_DEBUG_ENABLED, COMET_DEBUG_MEMORY, COMET_EXPLAIN_NATIVE_ENABLED,
+    SparkConfig, COMET_DEBUG_ENABLED, COMET_DEBUG_MEMORY,
+    COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD, COMET_EXPLAIN_NATIVE_ENABLED,
     COMET_MAX_TEMP_DIRECTORY_SIZE, COMET_PARQUET_ROW_FILTER_PUSHDOWN_ENABLED,
     COMET_TRACING_ENABLED, SPARK_EXECUTOR_CORES,
 };
@@ -910,6 +912,13 @@ fn prepare_datafusion_session_context(
             let df_key = format!("datafusion.{df_key}");
             session_config = session_config.set_str(&df_key, value);
         }
+    }
+
+    let spill_before_output =
+        spark_config.get_usize(COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD, 0);
+    if spill_before_output > 0 {
+        session_config = session_config
+            .with_extension(Arc::new(SpillBeforeOutputThreshold(spill_before_output)));
     }
 
     configure_skip_partial_aggregation(&mut session_config, spark_plan);
@@ -3316,5 +3325,329 @@ mod native_sort_spill_tests {
             run.peak_reserved
         );
         assert!(run.held_during_final_merge <= share);
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum RowShape {
+        KeyAndKibPayload,
+        KibKeyAndId,
+    }
+
+    const KIB_ROW: usize = 1000;
+
+    struct KibRows {
+        shape: RowShape,
+        schema: SchemaRef,
+        rows: usize,
+        rows_per_batch: usize,
+    }
+
+    impl std::fmt::Debug for KibRows {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("KibRows")
+                .field("shape", &self.shape)
+                .field("rows", &self.rows)
+                .field("rows_per_batch", &self.rows_per_batch)
+                .finish()
+        }
+    }
+
+    fn kib_text(prefix: String) -> String {
+        let mut s = prefix;
+        while s.len() < KIB_ROW {
+            s.push_str("lorem ipsum ");
+        }
+        s.truncate(KIB_ROW);
+        s
+    }
+
+    impl KibRows {
+        fn new(shape: RowShape, rows: usize, rows_per_batch: usize) -> Self {
+            let schema = Arc::new(Schema::new(match shape {
+                RowShape::KeyAndKibPayload => vec![
+                    Field::new("key", DataType::Int64, false),
+                    Field::new("id", DataType::Int64, false),
+                    Field::new("payload", DataType::Utf8, false),
+                ],
+                RowShape::KibKeyAndId => vec![
+                    Field::new("key", DataType::Utf8, false),
+                    Field::new("id", DataType::Int64, false),
+                ],
+            }));
+            Self {
+                shape,
+                schema,
+                rows,
+                rows_per_batch,
+            }
+        }
+
+        fn batch(&self, start: usize) -> RecordBatch {
+            let end = (start + self.rows_per_batch).min(self.rows);
+            let ids: Vec<u64> = (start as u64..end as u64).collect();
+            let id: ArrayRef =
+                Arc::new(Int64Array::from_iter_values(ids.iter().map(|&i| i as i64)));
+            let columns: Vec<ArrayRef> = match self.shape {
+                RowShape::KeyAndKibPayload => vec![
+                    Arc::new(Int64Array::from_iter_values(
+                        ids.iter().map(|&i| mix(i) as i64),
+                    )),
+                    id,
+                    Arc::new(StringArray::from_iter_values(
+                        ids.iter().map(|&i| kib_text(format!("{i:016x} "))),
+                    )),
+                ],
+                RowShape::KibKeyAndId => vec![
+                    Arc::new(StringArray::from_iter_values(
+                        ids.iter()
+                            .map(|&i| kib_text(format!("{:016x}{i:016x} ", mix(i)))),
+                    )),
+                    id,
+                ],
+            };
+            RecordBatch::try_new(Arc::clone(&self.schema), columns).unwrap()
+        }
+    }
+
+    impl PartitionStream for KibRows {
+        fn schema(&self) -> &SchemaRef {
+            &self.schema
+        }
+
+        fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+            let source = KibRows::new(self.shape, self.rows, self.rows_per_batch);
+            Box::pin(RecordBatchStreamAdapter::new(
+                Arc::clone(&self.schema),
+                futures::stream::iter((0..self.rows).step_by(self.rows_per_batch))
+                    .map(move |start| Ok(source.batch(start))),
+            ))
+        }
+    }
+
+    struct OutputTrace {
+        reserved: Vec<usize>,
+        spill_counts: Vec<usize>,
+        peak_reserved: usize,
+    }
+
+    impl OutputTrace {
+        fn spill_count(&self) -> usize {
+            *self.spill_counts.last().unwrap()
+        }
+
+        fn max_reserved_after(&self, fraction: f64) -> usize {
+            let from = (self.reserved.len() as f64 * fraction) as usize;
+            self.reserved[from..].iter().copied().max().unwrap_or(0)
+        }
+
+        fn reserved_at(&self, fraction: f64) -> usize {
+            self.reserved[(self.reserved.len() as f64 * fraction) as usize]
+        }
+    }
+
+    fn check_sorted_output(
+        shape: RowShape,
+        batch: &RecordBatch,
+        last: &mut Option<Vec<u8>>,
+        seen: &mut [bool],
+    ) {
+        let ids = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            let id = ids.value(row) as u64;
+            let key = match shape {
+                RowShape::KeyAndKibPayload => {
+                    let key = batch
+                        .column(0)
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .unwrap()
+                        .value(row);
+                    let payload = batch
+                        .column(2)
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap()
+                        .value(row);
+                    assert_eq!(key, mix(id) as i64, "key of row {id}");
+                    assert_eq!(
+                        payload,
+                        kib_text(format!("{id:016x} ")),
+                        "payload of row {id}"
+                    );
+                    ((key as u64) ^ (1 << 63)).to_be_bytes().to_vec()
+                }
+                RowShape::KibKeyAndId => {
+                    let key = batch
+                        .column(0)
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap()
+                        .value(row);
+                    assert_eq!(
+                        key,
+                        kib_text(format!("{:016x}{id:016x} ", mix(id))),
+                        "key of row {id}"
+                    );
+                    key.as_bytes().to_vec()
+                }
+            };
+            assert!(!seen[id as usize], "row {id} returned twice");
+            seen[id as usize] = true;
+            if let Some(prev) = last.as_ref() {
+                assert!(*prev <= key, "output not sorted at row {id}");
+            }
+            *last = Some(key);
+        }
+    }
+
+    async fn sort_and_trace(
+        source: KibRows,
+        share: usize,
+        executor_cores: usize,
+        spill_before_output: Option<usize>,
+    ) -> OutputTrace {
+        let shape = source.shape;
+        let rows = source.rows;
+        let off_heap_size = share * executor_cores;
+        let (pool, spark) = fair_unified_pool_with_fake_spark(off_heap_size, share);
+        let peak = Arc::new(PeakPool {
+            inner: pool,
+            peak: Default::default(),
+        });
+        let pool: Arc<dyn MemoryPool> = Arc::clone(&peak) as _;
+        let spill_dir = tempfile::tempdir().unwrap();
+        let mut spark_config =
+            HashMap::from([(SPARK_EXECUTOR_CORES.to_string(), executor_cores.to_string())]);
+        if let Some(threshold) = spill_before_output {
+            spark_config.insert(
+                COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD.to_string(),
+                threshold.to_string(),
+            );
+        }
+        let session = prepare_datafusion_session_context(
+            8192,
+            Arc::clone(&pool),
+            vec![spill_dir.path().to_string_lossy().into_owned()],
+            u64::MAX,
+            1,
+            &spark_config,
+            &Operator::default(),
+            Some(off_heap_size),
+        )
+        .unwrap();
+        let schema = Arc::clone(&source.schema);
+        let child = Arc::new(
+            StreamingTableExec::try_new(
+                Arc::clone(&schema),
+                vec![Arc::new(source)],
+                None,
+                Vec::<LexOrdering>::new(),
+                false,
+                None,
+            )
+            .unwrap(),
+        );
+        let ordering = LexOrdering::new(vec![PhysicalSortExpr::new(
+            col("key", &schema).unwrap(),
+            SortOptions {
+                descending: false,
+                nulls_first: true,
+            },
+        )])
+        .unwrap();
+        let sort: Arc<dyn ExecutionPlan> = Arc::new(SortExec::new(ordering, child));
+        let mut stream = sort.execute(0, session.task_ctx()).unwrap();
+        let mut trace = OutputTrace {
+            reserved: vec![],
+            spill_counts: vec![],
+            peak_reserved: 0,
+        };
+        let mut last = None;
+        let mut seen = vec![false; rows];
+        while let Some(batch) = stream.next().await {
+            let batch = batch.unwrap_or_else(|e| panic!("native sort failed: {e}"));
+            trace.reserved.push(pool.reserved());
+            trace
+                .spill_counts
+                .push(sort.metrics().unwrap().spill_count().unwrap_or(0));
+            check_sorted_output(shape, &batch, &mut last, &mut seen);
+        }
+        assert!(seen.iter().all(|&s| s), "rows missing from the output");
+        drop(stream);
+        assert_eq!(pool.reserved(), 0, "memory still reserved after the sort");
+        assert_eq!(spark.held(), 0, "memory not handed back to Spark");
+        trace.peak_reserved = peak.peak();
+        trace
+    }
+
+    const SPILL_BEFORE_OUTPUT_SHARE: usize = 1536 * MB;
+    const SPILL_BEFORE_OUTPUT_ROWS: usize = 900_000;
+
+    fn input_bytes(rows: usize) -> usize {
+        rows * KIB_ROW
+    }
+
+    async fn assert_spills_before_output(shape: RowShape, rows: usize) {
+        let share = SPILL_BEFORE_OUTPUT_SHARE;
+        for rows_per_batch in [8192, 3] {
+            let case = format!("{shape:?} rows={rows} rows_per_batch={rows_per_batch}");
+            let held =
+                sort_and_trace(KibRows::new(shape, rows, rows_per_batch), share, 8, None).await;
+            eprintln!(
+                "{case} off: spill_count={} peak={}MiB reserved at 0%={}MiB 50%={}MiB 90%={}MiB",
+                held.spill_count(),
+                held.peak_reserved / MB,
+                held.reserved_at(0.0) / MB,
+                held.reserved_at(0.5) / MB,
+                held.reserved_at(0.9) / MB
+            );
+            assert_eq!(held.spill_count(), 0, "{case}");
+            assert!(held.reserved_at(0.9) >= input_bytes(rows) / 2, "{case}");
+
+            let spilled = sort_and_trace(
+                KibRows::new(shape, rows, rows_per_batch),
+                share,
+                8,
+                Some(share / 4),
+            )
+            .await;
+            eprintln!(
+                "{case} on: spill_count={} peak={}MiB max reserved during output={}MiB",
+                spilled.spill_count(),
+                spilled.peak_reserved / MB,
+                spilled.max_reserved_after(0.0) / MB
+            );
+            assert!(spilled.spill_counts.iter().all(|&c| c >= 1), "{case}");
+            assert!(spilled.max_reserved_after(0.0) <= 64 * MB, "{case}");
+            assert!(
+                spilled.peak_reserved <= held.peak_reserved + held.peak_reserved / 10,
+                "{case}"
+            );
+
+            let below = sort_and_trace(
+                KibRows::new(shape, rows, rows_per_batch),
+                share,
+                8,
+                Some(held.peak_reserved),
+            )
+            .await;
+            assert_eq!(below.spill_count(), 0, "{case}");
+            assert_eq!(below.reserved.len(), held.reserved.len(), "{case}");
+            assert!(below.reserved_at(0.9) >= input_bytes(rows) / 2, "{case}");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn late_materialized_sort_spills_before_output_above_the_threshold() {
+        assert_spills_before_output(RowShape::KeyAndKibPayload, SPILL_BEFORE_OUTPUT_ROWS).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sort_spills_before_output_above_the_threshold() {
+        assert_spills_before_output(RowShape::KibKeyAndId, SPILL_BEFORE_OUTPUT_ROWS / 2).await;
     }
 }

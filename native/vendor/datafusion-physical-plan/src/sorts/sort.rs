@@ -101,6 +101,11 @@ impl ExternalSorterMetrics {
 /// COMET PATCH
 const SMALL_BATCHES_TARGET_BYTES: usize = 4 << 20;
 
+/// COMET PATCH: a session config extension. A sort whose input stayed in memory but whose
+/// reservation exceeds this many bytes spills it before producing output. 0 disables.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SpillBeforeOutputThreshold(pub usize);
+
 /// Sorts an arbitrary sized, unsorted, stream of [`RecordBatch`]es to
 /// a total order. Depending on the input size and memory manager
 /// configuration, writes intermediate results to disk ("spills")
@@ -288,6 +293,7 @@ struct ExternalSorter {
     late_materialization: Option<LateMaterialization>,
     late_spilled_run_bytes: usize,
     late_merge_batch_size: usize,
+    spill_before_output_threshold: usize,
 }
 
 impl ExternalSorter {
@@ -349,7 +355,23 @@ impl ExternalSorter {
             late_materialization: None,
             late_spilled_run_bytes: 0,
             late_merge_batch_size: batch_size,
+            spill_before_output_threshold: 0,
         })
+    }
+
+    /// COMET PATCH
+    fn with_spill_before_output_threshold(mut self, threshold: usize) -> Self {
+        self.spill_before_output_threshold = threshold;
+        self
+    }
+
+    /// COMET PATCH
+    fn spills_before_output(&self) -> bool {
+        self.spill_before_output_threshold > 0
+            && !self.spilled_before()
+            && !self.in_mem_batches.is_empty()
+            && self.reservation.size() > self.spill_before_output_threshold
+            && self.runtime.disk_manager.tmp_files_enabled()
     }
 
     /// COMET PATCH
@@ -462,6 +484,9 @@ impl ExternalSorter {
     async fn sort(&mut self) -> Result<SendableRecordBatchStream> {
         // COMET PATCH
         self.flush_small_batches()?;
+        if self.spills_before_output() {
+            self.sort_and_spill(true).await?;
+        }
         if self.spilled_before() {
             // Sort `in_mem_batches` and spill it first. If there are many
             // `in_mem_batches` and the memory limit is almost reached, merging
@@ -610,7 +635,11 @@ impl ExternalSorter {
     /// Sorts the in-memory batches and merges them into a single sorted run, then writes
     /// the result to spill files.
     async fn sort_and_spill_in_mem_batches(&mut self) -> Result<()> {
-        // COMET PATCH
+        self.sort_and_spill(false).await
+    }
+
+    /// COMET PATCH
+    async fn sort_and_spill(&mut self, eager: bool) -> Result<()> {
         self.flush_small_batches()?;
         assert_or_internal_err!(
             !self.in_mem_batches.is_empty(),
@@ -626,7 +655,7 @@ impl ExternalSorter {
             self.merge_reservation.take(),
         ]);
         let result = self
-            .merge_and_spill_in_mem_batches(&workspace, buffered)
+            .merge_and_spill_in_mem_batches(&workspace, buffered, eager)
             .await;
         workspace.close();
         result?;
@@ -641,6 +670,7 @@ impl ExternalSorter {
         &mut self,
         workspace: &Arc<SpillWorkspace>,
         buffered: usize,
+        eager: bool,
     ) -> Result<()> {
         let mut sorted_stream = self.in_mem_sort_stream_in_workspace(
             workspace, buffered, false,
@@ -658,11 +688,11 @@ impl ExternalSorter {
         // sort-preserving merge and incrementally append to spill files.
         let mut globally_sorted_batches: Vec<RecordBatch> = vec![];
 
-        let late = self.late_materialization.is_some();
+        let eager = eager || self.late_materialization.is_some();
         while let Some(batch) = sorted_stream.next().await {
             let batch = batch?;
             let sorted_size = get_reserved_bytes_for_record_batch(&batch)?;
-            if late || self.reservation.try_grow(sorted_size).is_err() {
+            if eager || self.reservation.try_grow(sorted_size).is_err() {
                 // Although the reservation is not enough, the batch is
                 // already in memory, so it's okay to combine it with previously
                 // sorted batches, and spill together.
@@ -1693,6 +1723,10 @@ impl ExecutionPlan for SortExec {
                     execution_options.sort_spill_reservation_bytes;
                 let in_place_bytes =
                     execution_options.sort_in_place_threshold_bytes;
+                let spill_before_output = context
+                    .session_config()
+                    .get_extension::<SpillBeforeOutputThreshold>()
+                    .map_or(0, |threshold| threshold.0);
                 let compression = context.session_config().spill_compression();
                 let runtime = context.runtime_env();
                 Ok(Box::pin(RecordBatchStreamAdapter::new(
@@ -1734,7 +1768,8 @@ impl ExecutionPlan for SortExec {
                             &metrics,
                             runtime,
                         )?
-                        .with_late_materialization(late);
+                        .with_late_materialization(late)
+                        .with_spill_before_output_threshold(spill_before_output);
                         if let Some(batch) = first {
                             sorter.insert_batch(batch).await?;
                         }
