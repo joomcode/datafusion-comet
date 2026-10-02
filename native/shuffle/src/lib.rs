@@ -33,6 +33,7 @@ mod schema_align;
 mod shuffle_writer;
 mod spark_crc32c_hasher;
 pub mod spark_unsafe;
+mod type_align;
 pub(crate) mod writers;
 
 pub use codec_context::ShuffleCodecContext;
