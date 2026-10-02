@@ -19,7 +19,7 @@
 
 package org.apache.comet.rules
 
-import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Expression}
 import org.apache.spark.sql.types.{ArrayType, DataType, MapType, StructType, UserDefinedType}
 
 object LeafColumns {
@@ -33,4 +33,20 @@ object LeafColumns {
   }
 
   def count(attributes: Seq[Attribute]): Int = attributes.map(a => count(a.dataType)).sum
+
+  def isNested(dataType: DataType): Boolean = dataType match {
+    case _: StructType | _: ArrayType | _: MapType => true
+    case udt: UserDefinedType[_] => isNested(udt.sqlType)
+    case _ => false
+  }
+
+  /** Leaves of the attributes whose type is a struct, an array or a map. */
+  def nestedCount(attributes: Seq[Attribute]): Int =
+    attributes.filter(a => isNested(a.dataType)).map(a => count(a.dataType)).sum
+
+  /** The attributes that none of `keys` references. */
+  def outside(attributes: Seq[Attribute], keys: Seq[Expression]): Seq[Attribute] = {
+    val referenced = AttributeSet(keys.flatMap(_.references))
+    attributes.filterNot(referenced.contains)
+  }
 }

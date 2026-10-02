@@ -35,7 +35,9 @@ import org.apache.comet.CometConf
  *
  * It needs the consumers of the boundaries, so [[CometRule]] runs it on whole plans only: the
  * plan without AQE, and the initial plan and each re-optimization under AQE. The Spark shuffles
- * and broadcasts it creates are tagged so that AQE's per-stage conversion keeps them.
+ * and broadcasts it creates are tagged so that AQE's per-stage conversion keeps them. With
+ * `spark.comet.exec.costBasedEngines.enabled` it prices formats like [[CostBasedEngineChoice]],
+ * so that it keeps the formats that rule picked.
  */
 case class ChooseBoundaryFormats(session: SparkSession) extends Rule[SparkPlan] {
 
@@ -44,7 +46,10 @@ case class ChooseBoundaryFormats(session: SparkSession) extends Rule[SparkPlan] 
       !CometConf.COMET_EXEC_ENABLED.get(conf)) {
       plan
     } else {
-      BoundaryFormats.applyFormats(plan)
+      val pricing =
+        if (CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.get(conf)) EngineCostModel(conf)
+        else BoundaryFormats.ConversionCount
+      BoundaryFormats.applyFormats(plan, pricing)
     }
   }
 }

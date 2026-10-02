@@ -21,7 +21,6 @@ package org.apache.comet.rules
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.AttributeSet
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.comet.{CometSortExec, CometSparkToColumnarExec}
 import org.apache.spark.sql.execution.{ColumnarToRowTransition, SortExec, SparkPlan}
@@ -34,6 +33,7 @@ case class WideRowSortFallback(session: SparkSession) extends Rule[SparkPlan] wi
 
   override def apply(plan: SparkPlan): SparkPlan = {
     if (!CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_ENABLED.get(conf) ||
+      CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.get(conf) ||
       !CometConf.COMET_EXEC_ENABLED.get(conf)) {
       return plan
     }
@@ -69,10 +69,8 @@ object WideRowSortFallback extends Logging {
   private[rules] def revertible(sort: CometSortExec): Boolean =
     sort.originalPlan.isInstanceOf[SortExec]
 
-  def payloadLeaves(sort: CometSortExec): Int = {
-    val keys = AttributeSet(sort.sortOrder.flatMap(_.references))
-    LeafColumns.count(sort.child.output.filterNot(keys.contains))
-  }
+  def payloadLeaves(sort: CometSortExec): Int =
+    LeafColumns.count(LeafColumns.outside(sort.child.output, sort.sortOrder))
 
   def fallbackReason(sort: CometSortExec, minLeaves: Int): Option[String] = {
     val leaves = payloadLeaves(sort)

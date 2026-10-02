@@ -117,10 +117,23 @@ object BoundaryFormats extends Logging with CometTypeShim {
       producer: Engine,
       producerPlan: SparkPlan)
 
-  case class Choice(format: Format, conversions: Int)
+  /** `cost` is what `pricing` charges for the format and its conversions. */
+  case class Choice(format: Format, conversions: Int, cost: Double)
 
   case class Decision(choices: Seq[Choice], mode: Mode) {
     def conversions: Int = choices.map(_.conversions).sum
+    def cost: Double = choices.map(_.cost).sum
+  }
+
+  /** What a format of one boundary costs, with the conversions it implies. */
+  trait Pricing {
+    def price(input: Input, format: Format, conversions: Int): Double
+  }
+
+  /** Each conversion costs one, and the format nothing else. */
+  object ConversionCount extends Pricing {
+    override def price(input: Input, format: Format, conversions: Int): Double =
+      conversions.toDouble
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -366,18 +379,17 @@ object BoundaryFormats extends Logging with CometTypeShim {
   }
 
   /**
-   * The cheapest format for `input` under `mode`, preferring its current format on a tie, or
-   * `None` if no format is feasible.
+   * The cheapest format for `input` under `mode` by `pricing`, preferring its current format on a
+   * tie, or `None` if no format is feasible.
    */
-  def choose(input: Input, mode: Mode): Option[Choice] = {
+  def choose(input: Input, mode: Mode, pricing: Pricing = ConversionCount): Option[Choice] = {
     val current = currentFormat(input.boundary)
     val allowed = optionsUnder(input, mode)
     if (allowed.isEmpty) {
       None
     } else {
-      val (format, conversions) =
-        allowed.minBy { case (f, c) => (c, if (f == current) 0 else 1) }
-      Some(Choice(format, conversions))
+      val priced = allowed.map { case (f, c) => Choice(f, c, pricing.price(input, f, c)) }
+      Some(priced.minBy(c => (c.cost, if (c.format == current) 0 else 1)))
     }
   }
 
@@ -398,15 +410,18 @@ object BoundaryFormats extends Logging with CometTypeShim {
    * The formats of all boundaries feeding one stage, deciding the co-partitioned ones together,
    * or `None` if no choice of formats is feasible for these engines.
    */
-  def decide(inputs: Seq[Input], stageModes: Seq[Mode]): Option[Decision] = {
+  def decide(
+      inputs: Seq[Input],
+      stageModes: Seq[Mode],
+      pricing: Pricing = ConversionCount): Option[Decision] = {
     val candidates = stageModes.flatMap { mode =>
-      val choices = inputs.map(choose(_, mode))
+      val choices = inputs.map(choose(_, mode, pricing))
       if (choices.forall(_.isDefined)) Some(Decision(choices.flatten, mode)) else None
     }
     def changes(d: Decision): Int =
       inputs.zip(d.choices).count { case (i, c) => c.format != currentFormat(i.boundary) }
     if (candidates.isEmpty) None
-    else Some(candidates.minBy(d => (d.conversions, changes(d))))
+    else Some(candidates.minBy(d => (d.cost, changes(d))))
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -457,10 +472,11 @@ object BoundaryFormats extends Logging with CometTypeShim {
 
   /**
    * Sets the format of every decidable boundary in `plan` from the engines of the operators on
-   * its two sides, which it does not change. Identical exchanges, which Spark would reuse, get
-   * one format when one format suits all of their consumers.
+   * its two sides, which it does not change, picking the cheapest by `pricing`. Identical
+   * exchanges, which Spark would reuse, get one format when one format suits all of their
+   * consumers.
    */
-  def applyFormats(plan: SparkPlan): SparkPlan = {
+  def applyFormats(plan: SparkPlan, pricing: Pricing = ConversionCount): SparkPlan = {
     val decided = new IdentityHashMap[SparkPlan, (Input, Mode, Format)]()
 
     def visitKept(boundary: SparkPlan): Unit = {
@@ -468,7 +484,7 @@ object BoundaryFormats extends Logging with CometTypeShim {
         val producer = boundary.children.head
         visitProducer(producer)
         val input = Input(boundary, None, engineOf(producer), producer)
-        choose(input, Unconstrained).foreach(c =>
+        choose(input, Unconstrained, pricing).foreach(c =>
           decided.put(boundary, (input, Unconstrained, c.format)))
       }
     }
@@ -486,7 +502,7 @@ object BoundaryFormats extends Logging with CometTypeShim {
         Input(boundary, Some(consumerEngineOf(consumer)), engineOf(producer), producer)
       }
       val stageModes = modes(edges.map(_._2), stageLeaves(root))
-      decide(inputs, stageModes) match {
+      decide(inputs, stageModes, pricing) match {
         case Some(decision) =>
           inputs.zip(decision.choices).foreach { case (input, choice) =>
             if (isDecidable(input.boundary)) {
@@ -499,7 +515,7 @@ object BoundaryFormats extends Logging with CometTypeShim {
     }
 
     if (isBoundary(plan)) visitKept(plan) else visitStage(plan)
-    unifyReused(decided)
+    unifyReused(decided, pricing)
 
     def rebuild(node: SparkPlan): SparkPlan = {
       val children = node.children.map(rebuild)
@@ -518,7 +534,9 @@ object BoundaryFormats extends Logging with CometTypeShim {
    * a single format is feasible for every copy, under each copy's consumer and its stage's hash
    * mode, use the cheapest such format for all of them.
    */
-  private def unifyReused(decided: IdentityHashMap[SparkPlan, (Input, Mode, Format)]): Unit = {
+  private def unifyReused(
+      decided: IdentityHashMap[SparkPlan, (Input, Mode, Format)],
+      pricing: Pricing): Unit = {
     val entries = mutable.ArrayBuffer.empty[(SparkPlan, (Input, Mode, Format))]
     val it = decided.entrySet().iterator()
     while (it.hasNext) {
@@ -528,7 +546,7 @@ object BoundaryFormats extends Logging with CometTypeShim {
     entries.groupBy(_._1.canonicalized).values.foreach { group =>
       if (group.size > 1 && group.map(_._2._3).distinct.size > 1) {
         val perCopy = group.map { case (_, (input, mode, _)) =>
-          optionsUnder(input, mode).map { case (f, c) => f -> c }.toMap
+          optionsUnder(input, mode).map { case (f, c) => f -> pricing.price(input, f, c) }.toMap
         }
         val common = perCopy.map(_.keySet).reduce(_ intersect _)
         if (common.nonEmpty) {

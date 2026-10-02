@@ -19,7 +19,7 @@
 
 package org.apache.comet.rules
 
-import org.apache.spark.sql.catalyst.expressions.{AttributeSet, Expression}
+import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, Partitioning, RangePartitioning}
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeExec
 
@@ -33,14 +33,13 @@ object WideRowShuffleFallback {
     case _ => Nil
   }
 
-  def payloadLeaves(shuffle: ShuffleExchangeExec): Int = {
-    val keys = AttributeSet(keyExpressions(shuffle.outputPartitioning).flatMap(_.references))
-    LeafColumns.count(shuffle.child.output.filterNot(keys.contains))
-  }
+  def payloadLeaves(shuffle: ShuffleExchangeExec): Int =
+    LeafColumns.count(
+      LeafColumns.outside(shuffle.child.output, keyExpressions(shuffle.outputPartitioning)))
 
   def fallbackReason(shuffle: ShuffleExchangeExec): Option[String] = {
     val minLeaves = CometConf.COMET_SHUFFLE_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS.get(shuffle.conf)
-    if (minLeaves <= 0) {
+    if (minLeaves <= 0 || CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.get(shuffle.conf)) {
       None
     } else {
       val leaves = payloadLeaves(shuffle)

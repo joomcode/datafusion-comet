@@ -586,16 +586,33 @@ operator reads it.
 ### Cost-Based Engine Choice
 
 `spark.comet.exec.costBasedEngines.enabled=true` decides, for each operator Comet converted, whether it runs
-natively or in Spark by minimizing one cost over the whole plan: every native operator earns
-`spark.comet.exec.costBasedEngines.cometOperatorWeight` (default `-1`, against
-`spark.comet.exec.costBasedEngines.sparkOperatorWeight`, default `0`), and every row/columnar conversion, inside a
-stage or at a shuffle or broadcast, costs `spark.comet.exec.costBasedEngines.conversionWeight` (default `1`). For
-example, a native sort between a columnar shuffle from a Spark aggregate and a Spark aggregate costs `-1 + 1 + 1`
-and runs in Spark, together with a Spark shuffle, while a native filter and project feeding a Spark aggregate
-stay native. `spark.comet.exec.costBasedEngines.cometOperatorWeights` overrides the native weight per Spark
-operator, for example `SortExec=-2`. Operators only move from Comet to Spark; scans, writes, and native aggregates
-whose buffers Spark cannot read keep their engine. Shuffle and broadcast formats then follow as with
-`spark.comet.exec.boundaryFormats.enabled`.
+natively or in Spark by minimizing one estimated time over the whole plan. Each priced operator costs its rows times
+a price per row from a table of measurements: `k0*L + k1*L*L` ns natively and `c0 + k*L` ns in Spark, where `L` is
+the number of leaf columns of its output outside its key (the sort order of a sort, the partitioning of a shuffle)
+and the coefficients depend on the operator class (`shuffleWrite`, `shuffleRead`, `sort` for sorts, sort-merge
+joins, windows and expands, `rowLocal` for filters, projects, broadcast hash joins, unions, hash aggregates and
+limits) and on the form of the rows (`nested` when at least half of the leaves are inside structs, arrays or maps,
+`flat` otherwise). Each columnar-to-row conversion costs `c2r`, a native price of the same shape over every leaf of
+the converted rows, and a Comet columnar shuffle over Spark rows costs a native shuffle write plus one `c2r`. A
+native shuffle write is scaled by `1 + 0.08 * max(0, partitions / 250 - 1)`. A conversion from a native operator to
+a Spark one inside a stage costs another 2000 ns per row when a native sort, sort-merge join, hash join or hash
+aggregate is below it and a Spark sort, window, sort-merge join, sort aggregate or object hash aggregate above it,
+since the two engines then hold memory in the same task.
+
+Rows come from the runtime statistics of materialized query stages, then from the row count of the logical plan,
+then from the operator's inputs; without any, every operator counts one row and the engines are compared per row.
+`spark.comet.exec.costBasedEngines.costTable` overrides any coefficient or scalar, for example
+`sort.flat.comet=0,0.028;shuffleWrite.flat.spark=303,67.07;oomRiskPenalty=2000`. Operators outside the table, such
+as shuffled hash joins, keep the constant weights `spark.comet.exec.costBasedEngines.cometOperatorWeight` (default
+`-1`), `spark.comet.exec.costBasedEngines.sparkOperatorWeight` (default `0`) and the per-operator
+`spark.comet.exec.costBasedEngines.cometOperatorWeights`. Set `spark.comet.exec.costBasedEngines.log.enabled` (or
+`spark.comet.explain.fallback.enabled`) to log every decided operator, shuffle and conversion with its class, form,
+leaf columns, rows and costs.
+
+Operators only move from Comet to Spark; scans, writes, and native aggregates whose buffers Spark cannot read keep
+their engine. Shuffle and broadcast formats then follow as with `spark.comet.exec.boundaryFormats.enabled`, priced
+the same way. The wide-row rules `spark.comet.exec.sort.wideRowFallback.enabled` and
+`spark.comet.shuffle.wideRowFallback.minLeafColumns` do not run while the cost-based choice is enabled.
 
 ### Sorts of Wide Rows
 
