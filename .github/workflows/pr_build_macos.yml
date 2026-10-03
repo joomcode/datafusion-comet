@@ -163,11 +163,13 @@ jobs:
               org.apache.spark.sql.comet.execution.shuffle.CometDiskBlockWriterSuite
               org.apache.comet.exec.CometShuffleEncryptionSuite
               org.apache.comet.exec.CometShuffleManagerSuite
+              org.apache.comet.exec.CometShuffleReadCoalesceSuite
               org.apache.comet.exec.CometAsyncShuffleSuite
               org.apache.comet.exec.DisableAQECometShuffleSuite
               org.apache.comet.exec.DisableAQECometAsyncShuffleSuite
               org.apache.spark.shuffle.comet.CometUnboundedShuffleMemoryAllocatorSuite
               org.apache.spark.shuffle.sort.SpillSorterSuite
+              org.apache.spark.shuffle.sort.CometShuffleExternalSorterSpillSuite
           - name: "exec"
             value: |
               org.apache.comet.exec.CometAggregateSuite
@@ -176,8 +178,11 @@ jobs:
               org.apache.comet.exec.CometEmptyRelationExecSuite
               org.apache.comet.exec.CometInMemoryCacheSuite
               org.apache.comet.exec.CometInMemoryCacheKryoSuite
+              org.apache.spark.sql.comet.CometBroadcastKryoPayloadSuite
+              org.apache.spark.sql.comet.CometBroadcastDefaultKryoSuite
               org.apache.comet.exec.CometGenerateExecSuite
               org.apache.comet.exec.CometWindowExecSuite
+              org.apache.comet.exec.CometPartitionAggregateWindowSuite
               org.apache.comet.exec.CometJoinSuite
               org.apache.spark.sql.comet.CometMapInBatchSuite
               org.apache.spark.sql.execution.python.CometArrowPythonRunnerSuite
@@ -205,12 +210,17 @@ jobs:
               org.apache.spark.sql.comet.CometPlanEqualitySuite
               org.apache.comet.rules.CometEmptyRelationExecRuleSuite
               org.apache.comet.rules.RevertNativeForTransitionHeavyStagesSuite
+              org.apache.comet.rules.ChooseBoundaryFormatsSuite
+              org.apache.comet.rules.CostBasedEngineChoiceSuite
+              org.apache.comet.rules.WideRowSortFallbackSuite
+              org.apache.comet.rules.WideRowShuffleFallbackSuite
               org.apache.spark.sql.CometTPCDSQuerySuite
               org.apache.spark.sql.CometTPCDSQueryTestSuite
               org.apache.spark.sql.CometTPCHQuerySuite
               org.apache.spark.sql.comet.CometTPCDSV1_4_PlanStabilitySuite
               org.apache.spark.sql.comet.CometTPCDSV2_7_PlanStabilitySuite
               org.apache.spark.sql.comet.CometTaskMetricsSuite
+              org.apache.spark.sql.comet.CometBatchRowProjectionSuite
               org.apache.spark.sql.comet.CometDppFallbackRepro3949Suite
               org.apache.spark.sql.comet.CometShuffleFallbackStickinessSuite
               org.apache.spark.sql.comet.PlanDataInjectorSuite

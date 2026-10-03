@@ -22,6 +22,7 @@ use crate::partitioners::{
     EmptySchemaShufflePartitioner, MultiPartitionShuffleRepartitioner, ShufflePartitioner,
     SinglePartitionShufflePartitioner,
 };
+use crate::type_align::align_batch_types;
 use crate::writers::{LocalPartitionWriter, PartitionWriter, RssPartitionWriter};
 use crate::{CometPartitioning, CompressionCodec, RoundRobinStrategy, ShuffleBlockWriter};
 use async_trait::async_trait;
@@ -374,7 +375,7 @@ async fn external_shuffle(
         // Otherwise, pull the next batch from the input stream might overwrite the
         // current batch in the repartitioner.
         repartitioner
-            .insert_batch(batch?)
+            .insert_batch(align_batch_types(batch?, &schema))
             .await
             .map_err(|error| contextualize_shuffle_error(error, "inserting batch"))?;
     }
@@ -1643,6 +1644,193 @@ mod test {
             .collect();
         let expected: Vec<i32> = (0..380).collect();
         assert_eq!(roundtripped, expected, "rows not preserved in order");
+    }
+
+    fn nested_type_instance(field_id: &str) -> Schema {
+        use std::collections::HashMap;
+        let meta = HashMap::from([("PARQUET:field_id".to_string(), field_id.to_string())]);
+        let money = DataType::Struct(
+            vec![
+                Field::new("amount", DataType::Float64, true).with_metadata(meta.clone()),
+                Field::new("ccy", DataType::Utf8, true),
+            ]
+            .into(),
+        );
+        let costs = DataType::Struct(
+            (0..3)
+                .map(|i| Field::new(format!("m{i}"), money.clone(), true))
+                .collect::<Vec<_>>()
+                .into(),
+        );
+        Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("costs", costs, true),
+            Field::new(
+                "l",
+                DataType::List(Arc::new(Field::new("element", DataType::Utf8, true))),
+                true,
+            ),
+            Field::new(
+                "m",
+                DataType::Map(
+                    Arc::new(Field::new(
+                        "entries",
+                        DataType::Struct(
+                            vec![
+                                Field::new("keys", DataType::Utf8, false),
+                                Field::new("values", DataType::Int64, true),
+                            ]
+                            .into(),
+                        ),
+                        false,
+                    )),
+                    false,
+                ),
+                true,
+            ),
+        ])
+    }
+
+    fn nested_batch(schema: SchemaRef, start: i64, rows: usize) -> RecordBatch {
+        use arrow::array::{ListArray, MapArray, StructArray};
+        use arrow::buffer::{NullBuffer, OffsetBuffer};
+        let ids: Vec<i64> = (start..start + rows as i64).collect();
+        let DataType::Struct(costs) = schema.field(1).data_type() else {
+            unreachable!()
+        };
+        let money = costs
+            .iter()
+            .enumerate()
+            .map(|(m, field)| {
+                let DataType::Struct(inner) = field.data_type() else {
+                    unreachable!()
+                };
+                Arc::new(StructArray::new(
+                    inner.clone(),
+                    vec![
+                        Arc::new(arrow::array::Float64Array::from_iter(
+                            ids.iter()
+                                .map(|i| (i % 5 != 0).then_some(*i as f64 + m as f64)),
+                        )),
+                        Arc::new(StringArray::from_iter(
+                            ids.iter()
+                                .map(|i| (i % 3 != 0).then(|| format!("c{}", i % 4))),
+                        )),
+                    ],
+                    Some(NullBuffer::from_iter(
+                        ids.iter().map(|i| (i + m as i64) % 7 != 0),
+                    )),
+                )) as Arc<dyn Array>
+            })
+            .collect::<Vec<_>>();
+        let costs = StructArray::new(
+            costs.clone(),
+            money,
+            Some(NullBuffer::from_iter(ids.iter().map(|i| i % 11 != 0))),
+        );
+        let DataType::List(element) = schema.field(2).data_type() else {
+            unreachable!()
+        };
+        let lengths: Vec<usize> = ids.iter().map(|i| (i % 3) as usize).collect();
+        let total: usize = lengths.iter().sum();
+        let list = ListArray::new(
+            Arc::clone(element),
+            OffsetBuffer::from_lengths(lengths.clone()),
+            Arc::new(StringArray::from_iter((0..total).map(|j| {
+                (j % 4 != 0).then(|| format!("e{}", start as usize + j))
+            }))),
+            Some(NullBuffer::from_iter(ids.iter().map(|i| i % 13 != 0))),
+        );
+        let DataType::Map(entries, _) = schema.field(3).data_type() else {
+            unreachable!()
+        };
+        let DataType::Struct(kv) = entries.data_type() else {
+            unreachable!()
+        };
+        let entries_array = StructArray::new(
+            kv.clone(),
+            vec![
+                Arc::new(StringArray::from_iter_values(
+                    (0..total).map(|j| format!("k{j}")),
+                )),
+                Arc::new(Int64Array::from_iter(
+                    (0..total).map(|j| (j % 2 == 0).then_some(j as i64)),
+                )),
+            ],
+            None,
+        );
+        let map = MapArray::new(
+            Arc::clone(entries),
+            OffsetBuffer::from_lengths(lengths),
+            entries_array,
+            Some(NullBuffer::from_iter(ids.iter().map(|i| i % 17 != 0))),
+            false,
+        );
+        RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(ids)),
+                Arc::new(costs),
+                Arc::new(list),
+                Arc::new(map),
+            ],
+        )
+        .unwrap()
+    }
+
+    fn write_nested(batches: Vec<RecordBatch>, schema: SchemaRef, partitions: usize) -> Vec<u8> {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data.out");
+        let exec = ShuffleWriterExec::try_new(
+            Arc::new(DataSourceExec::new(Arc::new(
+                MemorySourceConfig::try_new(&[batches], schema, None).unwrap(),
+            ))),
+            CometPartitioning::Hash(vec![Arc::new(Column::new("id", 0))], partitions),
+            CompressionCodec::Zstd(1),
+            data.to_str().unwrap().to_string(),
+            false,
+            1024 * 1024,
+            None,
+        )
+        .unwrap();
+        let ctx = SessionContext::new_with_config(SessionConfig::new().with_batch_size(64));
+        let stream = exec.execute(0, ctx.task_ctx()).unwrap();
+        Runtime::new().unwrap().block_on(collect(stream)).unwrap();
+        std::fs::read(data).unwrap()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn nested_types_from_distinct_instances_write_like_shared_ones() {
+        let writer_schema = Arc::new(nested_type_instance("1"));
+        let shared: Vec<RecordBatch> = (0..9)
+            .map(|b| nested_batch(Arc::clone(&writer_schema), b * 40, 40))
+            .collect();
+        let distinct: Vec<RecordBatch> = (0..9)
+            .map(|b| {
+                let field_id = if b % 3 == 0 { "1" } else { "2" };
+                nested_batch(Arc::new(nested_type_instance(field_id)), b * 40, 40)
+            })
+            .collect();
+        for partitions in [1, 7, 500] {
+            let expected = write_nested(shared.clone(), Arc::clone(&writer_schema), partitions);
+            let actual = write_nested(distinct.clone(), Arc::clone(&writer_schema), partitions);
+            assert_eq!(expected, actual, "{partitions} partitions");
+
+            let mut read = read_all_ipc_batches(&actual);
+            let schema = read[0].schema();
+            read.iter_mut().for_each(|b| {
+                *b = RecordBatch::try_new(Arc::clone(&schema), b.columns().to_vec()).unwrap()
+            });
+            let all = arrow::compute::concat_batches(&schema, &read).unwrap();
+            let order = arrow::compute::sort_to_indices(all.column(0), None, None).unwrap();
+            let sorted = arrow::compute::take_record_batch(&all, &order).unwrap();
+            let input = arrow::compute::concat_batches(&writer_schema, &shared).unwrap();
+            assert_eq!(sorted.num_rows(), input.num_rows());
+            for (out, inp) in sorted.columns().iter().zip(input.columns()) {
+                assert_eq!(out.to_data(), inp.to_data());
+            }
+        }
     }
 
     #[test]

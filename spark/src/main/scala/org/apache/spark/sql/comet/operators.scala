@@ -936,10 +936,9 @@ abstract class CometNativeExec extends CometExec {
     }
 
     // The protobuf is the source of truth for whether a slot is a ShuffleScan or a regular
-    // Scan: `CometExchangeSink.shouldUseShuffleScan` only fires for AQE wrappers
-    // (`ShuffleQueryStageExec`), so a bare non-AQE `CometShuffleExchangeExec` always serializes
-    // as a regular Scan regardless of `COMET_SHUFFLE_DIRECT_READ_ENABLED`. Driving the JVM
-    // dispatch from `shuffleScanIndices` instead of the conf keeps the two aligned.
+    // Scan. Both the initial exchange conversion and AQE stage conversion choose that input
+    // representation. Driving the JVM dispatch from `shuffleScanIndices` instead of the current
+    // conf keeps it aligned with the serialized plan, including across AQE replanning.
     val shuffleScanIndices = findShuffleScanIndices(nativeOp)
 
     def isBroadcastInput(plan: SparkPlan): Boolean = plan match {
@@ -1005,6 +1004,11 @@ abstract class CometNativeExec extends CometExec {
     // broadcast plan.
     val (firstNonBroadcastPlanRDD, firstNonBroadcastPlanNumPartitions) =
       firstNonBroadcastPlan.get._1 match {
+        case plan: CometScanWithPlanData =>
+          // File counts are execution data, not a planning-time partitioning guarantee.
+          // findAllPlanData above has already resolved DPP and serialized the selected files.
+          // Read the scan itself: the plan-data map omits scans with zero selected files.
+          (null.asInstanceOf[RDD[Any]], plan.perPartitionData.length)
         case plan: CometNativeExec =>
           (null.asInstanceOf[RDD[Any]], plan.outputPartitioning.numPartitions)
         case plan =>
@@ -1050,9 +1054,10 @@ abstract class CometNativeExec extends CometExec {
       commonByKey = commonByKey,
       perPartitionByKey = perPartitionByKey,
       shuffleScanIndices = shuffleScanIndices,
-      // A leaf Comet scan (`CometNativeScanExec`, `CometIcebergNativeScanExec`) can
-      // contribute `bytes_scanned` / `output_rows` to Spark's task-level input metrics,
-      // which drive the Input column on the UI's Stages and Executors tabs.
+      // A leaf Comet scan (`CometNativeScanExec`, `CometIcebergNativeScanExec`, or a contrib
+      // leaf such as `CometDeltaNativeScanExec`) can contribute `bytes_scanned` /
+      // `output_rows` to Spark's task-level input metrics, which drive the Input column on
+      // the UI's Stages and Executors tabs.
       // Matching on `CometLeafExec` rather than `CometNativeScanExec` keeps every scan
       // reported once the scan is fused into a larger native block, where only the block
       // root's `compute` runs. `reportScanInputMetrics` self-filters on the `bytes_scanned`

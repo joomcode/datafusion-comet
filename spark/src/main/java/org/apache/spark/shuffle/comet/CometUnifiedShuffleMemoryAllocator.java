@@ -48,9 +48,15 @@ public final class CometUnifiedShuffleMemoryAllocator extends CometShuffleMemory
     }
   }
 
+  /**
+   * Spills for another consumer of the task, such as a native operator or a Spark sort in the same
+   * stage, when the owner registered itself with `setOwnerSpill`. Otherwise the JVM shuffle writer
+   * keeps up to the task's whole share of the off-heap pool while its input is still producing, and
+   * a consumer upstream of it gets nothing. The writer spills its own records when one of its
+   * allocations fails, so a request from this allocator itself spills nothing here.
+   */
   public long spill(long l, MemoryConsumer memoryConsumer) throws IOException {
-    // JVM shuffle writer does not support spilling for other memory consumers
-    return 0;
+    return spillOwnerFor(memoryConsumer);
   }
 
   public synchronized MemoryBlock allocate(long required) {

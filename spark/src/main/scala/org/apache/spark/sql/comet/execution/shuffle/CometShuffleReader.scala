@@ -23,7 +23,15 @@ import java.io.InputStream
 
 import org.apache.spark.shuffle.ShuffleReader
 
+import org.apache.comet.CometConf
+
 /** The local and remote shuffle readers support the same decoded and native consumption paths. */
 private[shuffle] trait CometShuffleReader[K, C] extends ShuffleReader[K, C] {
   def readAsRawStream(): InputStream
+}
+
+private[shuffle] object CometShuffleReader {
+  def coalesceRows: Int =
+    if (CometConf.COMET_SHUFFLE_READ_COALESCE_ENABLED.get()) CometConf.COMET_BATCH_SIZE.get()
+    else 0
 }

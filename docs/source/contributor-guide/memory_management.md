@@ -335,6 +335,38 @@ Native operators reserve through DataFusion's `MemoryConsumer` / `MemoryReservat
 
 An operator that never calls `try_grow` is invisible to the pool no matter how much memory it uses.
 
+### Sort and whole-partition windows
+
+The sort merge reservation is capped at 1/32 of the configured off-heap budget per
+concurrent Spark task (executor cores divided by task CPUs), up to DataFusion's default.
+This leaves room for input batches on small executors; the spillable merge can grow its
+reservation when it needs more. It does not increase the memory pool or suppress allocation
+failures. An individual batch still has to fit the available execution budget.
+
+`PartitionAggregateWindowExec` is disabled by default. With
+`spark.comet.exec.window.partitionAggregate.enabled=true` it handles window expressions that
+cannot stream; otherwise they run in `WindowAggExec`, as upstream. These are full-partition
+`sum`, `avg`, `count`, `min`, `max`, `first_value`, `last_value` and `nth_value` frames (with
+or without `IGNORE NULLS`), `ntile`, `percent_rank`, `cume_dist`, and frames that end at
+`UNBOUNDED FOLLOWING` but start at `CURRENT ROW`, `N PRECEDING` or `N FOLLOWING`. It reserves
+the retained input batches of the current window partition and, on reservation failure, spills
+them through DataFusion's spill manager, then replays one spill file at a time with the window
+columns. Small partitions avoid disk entirely.
+
+Full-partition aggregates update the existing native accumulators incrementally, and value
+functions track the selected row while rows arrive. `ntile` and `percent_rank` are computed
+during the replay from the partition size counted on the first pass. `cume_dist` and frames
+ending at `UNBOUNDED FOLLOWING` use a reverse pass over a narrow copy of the spilled rows (ORDER
+BY keys and function arguments, written in reverse order next to each row spill file). That pass
+computes the value of the frame starting at every row; the values are buffered in a separate
+spillable reservation and read back at each row's frame start during the replay. Accumulator
+state is reserved separately and is not spillable.
+
+In a window node that mixes these with expressions that can stream (for example `row_number`,
+`lag` or running aggregates), the streaming expressions run in a `BoundedWindowAggExec` below
+`PartitionAggregateWindowExec`. `WindowAggExec`, which buffers whole partitions, remains only
+for expressions without a spilling implementation.
+
 ## Crossing the FFI boundary
 
 Batches move between the JVM and native over the Arrow C Data and C Stream interfaces, which are

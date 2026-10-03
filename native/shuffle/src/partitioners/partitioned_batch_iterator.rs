@@ -175,6 +175,8 @@ pub(crate) struct RowIterator<'a> {
     /// expects. Reused across chunks so each partition costs one small allocation
     /// (capacity at most `batch_size`) rather than re-materializing its whole index list.
     chunk_scratch: Vec<(usize, usize)>,
+    chunk_batches: Vec<&'a RecordBatch>,
+    batch_slots: Vec<u32>,
     pos: usize,
     interleave_time: &'a Time,
 }
@@ -193,6 +195,8 @@ impl<'a> RowIterator<'a> {
                 batch_size,
                 indices: &[],
                 chunk_scratch: vec![],
+                chunk_batches: vec![],
+                batch_slots: vec![],
                 pos: 0,
                 interleave_time,
             };
@@ -202,6 +206,8 @@ impl<'a> RowIterator<'a> {
             batch_size,
             indices,
             chunk_scratch: Vec::with_capacity(batch_size.min(indices.len())),
+            chunk_batches: Vec::new(),
+            batch_slots: vec![u32::MAX; record_batches.len()],
             pos: 0,
             interleave_time,
         }
@@ -217,14 +223,23 @@ impl Iterator for RowIterator<'_> {
         }
 
         let indices_end = std::cmp::min(self.pos + self.batch_size, self.indices.len());
-        self.chunk_scratch.clear();
-        self.chunk_scratch.extend(
-            self.indices[self.pos..indices_end]
-                .iter()
-                .map(|(i_batch, i_row)| (*i_batch as usize, *i_row as usize)),
-        );
+        let chunk = &self.indices[self.pos..indices_end];
         let mut timer = self.interleave_time.timer();
-        let result = interleave_record_batch(self.record_batches, &self.chunk_scratch);
+        self.chunk_scratch.clear();
+        self.chunk_batches.clear();
+        for &(i_batch, i_row) in chunk {
+            let slot = &mut self.batch_slots[i_batch as usize];
+            if *slot == u32::MAX {
+                *slot = self.chunk_batches.len() as u32;
+                self.chunk_batches
+                    .push(self.record_batches[i_batch as usize]);
+            }
+            self.chunk_scratch.push((*slot as usize, i_row as usize));
+        }
+        let result = interleave_record_batch(&self.chunk_batches, &self.chunk_scratch);
+        for &(i_batch, _) in chunk {
+            self.batch_slots[i_batch as usize] = u32::MAX;
+        }
         timer.stop();
         match result {
             Ok(batch) => {
@@ -411,6 +426,51 @@ mod tests {
             .collect::<datafusion::common::Result<_>>()
             .unwrap();
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn partitions_gather_only_the_batches_they_reference() {
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int32, false)]));
+        let buffered: Vec<RecordBatch> = (0..6)
+            .map(|b| {
+                RecordBatch::try_new(
+                    Arc::clone(&schema),
+                    vec![Arc::new(Int32Array::from(
+                        (0..4).map(|r| b * 100 + r).collect::<Vec<_>>(),
+                    ))],
+                )
+                .unwrap()
+            })
+            .collect();
+        let partitions: Vec<Vec<(u32, u32)>> = vec![
+            vec![(4, 1), (1, 3), (4, 0), (1, 0), (4, 3)],
+            vec![],
+            vec![(5, 2)],
+            vec![(0, 0), (2, 1), (2, 2), (3, 3), (5, 0), (0, 3), (3, 0)],
+        ];
+        let producer = PartitionedBatchesProducer::new(
+            buffered.clone(),
+            PartitionIndices::Rows(partitions.clone()),
+            2,
+        );
+        let refs = producer.batch_refs();
+        let time = Time::default();
+        let expected_refs: Vec<&RecordBatch> = buffered.iter().collect();
+        for (p, indices) in partitions.iter().enumerate() {
+            let produced: Vec<RecordBatch> = producer
+                .produce(&refs, p, &time)
+                .collect::<datafusion::common::Result<_>>()
+                .unwrap();
+            let full: Vec<(usize, usize)> = indices
+                .iter()
+                .map(|(b, r)| (*b as usize, *r as usize))
+                .collect();
+            let expected: Vec<RecordBatch> = full
+                .chunks(2)
+                .map(|chunk| interleave_record_batch(&expected_refs, chunk).unwrap())
+                .collect();
+            assert_eq!(produced, expected, "partition {p}");
+        }
     }
 
     /// A refs slice that does not cover every buffered batch (e.g. built from a different

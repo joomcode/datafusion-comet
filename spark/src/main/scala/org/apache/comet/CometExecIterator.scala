@@ -595,6 +595,9 @@ object CometExecIterator extends Logging {
     // for tokio runtime thread count
     val executorCores = numDriverOrExecutorCores(SparkEnv.get.conf)
     builder.putEntries("spark.executor.cores", executorCores.toString)
+    builder.putEntries(
+      CometConf.COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD.key,
+      sortSpillBeforeOutputThreshold(SparkEnv.get.conf, executorCores).toString)
 
     // Any Comet config that the native side reads must be added here manually, resolved.
     // `cometSqlConfs` only carries values that were explicitly set, exactly as they were
@@ -604,6 +607,7 @@ object CometExecIterator extends Logging {
     Seq[ConfigEntry[_]](
       CometConf.COMET_DEBUG_ENABLED,
       CometConf.COMET_DEBUG_MEMORY_ENABLED,
+      CometConf.COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED,
       CometConf.COMET_EXPLAIN_NATIVE_ENABLED,
       CometConf.COMET_MAX_TEMP_DIRECTORY_SIZE,
       CometConf.COMET_PARQUET_ROW_FILTER_PUSHDOWN_ENABLED,
@@ -613,6 +617,17 @@ object CometExecIterator extends Logging {
 
     builder.build().toByteArray
   }
+
+  def sortSpillBeforeOutputThreshold(conf: SparkConf, executorCores: Int): Long =
+    CometConf.COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD.get(SQLConf.get).getOrElse {
+      if (CometSparkSessionExtensions.isOffHeapEnabled(conf)) {
+        val concurrentTasks =
+          math.max(executorCores / math.max(conf.getInt("spark.task.cpus", 1), 1), 1)
+        conf.getSizeAsBytes("spark.memory.offHeap.size", "0") / concurrentTasks / 4
+      } else {
+        0L
+      }
+    }
 
   def getMemoryConfig(conf: SparkConf): MemoryConfig = {
     // there are different paths for on-heap vs off-heap mode

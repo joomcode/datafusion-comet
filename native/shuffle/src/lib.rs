@@ -23,6 +23,7 @@ pub(crate) mod comet_partitioning;
 pub mod ipc;
 pub(crate) mod metrics;
 pub(crate) mod partitioners;
+mod read_coalescer;
 mod remote_schema;
 #[cfg(test)]
 mod remote_schema_tests;
@@ -32,11 +33,13 @@ mod schema_align;
 mod shuffle_writer;
 mod spark_crc32c_hasher;
 pub mod spark_unsafe;
+mod type_align;
 pub(crate) mod writers;
 
 pub use codec_context::ShuffleCodecContext;
 pub use comet_partitioning::{CometPartitioning, RoundRobinStrategy};
 pub use ipc::{read_ipc_compressed, read_ipc_compressed_validated, reset_schema_cache};
+pub use read_coalescer::ShuffleReadCoalescer;
 pub use remote_schema::{decode_remote_shuffle_batch, validate_remote_schema};
 pub use schema_align::SchemaAlignExec;
 pub use shuffle_writer::{PartitionOffsets, ShuffleWriterDestination, ShuffleWriterExec};

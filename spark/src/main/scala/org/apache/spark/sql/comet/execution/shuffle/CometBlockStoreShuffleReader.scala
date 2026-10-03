@@ -103,20 +103,32 @@ class CometBlockStoreShuffleReader[K, C](
       nativeUtil.close()
     }
 
-    val recordIter: Iterator[(Int, ColumnarBatch)] = fetchIterator
-      .flatMap(blockIdAndStream => {
-        if (currentReadIterator != null) {
-          currentReadIterator.close()
-        }
-        currentReadIterator = NativeBatchDecoderIterator(
-          blockIdAndStream._2,
-          dep.decodeTime,
-          nativeLib,
-          nativeUtil,
-          tracingEnabled)
-        currentReadIterator
-      })
-      .map(b => (0, b))
+    val coalesceRows = CometShuffleReader.coalesceRows
+    val batchIter: Iterator[ColumnarBatch] = if (coalesceRows > 0) {
+      currentReadIterator = NativeBatchDecoderIterator(
+        readAsRawStream(),
+        dep.decodeTime,
+        nativeLib,
+        nativeUtil,
+        tracingEnabled,
+        coalesceRows = coalesceRows)
+      currentReadIterator
+    } else {
+      fetchIterator
+        .flatMap(blockIdAndStream => {
+          if (currentReadIterator != null) {
+            currentReadIterator.close()
+          }
+          currentReadIterator = NativeBatchDecoderIterator(
+            blockIdAndStream._2,
+            dep.decodeTime,
+            nativeLib,
+            nativeUtil,
+            tracingEnabled)
+          currentReadIterator
+        })
+    }
+    val recordIter: Iterator[(Int, ColumnarBatch)] = batchIter.map(b => (0, b))
 
     // Update the context task metrics for each record read.
     val metricIter = CompletionIterator[(Any, Any), Iterator[(Any, Any)]](

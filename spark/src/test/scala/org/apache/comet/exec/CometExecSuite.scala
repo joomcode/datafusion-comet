@@ -109,6 +109,33 @@ class CometExecSuite extends CometTestBase {
     }
   }
 
+  test("SQLConf serde resolves the sort spill-before-output threshold") {
+    val key = CometConf.COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD.key
+    def entries = ConfigMap.parseFrom(CometExecIterator.serializeCometSQLConfs()).getEntriesMap
+    val conf = spark.sparkContext.getConf
+    val cores = entries.get("spark.executor.cores").toInt
+    val expected = if (conf.getBoolean("spark.memory.offHeap.enabled", false)) {
+      val tasks = math.max(cores / math.max(conf.getInt("spark.task.cpus", 1), 1), 1)
+      conf.getSizeAsBytes("spark.memory.offHeap.size", "0") / tasks / 4
+    } else {
+      0L
+    }
+    assert(entries.get(key) == expected.toString)
+    assert(
+      CometExecIterator.sortSpillBeforeOutputThreshold(
+        conf
+          .clone()
+          .set("spark.memory.offHeap.enabled", "true")
+          .set("spark.memory.offHeap.size", "12g"),
+        8) == 384L * 1024 * 1024)
+    withSQLConf(key -> "512m") {
+      assert(entries.get(key) == (512L * 1024 * 1024).toString)
+    }
+    withSQLConf(key -> "0") {
+      assert(entries.get(key) == "0")
+    }
+  }
+
   test("sample without replacement") {
     withParquetTable((0 until 1000).map(i => (i, i + 1)), "tbl") {
       val df = sql("SELECT * FROM tbl").sample(withReplacement = false, fraction = 0.3, seed = 42)
@@ -2584,11 +2611,29 @@ class CometExecSuite extends CometTestBase {
     }
   }
 
+  test("pooled columnar-to-row projections stay correct across schemas and self-joins") {
+    withSQLConf(
+      SQLConf.WHOLESTAGE_CODEGEN_ENABLED.key -> "false",
+      SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+      SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+      CometConf.COMET_EXEC_SORT_MERGE_JOIN_ENABLED.key -> "false") {
+      withParquetTable((0 until 200).map(i => (i % 17, s"v$i", i.toLong * 3)), "t") {
+        for (_ <- 0 until 2) {
+          checkSparkAnswer(sql("SELECT a._1, a._2, b._3 FROM t a JOIN t b ON a._1 = b._1"))
+          checkSparkAnswer(sql("SELECT _2, _1 FROM t WHERE _1 > 3"))
+          checkSparkAnswer(sql("SELECT _3, named_struct('k', _1, 's', _2) FROM t"))
+        }
+      }
+    }
+  }
+
   test("Comet native metrics: HashJoin") {
     withParquetTable((0 until 5).map(i => (i, i + 1)), "t1") {
       withParquetTable((0 until 5).map(i => (i, i + 1)), "t2") {
         val df = sql("SELECT /*+ SHUFFLE_HASH(t1) */ * FROM t1 INNER JOIN t2 ON t1._1 = t2._1")
-        df.collect()
+        withSQLConf(CometConf.COMET_SHUFFLE_READ_COALESCE_ENABLED.key -> "false") {
+          df.collect()
+        }
 
         val metrics = find(df.queryExecution.executedPlan) {
           case _: CometHashJoinExec => true
@@ -3062,6 +3107,39 @@ class CometExecSuite extends CometTestBase {
     }
 
     spark.sessionState.functionRegistry.dropFunction(funcId_bloom_filter_agg)
+  }
+
+  for (wholeStage <- Seq("true", "false")) {
+    test(
+      s"sort wide binary payload preserves values across the native boundary codegen=$wholeStage") {
+      // Disable Parquet dictionary encoding so the wide Binary sort path is exercised.
+      // Nulls and distinct payloads catch a view retaining the wrong backing buffer.
+      withTempDir { dir =>
+        val path = new Path(dir.toURI.toString, "wide-sort").toString
+        val rows = (0 until 384).map { i =>
+          val payload = if (i % 7 == 0) null else Array.fill[Byte](8192)((i % 251).toByte)
+          (i, payload)
+        }
+        spark
+          .createDataFrame(rows)
+          .coalesce(1)
+          .write
+          .option("parquet.enable.dictionary", "false")
+          .parquet(path)
+        withSQLConf(
+          SQLConf.WHOLESTAGE_CODEGEN_ENABLED.key -> wholeStage,
+          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+          CometConf.COMET_NATIVE_COLUMNAR_TO_ROW_ENABLED.key -> "false",
+          CometConf.COMET_BATCH_SIZE.key -> "32",
+          "spark.comet.exec.sort.enabled" -> "true",
+          "spark.comet.exec.transitionRevert.enabled" -> "false") {
+          val query = spark.read.parquet(path).sortWithinPartitions($"_1".desc)
+          checkSparkAnswerAndOperator(
+            query,
+            Seq(classOf[CometSortExec], classOf[CometColumnarToRowExec]))
+        }
+      }
+    }
   }
 
   test("sort (non-global)") {

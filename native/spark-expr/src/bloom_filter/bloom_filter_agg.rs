@@ -22,8 +22,8 @@ use std::sync::Arc;
 use crate::bloom_filter::spark_bloom_filter;
 use crate::bloom_filter::spark_bloom_filter::{SparkBloomFilter, SparkBloomFilterVersion};
 
-use arrow::array::ArrayRef;
 use arrow::array::BinaryArray;
+use arrow::array::{Array, ArrayRef};
 use datafusion::common::{downcast_value, ScalarValue};
 use datafusion::error::{DataFusionError, Result};
 use datafusion::logical_expr::function::{AccumulatorArgs, StateFieldsArgs};
@@ -182,9 +182,13 @@ impl Accumulator for SparkBloomFilter {
             "Expect one element in 'states' but found {}",
             states.len()
         );
-        assert_eq!(states[0].len(), 1);
         let state_sv = downcast_value!(states[0], BinaryArray);
-        self.merge_filter(state_sv.value_data())
+        for i in 0..state_sv.len() {
+            if state_sv.is_valid(i) {
+                self.merge_filter(state_sv.value(i))?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -213,5 +217,39 @@ mod tests {
             acc.evaluate().unwrap(),
             ScalarValue::Binary(Some(_))
         ));
+    }
+
+    #[test]
+    fn merge_batch_merges_every_partial_state_of_a_batch() {
+        let num_bits = 1024;
+        let num_hash = spark_bloom_filter::optimal_num_hash_functions(100, num_bits);
+        let filter = || SparkBloomFilter::new(SparkBloomFilterVersion::V1, num_hash, num_bits, 0);
+        let state = |values: &[i64]| {
+            let mut acc = filter();
+            for v in values {
+                acc.put_long(*v);
+            }
+            match acc.state().unwrap().remove(0) {
+                ScalarValue::Binary(Some(bytes)) => bytes,
+                other => panic!("unexpected state {other:?}"),
+            }
+        };
+        let (a, b) = (state(&[1, 2]), state(&[42]));
+
+        let mut separately = filter();
+        for s in [&a, &b] {
+            let one: ArrayRef = Arc::new(BinaryArray::from(vec![Some(s.as_slice())]));
+            separately.merge_batch(&[one]).unwrap();
+        }
+        let mut together = filter();
+        let all: ArrayRef = Arc::new(BinaryArray::from(vec![
+            Some(a.as_slice()),
+            None,
+            Some(b.as_slice()),
+        ]));
+        together.merge_batch(&[all]).unwrap();
+
+        assert_eq!(together.evaluate().unwrap(), separately.evaluate().unwrap());
+        assert_ne!(together.evaluate().unwrap(), filter().evaluate().unwrap());
     }
 }

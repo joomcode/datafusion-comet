@@ -40,7 +40,12 @@ if __name__ == "__main__":
         "org.apache.comet.shuffle.CelebornReflectionCompatibilitySuite", # dedicated version matrix
         "org.apache.spark.sql.comet.CometPlanStabilitySuite", # abstract
         "org.apache.spark.sql.comet.ParquetDatetimeRebaseSuite", # abstract
-        "org.apache.comet.exec.CometColumnarShuffleSuite" # abstract
+        "org.apache.comet.exec.CometColumnarShuffleSuite", # abstract
+        "org.apache.comet.contrib.delta.CometDeltaNativeScanSuite", # contrib/delta-spark, runs with -Pdelta
+        "org.apache.comet.contrib.delta.DeltaScanContribSuite", # contrib/delta-spark, runs with -Pdelta
+        "org.apache.comet.contrib.delta.CometDeltaDmlReproSuite", # contrib/delta-spark, runs with -Pdelta
+        "org.apache.comet.contrib.delta.CometDeltaS3Suite", # contrib/delta-spark, runs with -Pdelta
+        "org.apache.spark.sql.comet.DeltaPlanDataInjectorSuite" # contrib/delta-spark, runs with -Pdelta
     ]
 
     for workflow_filename in [".github/workflows/pr_build_linux.yml", ".github/workflows/pr_build_macos.yml"]:

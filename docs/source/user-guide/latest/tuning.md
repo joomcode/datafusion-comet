@@ -560,6 +560,9 @@ single-node setups with fast NVMe drives, at the expense of increased disk space
 
 ## Reducing Row/Columnar Conversion Overhead
 
+All rules in this section are disabled by default. The cost-based engine choice, described below, replaces the other
+rules when it is enabled; they are meant for plans where it is disabled.
+
 When a query stage contains many operators that fall back to Spark row-based execution, Comet may insert
 repeated columnar-to-row and row-to-columnar conversions that dominate stage runtime. Set
 `spark.comet.exec.transitionRevert.enabled=true` to have Comet revert the entire stage to Spark row execution
@@ -568,6 +571,92 @@ when the number of columnar-to-row transitions exceeds
 subset of operators for eliminating conversion overhead across the stage. A stage is not reverted when it holds a
 native aggregate whose intermediate buffer Spark cannot exchange with Comet across a stage boundary, because
 reverting it would split that aggregate between the two engines.
+
+### Shuffle Formats from Both Sides
+
+Comet picks each shuffle's format from its producer: a native shuffle after a native operator and, with
+`spark.comet.shuffle.convertFromSparkPlan.enabled`, Comet's columnar shuffle after a Spark operator, whatever
+reads it. When a Spark operator reads that columnar shuffle too, rows are converted to Arrow when written and back
+to rows when read, for nothing. The cost-based engine choice already picks formats this way. With it disabled, set
+`spark.comet.exec.boundaryFormats.enabled=true` to pick each shuffle and
+broadcast format from the engines on both of its sides: a Spark shuffle between two Spark operators, a columnar
+shuffle from a Spark operator into a native one, a native shuffle after a native operator, and a Spark broadcast
+for a Spark join. No operator changes engine. The shuffles read in one stage, such as the inputs of a sort-merge
+join, are not split between Comet's and Spark's hash functions unless their key types hash alike in both
+(booleans, integers, floating point, strings, binary, dates, timestamps, and decimals up to precision 18). For
+other keys, a native input can instead be written by a Spark shuffle, or by Comet's columnar shuffle when a native
+operator reads it.
+
+### Cost-Based Engine Choice
+
+`spark.comet.exec.costBasedEngines.enabled` (default `false`) decides, for each operator Comet converted, whether it runs
+natively or in Spark by minimizing one estimated time per row over the whole plan. Each priced operator costs the sum of
+prices per row from a table of measurements: `c0 + k0*L + k1*L*min(L, 600)` ns natively and `c0 + k*L` ns in Spark, where
+`L` is the number of leaf columns a class prices and the coefficients depend on the class:
+
+- `shuffleWrite` and `shuffleRead`: every leaf of the shuffled rows, the partitioning key included. A native write is
+  scaled by `1 + (0.04 + 0.00036*L) * max(0, partitions / 250 - 1)` and a Comet read by
+  `1 + (0.06 + 0.00025*L) * max(0, partitions / 250 - 1)`; Spark's shuffle does not depend on the partitions. Comet's
+  columnar shuffle over Spark rows costs a native shuffle with its own write slope (`0.001*L`), 400 ns and one `r2c`.
+  Bytes beyond 12 per leaf of the estimated row size add 0.5 + 0.6 ns per byte to a Comet shuffle and 3.6 + 0.45 to a
+  Spark one.
+- `sort` over every leaf of the sorted rows (Comet also 0.15 ns per byte beyond 12 per leaf); `sortSpill` adds the
+  price of a spill to a fraction `sortSpillFraction` of rows, none by default. `smj` prices a sort-merge join and `bhj`
+  the probe side of a broadcast hash join, over every output leaf.
+- `predicate` for filters, over the leaves their predicate references, plus a pass-through of 1.5 ns per output leaf
+  natively and none in Spark. A native filter over a native scan, and the native projects over it, stay native
+  whatever their prices (`keepFiltersOverNativeScans=false` lets them move): the rows a filter drops are not estimated,
+  so the model cannot see that a Spark filter would read every row of the scan through a conversion. Likewise a native
+  partial aggregate directly over a native scan, filter or project stays native
+  (`keepPartialAggregatesOverNativeInputs=false` lets it move), so the conversion is over its few output rows.
+- `projectPassThrough` for projects, over every output leaf, free in Spark over a scan, and `expression` once per leaf a
+  project computes (`expressionOverScan` in Spark over a scan).
+- `agg` for hash, object hash and sort aggregates, over the leaves of the grouping keys, half for each phase of a
+  two-phase aggregate, plus the price of the class of each aggregate function (`aggDeclarative`, `aggCollectList`,
+  `aggCollectSet`, `aggPercentile`, `aggPercentileApprox`, `aggOther`) and `aggObjectHash` for an object hash aggregate.
+- `window` over the leaves of its input, plus `windowAggregate`, `windowOffset` or `windowRank` for each window
+  function, at `L` the number of window functions; `wglPartial` and `wglFinal` for window group limits.
+- `expand`, per projection, and `generate`: free with Spark's whole-stage codegen, `expandNoCodegen` and
+  `generateNoCodegen` in Spark beyond `spark.sql.codegen.maxFields`, as for `aggDeclarativeNoCodegen`.
+- `rowLocal` for unions, coalesces and limits, which cost nothing.
+- `c2r` and `r2c` for each conversion between Arrow and rows, over every leaf of the converted rows.
+
+Every class has a `flat` and a `nested` line, and a row whose leaves are a fraction `f` inside structs, arrays or maps
+costs `(1 - f)` times the flat price plus `f` times the nested one. An array counts the leaves of its element once,
+whatever its length. Rows are not estimated: every operator counts one row, so the choice depends only on the schema and
+the shape of the plan, and it is made again on every plan adaptive query execution re-optimizes, for example after a
+sort-merge join becomes a broadcast hash join.
+
+`spark.comet.exec.costBasedEngines.costTable` overrides any coefficient or scalar, for example
+`sort.flat.comet=224,0,0.023;agg.spark=0,62.1;filterPassThroughPerLeaf.comet=1.5;sortSpillFraction=0.1`. Operators
+outside the table, such as shuffled hash joins, keep the constant weights
+`spark.comet.exec.costBasedEngines.cometOperatorWeight` (default `-1`),
+`spark.comet.exec.costBasedEngines.sparkOperatorWeight` (default `0`) and the per-operator
+`spark.comet.exec.costBasedEngines.cometOperatorWeights`. Set `spark.comet.exec.costBasedEngines.log.enabled` (or
+`spark.comet.explain.fallback.enabled`) to log every decided operator, shuffle and conversion with the classes, leaf
+columns and costs of each engine.
+
+Operators only move from Comet to Spark; scans, writes, and native aggregates whose buffers Spark cannot read keep
+their engine. Shuffle and broadcast formats then follow as with `spark.comet.exec.boundaryFormats.enabled`, priced
+the same way. The wide-row rules `spark.comet.exec.sort.wideRowFallback.enabled` (default `false`) and
+`spark.comet.shuffle.wideRowFallback.minLeafColumns` (default `0`, disabled) do not run while the cost-based choice is enabled. Disabled, as by
+default, it leaves each operator in the engine Comet's conversion chose.
+
+### Sorts of Wide Rows
+
+The native sort copies every row when it sorts a batch, when it spills and when it merges spills, while Spark sorts
+pointers with key prefixes. For wide rows the copies dominate. With the cost-based choice disabled, set
+`spark.comet.exec.sort.wideRowFallback.enabled=true`
+to run a sort in Spark when a Spark operator reads it and its input has at least
+`spark.comet.exec.sort.wideRowFallback.minLeafColumns` (default `50`) leaf columns outside the sort key. A struct
+counts the leaves of its fields, an array the leaves of its element, a map the leaves of its key and value, and any
+other type one. Columns referenced by the sort key are not counted. The decision reads only the schema, so it is
+made on the initial plan, every later plan of the query makes the same one, and the shuffle formats around the sort
+follow it.
+
+A sort read by a native operator, such as a sort-merge join or a window, stays native, since running it in Spark would
+add two conversions. With `spark.comet.exec.boundaryFormats.enabled`, the shuffle formats around the sort then follow
+its engine.
 
 ### Wide or Deeply Nested Schemas
 

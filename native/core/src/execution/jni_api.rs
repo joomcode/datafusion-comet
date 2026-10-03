@@ -36,6 +36,7 @@ use datafusion::execution::disk_manager::DiskManagerMode;
 use datafusion::execution::memory_pool::MemoryPool;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::logical_expr::ScalarUDF;
+use datafusion::physical_plan::sorts::sort::SpillBeforeOutputThreshold;
 use datafusion::{
     execution::disk_manager::DiskManagerBuilder,
     physical_plan::{display::DisplayableExecutionPlan, SendableRecordBatchStream},
@@ -105,9 +106,10 @@ use tokio::runtime::{Handle, Runtime};
 use tokio::sync::mpsc;
 
 use crate::execution::memory_pools::{create_memory_pool, parse_memory_pool_config};
-use crate::execution::operators::{ScanExec, ShuffleScanExec};
+use crate::execution::operators::{PartitionAggregateWindowEnabled, ScanExec, ShuffleScanExec};
 use crate::execution::shuffle::{
-    decode_remote_shuffle_batch, read_ipc_compressed, CompressionCodec, ShuffleWriterExec,
+    decode_remote_shuffle_batch, read_ipc_compressed, CompressionCodec, ShuffleReadCoalescer,
+    ShuffleWriterExec,
 };
 use crate::execution::spark_plan::SparkPlan;
 
@@ -117,9 +119,10 @@ use crate::execution::tracing::{
 
 use crate::execution::memory_pools::logging_pool::LoggingMemoryPool;
 use crate::execution::spark_config::{
-    SparkConfig, COMET_DEBUG_ENABLED, COMET_DEBUG_MEMORY, COMET_EXPLAIN_NATIVE_ENABLED,
-    COMET_MAX_TEMP_DIRECTORY_SIZE, COMET_PARQUET_ROW_FILTER_PUSHDOWN_ENABLED,
-    COMET_TRACING_ENABLED, SPARK_EXECUTOR_CORES,
+    SparkConfig, COMET_DEBUG_ENABLED, COMET_DEBUG_MEMORY,
+    COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD, COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED,
+    COMET_EXPLAIN_NATIVE_ENABLED, COMET_MAX_TEMP_DIRECTORY_SIZE,
+    COMET_PARQUET_ROW_FILTER_PUSHDOWN_ENABLED, COMET_TRACING_ENABLED, SPARK_EXECUTOR_CORES,
 };
 use crate::parquet::encryption_support::{CometEncryptionFactory, ENCRYPTION_FACTORY_ID};
 use crate::parquet::parquet_support::CometObjectStoreRegistry;
@@ -327,6 +330,22 @@ fn memory_usage() -> MemoryUsage {
         pools_reserved: sum_reserved(&snapshot.all_pools),
         pools: snapshot.all_pools.len(),
         plans: snapshot.plans,
+    }
+}
+
+/// Temporary, opt-in measurements at the unreserved scan/FFI boundaries. Count shared
+/// IPC buffers once: summing array sizes would count a single IPC body per column.
+pub(crate) fn log_batch_memory(boundary: &str, batch: &RecordBatch) {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ENABLED.get_or_init(|| std::env::var("COMET_DEBUG_BATCH_MEMORY").as_deref() == Ok("1")) {
+        return;
+    }
+    let bytes =
+        datafusion::common::utils::memory::RecordBatchMemoryCounter::new().count_batch(batch);
+    if bytes >= 16 * 1024 * 1024 {
+        let usage = memory_usage();
+        info!("Comet batch memory: boundary={boundary} rows={} bytes={bytes} allocated={} reserved={}",
+            batch.num_rows(), usage.native_allocated, usage.pools_reserved);
     }
 }
 
@@ -668,6 +687,7 @@ pub unsafe extern "system" fn Java_org_apache_comet_Native_createPlan(
                 task_cpus as usize,
                 &spark_config,
                 &spark_plan,
+                (off_heap_mode != JNI_FALSE).then_some(memory_limit as usize),
             )?;
 
             let plan_creation_time = start.elapsed();
@@ -820,7 +840,24 @@ fn configure_skip_partial_aggregation(config: &mut SessionConfig, plan: &Operato
     }
 }
 
+/// DataFusion's fixed 10 MiB merge reserve can consume most of a small Spark task's
+/// share before the sorter admits its first batch. Cap this eager reservation at 1/32
+/// of the per-task budget. The spillable merge can grow it as needed; larger executors
+/// retain the upstream default. Explicit testing overrides are applied afterwards.
+fn configure_sort_spill_reservation(
+    config: &mut SessionConfig,
+    off_heap_limit: usize,
+    executor_cores: usize,
+    task_cpus: usize,
+) {
+    let concurrent_tasks = (executor_cores / task_cpus.max(1)).max(1);
+    let cap = (off_heap_limit / concurrent_tasks / 32).max(1);
+    let reservation = &mut config.options_mut().execution.sort_spill_reservation_bytes;
+    *reservation = (*reservation).min(cap);
+}
+
 /// Configure DataFusion session context.
+#[allow(clippy::too_many_arguments)]
 fn prepare_datafusion_session_context(
     batch_size: usize,
     memory_pool: Arc<dyn MemoryPool>,
@@ -829,6 +866,7 @@ fn prepare_datafusion_session_context(
     task_cpus: usize,
     spark_config: &HashMap<String, String>,
     spark_plan: &Operator,
+    off_heap_limit: Option<usize>,
 ) -> CometResult<SessionContext> {
     let paths = local_dirs.into_iter().map(PathBuf::from).collect();
     let disk_manager = DiskManagerBuilder::default()
@@ -845,6 +883,11 @@ fn prepare_datafusion_session_context(
         // its internal parallelism to the number of CPUs allocated to Spark Tasks. This can be
         // modified by changing spark.task.cpus in the Spark config.
         .with_batch_size(batch_size);
+
+    if let Some(limit) = off_heap_limit {
+        let executor_cores = spark_config.get_usize(SPARK_EXECUTOR_CORES, 1);
+        configure_sort_spill_reservation(&mut session_config, limit, executor_cores, task_cpus);
+    }
 
     // Translate the Comet-namespaced row-level pushdown flag into the equivalent
     // DataFusion session options. `pushdown_filters` enables the parquet reader's
@@ -869,6 +912,17 @@ fn prepare_datafusion_session_context(
             let df_key = format!("datafusion.{df_key}");
             session_config = session_config.set_str(&df_key, value);
         }
+    }
+
+    let spill_before_output =
+        spark_config.get_usize(COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD, 0);
+    if spill_before_output > 0 {
+        session_config = session_config
+            .with_extension(Arc::new(SpillBeforeOutputThreshold(spill_before_output)));
+    }
+
+    if spark_config.get_bool(COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED) {
+        session_config = session_config.with_extension(Arc::new(PartitionAggregateWindowEnabled));
     }
 
     configure_skip_partial_aggregation(&mut session_config, spark_plan);
@@ -946,6 +1000,7 @@ fn prepare_output(
     let schema_addrs = &*schema_addrs;
 
     let output_schema = output_batch.schema();
+    log_batch_memory("ffi_output", &output_batch);
     let results = output_batch.columns();
     let num_rows = output_batch.num_rows();
 
@@ -1665,7 +1720,119 @@ fn decode_shuffle_block(
     } else {
         read_ipc_compressed(slice)?
     };
+    log_batch_memory("shuffle_decode_jvm", &batch);
     prepare_output(env, array_addrs, schema_addrs, batch, false)
+}
+
+struct ShuffleReadState {
+    coalescer: ShuffleReadCoalescer,
+    ready: Option<RecordBatch>,
+}
+
+fn shuffle_read_state<'a>(handle: jlong) -> CometResult<&'a mut ShuffleReadState> {
+    unsafe { (handle as *mut ShuffleReadState).as_mut() }
+        .ok_or_else(|| CometError::Internal("Shuffle read coalescer is not initialized".to_owned()))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_apache_comet_Native_createShuffleReadCoalescer(
+    e: EnvUnowned,
+    _class: JClass,
+    batch_size: jint,
+) -> jlong {
+    try_unwrap_or_throw(&e, |_| {
+        let state = ShuffleReadState {
+            coalescer: ShuffleReadCoalescer::new(batch_size.max(1) as usize),
+            ready: None,
+        };
+        Ok(Box::into_raw(Box::new(state)) as jlong)
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// A nonzero handle must have been returned by `createShuffleReadCoalescer`, must not have been
+/// released, and must not be in use by a concurrent call.
+pub unsafe extern "system" fn Java_org_apache_comet_Native_releaseShuffleReadCoalescer(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) {
+    try_unwrap_or_throw(&e, |_| {
+        if handle != 0 {
+            drop(unsafe { Box::from_raw(handle as *mut ShuffleReadState) });
+        }
+        Ok(())
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The buffer must be valid for `length` bytes. `handle` must come from
+/// `createShuffleReadCoalescer` and must stay alive for the duration of this call.
+pub unsafe extern "system" fn Java_org_apache_comet_Native_pushShuffleBlock(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    byte_buffer: JByteBuffer,
+    length: jint,
+    tracing_enabled: jboolean,
+) -> jboolean {
+    try_unwrap_or_throw(&e, |env| {
+        with_trace("pushShuffleBlock", tracing_enabled != JNI_FALSE, || {
+            let state = shuffle_read_state(handle)?;
+            if state.ready.is_some() {
+                return Err(CometError::Internal(
+                    "Shuffle read coalescer has an unexported batch".to_owned(),
+                ));
+            }
+            let raw_pointer = env.get_direct_buffer_address(&byte_buffer)?;
+            let slice: &[u8] = unsafe { std::slice::from_raw_parts(raw_pointer, length as usize) };
+            let batch = read_ipc_compressed(slice)?;
+            state.ready = state.coalescer.push(batch)?;
+            Ok(state.ready.is_some() as jboolean)
+        })
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// `handle` must come from `createShuffleReadCoalescer` and must not have been released.
+pub unsafe extern "system" fn Java_org_apache_comet_Native_finishShuffleRead(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) -> jboolean {
+    try_unwrap_or_throw(&e, |_| {
+        let state = shuffle_read_state(handle)?;
+        if state.ready.is_none() {
+            state.ready = state.coalescer.finish()?;
+        }
+        Ok(state.ready.is_some() as jboolean)
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// `handle` must come from `createShuffleReadCoalescer` and must not have been released. The
+/// output addresses must point to allocated Arrow C structs.
+pub unsafe extern "system" fn Java_org_apache_comet_Native_exportShuffleBatch(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    array_addrs: JLongArray,
+    schema_addrs: JLongArray,
+) -> jlong {
+    try_unwrap_or_throw(&e, |env| {
+        let state = shuffle_read_state(handle)?;
+        match state.ready.take() {
+            Some(batch) => {
+                log_batch_memory("shuffle_decode_jvm", &batch);
+                prepare_output(env, array_addrs, schema_addrs, batch, false)
+            }
+            None => Ok(-1),
+        }
+    })
 }
 
 #[no_mangle]
@@ -1906,6 +2073,23 @@ mod tests {
     use datafusion_comet_proto::spark_operator::{HashAggregate, ShuffleWriter};
     use std::cell::Cell;
     use std::future::Future;
+
+    #[test]
+    fn sort_merge_reserve_scales_with_the_task_budget() {
+        let mut config = SessionConfig::new();
+        let default = config.options().execution.sort_spill_reservation_bytes;
+        configure_sort_spill_reservation(&mut config, 64 * 1024 * 1024, 2, 1);
+        assert_eq!(
+            config.options().execution.sort_spill_reservation_bytes,
+            1024 * 1024
+        );
+        let mut config = SessionConfig::new();
+        configure_sort_spill_reservation(&mut config, 8 * 1024 * 1024 * 1024, 4, 1);
+        assert_eq!(
+            config.options().execution.sort_spill_reservation_bytes,
+            default
+        );
+    }
 
     #[test]
     fn skip_partial_eligibility_is_fail_closed() {
@@ -2481,5 +2665,999 @@ mod tests {
             .unwrap();
         assert!(next.is_some());
         assert_eq!(pulls, 1);
+    }
+}
+
+#[cfg(test)]
+mod native_sort_spill_tests {
+    use super::*;
+    use crate::execution::memory_pools::{fair_unified_pool_with_fake_spark, FakeSparkTask};
+    use arrow::array::{ArrayRef, BinaryArray, Float64Array, Int32Array, Int64Array, StringArray};
+    use arrow::compute::SortOptions;
+    use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+    use datafusion::common::{JoinType, NullEquality};
+    use datafusion::execution::memory_pool::{MemoryConsumer, MemoryLimit, MemoryReservation};
+    use datafusion::execution::TaskContext;
+    use datafusion::physical_expr::expressions::col;
+    use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
+    use datafusion::physical_plan::joins::SortMergeJoinExec;
+    use datafusion::physical_plan::sorts::sort::SortExec;
+    use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+    use datafusion::physical_plan::streaming::{PartitionStream, StreamingTableExec};
+    use datafusion::physical_plan::{ExecutionPlan, SendableRecordBatchStream};
+    use datafusion_comet_proto::spark_operator::Operator;
+
+    const MB: usize = 1024 * 1024;
+
+    #[derive(Clone, Debug)]
+    struct SortSpillCase {
+        executor_cores: usize,
+        task_share: usize,
+        active_tasks_at_start: usize,
+        active_tasks_later: usize,
+        tasks_start_at_batch: usize,
+        batch_size: usize,
+        input_rows: usize,
+        num_batches: usize,
+        /// Average length of the `title` column; 0 leaves the column out.
+        title_len: usize,
+    }
+
+    impl SortSpillCase {
+        /// Six million product rows sorted by `product_variant_id` while the executor goes
+        /// from two active tasks to eight.
+        fn production() -> Self {
+            Self {
+                executor_cores: 8,
+                task_share: 32 * MB,
+                active_tasks_at_start: 2,
+                active_tasks_later: 8,
+                tasks_start_at_batch: 45,
+                batch_size: 8192,
+                input_rows: 8192,
+                num_batches: 160,
+                title_len: 60,
+            }
+        }
+
+        fn four_to_eight_tasks_at(batch: usize) -> Self {
+            Self {
+                active_tasks_at_start: 4,
+                tasks_start_at_batch: batch,
+                ..Self::production()
+            }
+        }
+    }
+
+    struct ProductRows {
+        schema: SchemaRef,
+        case: SortSpillCase,
+        spark: FakeSparkTask,
+    }
+
+    impl std::fmt::Debug for ProductRows {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("ProductRows")
+                .field("case", &self.case)
+                .finish()
+        }
+    }
+
+    fn product_schema(case: &SortSpillCase) -> SchemaRef {
+        let mut fields = vec![
+            Field::new("product_variant_id", DataType::Utf8, true),
+            Field::new("product_id", DataType::Utf8, true),
+            Field::new("store_id", DataType::Int64, true),
+            Field::new("price", DataType::Float64, true),
+            Field::new("quantity", DataType::Int32, true),
+        ];
+        if case.title_len > 0 {
+            fields.push(Field::new("title", DataType::Utf8, true));
+        }
+        Arc::new(Schema::new(fields))
+    }
+
+    fn mix(mut x: u64) -> u64 {
+        x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        x ^ (x >> 31)
+    }
+
+    fn product_batch(schema: &SchemaRef, case: &SortSpillCase, index: usize) -> RecordBatch {
+        let start = (index * case.input_rows) as u64;
+        let rows: Vec<u64> = (start..start + case.input_rows as u64).collect();
+        let variant = StringArray::from_iter_values(
+            rows.iter()
+                .map(|&r| format!("{:016x}{:08x}", mix(r), mix(r ^ 7) as u32)),
+        );
+        let product = StringArray::from_iter_values(
+            rows.iter()
+                .map(|&r| format!("{:016x}{:08x}", mix(r / 4), r as u32)),
+        );
+        let store = Int64Array::from_iter_values(rows.iter().map(|&r| (mix(r) % 50_000) as i64));
+        let price =
+            Float64Array::from_iter_values(rows.iter().map(|&r| (mix(r) % 100_000) as f64 / 100.0));
+        let quantity = Int32Array::from_iter_values(rows.iter().map(|&r| (r % 97) as i32));
+        let mut columns: Vec<ArrayRef> = vec![
+            Arc::new(variant),
+            Arc::new(product),
+            Arc::new(store),
+            Arc::new(price),
+            Arc::new(quantity),
+        ];
+        if case.title_len > 0 {
+            columns.push(Arc::new(StringArray::from_iter_values(rows.iter().map(
+                |&r| {
+                    let len = case.title_len / 2 + (mix(r ^ 11) as usize % (case.title_len + 1));
+                    let mut s = format!("title {r} ");
+                    while s.len() < len {
+                        s.push_str("lorem ipsum ");
+                    }
+                    s.truncate(len);
+                    s
+                },
+            ))));
+        }
+        RecordBatch::try_new(Arc::clone(schema), columns).unwrap()
+    }
+
+    impl PartitionStream for ProductRows {
+        fn schema(&self) -> &SchemaRef {
+            &self.schema
+        }
+
+        fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+            let schema = Arc::clone(&self.schema);
+            let case = self.case.clone();
+            let spark = self.spark.clone();
+            let off_heap_size = case.task_share * case.executor_cores;
+            Box::pin(RecordBatchStreamAdapter::new(
+                Arc::clone(&schema),
+                futures::stream::iter(0..case.num_batches).map(move |i| {
+                    if i == case.tasks_start_at_batch {
+                        spark.set_limit(off_heap_size / case.active_tasks_later);
+                    }
+                    Ok(product_batch(&schema, &case, i))
+                }),
+            ))
+        }
+    }
+
+    fn sort_plan(case: &SortSpillCase, spark: &FakeSparkTask) -> Arc<SortExec> {
+        let schema = product_schema(case);
+        let source = Arc::new(ProductRows {
+            schema: Arc::clone(&schema),
+            case: case.clone(),
+            spark: spark.clone(),
+        });
+        let child = Arc::new(
+            StreamingTableExec::try_new(
+                Arc::clone(&schema),
+                vec![source],
+                None,
+                Vec::<LexOrdering>::new(),
+                false,
+                None,
+            )
+            .unwrap(),
+        );
+        let ordering = LexOrdering::new(vec![PhysicalSortExpr::new(
+            col("product_variant_id", &schema).unwrap(),
+            SortOptions {
+                descending: false,
+                nulls_first: true,
+            },
+        )])
+        .unwrap();
+        Arc::new(SortExec::new(ordering, child).with_fetch(None))
+    }
+
+    /// Reads a sort's output, checking that its keys come in order, and returns the rows.
+    async fn read_sorted(mut stream: SendableRecordBatchStream) -> DataFusionResult<usize> {
+        let mut rows = 0;
+        let mut last: Option<String> = None;
+        while let Some(batch) = stream.next().await {
+            let batch = batch?;
+            let keys = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
+            for key in keys.iter() {
+                let key = key.unwrap();
+                if let Some(prev) = &last {
+                    assert!(prev.as_str() <= key, "output not sorted: {prev} > {key}");
+                }
+                last = Some(key.to_string());
+            }
+            rows += batch.num_rows();
+        }
+        Ok(rows)
+    }
+
+    /// Runs `plan` in one task's session, checks that its output is sorted on the first
+    /// column and that all memory is handed back, and returns the rows it produced.
+    async fn run_in_task(
+        case: &SortSpillCase,
+        plan: impl FnOnce(&FakeSparkTask) -> Arc<dyn ExecutionPlan>,
+    ) -> DataFusionResult<(usize, Arc<dyn ExecutionPlan>)> {
+        let off_heap_size = case.task_share * case.executor_cores;
+        let (pool, spark) = fair_unified_pool_with_fake_spark(
+            off_heap_size,
+            off_heap_size / case.active_tasks_at_start,
+        );
+        let spill_dir = tempfile::tempdir().unwrap();
+        let spark_config = HashMap::from([(
+            SPARK_EXECUTOR_CORES.to_string(),
+            case.executor_cores.to_string(),
+        )]);
+        let session = prepare_datafusion_session_context(
+            case.batch_size,
+            Arc::clone(&pool),
+            vec![spill_dir.path().to_string_lossy().into_owned()],
+            u64::MAX,
+            1,
+            &spark_config,
+            &Operator::default(),
+            Some(off_heap_size),
+        )
+        .unwrap();
+
+        let plan = plan(&spark);
+        let rows = read_sorted(plan.execute(0, session.task_ctx())?).await?;
+        assert_eq!(
+            pool.reserved(),
+            0,
+            "memory still reserved after the plan finished"
+        );
+        assert_eq!(spark.held(), 0, "memory not handed back to Spark");
+        Ok((rows, plan))
+    }
+
+    fn spill_count(plan: &Arc<dyn ExecutionPlan>) -> usize {
+        plan.metrics().and_then(|m| m.spill_count()).unwrap_or(0)
+    }
+
+    async fn assert_sort_spills(case: SortSpillCase) {
+        match run_in_task(&case, |spark| {
+            sort_plan(&case, spark) as Arc<dyn ExecutionPlan>
+        })
+        .await
+        {
+            Ok((rows, sort)) => {
+                assert_eq!(rows, case.input_rows * case.num_batches, "{case:?}");
+                assert!(spill_count(&sort) > 0, "sort did not spill: {case:?}");
+            }
+            Err(e) => panic!("native sort failed instead of spilling: {e}\n{case:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_spills_after_other_tasks_shrink_the_spark_share() {
+        assert_sort_spills(SortSpillCase::production()).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_spills_when_the_share_halves_early_or_late() {
+        for batch in [20, 25, 50] {
+            assert_sort_spills(SortSpillCase::four_to_eight_tasks_at(batch)).await;
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_spills_with_output_batches_smaller_than_its_runs() {
+        assert_sort_spills(SortSpillCase {
+            batch_size: 4096,
+            ..SortSpillCase::four_to_eight_tasks_at(25)
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_spills_many_small_input_batches() {
+        assert_sort_spills(SortSpillCase {
+            input_rows: 1024,
+            num_batches: 1280,
+            tasks_start_at_batch: 200,
+            ..SortSpillCase::four_to_eight_tasks_at(25)
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_spills_when_the_key_is_most_of_the_row() {
+        assert_sort_spills(SortSpillCase {
+            title_len: 0,
+            num_batches: 240,
+            ..SortSpillCase::four_to_eight_tasks_at(25)
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_spills_with_a_fixed_share() {
+        assert_sort_spills(SortSpillCase {
+            active_tasks_at_start: 8,
+            ..SortSpillCase::production()
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn both_sorts_of_a_sort_merge_join_spill_after_the_share_shrinks() {
+        for batch in [20, 80] {
+            let case = SortSpillCase::four_to_eight_tasks_at(batch);
+            let plan = |spark: &FakeSparkTask| -> Arc<dyn ExecutionPlan> {
+                let left: Arc<dyn ExecutionPlan> = sort_plan(&case, spark);
+                let right: Arc<dyn ExecutionPlan> = sort_plan(&case, spark);
+                let on = vec![(
+                    col("product_variant_id", &left.schema()).unwrap(),
+                    col("product_variant_id", &right.schema()).unwrap(),
+                )];
+                Arc::new(
+                    SortMergeJoinExec::try_new(
+                        left,
+                        right,
+                        on,
+                        None,
+                        JoinType::Inner,
+                        vec![SortOptions {
+                            descending: false,
+                            nulls_first: true,
+                        }],
+                        NullEquality::NullEqualsNothing,
+                    )
+                    .unwrap(),
+                )
+            };
+            match run_in_task(&case, plan).await {
+                Ok((rows, join)) => {
+                    // Every key is unique and both sides read the same rows.
+                    assert_eq!(rows, case.input_rows * case.num_batches);
+                    for sort in join.children() {
+                        assert!(spill_count(sort) > 0, "sort did not spill");
+                    }
+                }
+                Err(e) => panic!("sort-merge join failed instead of spilling: {e}\n{case:?}"),
+            }
+        }
+    }
+
+    /// Records the most the wrapped pool has had reserved.
+    #[derive(Debug)]
+    struct PeakPool {
+        inner: Arc<dyn MemoryPool>,
+        peak: std::sync::atomic::AtomicUsize,
+    }
+
+    impl PeakPool {
+        fn record(&self) {
+            self.peak
+                .fetch_max(self.inner.reserved(), std::sync::atomic::Ordering::Relaxed);
+        }
+
+        fn peak(&self) -> usize {
+            self.peak.load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    impl std::fmt::Display for PeakPool {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "peak({})", self.inner)
+        }
+    }
+
+    impl MemoryPool for PeakPool {
+        fn name(&self) -> &str {
+            "peak"
+        }
+
+        fn register(&self, consumer: &MemoryConsumer) {
+            self.inner.register(consumer)
+        }
+
+        fn unregister(&self, consumer: &MemoryConsumer) {
+            self.inner.unregister(consumer)
+        }
+
+        fn grow(&self, reservation: &MemoryReservation, additional: usize) {
+            self.inner.grow(reservation, additional);
+            self.record();
+        }
+
+        fn shrink(&self, reservation: &MemoryReservation, shrink: usize) {
+            self.inner.shrink(reservation, shrink)
+        }
+
+        fn try_grow(
+            &self,
+            reservation: &MemoryReservation,
+            additional: usize,
+        ) -> DataFusionResult<()> {
+            self.inner.try_grow(reservation, additional)?;
+            self.record();
+            Ok(())
+        }
+
+        fn reserved(&self) -> usize {
+            self.inner.reserved()
+        }
+
+        fn memory_limit(&self) -> MemoryLimit {
+            self.inner.memory_limit()
+        }
+    }
+
+    /// Rows like the cube job's: a short key and a wide binary sketch.
+    #[derive(Debug)]
+    struct WideRows {
+        schema: SchemaRef,
+        rows_per_batch: usize,
+        num_batches: usize,
+        sketch_len: usize,
+    }
+
+    impl WideRows {
+        fn batch(&self, index: usize) -> RecordBatch {
+            let start = (index * self.rows_per_batch) as u64;
+            let rows: Vec<u64> = (start..start + self.rows_per_batch as u64).collect();
+            let key = StringArray::from_iter_values(
+                rows.iter()
+                    .map(|&r| format!("{:016x}{:08x}", mix(r), mix(r ^ 7) as u32)),
+            );
+            let sketch = BinaryArray::from_iter_values(rows.iter().map(|&r| {
+                (0..self.sketch_len as u64)
+                    .map(|i| mix(r.wrapping_mul(31).wrapping_add(i)) as u8)
+                    .collect::<Vec<u8>>()
+            }));
+            RecordBatch::try_new(
+                Arc::clone(&self.schema),
+                vec![Arc::new(key), Arc::new(sketch)],
+            )
+            .unwrap()
+        }
+    }
+
+    impl PartitionStream for WideRows {
+        fn schema(&self) -> &SchemaRef {
+            &self.schema
+        }
+
+        fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+            let batches: Vec<_> = (0..self.num_batches).map(|i| Ok(self.batch(i))).collect();
+            Box::pin(RecordBatchStreamAdapter::new(
+                Arc::clone(&self.schema),
+                futures::stream::iter(batches),
+            ))
+        }
+    }
+
+    struct SortRun {
+        rows: usize,
+        first_output_bytes: usize,
+        /// Bytes Spark had granted when the sort produced its first batch, that is while
+        /// the final merge pass runs.
+        held_during_final_merge: usize,
+        peak_reserved: usize,
+        spill_count: usize,
+        spilled_rows: usize,
+    }
+
+    /// Sorts `source` by its first column in one task with a fixed Spark share, and checks
+    /// the output order and that all memory is handed back.
+    async fn sort_with_fixed_share(
+        source: Arc<dyn PartitionStream>,
+        share: usize,
+        executor_cores: usize,
+        batch_size: usize,
+    ) -> SortRun {
+        let off_heap_size = share * executor_cores;
+        let (pool, spark) = fair_unified_pool_with_fake_spark(off_heap_size, share);
+        let peak = Arc::new(PeakPool {
+            inner: pool,
+            peak: Default::default(),
+        });
+        let pool: Arc<dyn MemoryPool> = Arc::clone(&peak) as _;
+        let spill_dir = tempfile::tempdir().unwrap();
+        let spark_config =
+            HashMap::from([(SPARK_EXECUTOR_CORES.to_string(), executor_cores.to_string())]);
+        let session = prepare_datafusion_session_context(
+            batch_size,
+            Arc::clone(&pool),
+            vec![spill_dir.path().to_string_lossy().into_owned()],
+            u64::MAX,
+            1,
+            &spark_config,
+            &Operator::default(),
+            Some(off_heap_size),
+        )
+        .unwrap();
+        let schema = Arc::clone(source.schema());
+        let child = Arc::new(
+            StreamingTableExec::try_new(
+                Arc::clone(&schema),
+                vec![source],
+                None,
+                Vec::<LexOrdering>::new(),
+                false,
+                None,
+            )
+            .unwrap(),
+        );
+        let ordering = LexOrdering::new(vec![PhysicalSortExpr::new(
+            col(schema.field(0).name(), &schema).unwrap(),
+            SortOptions {
+                descending: false,
+                nulls_first: true,
+            },
+        )])
+        .unwrap();
+        let sort: Arc<dyn ExecutionPlan> = Arc::new(SortExec::new(ordering, child));
+
+        let mut stream = sort.execute(0, session.task_ctx()).unwrap();
+        let first = stream
+            .next()
+            .await
+            .expect("sorted output")
+            .unwrap_or_else(|e| panic!("native sort failed: {e}"));
+        let held_during_final_merge = spark.held();
+        let first_output_bytes =
+            datafusion::common::utils::memory::RecordBatchMemoryCounter::new().count_batch(&first);
+        let rest: SendableRecordBatchStream = Box::pin(RecordBatchStreamAdapter::new(
+            Arc::clone(&schema),
+            futures::stream::once(async { Ok(first) }).chain(stream),
+        ));
+        let rows = read_sorted(rest)
+            .await
+            .unwrap_or_else(|e| panic!("native sort failed: {e}"));
+        assert_eq!(pool.reserved(), 0, "memory still reserved after the sort");
+        assert_eq!(spark.held(), 0, "memory not handed back to Spark");
+        let metrics = sort.metrics().unwrap();
+        SortRun {
+            rows,
+            first_output_bytes,
+            held_during_final_merge,
+            peak_reserved: peak.peak(),
+            spill_count: metrics.spill_count().unwrap_or(0),
+            spilled_rows: metrics.spilled_rows().unwrap_or(0),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn final_spill_merge_leaves_half_the_share_for_its_consumers() {
+        let case = SortSpillCase {
+            active_tasks_at_start: 8,
+            tasks_start_at_batch: usize::MAX,
+            num_batches: 240,
+            ..SortSpillCase::production()
+        };
+        // The share stays fixed, so the source never changes it.
+        let spark = fair_unified_pool_with_fake_spark(1, 1).1;
+        let source = Arc::new(ProductRows {
+            schema: product_schema(&case),
+            case: case.clone(),
+            spark,
+        });
+        let run = sort_with_fixed_share(
+            source,
+            case.task_share,
+            case.executor_cores,
+            case.batch_size,
+        )
+        .await;
+        assert_eq!(run.rows, case.input_rows * case.num_batches);
+        assert!(run.spill_count > 0, "sort did not spill");
+        assert!(run.peak_reserved <= case.task_share, "overcommitted");
+        assert!(
+            run.held_during_final_merge * 2 <= case.task_share,
+            "the final merge holds {} of a {} share",
+            run.held_during_final_merge,
+            case.task_share
+        );
+    }
+
+    /// A returned batch is owned by the downstream consumer, not the sort's pool
+    /// reservation. The JVM row consumer does not reserve this Arrow memory. Bound
+    /// that handoff by batch size, and wide rows by bytes whatever the batch size,
+    /// rather than assuming the sort still accounts for it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn small_sort_batches_bound_the_unreserved_jvm_handoff() {
+        let source = Arc::new(WideRows {
+            schema: Arc::new(Schema::new(vec![
+                Field::new("key", DataType::Utf8, false),
+                Field::new("sketch", DataType::Binary, false),
+            ])),
+            rows_per_batch: 8192,
+            num_batches: 1,
+            sketch_len: 2048,
+        });
+        let large = sort_with_fixed_share(
+            Arc::clone(&source) as Arc<dyn PartitionStream>,
+            64 * MB,
+            8,
+            8192,
+        )
+        .await;
+        let small = sort_with_fixed_share(source, 64 * MB, 8, 512).await;
+        assert_eq!(large.rows, 8192);
+        assert_eq!(small.rows, large.rows);
+        assert_eq!(large.spill_count, 0);
+        assert_eq!(small.spill_count, 0);
+        assert!(large.first_output_bytes <= 5 * MB);
+        assert!(small.first_output_bytes < 2 * MB);
+        // The batches not yet returned remain reserved by the sorter.
+        assert!(large.held_during_final_merge >= 11 * MB);
+        assert!(small.held_during_final_merge >= 15 * MB);
+        eprintln!(
+            "sort handoff: large={}B reserved={}B; small={}B reserved={}B",
+            large.first_output_bytes,
+            large.held_during_final_merge,
+            small.first_output_bytes,
+            small.held_during_final_merge
+        );
+    }
+
+    /// Scaled down from the cube job: ~4 KiB rows, so a full output batch of `batch_size`
+    /// rows is larger than the task's whole share, and every spill run is a single batch.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_of_rows_wider_than_the_share_per_batch_stays_accounted() {
+        let share = 2 * MB;
+        let batch_size = 512;
+        let sketch_len = 4608;
+        let (rows_per_batch, num_batches) = (96, 96);
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("key", DataType::Utf8, false),
+            Field::new("sketch", DataType::Binary, false),
+        ]));
+        let source = Arc::new(WideRows {
+            schema,
+            rows_per_batch,
+            num_batches,
+            sketch_len,
+        });
+        assert!(batch_size * sketch_len > share);
+        let run = sort_with_fixed_share(source, share, 8, batch_size).await;
+        assert_eq!(run.rows, rows_per_batch * num_batches);
+        assert!(
+            run.spill_count >= 8,
+            "need many spills: {}",
+            run.spill_count
+        );
+        assert!(
+            run.spilled_rows > run.rows,
+            "need a multi-pass merge: {} rows spilled",
+            run.spilled_rows
+        );
+        assert!(
+            run.peak_reserved <= share,
+            "overcommitted: peak {} for a {share} share",
+            run.peak_reserved
+        );
+        assert!(run.held_during_final_merge <= share);
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum RowShape {
+        KeyAndKibPayload,
+        KibKeyAndId,
+    }
+
+    const KIB_ROW: usize = 1000;
+
+    struct KibRows {
+        shape: RowShape,
+        schema: SchemaRef,
+        rows: usize,
+        rows_per_batch: usize,
+    }
+
+    impl std::fmt::Debug for KibRows {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("KibRows")
+                .field("shape", &self.shape)
+                .field("rows", &self.rows)
+                .field("rows_per_batch", &self.rows_per_batch)
+                .finish()
+        }
+    }
+
+    fn kib_text(prefix: String) -> String {
+        let mut s = prefix;
+        while s.len() < KIB_ROW {
+            s.push_str("lorem ipsum ");
+        }
+        s.truncate(KIB_ROW);
+        s
+    }
+
+    impl KibRows {
+        fn new(shape: RowShape, rows: usize, rows_per_batch: usize) -> Self {
+            let schema = Arc::new(Schema::new(match shape {
+                RowShape::KeyAndKibPayload => vec![
+                    Field::new("key", DataType::Int64, false),
+                    Field::new("id", DataType::Int64, false),
+                    Field::new("payload", DataType::Utf8, false),
+                ],
+                RowShape::KibKeyAndId => vec![
+                    Field::new("key", DataType::Utf8, false),
+                    Field::new("id", DataType::Int64, false),
+                ],
+            }));
+            Self {
+                shape,
+                schema,
+                rows,
+                rows_per_batch,
+            }
+        }
+
+        fn batch(&self, start: usize) -> RecordBatch {
+            let end = (start + self.rows_per_batch).min(self.rows);
+            let ids: Vec<u64> = (start as u64..end as u64).collect();
+            let id: ArrayRef =
+                Arc::new(Int64Array::from_iter_values(ids.iter().map(|&i| i as i64)));
+            let columns: Vec<ArrayRef> = match self.shape {
+                RowShape::KeyAndKibPayload => vec![
+                    Arc::new(Int64Array::from_iter_values(
+                        ids.iter().map(|&i| mix(i) as i64),
+                    )),
+                    id,
+                    Arc::new(StringArray::from_iter_values(
+                        ids.iter().map(|&i| kib_text(format!("{i:016x} "))),
+                    )),
+                ],
+                RowShape::KibKeyAndId => vec![
+                    Arc::new(StringArray::from_iter_values(
+                        ids.iter()
+                            .map(|&i| kib_text(format!("{:016x}{i:016x} ", mix(i)))),
+                    )),
+                    id,
+                ],
+            };
+            RecordBatch::try_new(Arc::clone(&self.schema), columns).unwrap()
+        }
+    }
+
+    impl PartitionStream for KibRows {
+        fn schema(&self) -> &SchemaRef {
+            &self.schema
+        }
+
+        fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+            let source = KibRows::new(self.shape, self.rows, self.rows_per_batch);
+            Box::pin(RecordBatchStreamAdapter::new(
+                Arc::clone(&self.schema),
+                futures::stream::iter((0..self.rows).step_by(self.rows_per_batch))
+                    .map(move |start| Ok(source.batch(start))),
+            ))
+        }
+    }
+
+    struct OutputTrace {
+        reserved: Vec<usize>,
+        spill_counts: Vec<usize>,
+        peak_reserved: usize,
+    }
+
+    impl OutputTrace {
+        fn spill_count(&self) -> usize {
+            *self.spill_counts.last().unwrap()
+        }
+
+        fn max_reserved_after(&self, fraction: f64) -> usize {
+            let from = (self.reserved.len() as f64 * fraction) as usize;
+            self.reserved[from..].iter().copied().max().unwrap_or(0)
+        }
+
+        fn reserved_at(&self, fraction: f64) -> usize {
+            self.reserved[(self.reserved.len() as f64 * fraction) as usize]
+        }
+    }
+
+    fn check_sorted_output(
+        shape: RowShape,
+        batch: &RecordBatch,
+        last: &mut Option<Vec<u8>>,
+        seen: &mut [bool],
+    ) {
+        let ids = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        for row in 0..batch.num_rows() {
+            let id = ids.value(row) as u64;
+            let key = match shape {
+                RowShape::KeyAndKibPayload => {
+                    let key = batch
+                        .column(0)
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .unwrap()
+                        .value(row);
+                    let payload = batch
+                        .column(2)
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap()
+                        .value(row);
+                    assert_eq!(key, mix(id) as i64, "key of row {id}");
+                    assert_eq!(
+                        payload,
+                        kib_text(format!("{id:016x} ")),
+                        "payload of row {id}"
+                    );
+                    ((key as u64) ^ (1 << 63)).to_be_bytes().to_vec()
+                }
+                RowShape::KibKeyAndId => {
+                    let key = batch
+                        .column(0)
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap()
+                        .value(row);
+                    assert_eq!(
+                        key,
+                        kib_text(format!("{:016x}{id:016x} ", mix(id))),
+                        "key of row {id}"
+                    );
+                    key.as_bytes().to_vec()
+                }
+            };
+            assert!(!seen[id as usize], "row {id} returned twice");
+            seen[id as usize] = true;
+            if let Some(prev) = last.as_ref() {
+                assert!(*prev <= key, "output not sorted at row {id}");
+            }
+            *last = Some(key);
+        }
+    }
+
+    async fn sort_and_trace(
+        source: KibRows,
+        share: usize,
+        executor_cores: usize,
+        spill_before_output: Option<usize>,
+    ) -> OutputTrace {
+        let shape = source.shape;
+        let rows = source.rows;
+        let off_heap_size = share * executor_cores;
+        let (pool, spark) = fair_unified_pool_with_fake_spark(off_heap_size, share);
+        let peak = Arc::new(PeakPool {
+            inner: pool,
+            peak: Default::default(),
+        });
+        let pool: Arc<dyn MemoryPool> = Arc::clone(&peak) as _;
+        let spill_dir = tempfile::tempdir().unwrap();
+        let mut spark_config =
+            HashMap::from([(SPARK_EXECUTOR_CORES.to_string(), executor_cores.to_string())]);
+        if let Some(threshold) = spill_before_output {
+            spark_config.insert(
+                COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD.to_string(),
+                threshold.to_string(),
+            );
+        }
+        let session = prepare_datafusion_session_context(
+            8192,
+            Arc::clone(&pool),
+            vec![spill_dir.path().to_string_lossy().into_owned()],
+            u64::MAX,
+            1,
+            &spark_config,
+            &Operator::default(),
+            Some(off_heap_size),
+        )
+        .unwrap();
+        let schema = Arc::clone(&source.schema);
+        let child = Arc::new(
+            StreamingTableExec::try_new(
+                Arc::clone(&schema),
+                vec![Arc::new(source)],
+                None,
+                Vec::<LexOrdering>::new(),
+                false,
+                None,
+            )
+            .unwrap(),
+        );
+        let ordering = LexOrdering::new(vec![PhysicalSortExpr::new(
+            col("key", &schema).unwrap(),
+            SortOptions {
+                descending: false,
+                nulls_first: true,
+            },
+        )])
+        .unwrap();
+        let sort: Arc<dyn ExecutionPlan> = Arc::new(SortExec::new(ordering, child));
+        let mut stream = sort.execute(0, session.task_ctx()).unwrap();
+        let mut trace = OutputTrace {
+            reserved: vec![],
+            spill_counts: vec![],
+            peak_reserved: 0,
+        };
+        let mut last = None;
+        let mut seen = vec![false; rows];
+        while let Some(batch) = stream.next().await {
+            let batch = batch.unwrap_or_else(|e| panic!("native sort failed: {e}"));
+            trace.reserved.push(pool.reserved());
+            trace
+                .spill_counts
+                .push(sort.metrics().unwrap().spill_count().unwrap_or(0));
+            check_sorted_output(shape, &batch, &mut last, &mut seen);
+        }
+        assert!(seen.iter().all(|&s| s), "rows missing from the output");
+        drop(stream);
+        assert_eq!(pool.reserved(), 0, "memory still reserved after the sort");
+        assert_eq!(spark.held(), 0, "memory not handed back to Spark");
+        trace.peak_reserved = peak.peak();
+        trace
+    }
+
+    const SPILL_BEFORE_OUTPUT_SHARE: usize = 1536 * MB;
+    const SPILL_BEFORE_OUTPUT_ROWS: usize = 900_000;
+
+    fn input_bytes(rows: usize) -> usize {
+        rows * KIB_ROW
+    }
+
+    async fn assert_spills_before_output(shape: RowShape, rows: usize) {
+        let share = SPILL_BEFORE_OUTPUT_SHARE;
+        for rows_per_batch in [8192, 3] {
+            let case = format!("{shape:?} rows={rows} rows_per_batch={rows_per_batch}");
+            let held =
+                sort_and_trace(KibRows::new(shape, rows, rows_per_batch), share, 8, None).await;
+            eprintln!(
+                "{case} off: spill_count={} peak={}MiB reserved at 0%={}MiB 50%={}MiB 90%={}MiB",
+                held.spill_count(),
+                held.peak_reserved / MB,
+                held.reserved_at(0.0) / MB,
+                held.reserved_at(0.5) / MB,
+                held.reserved_at(0.9) / MB
+            );
+            assert_eq!(held.spill_count(), 0, "{case}");
+            assert!(held.reserved_at(0.9) >= input_bytes(rows) / 2, "{case}");
+
+            let spilled = sort_and_trace(
+                KibRows::new(shape, rows, rows_per_batch),
+                share,
+                8,
+                Some(share / 4),
+            )
+            .await;
+            eprintln!(
+                "{case} on: spill_count={} peak={}MiB max reserved during output={}MiB",
+                spilled.spill_count(),
+                spilled.peak_reserved / MB,
+                spilled.max_reserved_after(0.0) / MB
+            );
+            assert!(spilled.spill_counts.iter().all(|&c| c >= 1), "{case}");
+            assert!(spilled.max_reserved_after(0.0) <= 64 * MB, "{case}");
+            assert!(
+                spilled.peak_reserved <= held.peak_reserved + held.peak_reserved / 10,
+                "{case}"
+            );
+
+            let below = sort_and_trace(
+                KibRows::new(shape, rows, rows_per_batch),
+                share,
+                8,
+                Some(held.peak_reserved),
+            )
+            .await;
+            assert_eq!(below.spill_count(), 0, "{case}");
+            assert_eq!(below.reserved.len(), held.reserved.len(), "{case}");
+            assert!(below.reserved_at(0.9) >= input_bytes(rows) / 2, "{case}");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn late_materialized_sort_spills_before_output_above_the_threshold() {
+        assert_spills_before_output(RowShape::KeyAndKibPayload, SPILL_BEFORE_OUTPUT_ROWS).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sort_spills_before_output_above_the_threshold() {
+        assert_spills_before_output(RowShape::KibKeyAndId, SPILL_BEFORE_OUTPUT_ROWS / 2).await;
     }
 }

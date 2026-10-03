@@ -164,6 +164,7 @@ impl SparkMemory {
     }
 
     /// Takes up to `size` bytes off the overcommit in one atomic step and returns how many.
+    #[allow(deprecated)]
     fn repay(&self, size: usize) -> usize {
         let debt = self
             .overcommit

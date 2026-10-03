@@ -20,7 +20,7 @@ use crate::{
     execution::{
         operators::ExecutionError,
         planner::TEST_EXEC_CONTEXT_ID,
-        shuffle::{decode_remote_shuffle_batch, read_ipc_compressed},
+        shuffle::{decode_remote_shuffle_batch, read_ipc_compressed, ShuffleReadCoalescer},
     },
     jvm_bridge::{jni_call, JVMClasses},
 };
@@ -75,6 +75,7 @@ pub struct ShuffleScanExec {
     decode_time: Time,
     /// Remote inputs require Arrow array and logical schema validation; queried once at construction.
     requires_validation: bool,
+    coalescer: Option<Arc<Mutex<ShuffleReadCoalescer>>>,
 }
 
 impl ShuffleScanExec {
@@ -82,6 +83,7 @@ impl ShuffleScanExec {
         exec_context_id: i64,
         input_source: Option<Arc<Global<JObject<'static>>>>,
         data_types: Vec<DataType>,
+        coalesce_rows: Option<usize>,
     ) -> Result<Self, CometError> {
         let requires_validation = if exec_context_id == TEST_EXEC_CONTEXT_ID {
             false
@@ -118,6 +120,8 @@ impl ShuffleScanExec {
             schema,
             decode_time,
             requires_validation,
+            coalescer: coalesce_rows
+                .map(|rows| Arc::new(Mutex::new(ShuffleReadCoalescer::new(rows)))),
         })
     }
 
@@ -142,19 +146,60 @@ impl ShuffleScanExec {
         }
 
         let mut timer = self.baseline_metrics.elapsed_compute().timer();
-        let next_batch = Self::get_next(
-            self.exec_context_id,
-            self.input_source.as_ref().unwrap().as_obj(),
-            &self.data_types,
-            &self.decode_time,
-            self.requires_validation,
-        )?;
+        let next_batch = match &self.coalescer {
+            None => Self::get_next(
+                self.exec_context_id,
+                self.input_source.as_ref().unwrap().as_obj(),
+                &self.data_types,
+                &self.decode_time,
+                self.requires_validation,
+            )?,
+            Some(coalescer) => self.get_next_coalesced(&mut coalescer.lock().unwrap())?,
+        };
         *current_batch = Some(next_batch);
         timer.stop();
         drop(current_batch);
         self.waker.wake();
 
         Ok(())
+    }
+
+    fn get_next_coalesced(
+        &self,
+        coalescer: &mut ShuffleReadCoalescer,
+    ) -> Result<InputBatch, CometError> {
+        if self.exec_context_id == TEST_EXEC_CONTEXT_ID {
+            return Ok(InputBatch::EOF);
+        }
+        let iter = self.input_source.as_ref().unwrap().as_obj();
+        loop {
+            let block = Self::get_next(
+                self.exec_context_id,
+                iter,
+                &self.data_types,
+                &self.decode_time,
+                self.requires_validation,
+            )?;
+            let completed = match block {
+                InputBatch::EOF => match coalescer.finish()? {
+                    Some(batch) => batch,
+                    None => return Ok(InputBatch::EOF),
+                },
+                InputBatch::Batch(columns, num_rows) => {
+                    let batch =
+                        cast_and_stamp_schema(self.name(), &self.schema, columns, num_rows)?;
+                    match coalescer.push(batch)? {
+                        Some(batch) => batch,
+                        None => continue,
+                    }
+                }
+            };
+            let num_rows = completed.num_rows();
+            return Ok(InputBatch::new(
+                completed.columns().to_vec(),
+                Some(num_rows),
+            ));
+        }
     }
 
     /// Invokes JNI calls to get the next compressed shuffle block and decode it.
@@ -215,6 +260,8 @@ impl ShuffleScanExec {
                 }
             };
             timer.stop();
+
+            crate::execution::jni_api::log_batch_memory("shuffle_decode_native", &batch);
 
             let num_rows = batch.num_rows();
 
@@ -648,6 +695,7 @@ mod tests {
             super::super::super::planner::TEST_EXEC_CONTEXT_ID,
             None,
             vec![DataType::Int32, DataType::Utf8],
+            None,
         )
         .unwrap();
 
@@ -714,6 +762,7 @@ mod tests {
             super::super::super::planner::TEST_EXEC_CONTEXT_ID,
             None,
             vec![declared.clone()],
+            None,
         )
         .unwrap();
         scan.set_input_batch(InputBatch::new(decoded.columns().to_vec(), Some(2)));
@@ -749,6 +798,7 @@ mod tests {
             super::super::super::planner::TEST_EXEC_CONTEXT_ID,
             None,
             vec![declared],
+            None,
         )
         .unwrap();
         let column: ArrayRef = Arc::new(StringArray::from(vec!["a", "b"]));
@@ -784,7 +834,7 @@ mod tests {
         let mut cx = Context::from_waker(&waker);
 
         let mut scan =
-            ShuffleScanExec::new(TEST_EXEC_CONTEXT_ID, None, vec![DataType::Int32]).unwrap();
+            ShuffleScanExec::new(TEST_EXEC_CONTEXT_ID, None, vec![DataType::Int32], None).unwrap();
         let mut stream = scan.execute(0, Arc::new(TaskContext::default())).unwrap();
 
         assert!(stream.as_mut().poll_next(&mut cx).is_pending());

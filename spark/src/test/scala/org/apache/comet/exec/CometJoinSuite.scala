@@ -1109,6 +1109,39 @@ class CometJoinSuite extends CometTestBase {
     }
   }
 
+  test("SortMergeJoin with join filter keeps the streamed order for an aggregate on the key") {
+    withSQLConf(
+      CometConf.COMET_EXEC_SORT_MERGE_JOIN_ENABLED.key -> "true",
+      CometConf.COMET_EXEC_SORT_MERGE_JOIN_WITH_JOIN_FILTER_ENABLED.key -> "true",
+      CometConf.COMET_BATCH_SIZE.key -> "8",
+      SQLConf.SHUFFLE_PARTITIONS.key -> "1",
+      SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+      SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+      val unique = (0 until 7).map(k => (k, k, 3))
+      val skewed = for {
+        k <- 0 until 7
+        j <- 0 until (if (k < 5) 20 else 1)
+      } yield (k * 100 + j, k, j)
+      withParquetTable(unique, "tbl_u") {
+        withParquetTable(skewed, "tbl_s") {
+          val left = sql(
+            "SELECT tbl_u._1, tbl_u._2, count(tbl_s._1), sum(tbl_s._3) " +
+              "FROM tbl_u LEFT JOIN tbl_s ON tbl_u._2 = tbl_s._2 AND tbl_s._3 < tbl_u._3 " +
+              "GROUP BY tbl_u._1, tbl_u._2")
+          checkSparkAnswerAndOperator(left)
+          assert(left.collect().length == 7)
+
+          val right = sql(
+            "SELECT tbl_u._1, tbl_u._2, count(tbl_s._1), sum(tbl_s._3) " +
+              "FROM tbl_s RIGHT JOIN tbl_u ON tbl_u._2 = tbl_s._2 AND tbl_s._3 < tbl_u._3 " +
+              "GROUP BY tbl_u._1, tbl_u._2")
+          checkSparkAnswerAndOperator(right)
+          assert(right.collect().length == 7)
+        }
+      }
+    }
+  }
+
   test("full outer join") {
     withTempView("`left`", "`right`", "allNulls") {
       allNulls.createOrReplaceTempView("allNulls")
@@ -1230,6 +1263,30 @@ class CometJoinSuite extends CometTestBase {
         val broadcast = collect(cometPlan) { case b: CometBroadcastExchangeExec => b }.head
         assert(broadcast.metrics("numCoalescedBatches").value > 0L)
         assert(broadcast.metrics("numCoalescedRows").value == 6L)
+      }
+    }
+  }
+
+  test("Broadcast coalescing keeps the values of build batches sliced from one native batch") {
+    withSQLConf(
+      SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+      SQLConf.SHUFFLE_PARTITIONS.key -> "1") {
+      withParquetTable((0 until 20000).map(i => (i, s"key_$i")), "sliced_build_src") {
+        withParquetTable((0 until 20000).map(i => (s"key_$i", i)), "sliced_probe") {
+          val query =
+            """SELECT /*+ BROADCAST(b) */ p._2, b.k
+              |FROM sliced_probe p
+              |JOIN (SELECT DISTINCT _2 AS k FROM sliced_build_src) b ON p._1 = b.k
+              |""".stripMargin
+          val (_, cometPlan) = checkSparkAnswerAndOperator(
+            sql(query),
+            Seq(classOf[CometBroadcastExchangeExec], classOf[CometBroadcastHashJoinExec]))
+          assert(sql(query).count() == 20000)
+
+          val broadcast = collect(cometPlan) { case b: CometBroadcastExchangeExec => b }.head
+          assert(broadcast.metrics("numCoalescedBatches").value > 1L)
+          assert(broadcast.metrics("numCoalescedRows").value == 20000L)
+        }
       }
     }
   }

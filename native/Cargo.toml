@@ -20,7 +20,7 @@ default-members = ["core", "spark-expr", "common", "proto", "jni-bridge", "shuff
 members = ["core", "spark-expr", "common", "proto", "jni-bridge", "shuffle"]
 # Crates under ../contrib are intentionally NOT workspace members. Core pulls them in as
 # optional path dependencies when their corresponding contrib feature is enabled.
-exclude = ["../contrib"]
+exclude = ["../contrib", "vendor"]
 resolver = "2"
 
 [workspace.package]
@@ -70,6 +70,14 @@ aws-credential-types = "1.2.13"
 iceberg = { git = "https://github.com/apache/iceberg-rust", rev = "bb1e4a4861f02377489eff818b75138f414c4cb0" }
 iceberg-storage-opendal = { git = "https://github.com/apache/iceberg-rust", rev = "bb1e4a4861f02377489eff818b75138f414c4cb0", features = ["opendal-memory", "opendal-fs", "opendal-s3", "opendal-gcs", "opendal-oss", "opendal-azdls"] }
 reqsign-core = "3"
+
+# Vendored DataFusion 55.1.0 crates carrying Comet patches. The pristine crate is committed
+# first, so `git log -p native/vendor` shows each patch on its own. Drop the entry once the
+# DataFusion upgrade includes the fix.
+[patch.crates-io]
+# Keeps an in-memory sort spill's workspace instead of returning it to Spark and asking for it
+# again. See apache/datafusion#24739 and #24740.
+datafusion-physical-plan = { path = "vendor/datafusion-physical-plan" }
 
 [profile.release]
 debug = true

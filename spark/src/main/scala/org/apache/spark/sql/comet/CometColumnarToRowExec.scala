@@ -26,10 +26,11 @@ import scala.concurrent.Promise
 import scala.jdk.CollectionConverters._
 import scala.util.control.NonFatal
 
-import org.apache.spark.{broadcast, SparkException}
+import org.apache.arrow.vector.{LargeVarBinaryVector, VarBinaryVector}
+import org.apache.spark.{broadcast, SparkException, TaskContext}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{Attribute, SortOrder, UnsafeProjection}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, BoundReference, SortOrder, UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.catalyst.expressions.codegen._
 import org.apache.spark.sql.catalyst.expressions.codegen.Block._
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
@@ -44,6 +45,8 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 import org.apache.spark.util.{SparkFatalException, Utils}
 import org.apache.spark.util.io.ChunkedByteBuffer
+
+import org.apache.comet.vector.CometPlainVector
 
 /**
  * Copied from Spark `ColumnarToRowExec`. Comet needs the fix for SPARK-50235 but cannot wait for
@@ -77,10 +80,11 @@ case class CometColumnarToRowExec(child: SparkPlan)
     // plan (this) in the closure.
     val localOutput = this.output
     child.executeColumnar().mapPartitionsInternal { batches =>
-      val toUnsafe = UnsafeProjection.create(localOutput, localOutput)
+      val projections = new CometBatchRowProjection(localOutput)
       batches.flatMap { batch =>
         numInputBatches += 1
         numOutputRows += batch.numRows()
+        val toUnsafe = projections.forBatch(batch)
         batch.rowIterator().asScala.map(toUnsafe)
       }
     }
@@ -302,4 +306,118 @@ case class CometColumnarToRowExec(child: SparkPlan)
 
   override protected def withNewChildInternal(newChild: SparkPlan): CometColumnarToRowExec =
     copy(child = newChild)
+}
+
+/** Partition-local projections for the non-codegen columnar-to-row boundary. */
+private[sql] final class CometBatchRowProjection(output: Seq[Attribute]) {
+  private val binaryOrdinals = output.indices.filter(i => output(i).dataType == BinaryType)
+  private val context = TaskContext.get()
+  private var acquired = List.empty[CometBatchRowProjection.Pooled]
+  private var released = context == null
+
+  if (context != null) context.addTaskCompletionListener[Unit](_ => release())
+
+  private lazy val ordinary = acquire(output.zipWithIndex.map { case (attribute, i) =>
+    BoundReference(i, attribute.dataType, attribute.nullable)
+  })
+
+  // Binary and String have identical UnsafeRow layouts. Only for this immediate physical copy,
+  // use getUTF8String as a borrowed byte span: CometPlainVector does not decode or validate UTF-8.
+  // UnsafeWriter copies the span into the row's heap buffer, avoiding getBinary's intermediate
+  // byte[]. No String-typed value escapes this projection and the plan's schema stays unchanged.
+  private lazy val borrowedBinary = acquire(output.zipWithIndex.map { case (attribute, i) =>
+    val physicalType = if (attribute.dataType == BinaryType) StringType else attribute.dataType
+    BoundReference(i, physicalType, attribute.nullable)
+  })
+
+  private def acquire(references: Seq[BoundReference]): UnsafeProjection = synchronized {
+    if (released) {
+      UnsafeProjection.create(references)
+    } else {
+      val projection = CometBatchRowProjection.take(references)
+      acquired ::= projection
+      projection
+    }
+  }
+
+  private def release(): Unit = synchronized {
+    released = true
+    acquired.foreach(CometBatchRowProjection.release)
+    acquired = Nil
+  }
+
+  def forBatch(batch: ColumnarBatch): UnsafeProjection = {
+    // Check each batch: a partition can contain both Comet and Spark vectors. Dictionary,
+    // fixed-size binary, nested binary and other vector implementations retain the ordinary path.
+    val canBorrow = binaryOrdinals.nonEmpty && binaryOrdinals.forall { i =>
+      batch.column(i) match {
+        case vector: CometPlainVector =>
+          vector.getValueVector match {
+            case _: VarBinaryVector | _: LargeVarBinaryVector => true
+            case _ => false
+          }
+        case _ => false
+      }
+    }
+    if (canBorrow) borrowedBinary else ordinary
+  }
+}
+
+private[sql] object CometBatchRowProjection {
+  private val MaxSchemas = 64
+  private val MaxPooledPerSchema =
+    math.min(math.max(Runtime.getRuntime.availableProcessors, 1), 64)
+  private[comet] val MaxPooledBufferBytes = 1024 * 1024
+
+  private[comet] final class Pooled(val references: Seq[BoundReference])
+      extends UnsafeProjection {
+    private val projection = UnsafeProjection.create(references)
+    private var row: UnsafeRow = _
+
+    override def initialize(partitionIndex: Int): Unit = projection.initialize(partitionIndex)
+
+    override def apply(input: InternalRow): UnsafeRow = {
+      row = projection(input)
+      row
+    }
+
+    def bufferBytes: Long = row match {
+      case null => 0L
+      case r =>
+        r.getBaseObject match {
+          case buffer: Array[Byte] => buffer.length.toLong
+          case _ => r.getSizeInBytes.toLong
+        }
+    }
+  }
+
+  private val pools =
+    new java.util.LinkedHashMap[Seq[BoundReference], java.util.ArrayDeque[Pooled]](
+      16,
+      0.75f,
+      true) {
+      override def removeEldestEntry(
+          eldest: java.util.Map.Entry[Seq[BoundReference], java.util.ArrayDeque[Pooled]])
+          : Boolean = size() > MaxSchemas
+    }
+
+  private def take(references: Seq[BoundReference]): Pooled = {
+    val pooled = pools.synchronized {
+      Option(pools.get(references)).flatMap(pool => Option(pool.pollFirst()))
+    }
+    pooled.getOrElse(new Pooled(references))
+  }
+
+  private def release(projection: Pooled): Unit =
+    if (projection.bufferBytes <= MaxPooledBufferBytes) {
+      pools.synchronized {
+        val pool =
+          pools.computeIfAbsent(projection.references, _ => new java.util.ArrayDeque[Pooled]())
+        if (pool.size < MaxPooledPerSchema) pool.addFirst(projection)
+      }
+    }
+
+  private[comet] def pooled(references: Seq[BoundReference]): Int = pools.synchronized {
+    Option(pools.get(references)).map(_.size).getOrElse(0)
+  }
 }

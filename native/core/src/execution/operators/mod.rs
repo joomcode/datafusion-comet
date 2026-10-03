@@ -42,7 +42,11 @@ pub use iceberg_write::IcebergWriteExec;
 mod parquet_writer;
 pub use parquet_writer::{ParquetCompression, ParquetWriterExec};
 mod csv_scan;
+mod partition_aggregate_window;
 pub mod projection;
+pub use partition_aggregate_window::{
+    PartitionAggregateWindowEnabled, PartitionAggregateWindowExec,
+};
 mod sample;
 pub use sample::SampleExec;
 mod rank_limit;

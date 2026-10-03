@@ -401,6 +401,32 @@ object CometConf extends ShimCometConf {
       .booleanConf
       .createWithDefault(true)
 
+  val COMET_SHUFFLE_READ_COALESCE_ENABLED: ConfigEntry[Boolean] =
+    conf("spark.comet.shuffle.read.coalesce.enabled")
+      .category(CATEGORY_SHUFFLE)
+      .doc(
+        "When enabled, a Comet shuffle reader joins the small blocks it decodes into batches " +
+          "of spark.comet.batchSize rows before passing them on, both to JVM consumers and to " +
+          "native operators reading the shuffle directly. A map task writes one block per " +
+          "reduce partition, so with many partitions and wide rows a block holds a few rows " +
+          "and the per-batch cost of every column dominates the read.")
+      .booleanConf
+      .createWithDefault(true)
+
+  val COMET_SHUFFLE_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS: ConfigEntry[Int] =
+    conf("spark.comet.shuffle.wideRowFallback.minLeafColumns")
+      .category(CATEGORY_SHUFFLE)
+      .doc(
+        "Number of leaf columns outside the partitioning key at or above which a shuffle " +
+          "stays a Spark shuffle instead of a Comet native or columnar shuffle, whose cost " +
+          "grows with rows times leaf columns. A struct counts the leaves of its fields, an " +
+          "array the leaves of its element, a map the leaves of its key and value, and any " +
+          "other type one. 0, the default, disables the rule. Ignored when " +
+          "spark.comet.exec.costBasedEngines.enabled is set, which prices shuffles by width.")
+      .intConf
+      .checkValue(_ >= 0, "Must be >= 0.")
+      .createWithDefault(0)
+
   val COMET_SHUFFLE_MODE: ConfigEntry[String] = conf("spark.comet.shuffle.mode")
     .withAlternative(s"$COMET_EXEC_CONFIG_PREFIX.shuffle.mode")
     .category(CATEGORY_SHUFFLE)
@@ -617,6 +643,175 @@ object CometConf extends ShimCometConf {
       .checkValue(_ >= 0, "Must be >= 0.")
       .createWithDefault(2)
 
+  val COMET_EXEC_BOUNDARY_FORMATS_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.boundaryFormats.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "When enabled, Comet picks the format of each shuffle and broadcast from the engines " +
+          "on both of its sides instead of from its producer alone. A shuffle between two " +
+          "Spark operators then stays a Spark shuffle instead of a Comet columnar shuffle, " +
+          "which would convert rows to Arrow when writing and back to rows when reading. The " +
+          "inputs of an operator that needs co-partitioned inputs, such as a sort-merge join, " +
+          "are never split between Comet's and Spark's hash functions unless their keys hash " +
+          "alike in both. spark.comet.exec.costBasedEngines.enabled, when enabled, already " +
+          "picks the formats this way.")
+      .booleanConf
+      .createWithDefault(false)
+
+  val COMET_EXEC_COST_BASED_ENGINES_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "When enabled, Comet decides which converted operators run natively by minimizing an " +
+          "estimated time per row over the whole plan. Each operator, shuffle and " +
+          "columnar-to-row conversion costs a price per row that depends on the engine, the " +
+          "operator class and the leaf columns it processes, taken from the table that " +
+          "spark.comet.exec.costBasedEngines.costTable overrides, so the choice depends only on " +
+          "the schema and the shape of the plan. It is made again on every plan adaptive query " +
+          "execution re-optimizes. Shuffle and broadcast formats then " +
+          "follow the engines on both sides, as with spark.comet.exec.boundaryFormats.enabled. " +
+          "spark.comet.exec.sort.wideRowFallback.enabled and " +
+          "spark.comet.shuffle.wideRowFallback.minLeafColumns are ignored while it is enabled. " +
+          "Disabled, as by default, it leaves each operator in the engine Comet's conversion " +
+          "chose.")
+      .booleanConf
+      .createWithDefault(false)
+
+  val COMET_EXEC_COST_BASED_ENGINES_COST_TABLE: ConfigEntry[String] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.costTable")
+      .category(CATEGORY_EXEC)
+      .doc("Overrides of the cost table of spark.comet.exec.costBasedEngines.enabled, as " +
+        "semicolon-separated `<key>=<value>` entries, for example " +
+        "`shuffleWrite.flat.comet=0,48.95,0.037;sort.spark=646,0;" +
+        "filterPassThroughPerLeaf.comet=1.5`. A line is keyed `<class>.<form>.<engine>`, or " +
+        "`<class>.<engine>` for both forms: the form is flat or nested, and the engine comet, " +
+        "with `c0,k0,k1` for a price of c0 + k0*L + k1*L*min(L, quadraticLeafCap) ns per row " +
+        "(or `k0,k1`, keeping c0), or spark, with `c0,k` for c0 + k*L ns per row, where L is " +
+        "the number of leaf columns the class prices (for the functions of an aggregate or a " +
+        "window, the number of functions). The classes are shuffleWrite, shuffleRead, sort, " +
+        "sortSpill, smj, bhj, predicate, projectPassThrough, expression, agg, aggObjectHash, " +
+        "aggDeclarative, aggCollectList, aggCollectSet, aggPercentile, aggPercentileApprox, " +
+        "aggOther, window, windowAggregate, windowOffset, windowRank, wglPartial, wglFinal, " +
+        "expand, generate, rowLocal, the comet-only c2r and r2c, and the spark-only " +
+        "expressionOverScan, aggDeclarativeNoCodegen, expandNoCodegen and " +
+        "generateNoCodegen. A row whose leaves are a fraction f inside structs, arrays or " +
+        "maps costs (1 - f) times the flat price plus f times the nested one. The scalars " +
+        "are shuffleWritePartitionBase and, for the native write, the native read and the " +
+        "columnar write, shuffleWritePartitionSlope, shuffleReadPartitionSlope and " +
+        "columnarShuffleWritePartitionSlope with their PerLeaf variants, which scale a " +
+        "shuffle over L leaves by 1 + (slope + perLeaf * L) * max(0, partitions / base - 1); " +
+        "columnarShuffleConstant; filterPassThroughPerLeaf.comet and .spark, in ns per row " +
+        "and output leaf of a filter; shuffleWritePerByte, shuffleReadPerByte and " +
+        "sortPerByte, each " +
+        ".comet and .spark, in ns per byte of the estimated size of a Spark row beyond " +
+        "perByteLeafAllowance bytes per leaf, times cometShuffleBytesRatio for a Comet " +
+        "shuffle; sortSpillFraction, the fraction of the rows of a sort priced as spilled; " +
+        "and quadraticLeafCap. keepFiltersOverNativeScans (true or false, default true) keeps " +
+        "a native filter over a native scan, and the native projects over it, native " +
+        "whatever their prices, since the rows a filter drops are not estimated, and " +
+        "keepPartialAggregatesOverNativeInputs (default true) keeps a native partial " +
+        "aggregate over a native scan, filter or project native, since the rows it reduces " +
+        "are not estimated either. " +
+        "Entries not given keep their defaults.")
+      .stringConf
+      .createWithDefault("")
+
+  val COMET_EXEC_COST_BASED_ENGINES_LOG_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.log.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "When enabled, spark.comet.exec.costBasedEngines.enabled logs, for each plan it " +
+          "decides, every operator with its classes, leaf columns and costs in both " +
+          "engines, and every conversion with its cost. It also logs them when " +
+          "spark.comet.explain.fallback.enabled is set.")
+      .booleanConf
+      .createWithDefault(false)
+
+  val COMET_EXEC_COST_BASED_ENGINES_COMET_WEIGHT: ConfigEntry[Double] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.cometOperatorWeight")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "Cost of running natively one operator outside the cost table of " +
+          "spark.comet.exec.costBasedEngines.enabled, such as a shuffled hash join, in ns per " +
+          "row. Against the priced operators and conversions the default only breaks ties. " +
+          "Negative values favor native execution.")
+      .doubleConf
+      .createWithDefault(-1.0)
+
+  val COMET_EXEC_COST_BASED_ENGINES_SPARK_WEIGHT: ConfigEntry[Double] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.sparkOperatorWeight")
+      .category(CATEGORY_EXEC)
+      .doc("Cost of running in Spark one operator outside the cost table of " +
+        "spark.comet.exec.costBasedEngines.enabled that Comet could run natively.")
+      .doubleConf
+      .createWithDefault(0.0)
+
+  val COMET_EXEC_COST_BASED_ENGINES_OPERATOR_WEIGHTS: ConfigEntry[String] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.cometOperatorWeights")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "Per-operator overrides of spark.comet.exec.costBasedEngines.cometOperatorWeight, as " +
+          "comma-separated `<Spark operator>=<weight>` pairs such as " +
+          "`ShuffledHashJoinExec=-0.5`. The operator is named by the class of the Spark " +
+          "operator that Comet converted; operators in the cost table ignore it.")
+      .stringConf
+      .createWithDefault("")
+
+  val COMET_EXEC_SORT_WIDE_ROW_FALLBACK_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.wideRowFallback.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "When enabled, a sort that Comet converted runs in Spark instead when a Spark " +
+          "operator reads its output and its rows have at least " +
+          "spark.comet.exec.sort.wideRowFallback.minLeafColumns leaf columns outside the sort " +
+          "key. The native sort copies every row when sorting a batch, when spilling and when " +
+          "merging, while Spark sorts pointers to rows. The decision reads only the schema, so " +
+          "every plan of a query makes the same one. A sort read by a native operator stays " +
+          "native. Ignored when spark.comet.exec.costBasedEngines.enabled is set, which " +
+          "prices sorts by width.")
+      .booleanConf
+      .createWithDefault(false)
+
+  val COMET_EXEC_SORT_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS: ConfigEntry[Int] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.wideRowFallback.minLeafColumns")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "Number of leaf columns outside the sort key at or above which the rows of a sort " +
+          "are wide, for spark.comet.exec.sort.wideRowFallback.enabled. A struct counts the " +
+          "leaves of its fields, an array the leaves of its element, a map the leaves of its " +
+          "key and value, and any other type one.")
+      .intConf
+      .checkValue(_ >= 1, "Must be >= 1.")
+      .createWithDefault(50)
+
+  val COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.window.partitionAggregate.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "Whether native window expressions that cannot stream, such as whole-partition " +
+          "aggregates, FIRST_VALUE/LAST_VALUE/NTH_VALUE over whole partitions, NTILE, " +
+          "PERCENT_RANK, CUME_DIST and frames ending at UNBOUNDED FOLLOWING, run in Comet's " +
+          "PartitionAggregateWindowExec, which spills the rows of a window partition to disk " +
+          "when memory runs out. When false, they run in DataFusion's WindowAggExec, as in " +
+          "upstream Comet, which buffers each window partition in memory.")
+      .booleanConf
+      .createWithDefault(false)
+
+  val COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD: OptionalConfigEntry[Long] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.spillBeforeOutputThreshold")
+      .category(CATEGORY_EXEC)
+      .doc("A native sort whose whole input fits in memory spills it before producing output " +
+        "when it has reserved more than this many bytes, and then reads it back merging, so " +
+        "while its output is consumed it holds only the merge buffers instead of the whole " +
+        "input. Spark cannot make a native operator release memory, so a sort that keeps " +
+        "its input reserved while a Spark operator reading its output asks for memory " +
+        "starves that operator. When unset, it is a quarter of a task's share of " +
+        "spark.memory.offHeap.size, that is spark.memory.offHeap.size / (spark.executor.cores " +
+        "/ spark.task.cpus) / 4, in off-heap mode, and disabled in on-heap mode. 0 disables it.")
+      .bytesConf(ByteUnit.BYTE)
+      .checkValue(_ >= 0, "Must be >= 0.")
+      .createOptional
+
   val COMET_SHUFFLE_COMPRESSION_CODEC: ConfigEntry[String] =
     conf("spark.comet.shuffle.compression.codec")
       .withAlternative(s"$COMET_EXEC_CONFIG_PREFIX.shuffle.compression.codec")
@@ -678,14 +873,16 @@ object CometConf extends ShimCometConf {
     conf("spark.comet.shuffle.jvm.batchSize")
       .withAlternative("spark.comet.columnar.shuffle.batch.size")
       .category(CATEGORY_SHUFFLE)
-      .doc("Batch size when writing out sorted spill files on the native side. Note that " +
-        "this should not be larger than batch size (i.e., `spark.comet.batchSize`). Otherwise " +
-        "it will produce larger batches than expected in the native operator after shuffle.")
+      .doc("Batch size when writing out sorted spill files on the native side. " +
+        "The effective size is capped by `spark.comet.batchSize`.")
       .intConf
-      .checkValue(
-        v => v <= COMET_BATCH_SIZE.get(),
-        "Should not be larger than batch size `spark.comet.batchSize`")
+      // Config defaults are validated while this object initializes. Reading a session's
+      // batch size here makes even a valid batchSize=512 fail on the default value 8192.
+      .checkValue(v => v > 0, "Shuffle batch size must be positive")
       .createWithDefault(8192)
+
+  def shuffleJvmBatchSize: Int =
+    math.min(COMET_SHUFFLE_JVM_BATCH_SIZE.get(), COMET_BATCH_SIZE.get())
 
   val COMET_SHUFFLE_NATIVE_WRITE_BUFFER_SIZE: ConfigEntry[Long] =
     conf("spark.comet.shuffle.native.writeBufferSize")

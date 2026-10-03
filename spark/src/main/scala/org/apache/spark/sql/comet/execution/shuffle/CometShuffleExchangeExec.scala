@@ -52,6 +52,7 @@ import com.google.common.base.Objects
 import org.apache.comet.{CometConf, CometExplainInfo}
 import org.apache.comet.CometConf.{COMET_SHUFFLE_ENABLED, COMET_SHUFFLE_MODE}
 import org.apache.comet.CometSparkSessionExtensions.{cometCelebornShuffleFallbackReason, hasFallbackReason, isCometCelebornShuffleManagerEnabled, isCometShuffleManagerEnabled, isSpark40Plus, withFallbackReasons}
+import org.apache.comet.rules.WideRowShuffleFallback
 import org.apache.comet.serde.{Compatible, OperatorOuterClass, QueryPlanSerde, SupportLevel, Unsupported}
 import org.apache.comet.serde.operator.CometSink
 import org.apache.comet.shims.{CometTypeShim, ShimCometShuffleExchangeExec}
@@ -317,6 +318,31 @@ object CometShuffleExchangeExec
     if (shuffleSupported(op).isDefined) Compatible() else Unsupported()
   }
 
+  override def convert(
+      op: ShuffleExchangeExec,
+      builder: OperatorOuterClass.Operator.Builder,
+      childOp: OperatorOuterClass.Operator*): Option[OperatorOuterClass.Operator] = {
+    super.convert(op, builder, childOp: _*).map { input =>
+      // This describes the exchange's output, not its writer. Choose direct read on the first
+      // planning pass too: an already-native parent can retain this input across AQE, so relying
+      // on CometExchangeSink to replace it later leaves a native -> JVM -> native Arrow roundtrip.
+      if (CometConf.COMET_SHUFFLE_DIRECT_READ_ENABLED.get(op.conf)) {
+        val scan = input.getScan
+        input.toBuilder
+          .clearScan()
+          .setShuffleScan(
+            OperatorOuterClass.ShuffleScan
+              .newBuilder()
+              .setSource(scan.getSource)
+              .setCoalesceBatches(CometConf.COMET_SHUFFLE_READ_COALESCE_ENABLED.get(op.conf))
+              .addAllFields(scan.getFieldsList))
+          .build()
+      } else {
+        input
+      }
+    }
+  }
+
   /**
    * Whether a round-robin exchange over `child` places rows positionally
    * (`RoundRobinStrategy::RowGroups` in `PhysicalPlanner::create_partitioning`), and with what
@@ -467,6 +493,13 @@ object CometShuffleExchangeExec
       case None =>
     }
 
+    WideRowShuffleFallback.fallbackReason(s) match {
+      case Some(reason) =>
+        withFallbackReasons(s, Set(reason))
+        return None
+      case None =>
+    }
+
     // A Comet shuffle wrapped around a stage that still contains a Spark FileSourceScanExec
     // with DPP produces inefficient row<->columnar transitions. This only happens when the
     // scan fell back to Spark (e.g., AQE DPP on Spark 3.4, or unsupported scan type).
@@ -525,6 +558,35 @@ object CometShuffleExchangeExec
   }
 
   /**
+   * Whether Comet's JVM columnar shuffle can run `s` over its current child, for rules that pick
+   * shuffle formats after conversion. The same checks as the columnar path of
+   * [[shuffleSupported]], but pure: does not tag the node.
+   */
+  def columnarShuffleAvailable(s: ShuffleExchangeExec): Boolean =
+    isCometShuffleEnabledReason(s).isEmpty &&
+      WideRowShuffleFallback.fallbackReason(s).isEmpty &&
+      !isCometCelebornShuffleManagerEnabled(s.conf) &&
+      (isCometPlan(s.child) ||
+        CometConf.COMET_SHUFFLE_CONVERT_FROM_SPARK_PLAN_ENABLED.get(s.conf)) &&
+      !stageContainsDPPScan(s) &&
+      columnarShuffleFailureReasons(s).isEmpty
+
+  def hasWideDecimalHashKey(partitioning: Partitioning): Boolean = partitioning match {
+    case h: HashPartitioning if h.numPartitions > 1 =>
+      h.expressions.exists(e => containsWideDecimal(e.dataType))
+    case _ => false
+  }
+
+  private def containsWideDecimal(dt: DataType): Boolean = dt match {
+    case d: DecimalType => d.precision > 18
+    case StructType(fields) => fields.exists(f => containsWideDecimal(f.dataType))
+    case ArrayType(elementType, _) => containsWideDecimal(elementType)
+    case MapType(keyType, valueType, _) =>
+      containsWideDecimal(keyType) || containsWideDecimal(valueType)
+    case _ => false
+  }
+
+  /**
    * Reasons the native shuffle path cannot handle this shuffle. Empty means native is supported.
    * Pure: does not tag the node.
    */
@@ -555,12 +617,11 @@ object CometShuffleExchangeExec
           _: FloatType | _: DoubleType | _: StringType | _: BinaryType | _: TimestampType |
           _: TimestampNTZType | _: DateType =>
         true
-      case _: DecimalType =>
-        // TODO enforce this check
-        // https://github.com/apache/datafusion-comet/issues/3079
-        // Decimals with precision > 18 require Java BigDecimal conversion before hashing
-        // d.precision <= 18
-        true
+      case d: DecimalType =>
+        // Match the SQL hash restriction in serde/HashUtils until #5994 fixes native encoding.
+        // Different partition assignments break mixed native/Spark joins. A single partition
+        // does not hash the key: CometNativeShuffleWriter serializes it as SinglePartition.
+        d.precision <= 18 || s.outputPartitioning.numPartitions == 1
       case dt if isTimeType(dt) =>
         true
       case StructType(fields) if nestedHashPartitioningEnabled =>

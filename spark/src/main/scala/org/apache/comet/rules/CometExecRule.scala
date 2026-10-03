@@ -134,12 +134,74 @@ object CometExecRule {
    */
   val SKIP_COMET_BROADCAST_TAG: org.apache.spark.sql.catalyst.trees.TreeNodeTag[Unit] =
     org.apache.spark.sql.catalyst.trees.TreeNodeTag[Unit]("comet.skipCometBroadcast")
+
+  /**
+   * Tag set on a native operator that a whole-plan rule reverted to Spark. The operator is left
+   * in Spark when AQE runs the conversion again on each query stage, where the rest of the plan
+   * it was decided with is no longer visible.
+   */
+  val KEEP_ON_SPARK_TAG: TreeNodeTag[Unit] = TreeNodeTag[Unit]("comet.keepOnSpark")
+
+  /**
+   * Tag set on a native operator that [[CostBasedEngineChoice]] reverted to Spark. Like
+   * [[KEEP_ON_SPARK_TAG]] it leaves the operator in Spark on AQE's per-stage conversion, but the
+   * conversion of a whole plan ignores it, so that the choice is made again on every plan AQE
+   * re-optimizes, including the operators it carries over from the previous plan.
+   */
+  val ENGINE_CHOICE_SPARK_TAG: TreeNodeTag[Unit] = TreeNodeTag[Unit]("comet.engineChoiceSpark")
+
+  /**
+   * Serializes the native plan of each block of adjacent native operators into its topmost
+   * operator. Blocks that already hold a serialized plan are left as they are, so this can run
+   * again after a rule has reverted some native operators to Spark and so made new block roots.
+   */
+  def convertBlocks(plan: SparkPlan): SparkPlan = {
+    var firstNativeOp = true
+    plan.transformDown {
+      case op: CometNativeExec =>
+        val newPlan = if (firstNativeOp) {
+          firstNativeOp = false
+          op.convertBlock()
+        } else {
+          op
+        }
+
+        // If reaching leaf node, reset `firstNativeOp` to true
+        // because it will start a new block in next iteration.
+        if (op.children.isEmpty) {
+          firstNativeOp = true
+        }
+
+        // CometNativeWriteExec / CometIcebergWriteExec are special: they have two separate
+        // plans:
+        // 1. A protobuf plan (nativeOp) describing the write operation
+        // 2. A Spark plan (child) that produces the data to write
+        // The serializedPlanOpt is a def that always returns Some(...) by serializing
+        // nativeOp on-demand, so the write exec itself doesn't need convertBlock(). However,
+        // its child (e.g., CometNativeScanExec, or a CometProject over an AQEShuffleRead)
+        // needs its own serialization. Reset the flag so children can start their own native
+        // execution blocks.
+        if (op.isInstanceOf[CometNativeWriteExec] || op.isInstanceOf[CometIcebergWriteExec] ||
+          op.isInstanceOf[CometWriteFilesExec]) {
+          firstNativeOp = true
+        }
+
+        newPlan
+      case op =>
+        firstNativeOp = true
+        op
+    }
+  }
 }
 
 /**
  * Spark physical optimizer rule for replacing Spark operators with Comet operators.
+ *
+ * @param wholePlan
+ *   true when converting a whole plan, which converts again the operators tagged
+ *   [[CometExecRule.ENGINE_CHOICE_SPARK_TAG]] so that [[CostBasedEngineChoice]] decides them anew
  */
-case class CometExecRule(session: SparkSession)
+case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
     extends Rule[SparkPlan]
     with CometTypeShim
     with ShimSubqueryBroadcast {
@@ -339,6 +401,12 @@ case class CometExecRule(session: SparkSession)
   // spotless:on
   private def transform(plan: SparkPlan): SparkPlan = {
     def convertNode(op: SparkPlan): SparkPlan = op match {
+      case op if op.getTagValue(CometExecRule.KEEP_ON_SPARK_TAG).isDefined =>
+        op
+
+      case op if !wholePlan && op.getTagValue(CometExecRule.ENGINE_CHOICE_SPARK_TAG).isDefined =>
+        op
+
       // Scan marker produced by an optional, out-of-tree scan contrib (e.g. contrib/delta).
       // Matched by trait (no compile-time dependency on the contrib) and present only when that
       // contrib is on the classpath. The marker carries its own serde handler and typically wraps
@@ -856,41 +924,7 @@ case class CometExecRule(session: SparkSession)
       }
 
       // Convert native execution block by linking consecutive native operators.
-      var firstNativeOp = true
-      newPlan.transformDown {
-        case op: CometNativeExec =>
-          val newPlan = if (firstNativeOp) {
-            firstNativeOp = false
-            op.convertBlock()
-          } else {
-            op
-          }
-
-          // If reaching leaf node, reset `firstNativeOp` to true
-          // because it will start a new block in next iteration.
-          if (op.children.isEmpty) {
-            firstNativeOp = true
-          }
-
-          // CometNativeWriteExec / CometIcebergWriteExec are special: they have two separate
-          // plans:
-          // 1. A protobuf plan (nativeOp) describing the write operation
-          // 2. A Spark plan (child) that produces the data to write
-          // The serializedPlanOpt is a def that always returns Some(...) by serializing
-          // nativeOp on-demand, so the write exec itself doesn't need convertBlock(). However,
-          // its child (e.g., CometNativeScanExec, or a CometProject over an AQEShuffleRead)
-          // needs its own serialization. Reset the flag so children can start their own native
-          // execution blocks.
-          if (op.isInstanceOf[CometNativeWriteExec] || op.isInstanceOf[CometIcebergWriteExec] ||
-            op.isInstanceOf[CometWriteFilesExec]) {
-            firstNativeOp = true
-          }
-
-          newPlan
-        case op =>
-          firstNativeOp = true
-          op
-      }
+      CometExecRule.convertBlocks(newPlan)
     }
   }
 

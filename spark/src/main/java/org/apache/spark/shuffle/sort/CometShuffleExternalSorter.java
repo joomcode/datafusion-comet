@@ -109,6 +109,18 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
 
   private boolean spilling = false;
 
+  /**
+   * The task thread that writes this sorter. Another consumer's request to spill is honoured only
+   * on it, between the sorter's own operations, so that it never runs concurrently with one.
+   */
+  private final Thread ownerThread = Thread.currentThread();
+
+  /** Whether the owner thread is inside one of this sorter's operations. */
+  private boolean busy = false;
+
+  /** Whether the sorter has written its final file or released its memory. */
+  private boolean closed = false;
+
   private final int uaoSize = UnsafeAlignedOffset.getUaoSize();
   private final double preferDictionaryRatio;
   private final boolean tracingEnabled;
@@ -144,6 +156,7 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
         (double) CometConf$.MODULE$.COMET_SHUFFLE_JVM_PREFER_DICTIONARY_RATIO().get();
 
     this.activeSpillSorter = createSpillSorter();
+    allocator.setOwnerSpill(this::spillForOtherConsumer);
   }
 
   /** Creates a new SpillSorter with all required dependencies. */
@@ -208,6 +221,33 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
     spilling = false;
   }
 
+  /**
+   * Spills the buffered records because another memory consumer of the task needs memory, and
+   * returns the bytes released. The request comes from the task memory manager while the writer
+   * waits for its next record, e.g. while a sort or a native plan upstream of it builds up its
+   * state. It spills nothing when made on another thread, e.g. by a native operator running on a
+   * worker thread while the writer inserts records, or while the sorter is busy, e.g. when writing
+   * a spill asks for memory itself.
+   */
+  long spillForOtherConsumer() throws IOException {
+    if (Thread.currentThread() != ownerThread
+        || busy
+        || closed
+        || spilling
+        || activeSpillSorter == null
+        || activeSpillSorter.numRecords() == 0) {
+      return 0;
+    }
+    long before = allocator.getUsed();
+    busy = true;
+    try {
+      spill();
+    } finally {
+      busy = false;
+    }
+    return Math.max(0, before - allocator.getUsed());
+  }
+
   private long getMemoryUsage() {
     if (activeSpillSorter != null) {
       return activeSpillSorter.getMemoryUsage();
@@ -237,6 +277,7 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
 
   /** Force all memory and spill files to be deleted; called by shuffle error-handling code. */
   public void cleanupResources() {
+    closed = true;
     freeMemory();
 
     for (SpillInfo spill : spills) {
@@ -295,7 +336,16 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
    */
   public void insertRecord(Object recordBase, long recordOffset, int length, int partitionId)
       throws IOException {
+    busy = true;
+    try {
+      insertRecordWhileBusy(recordBase, recordOffset, length, partitionId);
+    } finally {
+      busy = false;
+    }
+  }
 
+  private void insertRecordWhileBusy(
+      Object recordBase, long recordOffset, int length, int partitionId) throws IOException {
     assert (activeSpillSorter != null);
     int threshold = numElementsForSpillThreshold;
     if (activeSpillSorter.numRecords() >= threshold) {
@@ -325,6 +375,7 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
    *     into this sorter, then this will return an empty array.
    */
   public SpillInfo[] closeAndGetSpills() throws IOException {
+    closed = true;
     if (activeSpillSorter != null) {
       // Do not count the final file towards the spill count.
       final Tuple2<TempShuffleBlockId, File> spilledFileInfo =

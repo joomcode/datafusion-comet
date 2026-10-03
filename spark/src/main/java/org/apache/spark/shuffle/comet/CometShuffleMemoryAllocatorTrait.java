@@ -19,6 +19,8 @@
 
 package org.apache.spark.shuffle.comet;
 
+import java.io.IOException;
+
 import org.apache.spark.memory.MemoryConsumer;
 import org.apache.spark.memory.MemoryMode;
 import org.apache.spark.memory.TaskMemoryManager;
@@ -29,6 +31,30 @@ public abstract class CometShuffleMemoryAllocatorTrait extends MemoryConsumer {
   protected CometShuffleMemoryAllocatorTrait(
       TaskMemoryManager taskMemoryManager, long pageSize, MemoryMode mode) {
     super(taskMemoryManager, pageSize, mode);
+  }
+
+  /** Spills what the owner of this allocator's memory buffers, for another consumer. */
+  public interface OwnerSpill {
+    /** Returns the bytes released, or 0 if the owner could not spill now. */
+    long spillForOtherConsumer() throws IOException;
+  }
+
+  private OwnerSpill ownerSpill;
+
+  /**
+   * Lets the task's other memory consumers make this allocator's owner spill: the sort-based JVM
+   * shuffle writer's buffered records would otherwise keep the task's whole share of the pool.
+   */
+  public void setOwnerSpill(OwnerSpill ownerSpill) {
+    this.ownerSpill = ownerSpill;
+  }
+
+  /** Asks the owner to spill for `trigger`, a consumer other than this allocator. */
+  protected long spillOwnerFor(MemoryConsumer trigger) throws IOException {
+    if (trigger == this || ownerSpill == null) {
+      return 0;
+    }
+    return ownerSpill.spillForOtherConsumer();
   }
 
   public abstract MemoryBlock allocate(long required);
