@@ -3268,7 +3268,13 @@ mod native_sort_spill_tests {
             num_batches: 1,
             sketch_len: 2048,
         });
-        let large = sort_with_fixed_share(source.clone(), 64 * MB, 8, 8192).await;
+        let large = sort_with_fixed_share(
+            Arc::clone(&source) as Arc<dyn PartitionStream>,
+            64 * MB,
+            8,
+            8192,
+        )
+        .await;
         let small = sort_with_fixed_share(source, 64 * MB, 8, 512).await;
         assert_eq!(large.rows, 8192);
         assert_eq!(small.rows, large.rows);
