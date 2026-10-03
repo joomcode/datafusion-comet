@@ -19,6 +19,8 @@
 
 package org.apache.spark.sql.comet
 
+import java.util.concurrent.CountDownLatch
+
 import scala.jdk.CollectionConverters._
 
 import org.scalatest.funsuite.AnyFunSuite
@@ -28,7 +30,7 @@ import org.apache.arrow.vector.{FieldVector, FixedSizeBinaryVector, IntVector, L
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, BoundReference, UnsafeProjection}
 import org.apache.spark.sql.execution.vectorized.{ConstantColumnVector, OnHeapColumnVector}
-import org.apache.spark.sql.types.{BinaryType, IntegerType, LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{BinaryType, DataType, DoubleType, IntegerType, LongType, StringType, StructField, StructType}
 import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 
 import org.apache.comet.vector.{CometDictionary, CometDictionaryVector, CometPlainVector}
@@ -179,20 +181,104 @@ class CometBatchRowProjectionSuite extends AnyFunSuite {
     }
   }
 
-  test("tasks reuse generated projections and never share one within a task") {
-    val references = Seq(BoundReference(0, LongType, nullable = false))
-    val (first, second) = inTask {
-      val a = CometBatchRowProjection.acquire(references)
-      val b = CometBatchRowProjection.acquire(references)
-      assert(a ne b)
-      (a, b)
+  private def column(dataType: DataType, values: Seq[Any]): ColumnarBatch = {
+    val vector = new OnHeapColumnVector(values.size, dataType)
+    values.zipWithIndex.foreach {
+      case (v: Long, i) => vector.putLong(i, v)
+      case (v: Double, i) => vector.putDouble(i, v)
+      case (v: String, i) => vector.putByteArray(i, v.getBytes("UTF-8"))
     }
-    assert(CometBatchRowProjection.pooled(references) >= 2)
-    inTask {
-      val reused = CometBatchRowProjection.acquire(references)
-      assert((reused eq first) || (reused eq second))
-      val other = CometBatchRowProjection.acquire(references)
-      assert(other ne reused)
+    new ColumnarBatch(Array[ColumnVector](vector), values.size)
+  }
+
+  private def project(projection: UnsafeProjection, batch: ColumnarBatch): Unit =
+    batch.rowIterator().asScala.foreach(projection(_))
+
+  private def onOtherThread[T](f: => T): T = {
+    var result: Option[T] = None
+    val thread = new Thread(() => result = Some(f))
+    thread.start()
+    thread.join()
+    result.get
+  }
+
+  test("tasks reuse generated projections and never share one within a task") {
+    val output = Seq(AttributeReference("n", LongType, nullable = false)())
+    val references = Seq(BoundReference(0, LongType, nullable = false))
+    val input = column(LongType, Seq(1L, 2L))
+    try {
+      val (first, second) = inTask {
+        val a = new CometBatchRowProjection(output).forBatch(input)
+        val b = new CometBatchRowProjection(output).forBatch(input)
+        assert(a ne b)
+        (a, b)
+      }
+      assert(CometBatchRowProjection.pooled(references) >= 2)
+      inTask {
+        val reused = new CometBatchRowProjection(output).forBatch(input)
+        assert((reused eq first) || (reused eq second))
+        val other = new CometBatchRowProjection(output).forBatch(input)
+        assert(other ne reused)
+      }
+    } finally input.close()
+  }
+
+  test("a projection read by another thread is pooled only after that thread finishes") {
+    val output = Seq(AttributeReference("d", DoubleType, nullable = false)())
+    val input = column(DoubleType, Seq(1.5d, 2.5d, 3.5d))
+    val acquired = new CountDownLatch(1)
+    val finish = new CountDownLatch(1)
+    val context = TaskContext.empty()
+    TaskContext.setTaskContext(context)
+    try {
+      val projections = new CometBatchRowProjection(output)
+      @volatile var used: UnsafeProjection = null
+      val writer = new Thread(() => {
+        TaskContext.setTaskContext(context)
+        used = projections.forBatch(input)
+        acquired.countDown()
+        finish.await()
+        project(used, input)
+      })
+      @volatile var taken: UnsafeProjection = null
+      context.addTaskCompletionListener[Unit] { _ =>
+        taken = onOtherThread(inTask(new CometBatchRowProjection(output).forBatch(input)))
+        finish.countDown()
+        writer.join()
+      }
+      writer.start()
+      acquired.await()
+      context.markTaskCompleted(None)
+      assert(!writer.isAlive)
+      assert(taken ne used)
+      assert(onOtherThread(inTask(new CometBatchRowProjection(output).forBatch(input))) eq used)
+    } finally {
+      TaskContext.unset()
+      input.close()
+    }
+  }
+
+  test("a projection whose row buffer grew past the limit is not pooled") {
+    val output = Seq(AttributeReference("s", StringType, nullable = true)())
+    val small = column(StringType, Seq("a", "bc"))
+    val large =
+      column(StringType, Seq("x" * (CometBatchRowProjection.MaxPooledBufferBytes + 1)))
+    try {
+      val first = inTask {
+        val projection = new CometBatchRowProjection(output).forBatch(small)
+        project(projection, small)
+        projection
+      }
+      val reused = inTask {
+        val projection = new CometBatchRowProjection(output).forBatch(small)
+        project(projection, large)
+        projection
+      }
+      assert(reused eq first)
+      inTask(assert(new CometBatchRowProjection(output).forBatch(small) ne reused))
+    } finally {
+      small.close()
+      large.close()
     }
   }
 
