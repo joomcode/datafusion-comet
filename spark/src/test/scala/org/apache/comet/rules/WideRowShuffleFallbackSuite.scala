@@ -105,7 +105,7 @@ class WideRowShuffleFallbackSuite extends CometTestBase {
     }
   }
 
-  private def withTable(f: => Unit): Unit = {
+  private def withWideTable(f: => Unit): Unit = {
     withTempPath { dir =>
       spark
         .range(3000)
@@ -151,7 +151,7 @@ class WideRowShuffleFallbackSuite extends CometTestBase {
     }
 
   test("a shuffle with at least the threshold of payload leaves stays a Spark shuffle") {
-    withTable {
+    withWideTable {
       bothAqeModes {
         withSQLConf(minLeaves -> payloadLeaves.toString) {
           val plan = run(spark.table("w").repartition(7, col("k")))
@@ -177,7 +177,7 @@ class WideRowShuffleFallbackSuite extends CometTestBase {
   }
 
   test("leaves of the hash partitioning key are not counted") {
-    withTable {
+    withWideTable {
       bothAqeModes {
         val keyed = () => spark.table("w").repartition(5, col("k"), col("st"))
         withSQLConf(minLeaves -> (payloadLeaves - 2).toString) {
@@ -191,7 +191,7 @@ class WideRowShuffleFallbackSuite extends CometTestBase {
   }
 
   test("leaves of the range partitioning key are not counted") {
-    withTable {
+    withWideTable {
       withSQLConf(minLeaves -> payloadLeaves.toString) {
         val byK = run(spark.table("w").orderBy(col("k")))
         assert(cometShuffles(byK).isEmpty && sparkShuffles(byK).nonEmpty, s"plan:\n$byK")
@@ -202,7 +202,7 @@ class WideRowShuffleFallbackSuite extends CometTestBase {
   }
 
   test("the columnar shuffle stays in Spark too") {
-    withTable {
+    withWideTable {
       bothAqeModes {
         withSQLConf(CometConf.COMET_SHUFFLE_MODE.key -> "jvm") {
           withSQLConf(minLeaves -> (payloadLeaves + 1).toString) {
@@ -221,7 +221,7 @@ class WideRowShuffleFallbackSuite extends CometTestBase {
   }
 
   test("the reader of a Spark shuffle runs in Spark and the native producer converts once") {
-    withTable {
+    withWideTable {
       bothAqeModes {
         withSQLConf(
           minLeaves -> payloadLeaves.toString,
@@ -245,7 +245,7 @@ class WideRowShuffleFallbackSuite extends CometTestBase {
   }
 
   test("boundary formats keep a wide shuffle in Spark") {
-    withTable {
+    withWideTable {
       withSQLConf(
         SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
         SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",

@@ -334,7 +334,7 @@ object EngineCostTable {
    * 37 times at 171 elements in a Comet shuffle write, partly cancelled in the ratio of the
    * engines).
    */
-  val defaultLines: Map[(CostClass, Form), Line] = Map(
+  val defaultLines: Map[(CostClass, Form), Line] = Map[(CostClass, Form), Line](
     (ShuffleWrite, Flat) -> Line(0, 48.95, 0.037, 69, 67.21),
     (ShuffleWrite, Nested) -> Line(46, 39.59, 0.031, 686, 47.77),
     (ShuffleRead, Flat) -> Line(0, 14.73, 0.032, 67, 26.34),
