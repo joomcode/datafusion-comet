@@ -560,8 +560,8 @@ single-node setups with fast NVMe drives, at the expense of increased disk space
 
 ## Reducing Row/Columnar Conversion Overhead
 
-The cost-based engine choice, described below, is the only rule in this section enabled by default. The other rules
-are disabled by default and are meant for plans where it is disabled.
+All rules in this section are disabled by default. The cost-based engine choice, described below, replaces the other
+rules when it is enabled; they are meant for plans where it is disabled.
 
 When a query stage contains many operators that fall back to Spark row-based execution, Comet may insert
 repeated columnar-to-row and row-to-columnar conversions that dominate stage runtime. Set
@@ -589,7 +589,7 @@ operator reads it.
 
 ### Cost-Based Engine Choice
 
-`spark.comet.exec.costBasedEngines.enabled`, enabled by default, decides, for each operator Comet converted, whether it runs
+`spark.comet.exec.costBasedEngines.enabled` (default `false`) decides, for each operator Comet converted, whether it runs
 natively or in Spark by minimizing one estimated time per row over the whole plan. Each priced operator costs the sum of
 prices per row from a table of measurements: `c0 + k0*L + k1*L*min(L, 600)` ns natively and `c0 + k*L` ns in Spark, where
 `L` is the number of leaf columns a class prices and the coefficients depend on the class:
@@ -639,8 +639,8 @@ columns and costs of each engine.
 Operators only move from Comet to Spark; scans, writes, and native aggregates whose buffers Spark cannot read keep
 their engine. Shuffle and broadcast formats then follow as with `spark.comet.exec.boundaryFormats.enabled`, priced
 the same way. The wide-row rules `spark.comet.exec.sort.wideRowFallback.enabled` (default `false`) and
-`spark.comet.shuffle.wideRowFallback.minLeafColumns` (default `0`, disabled) do not run while the cost-based choice is enabled. Set
-`spark.comet.exec.costBasedEngines.enabled=false` to leave each operator in the engine Comet's conversion chose.
+`spark.comet.shuffle.wideRowFallback.minLeafColumns` (default `0`, disabled) do not run while the cost-based choice is enabled. Disabled, as by
+default, it leaves each operator in the engine Comet's conversion chose.
 
 ### Sorts of Wide Rows
 

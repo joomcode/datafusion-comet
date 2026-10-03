@@ -653,7 +653,7 @@ object CometConf extends ShimCometConf {
           "which would convert rows to Arrow when writing and back to rows when reading. The " +
           "inputs of an operator that needs co-partitioned inputs, such as a sort-merge join, " +
           "are never split between Comet's and Spark's hash functions unless their keys hash " +
-          "alike in both. spark.comet.exec.costBasedEngines.enabled, on by default, already " +
+          "alike in both. spark.comet.exec.costBasedEngines.enabled, when enabled, already " +
           "picks the formats this way.")
       .booleanConf
       .createWithDefault(false)
@@ -672,10 +672,10 @@ object CometConf extends ShimCometConf {
           "follow the engines on both sides, as with spark.comet.exec.boundaryFormats.enabled. " +
           "spark.comet.exec.sort.wideRowFallback.enabled and " +
           "spark.comet.shuffle.wideRowFallback.minLeafColumns are ignored while it is enabled. " +
-          "It is the only plan rule enabled by default; disabling it leaves each operator in " +
-          "the engine Comet's conversion chose.")
+          "Disabled, as by default, it leaves each operator in the engine Comet's conversion " +
+          "chose.")
       .booleanConf
-      .createWithDefault(true)
+      .createWithDefault(false)
 
   val COMET_EXEC_COST_BASED_ENGINES_COST_TABLE: ConfigEntry[String] =
     conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.costTable")
