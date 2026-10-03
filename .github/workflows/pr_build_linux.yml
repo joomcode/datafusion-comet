@@ -532,6 +532,7 @@ jobs:
               org.apache.spark.sql.comet.CometBroadcastDefaultKryoSuite
               org.apache.comet.exec.CometGenerateExecSuite
               org.apache.comet.exec.CometWindowExecSuite
+              org.apache.comet.exec.CometPartitionAggregateWindowSuite
               org.apache.comet.exec.CometJoinSuite
               org.apache.spark.sql.comet.CometMapInBatchSuite
               org.apache.spark.sql.execution.python.CometArrowPythonRunnerSuite

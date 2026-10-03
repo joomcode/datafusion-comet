@@ -784,6 +784,19 @@ object CometConf extends ShimCometConf {
       .checkValue(_ >= 1, "Must be >= 1.")
       .createWithDefault(50)
 
+  val COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.window.partitionAggregate.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "Whether native window expressions that cannot stream, such as whole-partition " +
+          "aggregates, FIRST_VALUE/LAST_VALUE/NTH_VALUE over whole partitions, NTILE, " +
+          "PERCENT_RANK, CUME_DIST and frames ending at UNBOUNDED FOLLOWING, run in Comet's " +
+          "PartitionAggregateWindowExec, which spills the rows of a window partition to disk " +
+          "when memory runs out. When false, they run in DataFusion's WindowAggExec, as in " +
+          "upstream Comet, which buffers each window partition in memory.")
+      .booleanConf
+      .createWithDefault(false)
+
   val COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD: OptionalConfigEntry[Long] =
     conf(s"$COMET_EXEC_CONFIG_PREFIX.sort.spillBeforeOutputThreshold")
       .category(CATEGORY_EXEC)

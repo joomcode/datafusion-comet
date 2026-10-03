@@ -68,6 +68,9 @@ use futures::{stream, StreamExt};
 ///   value of the frame starting at every row. Those values are buffered as a spillable
 ///   stream in row order and read during the replay at each row's frame start.
 #[derive(Debug)]
+pub struct PartitionAggregateWindowEnabled;
+
+#[derive(Debug)]
 pub struct PartitionAggregateWindowExec {
     window: WindowAggExec,
     ignore_nulls: Vec<bool>,

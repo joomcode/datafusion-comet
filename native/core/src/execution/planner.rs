@@ -46,7 +46,8 @@ use crate::execution::{
     expressions::subquery::Subquery,
     operators::{
         CometFilterExec, ExecutionError, ExpandExec, ExplodeExec, ParquetCompression,
-        ParquetWriterExec, PartitionAggregateWindowExec, SampleExec, ScanExec, ShuffleScanExec,
+        ParquetWriterExec, PartitionAggregateWindowEnabled, PartitionAggregateWindowExec,
+        SampleExec, ScanExec, ShuffleScanExec,
     },
     planner::expression_registry::ExpressionRegistry,
     planner::operator_registry::OperatorRegistry,
@@ -2490,11 +2491,27 @@ impl PhysicalPlanner {
                 // trigger a retract call.
                 let window_expr = window_expr?;
                 let all_bounded = window_expr.iter().all(|e| e.uses_bounded_memory());
-                // Those go to `PartitionAggregateWindowExec`, which spills partition rows
-                // (and evaluates the bounded expressions of a mixed node below it) instead
-                // of buffering each partition in `WindowAggExec`. `WindowAggExec` remains
-                // only for expressions without a spilling implementation.
+                // With `spark.comet.exec.window.partitionAggregate.enabled`, those go to
+                // `PartitionAggregateWindowExec`, which spills partition rows (and evaluates
+                // the bounded expressions of a mixed node below it) instead of buffering each
+                // partition in `WindowAggExec`. `WindowAggExec` remains for expressions
+                // without a spilling implementation, and for all of them when it is disabled.
+                let partition_aggregate_enabled = self
+                    .session_ctx
+                    .copied_config()
+                    .get_extension::<PartitionAggregateWindowEnabled>()
+                    .is_some();
                 let ignore_nulls = wnd.window_expr.iter().map(|e| e.ignore_nulls).collect();
+                let partition_aggregate = if !all_bounded && partition_aggregate_enabled {
+                    PartitionAggregateWindowExec::try_plan(
+                        window_expr.clone(),
+                        Arc::clone(&child.native_plan),
+                        !partition_exprs.is_empty(),
+                        ignore_nulls,
+                    )?
+                } else {
+                    None
+                };
                 let window_agg: Arc<dyn ExecutionPlan> = if all_bounded {
                     Arc::new(BoundedWindowAggExec::try_new(
                         window_expr,
@@ -2502,12 +2519,7 @@ impl PhysicalPlanner {
                         InputOrderMode::Sorted,
                         !partition_exprs.is_empty(),
                     )?)
-                } else if let Some(plan) = PartitionAggregateWindowExec::try_plan(
-                    window_expr.clone(),
-                    Arc::clone(&child.native_plan),
-                    !partition_exprs.is_empty(),
-                    ignore_nulls,
-                )? {
+                } else if let Some(plan) = partition_aggregate {
                     plan
                 } else {
                     Arc::new(WindowAggExec::try_new(

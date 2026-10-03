@@ -42,12 +42,16 @@ class CometWindowExecSuite extends CometTestBase {
 
   import testImplicits._
 
+  protected def partitionAggregateWindowEnabled: Boolean = false
+
   override protected def test(testName: String, testTags: Tag*)(testFun: => Any)(implicit
       pos: Position): Unit = {
     super.test(testName, testTags: _*) {
       withSQLConf(
         CometConf.COMET_SHUFFLE_ENABLED.key -> "true",
         CometConf.COMET_EXEC_WINDOW_ENABLED.key -> "true",
+        CometConf.COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED.key ->
+          partitionAggregateWindowEnabled.toString,
         "spark.comet.operator.WindowExec.allowIncompatible" -> "true",
         "spark.comet.explain.fallback.enabled" -> "true",
         "spark.comet.explain.fallback.log.enabled" -> "true",
@@ -1514,8 +1518,9 @@ class CometWindowExecSuite extends CometTestBase {
     }
   }
 
-  // Shapes that previously ran in DataFusion's WindowAggExec, which buffers each partition in
-  // memory; they now run in the spilling PartitionAggregateWindowExec. Partitions include a
+  // Shapes that run in DataFusion's WindowAggExec, which buffers each partition in memory, or
+  // with spark.comet.exec.window.partitionAggregate.enabled in the spilling
+  // PartitionAggregateWindowExec (see CometPartitionAggregateWindowSuite). Partitions include a
   // NULL key, sizes 1 and 2 (smaller than the NTILE bucket counts), ORDER BY ties and NULLs,
   // and NULL values.
   private def withWindowSpillTable(f: => Unit): Unit = {

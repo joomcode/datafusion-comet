@@ -106,7 +106,7 @@ use tokio::runtime::{Handle, Runtime};
 use tokio::sync::mpsc;
 
 use crate::execution::memory_pools::{create_memory_pool, parse_memory_pool_config};
-use crate::execution::operators::{ScanExec, ShuffleScanExec};
+use crate::execution::operators::{PartitionAggregateWindowEnabled, ScanExec, ShuffleScanExec};
 use crate::execution::shuffle::{
     decode_remote_shuffle_batch, read_ipc_compressed, CompressionCodec, ShuffleReadCoalescer,
     ShuffleWriterExec,
@@ -120,9 +120,9 @@ use crate::execution::tracing::{
 use crate::execution::memory_pools::logging_pool::LoggingMemoryPool;
 use crate::execution::spark_config::{
     SparkConfig, COMET_DEBUG_ENABLED, COMET_DEBUG_MEMORY,
-    COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD, COMET_EXPLAIN_NATIVE_ENABLED,
-    COMET_MAX_TEMP_DIRECTORY_SIZE, COMET_PARQUET_ROW_FILTER_PUSHDOWN_ENABLED,
-    COMET_TRACING_ENABLED, SPARK_EXECUTOR_CORES,
+    COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD, COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED,
+    COMET_EXPLAIN_NATIVE_ENABLED, COMET_MAX_TEMP_DIRECTORY_SIZE,
+    COMET_PARQUET_ROW_FILTER_PUSHDOWN_ENABLED, COMET_TRACING_ENABLED, SPARK_EXECUTOR_CORES,
 };
 use crate::parquet::encryption_support::{CometEncryptionFactory, ENCRYPTION_FACTORY_ID};
 use crate::parquet::parquet_support::CometObjectStoreRegistry;
@@ -919,6 +919,10 @@ fn prepare_datafusion_session_context(
     if spill_before_output > 0 {
         session_config = session_config
             .with_extension(Arc::new(SpillBeforeOutputThreshold(spill_before_output)));
+    }
+
+    if spark_config.get_bool(COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED) {
+        session_config = session_config.with_extension(Arc::new(PartitionAggregateWindowEnabled));
     }
 
     configure_skip_partial_aggregation(&mut session_config, spark_plan);

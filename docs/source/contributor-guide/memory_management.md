@@ -343,7 +343,9 @@ This leaves room for input batches on small executors; the spillable merge can g
 reservation when it needs more. It does not increase the memory pool or suppress allocation
 failures. An individual batch still has to fit the available execution budget.
 
-`PartitionAggregateWindowExec` handles window expressions that cannot stream: full-partition
+`PartitionAggregateWindowExec` is disabled by default. With
+`spark.comet.exec.window.partitionAggregate.enabled=true` it handles window expressions that
+cannot stream; otherwise they run in `WindowAggExec`, as upstream. These are full-partition
 `sum`, `avg`, `count`, `min`, `max`, `first_value`, `last_value` and `nth_value` frames (with
 or without `IGNORE NULLS`), `ntile`, `percent_rank`, `cume_dist`, and frames that end at
 `UNBOUNDED FOLLOWING` but start at `CURRENT ROW`, `N PRECEDING` or `N FOLLOWING`. It reserves
