@@ -582,7 +582,7 @@ object EngineCostTable {
                 case _ =>
                   fail(
                     entry,
-                    s"<class>[.<form>].<engine>=<numbers> or one of " +
+                    "<class>[.<form>].<engine>=<numbers> or one of " +
                       s"${scalars.keys.toSeq.sorted.mkString(", ")}=<number>, or " +
                       s"${flags.keys.toSeq.sorted.mkString(", ")}=<true or false>")
               }
