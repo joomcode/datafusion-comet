@@ -418,7 +418,7 @@ private[rules] object EngineSolver {
       val unchanged = children.zip(node.children).forall { case (a, b) => a eq b }
       val label = Option(labels.get(node))
       node match {
-        case r2c: CometSparkToColumnarExec if label.contains(Engine.Spark) =>
+        case _: CometSparkToColumnarExec if label.contains(Engine.Spark) =>
           val input = children.head
           input.setTagValue(CometExecRule.ENGINE_CHOICE_SPARK_TAG, ())
           input
