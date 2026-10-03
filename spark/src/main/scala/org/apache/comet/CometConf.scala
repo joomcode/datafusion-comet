@@ -680,24 +680,39 @@ object CometConf extends ShimCometConf {
   val COMET_EXEC_COST_BASED_ENGINES_COST_TABLE: ConfigEntry[String] =
     conf(s"$COMET_EXEC_CONFIG_PREFIX.costBasedEngines.costTable")
       .category(CATEGORY_EXEC)
-      .doc(
-        "Overrides of the cost table of spark.comet.exec.costBasedEngines.enabled, as " +
-          "semicolon-separated `<key>=<value>` entries, for example " +
-          "`shuffleWrite.flat.comet=250,50.3,0.221;shuffleWrite.flat.spark=303,67.07;" +
-          "filterPassThroughPerLeaf=0.5`. A line is keyed `<class>.<form>.<engine>`: the class " +
-          "is shuffleWrite, shuffleRead, sort, rowLocal, agg or c2r, the form flat or nested, " +
-          "and the engine comet, with `c0,k0,k1` for a price of c0 + k0*L + k1*L*L ns per row " +
-          "(or `k0,k1`, keeping c0), or spark, with `c0,k` for c0 + k*L ns per row, where L is " +
-          "the number of leaf columns the operator processes. A row whose leaves are a " +
-          "fraction f inside structs, arrays or maps costs (1 - f) times the flat price plus f " +
-          "times the nested one. c2r has no spark line. The scalars are " +
-          "shuffleWritePartitionSlope and shuffleWritePartitionBase, which scale a Comet " +
-          "shuffle write by 1 + slope * max(0, partitions / base - 1); " +
-          "filterPassThroughPerLeaf, in ns per row and output leaf of a filter; and " +
-          "shuffleReadPerByte.comet and shuffleReadPerByte.spark, in ns per byte read from a " +
-          "shuffle, over the estimated size of a Spark row, times cometShuffleBytesRatio for " +
-          "Comet. " +
-          "Entries not given keep their defaults.")
+      .doc("Overrides of the cost table of spark.comet.exec.costBasedEngines.enabled, as " +
+        "semicolon-separated `<key>=<value>` entries, for example " +
+        "`shuffleWrite.flat.comet=0,48.95,0.037;sort.spark=646,0;" +
+        "filterPassThroughPerLeaf.comet=1.5`. A line is keyed `<class>.<form>.<engine>`, or " +
+        "`<class>.<engine>` for both forms: the form is flat or nested, and the engine comet, " +
+        "with `c0,k0,k1` for a price of c0 + k0*L + k1*L*min(L, quadraticLeafCap) ns per row " +
+        "(or `k0,k1`, keeping c0), or spark, with `c0,k` for c0 + k*L ns per row, where L is " +
+        "the number of leaf columns the class prices (for the functions of an aggregate or a " +
+        "window, the number of functions). The classes are shuffleWrite, shuffleRead, sort, " +
+        "sortSpill, smj, bhj, predicate, projectPassThrough, expression, agg, aggObjectHash, " +
+        "aggDeclarative, aggCollectList, aggCollectSet, aggPercentile, aggPercentileApprox, " +
+        "aggOther, window, windowAggregate, windowOffset, windowRank, wglPartial, wglFinal, " +
+        "expand, generate, rowLocal, the comet-only c2r and r2c, and the spark-only " +
+        "expressionOverScan, aggDeclarativeNoCodegen, expandNoCodegen and " +
+        "generateNoCodegen. A row whose leaves are a fraction f inside structs, arrays or " +
+        "maps costs (1 - f) times the flat price plus f times the nested one. The scalars " +
+        "are shuffleWritePartitionBase and, for the native write, the native read and the " +
+        "columnar write, shuffleWritePartitionSlope, shuffleReadPartitionSlope and " +
+        "columnarShuffleWritePartitionSlope with their PerLeaf variants, which scale a " +
+        "shuffle over L leaves by 1 + (slope + perLeaf * L) * max(0, partitions / base - 1); " +
+        "columnarShuffleConstant; filterPassThroughPerLeaf.comet and .spark, in ns per row " +
+        "and output leaf of a filter; shuffleWritePerByte, shuffleReadPerByte and " +
+        "sortPerByte, each " +
+        ".comet and .spark, in ns per byte of the estimated size of a Spark row beyond " +
+        "perByteLeafAllowance bytes per leaf, times cometShuffleBytesRatio for a Comet " +
+        "shuffle; sortSpillFraction, the fraction of the rows of a sort priced as spilled; " +
+        "and quadraticLeafCap. keepFiltersOverNativeScans (true or false, default true) keeps " +
+        "a native filter over a native scan, and the native projects over it, native " +
+        "whatever their prices, since the rows a filter drops are not estimated, and " +
+        "keepPartialAggregatesOverNativeInputs (default true) keeps a native partial " +
+        "aggregate over a native scan, filter or project native, since the rows it reduces " +
+        "are not estimated either. " +
+        "Entries not given keep their defaults.")
       .stringConf
       .createWithDefault("")
 
