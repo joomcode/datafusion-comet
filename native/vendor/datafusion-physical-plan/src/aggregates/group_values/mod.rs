@@ -22,7 +22,7 @@ use arrow::array::types::{
     Time64MicrosecondType, Time64NanosecondType, TimestampMicrosecondType,
     TimestampMillisecondType, TimestampNanosecondType, TimestampSecondType,
 };
-use arrow::array::{ArrayRef, downcast_primitive};
+use arrow::array::{Array, ArrayRef, AsArray, downcast_primitive};
 use arrow::datatypes::{DataType, SchemaRef, TimeUnit};
 use datafusion_common::Result;
 
@@ -115,6 +115,106 @@ pub trait GroupValues: Send {
 
     /// Clear the contents and shrink the capacity to the size of the batch (free up memory usage)
     fn clear_shrink(&mut self, num_rows: usize);
+
+    /// Returns false if interning `cols` could take a 32-bit offset buffer of the stored
+    /// group values, or of the arrays they are emitted as, past `i32::MAX`.
+    fn has_offset_room(&self, _cols: &[ArrayRef]) -> bool {
+        true
+    }
+}
+
+/// The largest extent `array` addresses in any of its 32-bit offset buffers (`Utf8`,
+/// `Binary`, `List` and `Map` at any depth): bytes for the former, entries for the latter.
+pub(crate) fn max_offset_extent(array: &dyn Array) -> usize {
+    max_extent(array, 0, array.len())
+}
+
+fn max_extent(array: &dyn Array, start: usize, end: usize) -> usize {
+    match array.data_type() {
+        DataType::Utf8 => {
+            let offsets = array.as_string::<i32>().value_offsets();
+            (offsets[end] - offsets[start]) as usize
+        }
+        DataType::Binary => {
+            let offsets = array.as_binary::<i32>().value_offsets();
+            (offsets[end] - offsets[start]) as usize
+        }
+        DataType::List(_) => {
+            let list = array.as_list::<i32>();
+            let offsets = list.value_offsets();
+            let (start, end) = (offsets[start] as usize, offsets[end] as usize);
+            (end - start).max(max_extent(list.values().as_ref(), start, end))
+        }
+        DataType::Map(_, _) => {
+            let map = array.as_map();
+            let offsets = map.value_offsets();
+            let (start, end) = (offsets[start] as usize, offsets[end] as usize);
+            (end - start).max(max_extent(map.entries(), start, end))
+        }
+        DataType::LargeList(_) => {
+            let list = array.as_list::<i64>();
+            let offsets = list.value_offsets();
+            max_extent(
+                list.values().as_ref(),
+                offsets[start] as usize,
+                offsets[end] as usize,
+            )
+        }
+        DataType::FixedSizeList(_, size) => {
+            let size = *size as usize;
+            max_extent(
+                array.as_fixed_size_list().values().as_ref(),
+                start * size,
+                end * size,
+            )
+        }
+        DataType::Struct(_) => array
+            .as_struct()
+            .columns()
+            .iter()
+            .map(|column| max_extent(column.as_ref(), start, end))
+            .max()
+            .unwrap_or(0),
+        DataType::Dictionary(_, _) => {
+            let values = array.as_any_dictionary().values();
+            max_extent(values.as_ref(), 0, values.len()).saturating_mul(end - start)
+        }
+        _ => 0,
+    }
+}
+
+/// True if `data_type` has a 32-bit offset buffer at any depth.
+pub(crate) fn has_offset_buffer(data_type: &DataType) -> bool {
+    match data_type {
+        DataType::Utf8 | DataType::Binary | DataType::List(_) | DataType::Map(_, _) => {
+            true
+        }
+        DataType::LargeList(field)
+        | DataType::FixedSizeList(field, _)
+        | DataType::ListView(field)
+        | DataType::LargeListView(field) => has_offset_buffer(field.data_type()),
+        DataType::Struct(fields) => fields
+            .iter()
+            .any(|field| has_offset_buffer(field.data_type())),
+        DataType::Dictionary(_, values) => has_offset_buffer(values),
+        DataType::RunEndEncoded(_, values) => has_offset_buffer(values.data_type()),
+        DataType::Union(fields, _) => fields
+            .iter()
+            .any(|(_, field)| has_offset_buffer(field.data_type())),
+        _ => false,
+    }
+}
+
+/// Whether encoded group rows of `held_bytes`, after appending rows decoded from `cols`,
+/// still decode into arrays whose 32-bit offsets fit. Every row-format encoding takes at least
+/// one byte per value byte and per list entry, so the decoded extent of each offset buffer is
+/// at most the encoded size.
+pub(crate) fn rows_have_offset_room(held_bytes: usize, cols: &[ArrayRef]) -> bool {
+    let incoming = cols
+        .iter()
+        .map(|col| max_offset_extent(col.as_ref()))
+        .fold(0usize, usize::saturating_add);
+    held_bytes.saturating_add(incoming) <= i32::MAX as usize
 }
 
 /// Return a specialized implementation of [`GroupValues`] for the given schema.

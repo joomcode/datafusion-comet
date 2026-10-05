@@ -17,7 +17,7 @@
 
 use std::mem::size_of;
 
-use crate::aggregates::group_values::GroupValues;
+use crate::aggregates::group_values::{GroupValues, max_offset_extent};
 
 use arrow::array::{Array, ArrayRef, OffsetSizeTrait};
 use datafusion_common::Result;
@@ -33,6 +33,8 @@ pub struct GroupValuesBytes<O: OffsetSizeTrait> {
     map: ArrowBytesMap<O, usize>,
     /// The total number of groups so far (used to assign group_index)
     num_groups: usize,
+    /// Bytes of the distinct values interned so far
+    value_bytes: usize,
 }
 
 impl<O: OffsetSizeTrait> GroupValuesBytes<O> {
@@ -40,6 +42,7 @@ impl<O: OffsetSizeTrait> GroupValuesBytes<O> {
         Self {
             map: ArrowBytesMap::new(output_type),
             num_groups: 0,
+            value_bytes: 0,
         }
     }
 }
@@ -55,7 +58,8 @@ impl<O: OffsetSizeTrait> GroupValues for GroupValuesBytes<O> {
         self.map.insert_if_new(
             arr,
             // called for each new group
-            |_value| {
+            |value| {
+                self.value_bytes += value.map_or(0, <[u8]>::len);
                 // assign new group index on each insert
                 let group_idx = self.num_groups;
                 self.num_groups += 1;
@@ -87,6 +91,7 @@ impl<O: OffsetSizeTrait> GroupValues for GroupValuesBytes<O> {
     fn emit(&mut self, emit_to: EmitTo) -> Result<Vec<ArrayRef>> {
         // Reset the map to default, and convert it into a single array
         let map_contents = self.map.take().into_state();
+        self.value_bytes = 0;
 
         let group_values = match emit_to {
             EmitTo::All => {
@@ -124,5 +129,14 @@ impl<O: OffsetSizeTrait> GroupValues for GroupValuesBytes<O> {
         // in theory we could potentially avoid this reallocation and clear the
         // contents of the maps, but for now we just reset the map from the beginning
         self.map.take();
+        self.value_bytes = 0;
+    }
+
+    fn has_offset_room(&self, cols: &[ArrayRef]) -> bool {
+        O::IS_LARGE
+            || self
+                .value_bytes
+                .saturating_add(max_offset_extent(cols[0].as_ref()))
+                <= i32::MAX as usize
     }
 }

@@ -169,9 +169,7 @@ class CometCelebornShuffleManager private[shuffle] (
           .put(resolved.celebornShuffleId, resolved.client)
 
         new CometNativeShuffleWriter[K, V](
-          dependency.nativeShuffleSpec.getOrElse {
-            throw new IllegalStateException("Native Comet shuffle has no execution plan")
-          },
+          Option(dependency.nativeShuffleSpec).flatten.orNull,
           dependency.outputPartitioning.getOrElse {
             throw new IllegalStateException("Native Comet shuffle has no output partitioning")
           },

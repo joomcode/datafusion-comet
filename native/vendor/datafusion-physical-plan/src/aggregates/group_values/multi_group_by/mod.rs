@@ -112,6 +112,12 @@ pub trait GroupColumn: Send + Sync {
     /// Builds a new array from the first `n` stored rows, shifting the
     /// remaining rows to the start of the builder
     fn take_n(&mut self, n: usize) -> ArrayRef;
+
+    /// Returns false if appending every row of `array` could take a 32-bit offset
+    /// buffer of this builder, or of the array it builds, past `i32::MAX`
+    fn has_offset_room(&self, _array: &ArrayRef) -> bool {
+        true
+    }
 }
 
 /// Determines if the nullability of the existing and new input array can be used
@@ -1163,6 +1169,13 @@ impl<const STREAMING: bool> GroupValues for GroupValuesColumn<STREAMING> {
     fn size(&self) -> usize {
         let group_values_size: usize = self.group_values.iter().map(|v| v.size()).sum();
         group_values_size + self.map_size + self.hashes_buffer.allocated_size()
+    }
+
+    fn has_offset_room(&self, cols: &[ArrayRef]) -> bool {
+        self.group_values
+            .iter()
+            .zip(cols)
+            .all(|(group_column, col)| group_column.has_offset_room(col))
     }
 
     fn is_empty(&self) -> bool {

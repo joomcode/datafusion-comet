@@ -22,6 +22,7 @@ package org.apache.spark.sql.comet.execution.arrow
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.ipc.ArrowReader
 import org.apache.arrow.vector.types.pojo.Schema
+import org.apache.spark.TaskContext
 import org.apache.spark.sql.catalyst.InternalRow
 
 /**
@@ -43,6 +44,8 @@ private[comet] class RowArrowReader(
 
   require(maxRecordsPerBatch > 0, "Maximum records per batch must be positive")
 
+  private val taskContext = TaskContext.get()
+
   override protected def readSchema(): Schema = arrowSchema
 
   override def bytesRead(): Long = 0L
@@ -60,6 +63,9 @@ private[comet] class RowArrowReader(
     val writer = ArrowWriter.create(getVectorSchemaRoot, maxRecordsPerBatch)
     var rowCount = 0
     while (rowIter.hasNext && rowCount < maxRecordsPerBatch) {
+      if ((rowCount & 255) == 0 && taskContext != null) {
+        taskContext.killTaskIfInterrupted()
+      }
       writer.write(rowIter.next())
       rowCount += 1
     }

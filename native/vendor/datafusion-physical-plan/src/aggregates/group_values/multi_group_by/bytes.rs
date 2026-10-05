@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use crate::aggregates::group_values::max_offset_extent;
 use crate::aggregates::group_values::multi_group_by::{
     GroupColumn, Nulls, nulls_equal_to,
 };
@@ -219,6 +220,10 @@ where
     }
 }
 
+fn large_extent(offsets: &[i64]) -> usize {
+    (offsets[offsets.len() - 1] - offsets[0]) as usize
+}
+
 impl<O> GroupColumn for ByteGroupValueBuilder<O>
 where
     O: OffsetSizeTrait,
@@ -242,6 +247,19 @@ where
             }
             _ => unreachable!("View types should use `ArrowBytesViewMap`"),
         }
+    }
+
+    fn has_offset_room(&self, column: &ArrayRef) -> bool {
+        let incoming = match column.data_type() {
+            DataType::LargeUtf8 => {
+                large_extent(column.as_string::<i64>().value_offsets())
+            }
+            DataType::LargeBinary => {
+                large_extent(column.as_binary::<i64>().value_offsets())
+            }
+            _ => max_offset_extent(column.as_ref()),
+        };
+        self.buffer.len().saturating_add(incoming) <= self.max_buffer_size
     }
 
     fn append_val(&mut self, column: &ArrayRef, row: usize) -> Result<()> {

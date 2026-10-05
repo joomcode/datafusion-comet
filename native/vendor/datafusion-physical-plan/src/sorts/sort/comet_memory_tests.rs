@@ -26,9 +26,12 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType, Field, Int32Type, Int64Type, Schema};
 use datafusion_execution::config::SessionConfig;
-use datafusion_execution::memory_pool::{GreedyMemoryPool, MemoryLimit};
+use datafusion_execution::memory_pool::{
+    GreedyMemoryPool, MemoryLimit, TrackConsumersPool,
+};
 use datafusion_execution::runtime_env::RuntimeEnvBuilder;
 use datafusion_physical_expr::expressions::Column;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 fn new_sorter(
@@ -654,5 +657,95 @@ async fn small_view_batches_are_not_coalesced() -> Result<()> {
     }
     assert_eq!(sorter.in_mem_batches.len(), 10);
     assert!(sorter.small_batches.is_empty());
+    Ok(())
+}
+
+fn key_dominated_batches(
+    batches: usize,
+    rows: usize,
+) -> Result<(SchemaRef, LexOrdering, Vec<RecordBatch>)> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("m", DataType::Utf8, false),
+        Field::new("d", DataType::Int32, false),
+        Field::new("p", DataType::Utf8, false),
+        Field::new("v", DataType::Int64, false),
+    ]));
+    let mut state = 17u64;
+    let mut hex = || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        format!("{:024x}", state >> 16)
+    };
+    let input = (0..batches)
+        .map(|b| {
+            let m: Vec<String> = (0..rows).map(|_| hex()).collect();
+            let p: Vec<String> = (0..rows).map(|_| hex()).collect();
+            RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![
+                    Arc::new(StringArray::from(m)),
+                    Arc::new(Int32Array::from_iter_values(
+                        (0..rows).map(|r| (r % 97) as i32),
+                    )),
+                    Arc::new(StringArray::from(p)),
+                    Arc::new(Int64Array::from_iter_values(
+                        (0..rows).map(|r| (b * rows + r) as i64),
+                    )),
+                ],
+            )
+        })
+        .collect::<std::result::Result<_, _>>()?;
+    let ordering = [
+        PhysicalSortExpr::new_default(crate::expressions::col("m", &schema)?),
+        PhysicalSortExpr::new_default(crate::expressions::col("d", &schema)?),
+        PhysicalSortExpr::new_default(crate::expressions::col("p", &schema)?),
+    ]
+    .into();
+    Ok((schema, ordering, input))
+}
+
+/// A spill merges the batches the sorter buffered inside the memory it holds for them,
+/// twice their size. When the sort key is most of each row, the merge's batches and the
+/// rows it encodes their keys into take about that much on their own, and the merge
+/// asked the pool for the rest. In a pool the sorter had filled that failed with
+/// "Additional allocation failed for ExternalSorter[0]", although the spill was about to
+/// release everything the sorter holds.
+#[tokio::test]
+async fn spill_merge_of_key_dominated_rows_does_not_fail() -> Result<()> {
+    let (schema, ordering, input) = key_dominated_batches(300, 1024)?;
+    let data: usize = input.iter().map(get_record_batch_memory_size).sum();
+    let expected = sort_batch(&concat_batches(&schema, &input)?, &ordering, None)?;
+    for percent in [35, 38, 42, 46, 48] {
+        let pool: Arc<dyn MemoryPool> = Arc::new(TrackConsumersPool::new(
+            GreedyMemoryPool::new(data * 2 * percent / 100),
+            NonZeroUsize::new(5).unwrap(),
+        ));
+        let runtime = RuntimeEnvBuilder::new()
+            .with_memory_pool(Arc::clone(&pool))
+            .build_arc()?;
+        let mut sorter = ExternalSorter::new(
+            0,
+            Arc::clone(&schema),
+            ordering.clone(),
+            8192,
+            64 * 1024,
+            1024 * 1024,
+            SpillCompression::Uncompressed,
+            &ExecutionPlanMetricsSet::new(),
+            runtime,
+        )?;
+        for batch in &input {
+            sorter.insert_batch(batch.clone()).await?;
+        }
+        assert!(sorter.spill_count() > 0);
+        let output: Vec<RecordBatch> = sorter.sort().await?.try_collect().await?;
+        drop(sorter);
+        assert_eq!(pool.reserved(), 0);
+        let actual = concat_batches(&schema, &output)?;
+        for column in 0..3 {
+            assert_eq!(actual.column(column), expected.column(column));
+        }
+    }
     Ok(())
 }

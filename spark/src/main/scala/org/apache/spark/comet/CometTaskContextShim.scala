@@ -38,4 +38,9 @@ object CometTaskContextShim {
   def set(taskContext: TaskContext): Unit = TaskContext.setTaskContext(taskContext)
 
   def unset(): Unit = TaskContext.unset()
+
+  /** Throws `TaskKilledException` if `taskContext` has been killed. */
+  def killTaskIfInterrupted(taskContext: TaskContext): Unit = taskContext.killTaskIfInterrupted()
+
+  def killReason(taskContext: TaskContext): Option[String] = taskContext.getKillReason()
 }

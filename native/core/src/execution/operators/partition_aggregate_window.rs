@@ -48,6 +48,7 @@ use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, InputDistributionRequirements, InputOrderMode,
     PlanProperties, SendableRecordBatchStream, WindowExpr,
 };
+use datafusion_comet_common::offset_extents::OffsetBudget;
 use futures::{stream, StreamExt};
 
 /// Window operator for expressions that need the whole partition, or every row after the
@@ -464,6 +465,7 @@ impl ExecutionPlan for PartitionAggregateWindowExec {
             target_rows: context.session_config().batch_size().max(1),
             buffered: vec![],
             buffered_rows: 0,
+            buffered_offsets: OffsetBudget::default(),
             ready: VecDeque::new(),
             current_key: None,
             num_rows: 0,
@@ -1139,6 +1141,7 @@ struct WindowState {
     target_rows: usize,
     buffered: Vec<RecordBatch>,
     buffered_rows: usize,
+    buffered_offsets: OffsetBudget,
     ready: VecDeque<RecordBatch>,
 }
 
@@ -1605,6 +1608,13 @@ impl WindowState {
                     };
                 }
                 Some(batch) => {
+                    if !self.buffered_offsets.try_add(batch.columns()) {
+                        let buffered = self.flush()?;
+                        self.buffered_offsets.try_add(batch.columns());
+                        self.buffered_rows = batch.num_rows();
+                        self.buffered.push(batch);
+                        return Ok(buffered);
+                    }
                     self.buffered_rows += batch.num_rows();
                     self.buffered.push(batch);
                     if self.buffered_rows >= self.target_rows {
@@ -1622,6 +1632,7 @@ impl WindowState {
         }
         let batches = std::mem::take(&mut self.buffered);
         self.buffered_rows = 0;
+        self.buffered_offsets.clear();
         Ok(Some(concat_batches(&self.schema, &batches)?))
     }
 

@@ -15,7 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::aggregates::group_values::GroupValues;
+use crate::aggregates::group_values::{
+    GroupValues, has_offset_buffer, rows_have_offset_room,
+};
 use arrow::array::{
     Array, ArrayRef, FixedSizeListArray, LargeListArray, LargeListViewArray, ListArray,
     ListViewArray, MapArray, PrimitiveArray, RunArray, StructArray,
@@ -191,6 +193,16 @@ impl GroupValues for GroupValuesRows {
             + self.map_size
             + self.rows_buffer.size()
             + self.hashes_buffer.allocated_size()
+    }
+
+    fn has_offset_room(&self, cols: &[ArrayRef]) -> bool {
+        let held = self.group_values.as_ref().map(|v| v.size()).unwrap_or(0);
+        !self
+            .schema
+            .fields()
+            .iter()
+            .any(|field| has_offset_buffer(field.data_type()))
+            || rows_have_offset_room(held, cols)
     }
 
     fn is_empty(&self) -> bool {

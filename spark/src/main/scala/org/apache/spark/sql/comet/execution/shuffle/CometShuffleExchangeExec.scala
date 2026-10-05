@@ -222,8 +222,8 @@ case class CometShuffleExchangeExec(
             outputPartitioning,
             serializer,
             metrics,
-            NativeShuffleSpec(
-              nativeChild.nativeOp,
+            CometShuffleExchangeExec.nativeShuffleSpec(
+              nativeChild.internedNativeOp,
               nativeChildMetricNode,
               ctx,
               positionalRoundRobin))
@@ -945,6 +945,18 @@ object CometShuffleExchangeExec
       NativeShuffleSpec(scanOp, childMetricNode, ctx))
   }
 
+  private[comet] def nativeShuffleSpec(
+      childNativeOp: OperatorOuterClass.Operator,
+      childMetricNode: CometMetricNode,
+      ctx: NativeExecContext,
+      positionalRoundRobin: Option[PositionalRoundRobin]): NativeShuffleSpec =
+    NativeShuffleSpec(
+      childNativeOp.toBuilder.clearSqlTextPool().build(),
+      childMetricNode,
+      ctx,
+      positionalRoundRobin,
+      childNativeOp.getSqlTextPoolList.asScala.toSeq ++ ctx.addedSqlTexts)
+
   /**
    * Build a Comet native shuffle dependency for the [[CometShuffleExchangeExec]] case where the
    * shuffle is fed by a [[CometNativeExec]] child. The writer drives the unified
@@ -986,9 +998,9 @@ object CometShuffleExchangeExec
       case e: Expression => e.collect { case s: ScalarSubquery => s }
       case _ => Nil
     }
-    // Drop the per-partition plan-data map off the spec that lands on the (non-transient)
-    // CometShuffleDependency.nativeShuffleSpec. Each partition's slice now rides on the thin RDD's
-    // Partition objects (see CometNativeShuffleInputRDD.getPartitions), so the full
+    // Drop the per-partition plan-data map off the spec that lands on the map-side
+    // CometNativeShuffleInputRDD.nativeShuffleSpec. Each partition's slice now rides on the thin
+    // RDD's Partition objects (see CometNativeShuffleInputRDD.getPartitions), so the full
     // O(numPartitions) map is dead weight here and would blow the 2GB ByteArrayOutputStream limit
     // at stage submission on very-high-partition-count jobs. NativeExecContext.perPartitionByKey is
     // also @transient (the structural guard against any build path), but we empty it explicitly
@@ -997,6 +1009,7 @@ object CometShuffleExchangeExec
     val augmentedSpec = spec.copy(execContext = spec.execContext.copy(
       subqueries = spec.execContext.subqueries ++ partitioningSubqueries,
       perPartitionByKey = Map.empty))
+    thinRDD.nativeShuffleSpec = augmentedSpec
 
     // The code block below is mostly brought over from
     // ShuffleExchangeExec::prepareShuffleDependency

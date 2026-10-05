@@ -19,6 +19,7 @@
 //! batch, and what the emptied table still holds must not fail the task.
 
 use std::fmt::{Debug, Formatter};
+use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
 use arrow::array::{Int64Array, RecordBatch, StringArray, UInt32Array};
@@ -29,7 +30,7 @@ use datafusion_common::Result;
 use datafusion_execution::TaskContext;
 use datafusion_execution::config::SessionConfig;
 use datafusion_execution::memory_pool::{
-    GreedyMemoryPool, MemoryConsumer, MemoryPool, MemoryReservation,
+    GreedyMemoryPool, MemoryConsumer, MemoryPool, MemoryReservation, TrackConsumersPool,
 };
 use datafusion_execution::runtime_env::RuntimeEnvBuilder;
 use datafusion_functions_aggregate::count::count_udaf;
@@ -320,4 +321,112 @@ async fn ordered_final_aggregate_survives_a_starved_first_spill() -> Result<()> 
         matches!(stream, StreamType::OrderedFinalAggregate(_))
     })
     .await
+}
+
+/// Partial states of `count(v)` and `sum(v)` grouped by `(a, b)`, for 200k groups in
+/// random order.
+fn many_group_states(batches: u32, rows: u32) -> Result<(SchemaRef, Vec<RecordBatch>)> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("a", DataType::UInt32, false),
+        Field::new("b", DataType::Utf8, false),
+        Field::new("count_v[count]", DataType::Int64, false),
+        Field::new("sum_v[sum]", DataType::Int64, true),
+    ]));
+    let mut state = 11u64;
+    let batches = (0..batches)
+        .map(|_| {
+            let keys: Vec<u64> = (0..rows)
+                .map(|_| {
+                    state = state
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    (state >> 33) % 200_000
+                })
+                .collect();
+            Ok(RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![
+                    Arc::new(UInt32Array::from_iter_values(
+                        keys.iter().map(|k| (k % 1000) as u32),
+                    )),
+                    Arc::new(StringArray::from_iter_values(
+                        keys.iter().map(|k| format!("key-{k:020}")),
+                    )),
+                    Arc::new(Int64Array::from_iter_values(keys.iter().map(|_| 1))),
+                    Arc::new(Int64Array::from_iter_values(
+                        keys.iter().map(|k| *k as i64),
+                    )),
+                ],
+            )?)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((schema, batches))
+}
+
+/// Reads `stream` as the native shuffle writer does: it keeps every batch reserved until
+/// the pool refuses one, and then spills them all.
+async fn read_as_shuffle_writer(
+    mut stream: SendableRecordBatchStream,
+    pool: &Arc<dyn MemoryPool>,
+) -> Result<(Vec<RecordBatch>, usize)> {
+    let writer = MemoryConsumer::new("ShuffleRepartitioner[0]")
+        .with_can_spill(true)
+        .register(pool);
+    let mut output = vec![];
+    let mut spills = 0;
+    while let Some(batch) = stream.next().await {
+        let batch = batch?;
+        if writer.try_grow(batch.get_array_memory_size()).is_err() {
+            spills += 1;
+            writer.free();
+        }
+        output.push(batch);
+    }
+    Ok((output, spills))
+}
+
+/// A final aggregate that spilled replays its runs through a fully ordered aggregate,
+/// which cannot spill. The native shuffle writer reading it buffers its output until the
+/// pool refuses it, so it soon holds nearly all the memory the aggregate released, and
+/// the replay then failed with "Additional allocation failed for
+/// FinalHashAggregateStream[0]" while the writer, which can spill, kept the rest.
+#[tokio::test]
+async fn spilled_final_aggregate_survives_a_shuffle_writer_that_takes_the_pool()
+-> Result<()> {
+    let raw_schema = raw_schema();
+    let (input_schema, batches) = many_group_states(100, 4096)?;
+    let unconstrained_input = TestMemoryExec::try_new_exec(
+        std::slice::from_ref(&batches),
+        Arc::clone(&input_schema),
+        None,
+    )?;
+    let unconstrained = aggregate(
+        AggregateMode::Final,
+        &["a", "b"],
+        unconstrained_input,
+        &raw_schema,
+    )?;
+    let expected = collect(unconstrained.execute(0, task_ctx(None)?)?).await?;
+    let expected = sorted_output(&unconstrained.schema(), &expected)?;
+
+    for limit in [4 << 20, 6 << 20, 8 << 20, 12 << 20] {
+        let pool: Arc<dyn MemoryPool> = Arc::new(TrackConsumersPool::new(
+            GreedyMemoryPool::new(limit),
+            NonZeroUsize::new(5).unwrap(),
+        ));
+        let input = TestMemoryExec::try_new_exec(
+            std::slice::from_ref(&batches),
+            Arc::clone(&input_schema),
+            None,
+        )?;
+        let starved = aggregate(AggregateMode::Final, &["a", "b"], input, &raw_schema)?;
+        let stream = starved.execute(0, task_ctx(Some(Arc::clone(&pool)))?)?;
+        let (actual, writer_spills) = read_as_shuffle_writer(stream, &pool).await?;
+        assert!(spill_count(&starved) > 0, "the aggregate must spill");
+        assert!(writer_spills > 0, "the writer must spill");
+        assert_eq!(sorted_output(&starved.schema(), &actual)?, expected);
+        drop(starved);
+        assert_eq!(pool.reserved(), 0);
+    }
+    Ok(())
 }

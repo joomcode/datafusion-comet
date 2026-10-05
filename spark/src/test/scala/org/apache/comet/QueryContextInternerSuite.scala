@@ -134,6 +134,32 @@ class QueryContextInternerSuite extends CometTestBase {
     }
   }
 
+  test("ANSI error reports full SQL context from a native shuffle's map side and scan filter") {
+    withSQLConf("spark.sql.ansi.enabled" -> "true") {
+      withTempPath { dir =>
+        spark
+          .range(1, 10)
+          .selectExpr("cast(id as int) as a", "cast(0 as int) as b", "id % 3 as k")
+          .write
+          .mode("overwrite")
+          .parquet(dir.getAbsolutePath)
+        withTempView("t_div") {
+          spark.read.parquet(dir.getAbsolutePath).createOrReplaceTempView("t_div")
+          Seq(
+            "select k, sum(a / b) as s from t_div group by k",
+            "select k, count(*) as c from t_div where a / b > 1 group by k").foreach { query =>
+            val err = intercept[Exception](spark.sql(query).collect())
+            val msg = Option(err.getMessage).getOrElse("")
+            assert(msg.contains("DIVIDE_BY_ZERO"), msg)
+            assert(
+              msg.contains("== SQL") && msg.contains("a / b"),
+              s"error message lost the SQL context:\n$msg")
+          }
+        }
+      }
+    }
+  }
+
   test("ANSI error still reports full SQL context after interning") {
     // Deliberately its own integer-typed table rather than reusing `withTestTable`: integer
     // division routes through the native `CheckedBinaryExpr`, which is what consults the

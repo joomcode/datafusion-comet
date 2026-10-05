@@ -32,7 +32,9 @@ use std::task::{Context, Poll};
 
 use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
-use datafusion_common::{DataFusionError, Result, internal_datafusion_err, internal_err};
+use datafusion_common::{
+    DataFusionError, Result, exec_err, internal_datafusion_err, internal_err,
+};
 use datafusion_execution::TaskContext;
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
 use datafusion_physical_expr::PhysicalSortExpr;
@@ -355,7 +357,11 @@ impl FinalSpillContext {
         let Some(batch) = hash_table.take_state_batch()? else {
             return Ok(());
         };
+        self.spill_batch(batch)
+    }
 
+    /// Sorts and spills a batch of intermediate states taken from the table.
+    fn spill_batch(&mut self, batch: RecordBatch) -> Result<()> {
         let sorted_iter =
             IncrementalSortIterator::new(batch, self.spill_expr.clone(), self.batch_size);
         let spill_file = self
@@ -578,8 +584,18 @@ impl PartialHashAggregateStream {
                 let result = hash_table.aggregate_batch(&batch);
                 timer.done();
 
-                if let Err(e) = result {
-                    return Self::break_with_err(e);
+                match result {
+                    Ok(None) => {}
+                    Ok(Some(taken)) => {
+                        let _ = self.reservation.try_resize(hash_table.memory_size());
+                        return ControlFlow::Continue(
+                            PartialHashAggregateState::EmittingOnMemoryPressure {
+                                hash_table,
+                                remaining_groups: taken,
+                            },
+                        );
+                    }
+                    Err(e) => return Self::break_with_err(e),
                 }
 
                 // --------------------------------
@@ -1129,7 +1145,7 @@ impl FinalHashAggregateStream {
     ) -> FinalHashAggregateStateTransition {
         let FinalHashAggregateState::ReadingInput {
             mut hash_table,
-            spill_context,
+            mut spill_context,
         } = original_state
         else {
             return Self::break_with_internal_err(
@@ -1148,7 +1164,17 @@ impl FinalHashAggregateStream {
             Poll::Ready(Some(Ok(batch))) => {
                 let elapsed_compute = self.baseline_metrics.elapsed_compute().clone();
                 let timer = elapsed_compute.timer();
-                let result = hash_table.aggregate_batch(&batch);
+                let result = hash_table.aggregate_batch(&batch).and_then(|taken| {
+                    match (taken, spill_context.as_deref_mut()) {
+                        (None, _) => Ok(()),
+                        (Some(taken), Some(spill_context)) => {
+                            spill_context.spill_batch(taken)
+                        }
+                        (Some(_), None) => exec_err!(
+                            "Final hash aggregate cannot spill group keys that overflow 32-bit offsets because temporary files are not enabled in the DiskManager"
+                        ),
+                    }
+                });
                 timer.done();
 
                 if let Err(e) = result {

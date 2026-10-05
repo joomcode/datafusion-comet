@@ -40,6 +40,14 @@ object LeafColumns {
     case _ => false
   }
 
+  def containsArray(dataType: DataType): Boolean = dataType match {
+    case _: ArrayType => true
+    case struct: StructType => struct.fields.exists(f => containsArray(f.dataType))
+    case map: MapType => containsArray(map.keyType) || containsArray(map.valueType)
+    case udt: UserDefinedType[_] => containsArray(udt.sqlType)
+    case _ => false
+  }
+
   /** The attributes that none of `keys` references. */
   def outside(attributes: Seq[Attribute], keys: Seq[Expression]): Seq[Attribute] = {
     val referenced = AttributeSet(keys.flatMap(_.references))

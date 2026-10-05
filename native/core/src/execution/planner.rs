@@ -1395,8 +1395,8 @@ impl PhysicalPlanner {
     /// ignore nullability. When a comparison's operands are nested types that differ only in
     /// nullability (e.g. a higher-order `transform` produces `List(non-null Struct)` while the
     /// other side is `List(nullable Struct)`), cast both to their nullability-union type so the
-    /// kernel accepts them. Non-comparison ops and non-nested or already-matching types are left
-    /// untouched.
+    /// kernel accepts them. Timestamps whose time zone labels differ are both relabelled as UTC.
+    /// Non-comparison ops and other or already-matching types are left untouched.
     pub fn reconcile_nested_comparison_types(
         left: Arc<dyn PhysicalExpr>,
         right: Arc<dyn PhysicalExpr>,
@@ -1415,6 +1415,23 @@ impl PhysicalPlanner {
             (Ok(lt), Ok(rt)) => (lt, rt),
             _ => return (left, right),
         };
+        if let (DataType::Timestamp(lu, ltz), DataType::Timestamp(ru, rtz)) = (&lt, &rt) {
+            // Spark only compares timestamps of one type, and a TimestampType value is a UTC
+            // instant whatever zone a native producer labelled it with (or none), so relabelling
+            // both sides as UTC keeps every value and lets Arrow compare them.
+            if lu != ru || ltz == rtz {
+                return (left, right);
+            }
+            let utc = DataType::Timestamp(*lu, Some("UTC".into()));
+            let relabel = |e: Arc<dyn PhysicalExpr>, dt: &DataType| -> Arc<dyn PhysicalExpr> {
+                if *dt == utc {
+                    e
+                } else {
+                    Arc::new(CastExpr::new(e, utc.clone(), None))
+                }
+            };
+            return (relabel(left, &lt), relabel(right, &rt));
+        }
         // Only nested types route through `apply_cmp_for_nested`; primitives coerce fine.
         let nested = matches!(
             lt,
@@ -7907,5 +7924,63 @@ mod tests {
             err.to_string().contains("Non-empty FileScanTask partition"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn comparisons_relabel_timestamps_whose_zones_differ() {
+        use arrow::array::{AsArray, RecordBatch, TimestampMicrosecondArray};
+        use arrow::datatypes::TimeUnit::Microsecond;
+        use datafusion::logical_expr::Operator;
+        use datafusion::physical_expr::expressions::BinaryExpr;
+
+        let micros = [Some(1_000_000), Some(2_000_000), None];
+        let zones: [Option<&str>; 4] = [None, Some("UTC"), Some("Europe/Moscow"), Some("Etc/UTC")];
+        let schema = Arc::new(Schema::new(
+            zones
+                .iter()
+                .enumerate()
+                .map(|(i, zone)| {
+                    Field::new(
+                        format!("c{i}"),
+                        DataType::Timestamp(Microsecond, zone.map(Into::into)),
+                        true,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ));
+        let columns = zones
+            .iter()
+            .enumerate()
+            .map(|(i, zone)| {
+                let shifted: Vec<Option<i64>> = micros
+                    .iter()
+                    .map(|m| m.map(|m| m + i as i64 * 500_000 - 750_000))
+                    .collect();
+                Arc::new(TimestampMicrosecondArray::from(shifted).with_timezone_opt(*zone))
+                    as ArrayRef
+            })
+            .collect();
+        let batch = RecordBatch::try_new(Arc::clone(&schema), columns).unwrap();
+        for left in 0..zones.len() {
+            for right in 0..zones.len() {
+                let (l, r) = PhysicalPlanner::reconcile_nested_comparison_types(
+                    Arc::new(Column::new(&format!("c{left}"), left)),
+                    Arc::new(Column::new(&format!("c{right}"), right)),
+                    &Operator::GtEq,
+                    &schema,
+                );
+                let result = BinaryExpr::new(l, Operator::GtEq, r)
+                    .evaluate(&batch)
+                    .unwrap()
+                    .into_array(3)
+                    .unwrap();
+                let expected = [Some(left >= right), Some(left >= right), None];
+                assert_eq!(
+                    result.as_boolean().iter().collect::<Vec<_>>(),
+                    expected,
+                    "c{left} >= c{right}"
+                );
+            }
+        }
     }
 }

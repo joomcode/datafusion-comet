@@ -78,6 +78,42 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     }
   }
 
+  /** Runs `f` with view `star`, the schema of star_order_2020's purchases, 4 rows per order. */
+  private def withStar(f: => Unit): Unit = {
+    withTempPath { dir =>
+      spark
+        .range(2000)
+        .selectExpr(
+          "cast(id % 500 AS string) AS order_id",
+          "id AS event_ts",
+          "concat('c', cast(id % 37 AS string)) AS category_id",
+          "IF(id % 2 = 0, 'android', 'ios') AS os_type",
+          "array(named_struct('amount', cast(id % 13 AS double) / 4, 'type', 'coupon', " +
+            "'subType', cast(id % 3 AS string))) AS discounts",
+          "named_struct('name', cast(id % 7 AS string), 'activation_ts', id, " +
+            "'is_last_context', true, 'is_adtech_promoted', id % 5 = 0) AS last_context",
+          "array(named_struct('name', cast(id % 7 AS string), 'activation_ts', id, " +
+            "'is_last_context', true, 'is_adtech_promoted', false)) AS normalized_contexts",
+          "'joom' AS legal_entity",
+          "'joom' AS app_entity",
+          "'joom' AS app_entity_group",
+          "IF(id % 4 = 0, NULL, 'd') AS custom_domain")
+        .write
+        .parquet(dir.getCanonicalPath)
+      spark.read.parquet(dir.getCanonicalPath).createOrReplaceTempView("star")
+      withTempView("star")(f)
+    }
+  }
+
+  private val starColumns = "order_id, category_id, os_type, discounts, last_context, " +
+    "normalized_contexts, legal_entity, app_entity, app_entity_group, custom_domain"
+
+  /** The latest purchase of each order, deduplicated, as star_order_2020 reads them. */
+  private def starQuery: DataFrame =
+    sql(
+      s"SELECT DISTINCT $starColumns FROM (SELECT *, rank() OVER (PARTITION BY order_id " +
+        "ORDER BY event_ts DESC) AS r FROM star) WHERE r = 1")
+
   private def run(df: => DataFrame): SparkPlan = checkSparkAnswer(df)._2
 
   private def run(query: String): SparkPlan = run(sql(query))
@@ -775,6 +811,69 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
             Term(Agg, Width(1, 0), 0.5),
             Term(AggDeclarative, Width(1, 0), 0.5),
             Term(Sort, Width(2, 0))))
+      }
+    }
+  }
+
+  test("aggregate keys holding arrays and keys computed by the codegen dispatcher add classes") {
+    withStar {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "false") {
+        val plan = runUnordered(sql(s"SELECT DISTINCT $starColumns FROM star"))
+        val aggs = nodes(plan).collect { case a: CometHashAggregateExec => a }
+        assert(aggs.size == 2, s"plan:\n$plan")
+        val (partial, finals) = aggs.partition(a =>
+          model.dispatchedThroughCodegen(
+            a.originalPlan
+              .asInstanceOf[HashAggregateExec]
+              .groupingExpressions
+              .find(_.name == "discounts")
+              .get))
+        assert(partial.size == 1 && finals.size == 1, s"plan:\n$plan")
+        val keys = Term(Agg, Width(18, 11), 0.5)
+        val arrays = Term(AggArrayKey, Width(7, 7), 0.5)
+        assert(
+          model.terms(partial.head, Engine.Comet) ==
+            Seq(keys, arrays, Term(CodegenDispatch, Width(3, 3))))
+        assert(model.terms(finals.head, Engine.Comet) == Seq(keys, arrays))
+        val table = EngineCostTable.default
+        same(
+          model.operatorPrice(partial.head, Engine.Comet),
+          0.5 * table.comet(Agg, Width(18, 11)) + 0.5 * 937 * 7 + 217 * 3)
+        same(
+          model.operatorPrice(partial.head, Engine.Spark),
+          0.5 * table.spark(Agg, Width(18, 11)) + 0.5 * 76 * 7 + 133 * 3)
+        same(
+          model.operatorPrice(finals.head, Engine.Comet),
+          0.5 * table.comet(Agg, Width(18, 11)) + 0.5 * 937 * 7)
+
+        val flat = runUnordered(sql("SELECT DISTINCT order_id, category_id FROM star"))
+        nodes(flat).collect { case a: CometHashAggregateExec => a }.foreach { agg =>
+          assert(model.terms(agg, Engine.Comet) == Seq(Term(Agg, Width(2, 0), 0.5)))
+        }
+      }
+    }
+  }
+
+  for (aqe <- Seq("false", "true")) {
+    test(
+      s"a distinct over array keys after a window runs in Spark, as in star_order_2020 (AQE=$aqe)") {
+      withStar {
+        withAqe(aqe) {
+          def aggregates(plan: SparkPlan): (Int, Int) =
+            (
+              count(plan) { case a: CometHashAggregateExec => a },
+              count(plan) { case a: HashAggregateExec => a })
+          val (off, on) = offAndOn(runUnordered(starQuery))
+          assert(aggregates(off) == (2, 0), s"plan:\n$off")
+          assert(aggregates(on) == (0, 2), s"plan:\n$on")
+          withSQLConf(
+            flag -> "true",
+            costTable -> ("aggArrayKey.comet=0,0,0;aggArrayKey.spark=0,0;" +
+              "codegenDispatch.comet=0,0,0;codegenDispatch.spark=0,0")) {
+            val before = runUnordered(starQuery)
+            assert(aggregates(before) == (2, 0), s"plan:\n$before")
+          }
+        }
       }
     }
   }

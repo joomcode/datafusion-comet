@@ -42,6 +42,7 @@ use datafusion::{
     physical_plan::{display::DisplayableExecutionPlan, SendableRecordBatchStream},
     prelude::{SessionConfig, SessionContext},
 };
+use datafusion_comet_common::cancellation::{cancelled_error, PlanCancellation};
 use datafusion_comet_common::decode_string_arrays;
 use datafusion_comet_proto::spark_expression::agg_expr::ExprStruct as AggExprStruct;
 use datafusion_comet_proto::spark_operator::{AggregateMode, Operator, ShuffleScan};
@@ -104,6 +105,7 @@ use std::{
 };
 use tokio::runtime::{Handle, Runtime};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 use crate::execution::memory_pools::{create_memory_pool, parse_memory_pool_config};
 use crate::execution::operators::{PartitionAggregateWindowEnabled, ScanExec, ShuffleScanExec};
@@ -133,6 +135,18 @@ use std::sync::OnceLock;
 use tikv_jemalloc_ctl::{epoch, stats};
 
 static TOKIO_RUNTIME: Mutex<Option<Runtime>> = Mutex::new(None);
+
+/// The cancellation of every plan created and not yet released, by the address of its context,
+/// so that `cancelPlan` reaches it without touching a context the task thread may be using.
+static PLAN_CANCELLATIONS: OnceLock<Mutex<HashMap<i64, Arc<PlanCancellation>>>> = OnceLock::new();
+
+fn plan_cancellations() -> &'static Mutex<HashMap<i64, Arc<PlanCancellation>>> {
+    PLAN_CANCELLATIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// How long `releasePlan` waits for an aborted producer task to drop the plan's stream, and with
+/// it the memory the stream holds, before the Spark task ends.
+const PRODUCER_STOP_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[cfg(feature = "jemalloc")]
 fn log_jemalloc_usage() {
@@ -525,6 +539,10 @@ struct ExecutionContext {
     pub stream: Option<SendableRecordBatchStream>,
     /// Receives batches from a spawned tokio task (async I/O path)
     pub batch_receiver: Option<mpsc::Receiver<DataFusionResult<RecordBatch>>>,
+    /// The spawned tokio task that sends to `batch_receiver`
+    pub producer: Option<JoinHandle<()>>,
+    /// Set when the Spark task running this plan is killed
+    pub cancellation: Arc<PlanCancellation>,
     /// Native metrics
     pub metrics: Arc<Global<JObject<'static>>>,
     // The interval in milliseconds to update metrics
@@ -679,8 +697,10 @@ pub unsafe extern "system" fn Java_org_apache_comet_Native_createPlan(
             // We need to keep the session context alive. Some session state like temporary
             // dictionaries are stored in session context. If it is dropped, the temporary
             // dictionaries will be dropped as well.
+            let cancellation = PlanCancellation::new();
             let session = prepare_datafusion_session_context(
                 batch_size as usize,
+                Arc::clone(&cancellation),
                 memory_pool,
                 local_dirs_vec,
                 max_temp_directory_size,
@@ -742,6 +762,8 @@ pub unsafe extern "system" fn Java_org_apache_comet_Native_createPlan(
                 input_sources,
                 stream: None,
                 batch_receiver: None,
+                producer: None,
+                cancellation: Arc::clone(&cancellation),
                 metrics,
                 metrics_update_interval,
                 metrics_last_update_time: Instant::now(),
@@ -761,8 +783,30 @@ pub unsafe extern "system" fn Java_org_apache_comet_Native_createPlan(
                 memory_pool_registration,
             });
 
-            Ok(Box::into_raw(exec_context) as i64)
+            let exec_context = Box::into_raw(exec_context) as i64;
+            plan_cancellations()
+                .lock()
+                .insert(exec_context, cancellation);
+            Ok(exec_context)
         })
+    })
+}
+
+/// Cancels a plan whose Spark task has been killed. Called from outside the task thread, at any
+/// point before `releasePlan`: an `executePlan` in progress, or the next one, then fails at its
+/// next check instead of running the plan to completion.
+#[no_mangle]
+pub extern "system" fn Java_org_apache_comet_Native_cancelPlan(
+    e: EnvUnowned,
+    _class: JClass,
+    exec_context: jlong,
+) {
+    try_unwrap_or_throw(&e, |_| {
+        let cancellation = plan_cancellations().lock().get(&exec_context).cloned();
+        if let Some(cancellation) = cancellation {
+            cancellation.cancel();
+        }
+        Ok(())
     })
 }
 
@@ -860,6 +904,7 @@ fn configure_sort_spill_reservation(
 #[allow(clippy::too_many_arguments)]
 fn prepare_datafusion_session_context(
     batch_size: usize,
+    cancellation: Arc<PlanCancellation>,
     memory_pool: Arc<dyn MemoryPool>,
     local_dirs: Vec<String>,
     max_temp_directory_size: u64,
@@ -882,7 +927,8 @@ fn prepare_datafusion_session_context(
         // This DataFusion context is within the scope of an executing Spark Task. We want to set
         // its internal parallelism to the number of CPUs allocated to Spark Tasks. This can be
         // modified by changing spark.task.cpus in the Spark config.
-        .with_batch_size(batch_size);
+        .with_batch_size(batch_size)
+        .with_extension(cancellation);
 
     if let Some(limit) = off_heap_limit {
         let executor_cores = spark_config.get_usize(SPARK_EXECUTOR_CORES, 1);
@@ -1110,12 +1156,16 @@ impl Wake for WakeFlag {
 /// this thread's budget unconstrained.
 async fn next_batch<S>(
     stream: &mut S,
+    cancellation: &PlanCancellation,
     mut on_pending: impl FnMut() -> Result<(), CometError>,
 ) -> Result<Option<RecordBatch>, CometError>
 where
     S: Stream<Item = DataFusionResult<RecordBatch>> + Unpin,
 {
     poll_fn(|cx| {
+        if cancellation.poll_cancelled(cx).is_ready() {
+            return Poll::Ready(Err(cancelled_error().into()));
+        }
         let flag = Arc::new(WakeFlag {
             woken: AtomicBool::new(false),
             parent: cx.waker().clone(),
@@ -1127,6 +1177,9 @@ where
         // `on_pending` calls into the JVM, which can run another Comet plan on this thread.
         // `block_in_place` exits the runtime context so that plan's `block_on` doesn't panic.
         tokio::task::block_in_place(&mut on_pending)?;
+        if cancellation.is_cancelled() {
+            return Poll::Ready(Err(cancelled_error().into()));
+        }
         if flag.woken.load(Ordering::Acquire) {
             // Poll again at once: a nested `block_on` may have taken the wake-up.
             cx.waker().wake_by_ref();
@@ -1134,6 +1187,30 @@ where
         Poll::Pending
     })
     .await
+}
+
+/// Waits for the next batch from the plan's producer task, or for the plan to be cancelled.
+fn recv_unless_cancelled(
+    rx: &mut mpsc::Receiver<DataFusionResult<RecordBatch>>,
+    cancellation: &PlanCancellation,
+) -> CometResult<Option<DataFusionResult<RecordBatch>>> {
+    get_runtime().block_on(poll_fn(|cx| {
+        if cancellation.poll_cancelled(cx).is_ready() {
+            return Poll::Ready(Err(cancelled_error().into()));
+        }
+        rx.poll_recv(cx).map(Ok)
+    }))
+}
+
+/// Aborts the plan's producer task and waits a bounded time for it to end, so that the stream it
+/// owns is dropped, and its memory returned, before the Spark task ends. An abort takes effect at
+/// the task's next yield, which an operator busy inside one poll may not reach in time.
+fn stop_producer(producer: JoinHandle<()>) {
+    producer.abort();
+    let deadline = Instant::now() + PRODUCER_STOP_TIMEOUT;
+    while !producer.is_finished() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 /// Accept serialized query plan and the addresses of Arrow Arrays from Spark,
@@ -1215,7 +1292,7 @@ pub unsafe extern "system" fn Java_org_apache_comet_Native_executePlan(
                     // decreasing to 1 would serialize production and consumption.
                     let (tx, rx) = mpsc::channel(2);
                     let mut stream = stream;
-                    get_runtime().spawn(async move {
+                    let producer = get_runtime().spawn(async move {
                         let result = std::panic::AssertUnwindSafe(async {
                             while let Some(batch) = stream.next().await {
                                 if tx.send(batch).await.is_err() {
@@ -1241,6 +1318,9 @@ pub unsafe extern "system" fn Java_org_apache_comet_Native_executePlan(
                                 .await;
                         }
                     });
+                    let abort = producer.abort_handle();
+                    exec_context.cancellation.on_cancel(move || abort.abort());
+                    exec_context.producer = Some(producer);
                     exec_context.batch_receiver = Some(rx);
                 } else {
                     exec_context.stream = Some(stream);
@@ -1252,7 +1332,7 @@ pub unsafe extern "system" fn Java_org_apache_comet_Native_executePlan(
             }
 
             if let Some(rx) = &mut exec_context.batch_receiver {
-                match rx.blocking_recv() {
+                match recv_unless_cancelled(rx, &exec_context.cancellation)? {
                     Some(Ok(batch)) => {
                         update_metrics(env, exec_context)?;
                         return prepare_output(
@@ -1278,7 +1358,8 @@ pub unsafe extern "system" fn Java_org_apache_comet_Native_executePlan(
             // the stream by the end of the pull, waits on native I/O, and `next_batch` parks
             // until it completes.
             let mut stream = exec_context.stream.take().unwrap();
-            let next = get_runtime().block_on(next_batch(&mut stream, || {
+            let cancellation = Arc::clone(&exec_context.cancellation);
+            let next = get_runtime().block_on(next_batch(&mut stream, &cancellation, || {
                 pull_input_batches(exec_context)?;
                 update_metrics_on_interval(env, exec_context)
             }));
@@ -1337,11 +1418,16 @@ pub extern "system" fn Java_org_apache_comet_Native_releasePlan(
             "Comet execution context shouldn't be null!"
         );
 
+        plan_cancellations().lock().remove(&exec_context);
+
         // Reclaim ownership of the context up front so that it is always freed, even if updating
         // metrics below fails. Dropping it releases the memory pool and every JNI global ref the
         // context holds.
         let mut execution_context: Box<ExecutionContext> =
             Box::from_raw(exec_context as *mut ExecutionContext);
+        if let Some(producer) = execution_context.producer.take() {
+            stop_producer(producer);
+        }
 
         // Unregister this context's pool and, when tracing, emit the remaining total for the
         // thread. Every context registers, but only a traced one writes counters, so the
@@ -1454,9 +1540,8 @@ pub extern "system" fn Java_org_apache_comet_Native_getShufflePartitionOffsets(
             )
         })?;
 
-        // `ExecutionPlan` has `Any` as a supertrait but no `as_any` method of its own, so upcast
-        // the trait object before downcasting to the writer.
-        let writer = (root_op.native_plan.as_ref() as &dyn std::any::Any)
+        let writer = root_op
+            .native_plan
             .downcast_ref::<ShuffleWriterExec>()
             .ok_or_else(|| {
                 CometError::Internal(
@@ -2601,11 +2686,15 @@ mod tests {
         .boxed();
         let mut pulls = 0;
         let next = single_worker_runtime()
-            .block_on(without_a_lost_wake(next_batch(&mut stream, || {
-                // Every JVM-fed scan already holds a batch, so the pull wakes nothing.
-                pulls += 1;
-                Ok(())
-            })))
+            .block_on(without_a_lost_wake(next_batch(
+                &mut stream,
+                &PlanCancellation::default(),
+                || {
+                    // Every JVM-fed scan already holds a batch, so the pull wakes nothing.
+                    pulls += 1;
+                    Ok(())
+                },
+            )))
             .unwrap();
         assert!(next.is_some());
         assert!(
@@ -2631,12 +2720,24 @@ mod tests {
         };
         // Only the refill's wake gets the stream polled again.
         single_worker_runtime().block_on(without_a_lost_wake(async {
-            let first = next_batch(&mut stream, &mut pull).await.unwrap();
+            let first = next_batch(&mut stream, &PlanCancellation::default(), &mut pull)
+                .await
+                .unwrap();
             assert_eq!(first.unwrap().num_rows(), 3);
             assert_eq!(pulls.get(), 1);
-            assert!(next_batch(&mut stream, &mut pull).await.unwrap().is_none());
+            assert!(
+                next_batch(&mut stream, &PlanCancellation::default(), &mut pull)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             assert_eq!(pulls.get(), 2);
-            assert!(next_batch(&mut stream, &mut pull).await.unwrap().is_none());
+            assert!(
+                next_batch(&mut stream, &PlanCancellation::default(), &mut pull)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             assert_eq!(pulls.get(), 2);
         }));
     }
@@ -2657,14 +2758,62 @@ mod tests {
         .boxed();
         let mut pulls = 0;
         let next = runtime
-            .block_on(without_a_lost_wake(next_batch(&mut stream, || {
-                pulls += 1;
-                handle.block_on(tokio::time::sleep(Duration::from_millis(100)));
-                Ok(())
-            })))
+            .block_on(without_a_lost_wake(next_batch(
+                &mut stream,
+                &PlanCancellation::default(),
+                || {
+                    pulls += 1;
+                    handle.block_on(tokio::time::sleep(Duration::from_millis(100)));
+                    Ok(())
+                },
+            )))
             .unwrap();
         assert!(next.is_some());
         assert_eq!(pulls, 1);
+    }
+
+    fn cancel_after(cancellation: &Arc<PlanCancellation>, delay: Duration) {
+        let cancellation = Arc::clone(cancellation);
+        std::thread::spawn(move || {
+            std::thread::sleep(delay);
+            cancellation.cancel();
+        });
+    }
+
+    #[test]
+    fn next_batch_stops_waiting_on_native_io_once_cancelled() {
+        let mut stream = futures::stream::pending::<DataFusionResult<RecordBatch>>().boxed();
+        let cancellation = PlanCancellation::new();
+        cancel_after(&cancellation, Duration::from_millis(50));
+        let start = Instant::now();
+        let next =
+            single_worker_runtime().block_on(next_batch(&mut stream, &cancellation, || Ok(())));
+        assert!(next.unwrap_err().to_string().contains("cancelled"));
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_producer_busy_without_output_is_aborted_and_the_wait_ends_once_cancelled() {
+        let (tx, mut rx) = mpsc::channel::<DataFusionResult<RecordBatch>>(2);
+        let producer = get_runtime().spawn(async move {
+            let _tx = tx;
+            loop {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        });
+        let cancellation = PlanCancellation::new();
+        let abort = producer.abort_handle();
+        cancellation.on_cancel(move || abort.abort());
+        cancel_after(&cancellation, Duration::from_millis(50));
+        let start = Instant::now();
+        let next = recv_unless_cancelled(&mut rx, &cancellation);
+        assert!(next.unwrap_err().to_string().contains("cancelled"));
+        stop_producer(producer);
+        assert!(start.elapsed() < Duration::from_secs(2));
+        assert!(
+            rx.blocking_recv().is_none(),
+            "the aborted producer still runs"
+        );
     }
 }
 
@@ -2894,6 +3043,7 @@ mod native_sort_spill_tests {
         )]);
         let session = prepare_datafusion_session_context(
             case.batch_size,
+            PlanCancellation::new(),
             Arc::clone(&pool),
             vec![spill_dir.path().to_string_lossy().into_owned()],
             u64::MAX,
@@ -3164,6 +3314,7 @@ mod native_sort_spill_tests {
             HashMap::from([(SPARK_EXECUTOR_CORES.to_string(), executor_cores.to_string())]);
         let session = prepare_datafusion_session_context(
             batch_size,
+            PlanCancellation::new(),
             Arc::clone(&pool),
             vec![spill_dir.path().to_string_lossy().into_owned()],
             u64::MAX,
@@ -3540,6 +3691,7 @@ mod native_sort_spill_tests {
         }
         let session = prepare_datafusion_session_context(
             8192,
+            PlanCancellation::new(),
             Arc::clone(&pool),
             vec![spill_dir.path().to_string_lossy().into_owned()],
             u64::MAX,
@@ -3659,5 +3811,417 @@ mod native_sort_spill_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sort_spills_before_output_above_the_threshold() {
         assert_spills_before_output(RowShape::KibKeyAndId, SPILL_BEFORE_OUTPUT_ROWS / 2).await;
+    }
+
+    /// Runs `plan` in one task whose Spark share stays at `share`, reads its output, checks
+    /// that all memory is handed back, and returns the rows and the most the pool reserved.
+    async fn run_with_fixed_share(
+        share: usize,
+        executor_cores: usize,
+        plan: Arc<dyn ExecutionPlan>,
+    ) -> DataFusionResult<(usize, usize)> {
+        let off_heap_size = share * executor_cores;
+        let (pool, spark) = fair_unified_pool_with_fake_spark(off_heap_size, share);
+        let peak = Arc::new(PeakPool {
+            inner: pool,
+            peak: Default::default(),
+        });
+        let pool: Arc<dyn MemoryPool> = Arc::clone(&peak) as _;
+        let spill_dir = tempfile::tempdir().unwrap();
+        // As in production, where the merge headroom is 10 MiB of a 4.25 GiB share.
+        let spark_config = HashMap::from([
+            (SPARK_EXECUTOR_CORES.to_string(), executor_cores.to_string()),
+            (
+                "spark.comet.datafusion.execution.sort_spill_reservation_bytes".to_string(),
+                (share / 400).to_string(),
+            ),
+        ]);
+        let session = prepare_datafusion_session_context(
+            8192,
+            PlanCancellation::new(),
+            Arc::clone(&pool),
+            vec![spill_dir.path().to_string_lossy().into_owned()],
+            u64::MAX,
+            1,
+            &spark_config,
+            &Operator::default(),
+            Some(off_heap_size),
+        )
+        .unwrap();
+        let mut stream = plan.execute(0, session.task_ctx())?;
+        let mut rows = 0;
+        while let Some(batch) = stream.next().await {
+            rows += batch?.num_rows();
+        }
+        drop(stream);
+        assert_eq!(pool.reserved(), 0, "memory still reserved after the plan");
+        assert_eq!(spark.held(), 0, "memory not handed back to Spark");
+        Ok((rows, peak.peak()))
+    }
+
+    fn streaming(source: Arc<dyn PartitionStream>) -> Arc<dyn ExecutionPlan> {
+        Arc::new(
+            StreamingTableExec::try_new(
+                Arc::clone(source.schema()),
+                vec![source],
+                None,
+                Vec::<LexOrdering>::new(),
+                false,
+                None,
+            )
+            .unwrap(),
+        )
+    }
+
+    /// Rows whose sort key, two 24-character ids and a day, is nearly all of the row.
+    #[derive(Debug)]
+    struct KeyedRows {
+        schema: SchemaRef,
+        rows_per_batch: usize,
+        num_batches: usize,
+    }
+
+    impl KeyedRows {
+        fn new(rows_per_batch: usize, num_batches: usize) -> Self {
+            Self {
+                schema: Arc::new(Schema::new(vec![
+                    Field::new("merchant_id", DataType::Utf8, false),
+                    Field::new("created_date", DataType::Int32, false),
+                    Field::new("product_id", DataType::Utf8, false),
+                    Field::new("row", DataType::Int64, false),
+                ])),
+                rows_per_batch,
+                num_batches,
+            }
+        }
+
+        fn ordering(&self) -> LexOrdering {
+            LexOrdering::new(
+                ["merchant_id", "created_date", "product_id"]
+                    .map(|name| PhysicalSortExpr::new_default(col(name, &self.schema).unwrap())),
+            )
+            .unwrap()
+        }
+
+        fn batch(&self, index: usize) -> RecordBatch {
+            let start = (index * self.rows_per_batch) as u64;
+            let rows: Vec<u64> = (start..start + self.rows_per_batch as u64).collect();
+            let id = |r: u64| format!("{:016x}{:08x}", mix(r), mix(r ^ 7) as u32);
+            RecordBatch::try_new(
+                Arc::clone(&self.schema),
+                vec![
+                    Arc::new(StringArray::from_iter_values(
+                        rows.iter().map(|&r| id(r / 50)),
+                    )),
+                    Arc::new(Int32Array::from_iter_values(
+                        rows.iter().map(|&r| (mix(r ^ 3) % 3650) as i32),
+                    )),
+                    Arc::new(StringArray::from_iter_values(
+                        rows.iter().map(|&r| id(r ^ 11)),
+                    )),
+                    Arc::new(Int64Array::from_iter_values(rows.iter().map(|&r| r as i64))),
+                ],
+            )
+            .unwrap()
+        }
+    }
+
+    impl PartitionStream for KeyedRows {
+        fn schema(&self) -> &SchemaRef {
+            &self.schema
+        }
+
+        fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+            let batches: Vec<_> = (0..self.num_batches).map(|i| Ok(self.batch(i))).collect();
+            Box::pin(RecordBatchStreamAdapter::new(
+                Arc::clone(&self.schema),
+                futures::stream::iter(batches),
+            ))
+        }
+    }
+
+    /// A spill merges the batches the sort buffered inside the memory it holds for them.
+    /// When the sort key is most of the row, the merge's batches and the rows it encodes
+    /// their keys into need a little more than that, and the merge asked Spark for it. With
+    /// the task's share used up the sort failed with "Additional allocation failed for
+    /// ExternalSorter[0] ... Failed to acquire N bytes plus 0 bytes overcommitted, only got N
+    /// bytes", as merchants_lifecycle did on every attempt.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_by_a_key_that_is_most_of_the_row_spills_in_a_fixed_share() {
+        for share in [24, 28, 32, 36, 40].map(|mb| mb * MB) {
+            let source = Arc::new(KeyedRows::new(1024, 1200));
+            let ordering = source.ordering();
+            let sort: Arc<dyn ExecutionPlan> = Arc::new(SortExec::new(ordering, streaming(source)));
+            match run_with_fixed_share(share, 8, Arc::clone(&sort)).await {
+                Ok((rows, peak)) => {
+                    assert_eq!(rows, 1024 * 1200);
+                    assert!(spill_count(&sort) > 0, "sort did not spill");
+                    assert!(peak <= share + share / 50, "{peak} reserved of {share}");
+                }
+                Err(e) => panic!("native sort failed instead of spilling at {share}: {e}"),
+            }
+        }
+    }
+
+    /// Partial states of `count(v)` and `sum(v)` per `(a, b)` for 400k groups in random
+    /// order, as a final aggregate reads them from a shuffle.
+    #[derive(Debug)]
+    struct GroupStates {
+        schema: SchemaRef,
+        rows_per_batch: usize,
+        num_batches: usize,
+    }
+
+    impl GroupStates {
+        fn new(rows_per_batch: usize, num_batches: usize) -> Self {
+            Self {
+                schema: Arc::new(Schema::new(vec![
+                    Field::new("a", DataType::Int32, false),
+                    Field::new("b", DataType::Utf8, false),
+                    Field::new("count_v[count]", DataType::Int64, false),
+                    Field::new("sum_v[sum]", DataType::Int64, true),
+                ])),
+                rows_per_batch,
+                num_batches,
+            }
+        }
+
+        fn batch(&self, index: usize) -> RecordBatch {
+            let start = (index * self.rows_per_batch) as u64;
+            let keys: Vec<u64> = (start..start + self.rows_per_batch as u64)
+                .map(|r| mix(r) % 400_000)
+                .collect();
+            RecordBatch::try_new(
+                Arc::clone(&self.schema),
+                vec![
+                    Arc::new(Int32Array::from_iter_values(
+                        keys.iter().map(|&k| (k % 1000) as i32),
+                    )),
+                    Arc::new(StringArray::from_iter_values(
+                        keys.iter().map(|&k| format!("key-{k:020}")),
+                    )),
+                    Arc::new(Int64Array::from_iter_values(keys.iter().map(|_| 1))),
+                    Arc::new(Int64Array::from_iter_values(keys.iter().map(|&k| k as i64))),
+                ],
+            )
+            .unwrap()
+        }
+    }
+
+    impl PartitionStream for GroupStates {
+        fn schema(&self) -> &SchemaRef {
+            &self.schema
+        }
+
+        fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+            let batches: Vec<_> = (0..self.num_batches).map(|i| Ok(self.batch(i))).collect();
+            Box::pin(RecordBatchStreamAdapter::new(
+                Arc::clone(&self.schema),
+                futures::stream::iter(batches),
+            ))
+        }
+    }
+
+    /// The final aggregate of `GroupStates` written by the native shuffle writer, as the
+    /// stage of ads_manual_product_rank_cohorts that failed.
+    fn aggregate_into_shuffle(
+        max_buffer_bytes: Option<usize>,
+        output: &std::path::Path,
+    ) -> (Arc<dyn ExecutionPlan>, Arc<dyn ExecutionPlan>) {
+        use datafusion::functions_aggregate::count::count_udaf;
+        use datafusion::functions_aggregate::sum::sum_udaf;
+        use datafusion::physical_expr::aggregate::AggregateExprBuilder;
+        use datafusion::physical_plan::aggregates::{
+            AggregateExec, AggregateMode, PhysicalGroupBy,
+        };
+        use datafusion_comet_shuffle::{CometPartitioning, CompressionCodec, ShuffleWriterExec};
+
+        let source = Arc::new(GroupStates::new(4096, 200));
+        let states = Arc::clone(&source.schema);
+        let raw = Arc::new(Schema::new(vec![
+            Field::new("a", DataType::Int32, false),
+            Field::new("b", DataType::Utf8, false),
+            Field::new("v", DataType::Int64, false),
+        ]));
+        let aggregate = |udaf, alias: &str| {
+            Arc::new(
+                AggregateExprBuilder::new(udaf, vec![col("v", &raw).unwrap()])
+                    .schema(Arc::clone(&raw))
+                    .alias(alias)
+                    .build()
+                    .unwrap(),
+            )
+        };
+        let group_by = PhysicalGroupBy::new_single(
+            ["a", "b"]
+                .map(|key| (col(key, &states).unwrap(), key.to_string()))
+                .to_vec(),
+        );
+        let final_aggregate: Arc<dyn ExecutionPlan> = Arc::new(
+            AggregateExec::try_new(
+                AggregateMode::Final,
+                group_by,
+                vec![
+                    aggregate(count_udaf(), "count_v"),
+                    aggregate(sum_udaf(), "sum_v"),
+                ],
+                vec![None, None],
+                streaming(source),
+                raw,
+            )
+            .unwrap(),
+        );
+        let output_schema = final_aggregate.schema();
+        let writer: Arc<dyn ExecutionPlan> = Arc::new(
+            ShuffleWriterExec::try_new(
+                Arc::clone(&final_aggregate),
+                CometPartitioning::Hash(vec![col("b", &output_schema).unwrap()], 16),
+                CompressionCodec::None,
+                output.to_string_lossy().into_owned(),
+                false,
+                1024 * 1024,
+                max_buffer_bytes,
+            )
+            .unwrap(),
+        );
+        (writer, final_aggregate)
+    }
+
+    /// A final aggregate that spilled replays its runs through a fully ordered aggregate,
+    /// which cannot spill. The native shuffle writer above it buffers the replay's output
+    /// until Spark refuses it, so it soon holds the share the aggregate released, and
+    /// Spark cannot make it spill. Without a buffer limit the replay then failed with
+    /// "Additional allocation failed for FinalHashAggregateStream[0] ...
+    /// ShuffleRepartitioner[0] ... consumed", as ads_manual_product_rank_cohorts did.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn spilled_final_aggregate_feeding_the_native_shuffle_writer_finishes() {
+        let output = tempfile::tempdir().unwrap();
+        for share in [8, 12, 16, 24].map(|mb| mb * MB) {
+            for max_buffer_bytes in [None, Some(share / 4)] {
+                let (writer, aggregate) =
+                    aggregate_into_shuffle(max_buffer_bytes, &output.path().join("data"));
+                match run_with_fixed_share(share, 8, Arc::clone(&writer)).await {
+                    Ok((_, peak)) => {
+                        assert!(peak <= share + share / 20, "{peak} reserved of {share}")
+                    }
+                    Err(e) => panic!(
+                        "aggregate failed instead of spilling at {share}, \
+                         max_buffer_bytes {max_buffer_bytes:?}: {e}"
+                    ),
+                }
+                assert!(spill_count(&aggregate) > 0, "the aggregate did not spill");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod aggregate_offset_overflow_tests {
+    use arrow::array::{Int32Array, StringArray};
+    use arrow::buffer::{Buffer, OffsetBuffer};
+    use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+    use arrow::record_batch::RecordBatch;
+    use datafusion::datasource::memory::MemorySourceConfig;
+    use datafusion::execution::TaskContext;
+    use datafusion::physical_expr::expressions::col;
+    use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
+    use datafusion::physical_plan::ExecutionPlan;
+    use datafusion::prelude::SessionConfig;
+    use futures::StreamExt;
+    use std::sync::Arc;
+
+    const KEY_BYTES: usize = 1 << 20;
+    const ROWS: usize = 1024;
+    const BATCHES: usize = 3;
+
+    /// `(day, product_id)` batches of distinct 1 MiB keys, 1 GiB per batch and 3 GiB in all,
+    /// sharing one buffer of pseudo-random letters so that the input itself stays at 1 GiB.
+    fn wide_keys(schema: &SchemaRef) -> Vec<RecordBatch> {
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let letters: Vec<u8> = (0..ROWS * KEY_BYTES + BATCHES)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                b'a' + (seed % 26) as u8
+            })
+            .collect();
+        let values = Buffer::from_vec(letters);
+        (0..BATCHES)
+            .map(|batch| {
+                let offsets = OffsetBuffer::new(
+                    (0..=ROWS)
+                        .map(|row| (batch + row * KEY_BYTES) as i32)
+                        .collect(),
+                );
+                RecordBatch::try_new(
+                    Arc::clone(schema),
+                    vec![
+                        Arc::new(Int32Array::from(vec![20_000; ROWS])),
+                        Arc::new(StringArray::try_new(offsets, values.clone(), None).unwrap()),
+                    ],
+                )
+                .unwrap()
+            })
+            .collect()
+    }
+
+    /// `SELECT DISTINCT` of `columns` in one aggregate of `mode`, with nothing but the
+    /// 32-bit offsets of its group keys to stop it from holding every group.
+    async fn distinct_wide_keys(
+        mode: AggregateMode,
+        columns: &[&str],
+    ) -> datafusion::common::Result<usize> {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("day", DataType::Int32, false),
+            Field::new("product_id", DataType::Utf8, false),
+        ]));
+        let input =
+            MemorySourceConfig::try_new_exec(&[wide_keys(&schema)], Arc::clone(&schema), None)?;
+        let group_by = PhysicalGroupBy::new_single(
+            columns
+                .iter()
+                .map(|name| Ok((col(name, &schema)?, name.to_string())))
+                .collect::<datafusion::common::Result<_>>()?,
+        );
+        let aggregate = AggregateExec::try_new(mode, group_by, vec![], vec![], input, schema)?;
+        let ctx =
+            TaskContext::default().with_session_config(SessionConfig::new().with_batch_size(64));
+        let mut stream = aggregate.execute(0, Arc::new(ctx))?;
+        let mut rows = 0;
+        while let Some(batch) = stream.next().await {
+            rows += batch?.num_rows();
+        }
+        Ok(rows)
+    }
+
+    #[tokio::test]
+    async fn partial_aggregate_emits_before_group_keys_overflow_32_bit_offsets() {
+        assert_eq!(
+            distinct_wide_keys(AggregateMode::Partial, &["day", "product_id"])
+                .await
+                .unwrap(),
+            ROWS * BATCHES
+        );
+    }
+
+    #[tokio::test]
+    async fn final_aggregate_spills_before_group_keys_overflow_32_bit_offsets() {
+        assert_eq!(
+            distinct_wide_keys(AggregateMode::Final, &["day", "product_id"])
+                .await
+                .unwrap(),
+            ROWS * BATCHES
+        );
+    }
+
+    #[tokio::test]
+    async fn single_key_aggregate_emits_before_group_keys_overflow_32_bit_offsets() {
+        assert_eq!(
+            distinct_wide_keys(AggregateMode::Partial, &["product_id"])
+                .await
+                .unwrap(),
+            ROWS * BATCHES
+        );
     }
 }

@@ -7012,16 +7012,11 @@ mod tests {
         let task_ctx = new_spill_ctx(1, 500);
         let result = collect(aggr.execute(0, Arc::clone(&task_ctx))?).await;
 
-        match &result {
-            Ok(_) => panic!("Expected ResourcesExhausted error but query succeeded"),
-            Err(e) => {
-                let root = e.find_root();
-                assert!(
-                    matches!(root, DataFusionError::ResourcesExhausted(_)),
-                    "Expected ResourcesExhausted, got: {root}",
-                );
-            }
-        }
+        // COMET PATCH: the spill succeeds, and the fully ordered replay that failed for
+        // the pool records the few groups it holds instead, see `OrderedFinalAggregateStream`.
+        let batches = result?;
+        assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
+        assert_eq!(task_ctx.runtime_env().memory_pool.reserved(), 0);
 
         Ok(())
     }

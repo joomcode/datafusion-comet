@@ -25,7 +25,7 @@ import scala.collection.mutable
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, NamedExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, NamedExpression, ScalaUDF}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{Complete, Partial}
 import org.apache.spark.sql.catalyst.plans.logical.statsEstimation.EstimationUtils
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -39,7 +39,7 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.comet.CometConf
 import org.apache.comet.CometSparkSessionExtensions.withFallbackReason
 import org.apache.comet.rules.BoundaryFormats._
-import org.apache.comet.serde.QueryPlanSerde
+import org.apache.comet.serde.{CometCodegenDispatch, QueryPlanSerde}
 import org.apache.comet.shims.ShimCometWindowGroupLimit
 
 /**
@@ -56,15 +56,17 @@ import org.apache.comet.shims.ShimCometWindowGroupLimit
  * those of its input; a filter's predicate those it references; an aggregate's those of its
  * grouping keys, at half the price for each phase of a two-phase aggregate. A project computes
  * once per leaf of the expressions it does not pass through; an expand copies once per
- * projection. The functions of an aggregate cost the price of their class each, and those of a
- * window the price of their class at the number of its window functions. In Spark, an operator
- * whose rows, or its inputs', have more leaves than `codegenMaxFields` runs without whole-stage
- * codegen and takes the classes of [[EngineCostTable.CostClass.withoutCodegen]], and a project
- * whose input comes from a scan through filters, projects and conversions only passes its columns
- * for free and computes at `expressionOverScan`. Shuffles cost their write and read over every
- * leaf of the shuffled rows, scaled by their partitions, and their bytes beyond
- * `perByteLeafAllowance` per leaf. A conversion to rows costs `c2r` over every leaf, and Comet's
- * columnar shuffle also pays one `r2c` when it writes.
+ * projection. The functions of an aggregate cost the price of their class each, the leaves of its
+ * grouping keys that hold an array `aggArrayKey` on top of `agg`, and the leaves of a grouping
+ * key computed through the JVM codegen dispatcher `codegenDispatch` once; those of a window the
+ * price of their class at the number of its window functions. In Spark, an operator whose rows,
+ * or its inputs', have more leaves than `codegenMaxFields` runs without whole-stage codegen and
+ * takes the classes of [[EngineCostTable.CostClass.withoutCodegen]], and a project whose input
+ * comes from a scan through filters, projects and conversions only passes its columns for free
+ * and computes at `expressionOverScan`. Shuffles cost their write and read over every leaf of the
+ * shuffled rows, scaled by their partitions, and their bytes beyond `perByteLeafAllowance` per
+ * leaf. A conversion to rows costs `c2r` over every leaf, and Comet's columnar shuffle also pays
+ * one `r2c` when it writes.
  */
 class EngineCostModel(
     val table: EngineCostTable,
@@ -111,6 +113,13 @@ class EngineCostModel(
       }
   }
 
+  /** Whether Comet evaluates `expression` through the JVM codegen dispatcher. */
+  def dispatchedThroughCodegen(expression: Expression): Boolean = expression.exists {
+    case _: ScalaUDF => true
+    case e =>
+      QueryPlanSerde.exprSerdeMap.get(e.getClass).exists(_.isInstanceOf[CometCodegenDispatch[_]])
+  }
+
   private def aggregateShare(agg: BaseAggregateExec): Double =
     if (agg.aggregateExpressions.exists(_.mode == Complete)) 1.0 else 0.5
 
@@ -149,9 +158,15 @@ class EngineCostModel(
         }
       case (Agg, agg: BaseAggregateExec) =>
         val share = aggregateShare(agg)
+        val keys = agg.groupingExpressions
         val functions =
           agg.aggregateExpressions.map(e => aggregateFunctionClass(e.aggregateFunction))
-        Term(Agg, widthOfTypes(agg.groupingExpressions.map(_.dataType)), share) +:
+        val arrayKeys = widthOfTypes(keys.map(_.dataType).filter(LeafColumns.containsArray))
+        val dispatched = widthOfTypes(keys.filter(dispatchedThroughCodegen).map(_.dataType))
+        Seq(
+          Some(Term(Agg, widthOfTypes(keys.map(_.dataType)), share)),
+          Some(Term(AggArrayKey, arrayKeys, share)).filter(_.width.leaves > 0),
+          Some(Term(CodegenDispatch, dispatched)).filter(_.width.leaves > 0)).flatten ++
           functions.distinct.map { c =>
             Term(c, Width(functions.size, 0), share * functions.count(_ == c))
           }

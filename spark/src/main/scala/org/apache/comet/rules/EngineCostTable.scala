@@ -186,6 +186,8 @@ object EngineCostTable {
     case object AggPercentile extends CostClass("aggPercentile")
     case object AggPercentileApprox extends CostClass("aggPercentileApprox")
     case object AggOther extends CostClass("aggOther")
+    case object AggArrayKey extends CostClass("aggArrayKey")
+    case object CodegenDispatch extends CostClass("codegenDispatch")
     case object Window extends CostClass("window")
     case object WindowAggregate extends CostClass("windowAggregate")
     case object WindowOffset extends CostClass("windowOffset")
@@ -219,6 +221,8 @@ object EngineCostTable {
       AggPercentile,
       AggPercentileApprox,
       AggOther,
+      AggArrayKey,
+      CodegenDispatch,
       Window,
       WindowAggregate,
       WindowOffset,
@@ -312,6 +316,15 @@ object EngineCostTable {
    *     beyond `spark.sql.codegen.maxFields`), `aggCollectList`, `aggCollectSet`,
    *     `aggPercentile`, `aggPercentileApprox` or `aggOther` (other imperative aggregates, by
    *     analogy, unmeasured); an object hash aggregate adds `aggObjectHash`.
+   *   - `aggArrayKey`: what each leaf of a grouping key holding an array adds to `agg`, partial
+   *     and final together, fitted by least squares on two distincts without reduction:
+   *     star_order_2020 (18 key leaves, 7 in arrays of 2.7 and 1.1 elements on average; Comet 4.0
+   *     us per row in each phase, Spark 0.71 to 0.98) and calib29's `aggkeys` over an array of
+   *     3-leaf structs of 2.7 elements (5 leaves, 3 in the array; Comet 2.4 us, Spark 1.7).
+   *     `codegenDispatch`: once per leaf of a grouping key computed through the JVM codegen
+   *     dispatcher, such as the `transform` normalizing the floating-point fields of an array, in
+   *     the phase that computes it: Comet 0.65 us for 3 leaves on star_order_2020 (partial minus
+   *     final), Spark 0.4 us in a local micro-benchmark (Spark's codegen of the same transform).
    *   - `window`: the operator with one `row_number`, over the leaves of its input (Spark noisy,
    *     maxrel 0.46). Each window function adds the price of its class at L = the number of
    *     window functions of the operator: `windowAggregate` (measured on a running sum, other
@@ -380,6 +393,8 @@ object EngineCostTable {
     both(AggPercentile, Line(130, 0, 0, 2400, 0)) ++
     both(AggPercentileApprox, Line(270, 0, 0, 3900, 0)) ++
     both(AggOther, Line(100, 0, 0, 1700, 0)) ++
+    both(AggArrayKey, Line(0, 937, 0, 0, 76)) ++
+    both(CodegenDispatch, Line(0, 217, 0, 0, 133)) ++
     both(WindowAggregate, Line(380, 0, 0, 20, 0.8)) ++
     both(WindowOffset, Line(60, 0, 0, 0, 0.25)) ++
     both(WindowRank, Line(0, 0, 0, 0, 0)) ++
