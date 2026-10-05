@@ -68,6 +68,8 @@ class CometNativeShuffleWriter[K, V](
     extends ShuffleWriter[K, V]
     with Logging {
 
+  private var activeSpec: NativeShuffleSpec = spec
+
   var partitionLengths: Array[Long] = _
   var mapStatus: MapStatus = _
   private var stopped = false
@@ -129,6 +131,11 @@ class CometNativeShuffleWriter[K, V](
             "CometNativeShuffleInputIterator (produced by CometNativeShuffleInputRDD), got " +
             s"${other.getClass.getName}")
     }
+    Option(shuffleInputIter.nativeShuffleSpec).foreach(activeSpec = _)
+    if (activeSpec == null) {
+      throw new IllegalStateException("Native Comet shuffle has no execution plan")
+    }
+    val spec = activeSpec
     val partitionIdx = shuffleInputIter.partitionIndex
     val inputObjects = shuffleInputIter.inputObjects
     val shuffleBlockIters = shuffleInputIter.shuffleBlockIterators
@@ -423,7 +430,7 @@ class CometNativeShuffleWriter[K, V](
           CometConf.COMET_SHUFFLE_NATIVE_ROUND_ROBIN_PARTITIONING_MAX_HASH_COLUMNS.get())
         // Decided on the driver, from the shape of the plan fused into this writer; the executor
         // cannot re-derive it. See `CometShuffleExchangeExec.positionalRoundRobinSpec`.
-        spec.positionalRoundRobin.foreach { positional =>
+        activeSpec.positionalRoundRobin.foreach { positional =>
           partitioning.setPositional(true)
           partitioning.setPositionalGroupRows(positional.groupRows)
           // Per task, unlike the two above: which partition this mapper's first group goes to.
@@ -458,7 +465,7 @@ class CometNativeShuffleWriter[K, V](
     OperatorOuterClass.Operator
       .newBuilder()
       .setShuffleWriter(shuffleWriterBuilder)
-      .addChildren(spec.childNativeOp)
+      .addChildren(activeSpec.childNativeOp)
       .build()
   }
 

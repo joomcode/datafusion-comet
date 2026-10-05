@@ -208,7 +208,8 @@ class CometCelebornNativeShuffleWriterSuite extends CometTestBase {
             commitValidator = () => {
               validations += 1
               true
-            })
+            },
+            spec = inputs.asInstanceOf[CometNativeShuffleInputIterator].nativeShuffleSpec)
           val plan = writer.buildUnifiedPlan("").getShuffleWriter
           assert(plan.getPartitionWriter.hasRss)
           assert(plan.getOutputDataFile.isEmpty)
@@ -716,10 +717,10 @@ private[shuffle] object CometCelebornNativeShuffleWriterSuite {
       pusher: CelebornShufflePartitionPusher,
       commitAuthorized: Boolean = false,
       commitValidator: () => Boolean = () => true,
-      onSizeLimitExceeded: Throwable => Unit = _ => ())
-      : CometNativeShuffleWriter[Int, ColumnarBatch] =
+      onSizeLimitExceeded: Throwable => Unit = _ => (),
+      spec: NativeShuffleSpec = null): CometNativeShuffleWriter[Int, ColumnarBatch] =
     new CometNativeShuffleWriter[Int, ColumnarBatch](
-      dependency.nativeShuffleSpec.get,
+      Option(spec).orElse(Option(dependency.nativeShuffleSpec).flatten).orNull,
       dependency.outputPartitioning.get,
       dependency.outputAttributes,
       dependency.shuffleWriteMetrics,

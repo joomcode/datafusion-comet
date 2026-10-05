@@ -767,7 +767,7 @@ private[comet] case class NativeExecContext(
     // counts it is huge. It is only read on the driver (to slice per partition onto each task's
     // Partition object - see CometNativeShuffleInputRDD / CometExecRDD); the executor reads its own
     // slice, never this map. Keeping it off the wire stops it from bloating the broadcast task
-    // binary when this context rides on the non-transient CometShuffleDependency.nativeShuffleSpec.
+    // binary when this context rides on the map-side CometNativeShuffleInputRDD.nativeShuffleSpec.
     @transient perPartitionByKey: Map[String, Array[Array[Byte]]],
     shuffleScanIndices: Set[Int],
     hasScanInput: Boolean) {

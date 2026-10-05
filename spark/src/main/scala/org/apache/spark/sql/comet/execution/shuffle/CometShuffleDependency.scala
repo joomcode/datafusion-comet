@@ -86,7 +86,7 @@ class CometShuffleDependency[K: ClassTag, V: ClassTag, C: ClassTag](
     val shuffleWriteMetrics: Map[String, SQLMetric] = Map.empty,
     val numParts: Int = 0,
     val rangePartitionBounds: Option[Seq[InternalRow]] = None,
-    val nativeShuffleSpec: Option[NativeShuffleSpec] = None,
+    @transient val nativeShuffleSpec: Option[NativeShuffleSpec] = None,
     val useLocalShuffle: Boolean = false,
     private[shuffle] val outputMetrics: Option[CometShuffleOutputMetrics] = None)
     extends ShuffleDependency[K, V, C](

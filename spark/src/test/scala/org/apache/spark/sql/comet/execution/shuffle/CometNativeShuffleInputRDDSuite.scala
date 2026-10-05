@@ -255,4 +255,54 @@ class CometNativeShuffleInputRDDSuite extends CometTestBase {
     assert(part.planDataByKey.keySet == Set("scan-0"))
     assert(part.planDataByKey("scan-0").length == 1024)
   }
+
+  test("the native shuffle plan rides on the map stage and stays off the reduce stage") {
+    val sc = spark.sparkContext
+    val ser = new JavaSerializer(sc.getConf).newInstance()
+    def build(planBytes: Int) = {
+      val metrics = Map(
+        "spilled_bytes" -> SQLMetrics.createSizeMetric(sc, "disk spilled bytes"),
+        "memory_spilled_bytes" -> SQLMetrics.createSizeMetric(sc, "memory spilled bytes"))
+      val rdd = new CometNativeShuffleInputRDD(
+        sc,
+        inputRDDs = Seq.empty,
+        numPartitionsParam = 4,
+        shuffleScanIndices = Set.empty,
+        spillMetricNode = CometMetricNode(metrics))
+      val execContext = NativeExecContext(
+        inputs = Seq.empty,
+        numPartitions = 4,
+        subqueries = Seq.empty,
+        broadcastedHadoopConfForEncryption = None,
+        encryptedFilePaths = Seq.empty,
+        commonByKey = Map("scan-0" -> new Array[Byte](planBytes)),
+        perPartitionByKey = Map.empty,
+        shuffleScanIndices = Set.empty,
+        hasScanInput = false)
+      val spec =
+        NativeShuffleSpec(Operator.getDefaultInstance, CometMetricNode(Map.empty), execContext)
+      rdd.nativeShuffleSpec = spec
+      val dep = new CometShuffleDependency[Int, ColumnarBatch, ColumnarBatch](
+        _rdd = rdd,
+        partitioner = new HashPartitioner(4),
+        decodeTime = SQLMetrics.createMetric(sc, "decode time"),
+        shuffleWriteMetrics = metrics,
+        nativeShuffleSpec = Some(spec))
+      (rdd, dep)
+    }
+
+    val (smallRdd, smallDep) = build(1024)
+    val (largeRdd, largeDep) = build(4 * 1024 * 1024)
+    val smallReduce = ser.serialize(new CometShuffledBatchRDD(smallDep, Map.empty)).limit()
+    val largeReduce = ser.serialize(new CometShuffledBatchRDD(largeDep, Map.empty)).limit()
+    assert(math.abs(largeReduce - smallReduce) < 1024, s"$smallReduce vs $largeReduce")
+    assert(ser.serialize((largeRdd, largeDep)).limit() > 4 * 1024 * 1024)
+
+    val (mapRdd, mapDep) = ser.deserialize[(
+        CometNativeShuffleInputRDD,
+        CometShuffleDependency[Int, ColumnarBatch, ColumnarBatch])](
+      ser.serialize((smallRdd, smallDep)))
+    assert(mapDep.nativeShuffleSpec == null)
+    assert(mapRdd.nativeShuffleSpec.execContext.commonByKey("scan-0").length == 1024)
+  }
 }
