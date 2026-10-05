@@ -19,6 +19,8 @@
 
 package org.apache.spark.sql.comet
 
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.QueryPlan
@@ -30,7 +32,7 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.vectorized.ColumnarBatch
 
 import org.apache.comet.contrib.delta.DeltaSparkScanEnvelope
-import org.apache.comet.serde.OperatorOuterClass
+import org.apache.comet.serde.{OperatorOuterClass, QueryContextInterner}
 import org.apache.comet.serde.OperatorOuterClass.Operator
 
 /**
@@ -148,12 +150,17 @@ case class CometDeltaNativeScanExec(
 
   override def doExecuteColumnar(): RDD[ColumnarBatch] = {
     val nativeMetrics = CometMetricNode.fromCometPlan(this)
-    val serializedPlan = CometExec.serializeNativePlan(nativeOp)
+    val plan = PlanDataInjector.internScans(QueryContextInterner.intern(nativeOp))
+    val sqlTextPool = new QueryContextInterner.Pool(plan.getSqlTextPoolList.asScala.toSeq)
+    val commonByKey =
+      PlanDataInjector.internCommons(plan, Map(sourceKey -> commonData), sqlTextPool)
+    val serializedPlan = CometExec.serializeNativePlan(
+      plan.toBuilder.addAllSqlTextPool(sqlTextPool.added.asJava).build())
 
     new CometExecRDD(
       sparkContext,
       Seq.empty,
-      Map(sourceKey -> commonData),
+      commonByKey,
       Map(sourceKey -> perPartitionData),
       serializedPlan,
       PlanDataInjector.planFingerprint(serializedPlan),

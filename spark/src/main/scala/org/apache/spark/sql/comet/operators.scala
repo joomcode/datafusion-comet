@@ -106,6 +106,8 @@ private[comet] trait PlanDataInjector {
    * operators need rebuilding.
    */
   def inject(op: Operator, preparedCommon: Prepared, partitionBytes: Array[Byte]): Operator
+
+  def internScan(op: Operator, pool: QueryContextInterner.Pool): Operator = op
 }
 
 /**
@@ -410,6 +412,61 @@ private[comet] object PlanDataInjector extends Logging {
     op.writeTo(codedOutput)
     codedOutput.checkNoSpaceLeft()
     bytes
+  }
+
+  private[comet] def internScans(root: Operator): Operator = {
+    val pool = new QueryContextInterner.Pool(root.getSqlTextPoolList.asScala.toSeq)
+    def visit(op: Operator): Operator = {
+      val self = injectorsByKind
+        .get(op.getOpStructCase)
+        .flatMap(_.find(_.canInject(op)))
+        .map(_.internScan(op, pool))
+        .getOrElse(op)
+      val children = self.getChildrenList
+      var builder: Operator.Builder = null
+      var i = 0
+      while (i < children.size()) {
+        val child = children.get(i)
+        val visited = visit(child)
+        if (visited ne child) {
+          if (builder == null) builder = self.toBuilder
+          builder.setChildren(i, visited)
+        }
+        i += 1
+      }
+      if (builder == null) self else builder.build()
+    }
+    val result = visit(root)
+    if (pool.added.isEmpty) result
+    else result.toBuilder.addAllSqlTextPool(pool.added.asJava).build()
+  }
+
+  private[comet] def internCommons(
+      root: Operator,
+      commonByKey: Map[String, Array[Byte]],
+      pool: QueryContextInterner.Pool): Map[String, Array[Byte]] = {
+    if (commonByKey.isEmpty) return commonByKey
+    val interned = mutable.Map.empty[String, Array[Byte]]
+    def visit(op: Operator): Unit = {
+      injectorsByKind.get(op.getOpStructCase).flatMap(_.find(_.canInject(op))).foreach {
+        injector =>
+          injector.getKey(op).foreach { key =>
+            commonByKey.get(key).filterNot(_ => interned.contains(key)).foreach { bytes =>
+              injector.prepareCommon(bytes) match {
+                case message: com.google.protobuf.Message =>
+                  val result = QueryContextInterner.internAgainst(message, pool)
+                  if (result ne message) {
+                    interned(key) = result.toByteArray
+                  }
+                case _ =>
+              }
+            }
+          }
+      }
+      op.getChildrenList.asScala.foreach(visit)
+    }
+    visit(root)
+    if (interned.isEmpty) commonByKey else commonByKey ++ interned
   }
 
   /**
@@ -770,7 +827,8 @@ private[comet] case class NativeExecContext(
     // binary when this context rides on the map-side CometNativeShuffleInputRDD.nativeShuffleSpec.
     @transient perPartitionByKey: Map[String, Array[Array[Byte]]],
     shuffleScanIndices: Set[Int],
-    hasScanInput: Boolean) {
+    hasScanInput: Boolean,
+    addedSqlTexts: Seq[String] = Seq.empty) {
   // Catch shape divergence (e.g. broadcast scans with different partition counts after DPP
   // filtering) at construction so consumers don't trip ArrayIndexOutOfBoundsException at
   // partition idx access time.
@@ -793,6 +851,9 @@ abstract class CometNativeExec extends CometExec {
 
   /** The Comet native operator */
   def nativeOp: Operator
+
+  private[comet] def internedNativeOp: Operator =
+    serializedPlanOpt.plan.map(Operator.parseFrom).getOrElse(nativeOp)
 
   override protected def doPrepare(): Unit = prepareSubqueries(this)
 
@@ -832,9 +893,11 @@ abstract class CometNativeExec extends CometExec {
   private[comet] def executeColumnarWithContext(
       ctx: NativeExecContext,
       nativeMetrics: CometMetricNode): RDD[ColumnarBatch] = {
-    val serializedPlan = serializedPlanOpt.plan.getOrElse(
-      throw new CometRuntimeException(
-        s"CometNativeExec should not be executed directly without a serialized plan: $this"))
+    val serializedPlan = QueryContextInterner.appendToPool(
+      serializedPlanOpt.plan.getOrElse(
+        throw new CometRuntimeException(
+          s"CometNativeExec should not be executed directly without a serialized plan: $this")),
+      ctx.addedSqlTexts)
 
     new CometExecRDD(
       sparkContext,
@@ -895,7 +958,10 @@ abstract class CometNativeExec extends CometExec {
       }
 
     // Find planning data within this stage (stops at shuffle boundaries).
-    val (commonByKey, perPartitionByKey) = PlanDataInjector.findAllPlanData(this)
+    val (scanCommonByKey, perPartitionByKey) = PlanDataInjector.findAllPlanData(this)
+    val sqlTextPool = new QueryContextInterner.Pool(
+      serializedPlanOpt.plan.map(QueryContextInterner.sqlTextPool).getOrElse(Nil))
+    val commonByKey = PlanDataInjector.internCommons(nativeOp, scanCommonByKey, sqlTextPool)
 
     // Collect the input batches from the child operators. Non-shuffle inputs become
     // RDD[ArrowArrayStream] (one stream per partition, exported via the C Stream Interface
@@ -1054,6 +1120,7 @@ abstract class CometNativeExec extends CometExec {
       commonByKey = commonByKey,
       perPartitionByKey = perPartitionByKey,
       shuffleScanIndices = shuffleScanIndices,
+      addedSqlTexts = sqlTextPool.added,
       // A leaf Comet scan (`CometNativeScanExec`, `CometIcebergNativeScanExec`, or a contrib
       // leaf such as `CometDeltaNativeScanExec`) can contribute `bytes_scanned` /
       // `output_rows` to Spark's task-level input metrics, which drive the Input column on
@@ -1139,7 +1206,10 @@ abstract class CometNativeExec extends CometExec {
         // Hoist duplicated QueryContext SQL text into a pool on the root operator. This is the
         // point where the whole native block is in hand, which is what the pool indices are
         // scoped to.
-        SerializedPlan(Some(CometExec.serializeNativePlan(QueryContextInterner.intern(nativeOp))))
+        SerializedPlan(
+          Some(
+            CometExec.serializeNativePlan(
+              PlanDataInjector.internScans(QueryContextInterner.intern(nativeOp)))))
       case other: AnyRef => other
       case null => null
     }

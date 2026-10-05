@@ -465,6 +465,7 @@ class CometNativeShuffleWriter[K, V](
     OperatorOuterClass.Operator
       .newBuilder()
       .setShuffleWriter(shuffleWriterBuilder)
+      .addAllSqlTextPool(activeSpec.sqlTextPool.asJava)
       .addChildren(activeSpec.childNativeOp)
       .build()
   }

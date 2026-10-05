@@ -222,8 +222,8 @@ case class CometShuffleExchangeExec(
             outputPartitioning,
             serializer,
             metrics,
-            NativeShuffleSpec(
-              nativeChild.nativeOp,
+            CometShuffleExchangeExec.nativeShuffleSpec(
+              nativeChild.internedNativeOp,
               nativeChildMetricNode,
               ctx,
               positionalRoundRobin))
@@ -944,6 +944,18 @@ object CometShuffleExchangeExec
       metrics,
       NativeShuffleSpec(scanOp, childMetricNode, ctx))
   }
+
+  private[comet] def nativeShuffleSpec(
+      childNativeOp: OperatorOuterClass.Operator,
+      childMetricNode: CometMetricNode,
+      ctx: NativeExecContext,
+      positionalRoundRobin: Option[PositionalRoundRobin]): NativeShuffleSpec =
+    NativeShuffleSpec(
+      childNativeOp.toBuilder.clearSqlTextPool().build(),
+      childMetricNode,
+      ctx,
+      positionalRoundRobin,
+      childNativeOp.getSqlTextPoolList.asScala.toSeq ++ ctx.addedSqlTexts)
 
   /**
    * Build a Comet native shuffle dependency for the [[CometShuffleExchangeExec]] case where the

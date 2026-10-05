@@ -51,7 +51,8 @@ case class NativeShuffleSpec(
      * size so that a re-executed map task places rows exactly as the attempt it replaces. See
      * `CometShuffleExchangeExec.positionalRoundRobinSpec`.
      */
-    positionalRoundRobin: Option[PositionalRoundRobin] = None)
+    positionalRoundRobin: Option[PositionalRoundRobin] = None,
+    sqlTextPool: Seq[String] = Seq.empty)
 
 /**
  * Parameters for positional round-robin placement, resolved on the driver.

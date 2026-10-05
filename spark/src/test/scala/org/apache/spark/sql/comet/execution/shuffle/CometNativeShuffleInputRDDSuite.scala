@@ -19,6 +19,9 @@
 
 package org.apache.spark.sql.comet.execution.shuffle
 
+import scala.collection.mutable
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.{HashPartitioner, Partition, TaskContext}
 import org.apache.spark.rdd.{DeterministicLevel, RDD}
 import org.apache.spark.serializer.JavaSerializer
@@ -27,6 +30,8 @@ import org.apache.spark.sql.comet.{CometMetricNode, NativeExecContext}
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
 import org.apache.spark.sql.vectorized.ColumnarBatch
 
+import org.apache.comet.CometConf
+import org.apache.comet.serde.{ExprOuterClass, OperatorOuterClass}
 import org.apache.comet.serde.OperatorOuterClass.Operator
 
 /**
@@ -304,5 +309,66 @@ class CometNativeShuffleInputRDDSuite extends CometTestBase {
       ser.serialize((smallRdd, smallDep)))
     assert(mapDep.nativeShuffleSpec == null)
     assert(mapRdd.nativeShuffleSpec.execContext.commonByKey("scan-0").length == 1024)
+  }
+
+  test("a native shuffle's plan and scan planning data refer to the writer's pool") {
+    def contexts(m: com.google.protobuf.Message): Seq[ExprOuterClass.QueryContext] = {
+      val own = m match {
+        case e: ExprOuterClass.Expr if e.hasQueryContext => Seq(e.getQueryContext)
+        case a: ExprOuterClass.AggExpr if a.hasQueryContext => Seq(a.getQueryContext)
+        case _ => Nil
+      }
+      own ++ m.getAllFields.values.asScala.toSeq.flatMap {
+        case child: com.google.protobuf.Message => contexts(child)
+        case list: java.util.List[_] =>
+          list.asScala.toSeq.flatMap {
+            case child: com.google.protobuf.Message => contexts(child)
+            case _ => Nil
+          }
+        case _ => Nil
+      }
+    }
+    withTempPath { dir =>
+      spark
+        .range(0, 100)
+        .selectExpr("cast(id % 17 as int) as k1", "cast(id % 1000 as int) as i1")
+        .write
+        .parquet(dir.getAbsolutePath)
+      withTempView("t1") {
+        spark.read.parquet(dir.getAbsolutePath).createOrReplaceTempView("t1")
+        withSQLConf(CometConf.COMET_SHUFFLE_MODE.key -> "native") {
+          val df = spark.sql(
+            "select k1, max(case when i1 > 100 then i1 + 1 else i1 * 2 end) as m " +
+              "from t1 where i1 between 1 and 1000 group by k1")
+          df.collect()
+          val rdds = mutable.ArrayBuffer.empty[RDD[_]]
+          def walk(rdd: RDD[_]): Unit = {
+            rdds += rdd
+            rdd.dependencies.foreach(d => walk(d.rdd))
+          }
+          walk(df.queryExecution.executedPlan.execute())
+          val specs = rdds.collect {
+            case r: CometNativeShuffleInputRDD if r.nativeShuffleSpec != null =>
+              r.nativeShuffleSpec
+          }
+          assert(specs.nonEmpty, "expected a native shuffle fed by a native block")
+          specs.foreach { spec =>
+            assert(spec.childNativeOp.getSqlTextPoolCount == 0)
+            assert(spec.sqlTextPool.size == 1)
+            val planContexts = contexts(spec.childNativeOp)
+            assert(planContexts.nonEmpty)
+            val commons = spec.execContext.commonByKey.values
+              .map(OperatorOuterClass.NativeScanCommon.parseFrom)
+            assert(commons.nonEmpty, "expected the scan to be fused into the shuffle's child")
+            val commonContexts = commons.flatMap(contexts)
+            assert(commonContexts.nonEmpty)
+            (planContexts ++ commonContexts).foreach { ctx =>
+              assert(ctx.hasSqlTextIdx && ctx.getSqlText.isEmpty, ctx)
+              assert(ctx.getSqlTextIdx < spec.sqlTextPool.size)
+            }
+          }
+        }
+      }
+    }
   }
 }

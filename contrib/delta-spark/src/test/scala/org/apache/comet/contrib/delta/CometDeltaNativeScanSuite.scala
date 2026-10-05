@@ -3881,4 +3881,54 @@ class CometDeltaNativeScanSuite extends CometDeltaTestBase {
       }
     }
   }
+
+  test("stage task binaries over delta scans do not repeat the query text per expression") {
+    withTempDir { dir =>
+      val paths = (0 until 20).map { i =>
+        val path = new File(dir, s"t$i").getAbsolutePath
+        spark
+          .range(0, 200)
+          .selectExpr("id", s"id % ${i + 3} AS k", "concat('data/', cast(id AS string)) AS name")
+          .write
+          .format("delta")
+          .save(path)
+        path
+      }
+      val sql = paths
+        .map(p =>
+          s"SELECT k, name FROM delta.`$p` WHERE name LIKE 'data/%' AND NOT endswith(name, '/') " +
+            "AND id % 7 <> 3 AND length(name) > 5")
+        .mkString("SELECT k, count(*) AS c FROM (\n", "\nUNION ALL\n", "\n) GROUP BY k")
+      def mapStageBytes(cometEnabled: Boolean): Long = {
+        var bytes = 0L
+        withSQLConf(
+          CometConf.COMET_ENABLED.key -> cometEnabled.toString,
+          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+          val df = spark.sql(sql)
+          val serializer = org.apache.spark.SparkEnv.get.closureSerializer.newInstance()
+          val deps = mutable.ArrayBuffer.empty[org.apache.spark.ShuffleDependency[_, _, _]]
+          def walk(rdd: org.apache.spark.rdd.RDD[_]): Unit = {
+            rdd.partitions
+            rdd.dependencies.foreach {
+              case d: org.apache.spark.ShuffleDependency[_, _, _] => deps += d
+              case d => walk(d.rdd)
+            }
+          }
+          walk(df.queryExecution.executedPlan.execute())
+          deps.foreach { d =>
+            walk(d.rdd)
+            bytes = math.max(bytes, serializer.serialize((d.rdd, d)).limit().toLong)
+          }
+          checkSparkAnswer(df)
+        }
+        bytes
+      }
+      val vanilla = mapStageBytes(cometEnabled = false)
+      val comet = mapStageBytes(cometEnabled = true)
+      // scalastyle:off println
+      println(s"delta task binary: vanilla=$vanilla comet=$comet sql=${sql.length}")
+      // scalastyle:on println
+      assert(comet < vanilla + 20L * sql.length * 3, s"vanilla=$vanilla comet=$comet")
+    }
+  }
 }
