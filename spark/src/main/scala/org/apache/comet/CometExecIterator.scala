@@ -427,7 +427,7 @@ object CometExecIterator extends Logging {
             } catch {
               case NonFatal(e) =>
                 logWarning(
-                  s"Failed to cancel the native plan of killed task " +
+                  "Failed to cancel the native plan of killed task " +
                     s"${context.taskAttemptId()}",
                   e)
             }
