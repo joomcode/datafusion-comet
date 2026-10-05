@@ -19,7 +19,7 @@
 
 package org.apache.spark.sql.comet.execution.shuffle
 
-import java.io.InputStream
+import java.io.{InputStream, IOException}
 
 import org.apache.spark.{InterruptibleIterator, MapOutputTracker, SparkEnv, TaskContext}
 import org.apache.spark.internal.{config, Logging}
@@ -168,13 +168,8 @@ class CometBlockStoreShuffleReader[K, C](
    * Returns the raw concatenated InputStream of all shuffle blocks, bypassing the decode step.
    * Used by ShuffleScan direct read path.
    */
-  override def readAsRawStream(): InputStream = {
-    val streams = fetchIterator.map(_._2)
-    new java.io.SequenceInputStream(new java.util.Enumeration[InputStream] {
-      override def hasMoreElements: Boolean = streams.hasNext
-      override def nextElement(): InputStream = streams.next()
-    })
-  }
+  override def readAsRawStream(): InputStream =
+    CometBlockStoreShuffleReader.concatenate(context, fetchIterator.map(_._2))
 
   private def fetchContinuousBlocksInBatch: Boolean = {
     val conf = SparkEnv.get.conf
@@ -202,5 +197,81 @@ class CometBlockStoreShuffleReader[K, C](
           s"$useOldFetchProtocol, io encryption: $ioEncryption.")
     }
     doBatchFetch
+  }
+}
+
+private[shuffle] object CometBlockStoreShuffleReader {
+  def concatenate(context: TaskContext, blocks: Iterator[InputStream]): InputStream =
+    new FetchedBlocksInputStream(context, blocks)
+}
+
+/**
+ * A block's stream releases the fetcher's current buffer when closed, so each block is closed
+ * before the next is fetched, and close() never fetches: the fetcher releases unread blocks.
+ */
+private final class FetchedBlocksInputStream(context: TaskContext, blocks: Iterator[InputStream])
+    extends InputStream {
+
+  private var current: InputStream = null
+  private var closed = false
+
+  private def block(): InputStream = synchronized {
+    if (closed) {
+      throw new IOException("Shuffle block stream is closed")
+    }
+    if (current == null) {
+      context.killTaskIfInterrupted()
+      if (blocks.hasNext) {
+        current = blocks.next()
+      }
+    }
+    current
+  }
+
+  private def finish(finished: InputStream): Unit = synchronized {
+    if (current eq finished) {
+      current = null
+      finished.close()
+    }
+  }
+
+  override def read(): Int = {
+    var in = block()
+    while (in != null) {
+      val value = in.read()
+      if (value >= 0) {
+        return value
+      }
+      finish(in)
+      in = block()
+    }
+    -1
+  }
+
+  override def read(buffer: Array[Byte], offset: Int, length: Int): Int = {
+    if (length == 0) {
+      return 0
+    }
+    var in = block()
+    while (in != null) {
+      val count = in.read(buffer, offset, length)
+      if (count >= 0) {
+        return count
+      }
+      finish(in)
+      in = block()
+    }
+    -1
+  }
+
+  override def close(): Unit = synchronized {
+    if (!closed) {
+      closed = true
+      val open = current
+      current = null
+      if (open != null) {
+        open.close()
+      }
+    }
   }
 }
