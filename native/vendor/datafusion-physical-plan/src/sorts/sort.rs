@@ -650,7 +650,7 @@ impl ExternalSorter {
         // merge instead of returning it to the pool and requesting it again, which fails
         // once the pool cannot grant what the sorter held. See `SpillWorkspace`.
         let buffered = self.reservation.size();
-        let workspace = SpillWorkspace::new(vec![
+        let workspace = SpillWorkspace::for_spill(vec![
             self.reservation.take(),
             self.merge_reservation.take(),
         ]);

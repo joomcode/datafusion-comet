@@ -3660,4 +3660,153 @@ mod native_sort_spill_tests {
     async fn sort_spills_before_output_above_the_threshold() {
         assert_spills_before_output(RowShape::KibKeyAndId, SPILL_BEFORE_OUTPUT_ROWS / 2).await;
     }
+
+    /// Runs `plan` in one task whose Spark share stays at `share`, reads its output, checks
+    /// that all memory is handed back, and returns the rows and the most the pool reserved.
+    async fn run_with_fixed_share(
+        share: usize,
+        executor_cores: usize,
+        plan: Arc<dyn ExecutionPlan>,
+    ) -> DataFusionResult<(usize, usize)> {
+        let off_heap_size = share * executor_cores;
+        let (pool, spark) = fair_unified_pool_with_fake_spark(off_heap_size, share);
+        let peak = Arc::new(PeakPool {
+            inner: pool,
+            peak: Default::default(),
+        });
+        let pool: Arc<dyn MemoryPool> = Arc::clone(&peak) as _;
+        let spill_dir = tempfile::tempdir().unwrap();
+        // As in production, where the merge headroom is 10 MiB of a 4.25 GiB share.
+        let spark_config = HashMap::from([
+            (SPARK_EXECUTOR_CORES.to_string(), executor_cores.to_string()),
+            (
+                "spark.comet.datafusion.execution.sort_spill_reservation_bytes".to_string(),
+                (share / 400).to_string(),
+            ),
+        ]);
+        let session = prepare_datafusion_session_context(
+            8192,
+            Arc::clone(&pool),
+            vec![spill_dir.path().to_string_lossy().into_owned()],
+            u64::MAX,
+            1,
+            &spark_config,
+            &Operator::default(),
+            Some(off_heap_size),
+        )
+        .unwrap();
+        let mut stream = plan.execute(0, session.task_ctx())?;
+        let mut rows = 0;
+        while let Some(batch) = stream.next().await {
+            rows += batch?.num_rows();
+        }
+        drop(stream);
+        assert_eq!(pool.reserved(), 0, "memory still reserved after the plan");
+        assert_eq!(spark.held(), 0, "memory not handed back to Spark");
+        Ok((rows, peak.peak()))
+    }
+
+    fn streaming(source: Arc<dyn PartitionStream>) -> Arc<dyn ExecutionPlan> {
+        Arc::new(
+            StreamingTableExec::try_new(
+                Arc::clone(source.schema()),
+                vec![source],
+                None,
+                Vec::<LexOrdering>::new(),
+                false,
+                None,
+            )
+            .unwrap(),
+        )
+    }
+
+    /// Rows whose sort key, two 24-character ids and a day, is nearly all of the row.
+    #[derive(Debug)]
+    struct KeyedRows {
+        schema: SchemaRef,
+        rows_per_batch: usize,
+        num_batches: usize,
+    }
+
+    impl KeyedRows {
+        fn new(rows_per_batch: usize, num_batches: usize) -> Self {
+            Self {
+                schema: Arc::new(Schema::new(vec![
+                    Field::new("merchant_id", DataType::Utf8, false),
+                    Field::new("created_date", DataType::Int32, false),
+                    Field::new("product_id", DataType::Utf8, false),
+                    Field::new("row", DataType::Int64, false),
+                ])),
+                rows_per_batch,
+                num_batches,
+            }
+        }
+
+        fn ordering(&self) -> LexOrdering {
+            LexOrdering::new(
+                ["merchant_id", "created_date", "product_id"]
+                    .map(|name| PhysicalSortExpr::new_default(col(name, &self.schema).unwrap())),
+            )
+            .unwrap()
+        }
+
+        fn batch(&self, index: usize) -> RecordBatch {
+            let start = (index * self.rows_per_batch) as u64;
+            let rows: Vec<u64> = (start..start + self.rows_per_batch as u64).collect();
+            let id = |r: u64| format!("{:016x}{:08x}", mix(r), mix(r ^ 7) as u32);
+            RecordBatch::try_new(
+                Arc::clone(&self.schema),
+                vec![
+                    Arc::new(StringArray::from_iter_values(
+                        rows.iter().map(|&r| id(r / 50)),
+                    )),
+                    Arc::new(Int32Array::from_iter_values(
+                        rows.iter().map(|&r| (mix(r ^ 3) % 3650) as i32),
+                    )),
+                    Arc::new(StringArray::from_iter_values(
+                        rows.iter().map(|&r| id(r ^ 11)),
+                    )),
+                    Arc::new(Int64Array::from_iter_values(rows.iter().map(|&r| r as i64))),
+                ],
+            )
+            .unwrap()
+        }
+    }
+
+    impl PartitionStream for KeyedRows {
+        fn schema(&self) -> &SchemaRef {
+            &self.schema
+        }
+
+        fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+            let batches: Vec<_> = (0..self.num_batches).map(|i| Ok(self.batch(i))).collect();
+            Box::pin(RecordBatchStreamAdapter::new(
+                Arc::clone(&self.schema),
+                futures::stream::iter(batches),
+            ))
+        }
+    }
+
+    /// A spill merges the batches the sort buffered inside the memory it holds for them.
+    /// When the sort key is most of the row, the merge's batches and the rows it encodes
+    /// their keys into need a little more than that, and the merge asked Spark for it. With
+    /// the task's share used up the sort failed with "Additional allocation failed for
+    /// ExternalSorter[0] ... Failed to acquire N bytes plus 0 bytes overcommitted, only got N
+    /// bytes", as merchants_lifecycle did on every attempt.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_sort_by_a_key_that_is_most_of_the_row_spills_in_a_fixed_share() {
+        for share in [24, 28, 32, 36, 40].map(|mb| mb * MB) {
+            let source = Arc::new(KeyedRows::new(1024, 1200));
+            let ordering = source.ordering();
+            let sort: Arc<dyn ExecutionPlan> = Arc::new(SortExec::new(ordering, streaming(source)));
+            match run_with_fixed_share(share, 8, Arc::clone(&sort)).await {
+                Ok((rows, peak)) => {
+                    assert_eq!(rows, 1024 * 1200);
+                    assert!(spill_count(&sort) > 0, "sort did not spill");
+                    assert!(peak <= share + share / 50, "{peak} reserved of {share}");
+                }
+                Err(e) => panic!("native sort failed instead of spilling at {share}: {e}"),
+            }
+        }
+    }
 }

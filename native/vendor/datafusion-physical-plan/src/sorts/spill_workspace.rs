@@ -41,9 +41,14 @@ use parking_lot::Mutex;
 /// workspace, and only usage beyond it grows the first parent reservation, under the
 /// execution pool's limits. [`Self::close`] ends the retention, and [`Self::keep_at_most`]
 /// limits it.
+///
+/// A workspace built with [`Self::for_spill`] grows its first parent with the infallible
+/// `grow` instead, for a merge that writes a spill: everything its children reserve
+/// already exists, and the spill it is writing releases all of it.
 #[derive(Debug)]
 pub(super) struct SpillWorkspace {
     state: Mutex<State>,
+    fallible: bool,
 }
 
 #[derive(Debug)]
@@ -101,6 +106,15 @@ impl Drop for WorkspaceLoan {
 impl SpillWorkspace {
     /// Takes over `parents`. The first one is grown if the children need more.
     pub(super) fn new(parents: Vec<MemoryReservation>) -> Arc<Self> {
+        Self::with_growth(parents, true)
+    }
+
+    /// [`Self::new`] for a merge that writes a spill, which never refuses its children.
+    pub(super) fn for_spill(parents: Vec<MemoryReservation>) -> Arc<Self> {
+        Self::with_growth(parents, false)
+    }
+
+    fn with_growth(parents: Vec<MemoryReservation>, fallible: bool) -> Arc<Self> {
         assert!(!parents.is_empty());
         Arc::new(Self {
             state: Mutex::new(State {
@@ -108,6 +122,7 @@ impl SpillWorkspace {
                 used: 0,
                 keep: usize::MAX,
             }),
+            fallible,
         })
     }
 
@@ -195,7 +210,7 @@ impl MemoryPool for SpillWorkspace {
         let Some(used) = state.used.checked_add(additional) else {
             return resources_err!("Sort spill workspace overflow");
         };
-        state.cover(used, true)
+        state.cover(used, self.fallible)
     }
 
     fn reserved(&self) -> usize {
@@ -268,6 +283,27 @@ mod tests {
         drop(workspace);
         drop(pool);
         assert_eq!(parent.reserved(), 0);
+    }
+
+    #[test]
+    fn a_spill_workspace_grows_its_first_parent_past_the_pool() {
+        let parent: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(100));
+        let sorter = MemoryConsumer::new("sorter").register(&parent);
+        sorter.try_grow(60).unwrap();
+        let contender = MemoryConsumer::new("contender").register(&parent);
+        contender.try_grow(40).unwrap();
+        let workspace = SpillWorkspace::for_spill(vec![sorter]);
+        let pool = Arc::clone(&workspace) as Arc<dyn MemoryPool>;
+        let child = MemoryConsumer::new("child").register(&pool);
+
+        child.try_grow(60).unwrap();
+        child.try_grow(15).unwrap();
+        assert_eq!(parent.reserved(), 115);
+        assert!(contender.try_grow(1).is_err());
+
+        workspace.close();
+        drop(child);
+        assert_eq!(parent.reserved(), 40);
     }
 
     #[test]
