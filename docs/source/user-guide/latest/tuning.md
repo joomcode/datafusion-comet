@@ -614,6 +614,8 @@ prices per row from a table of measurements: `c0 + k0*L + k1*L*min(L, 600)` ns n
 - `agg` for hash, object hash and sort aggregates, over the leaves of the grouping keys, half for each phase of a
   two-phase aggregate, plus the price of the class of each aggregate function (`aggDeclarative`, `aggCollectList`,
   `aggCollectSet`, `aggPercentile`, `aggPercentileApprox`, `aggOther`) and `aggObjectHash` for an object hash aggregate.
+  The leaves of grouping keys holding an array add `aggArrayKey`, also half for each phase, and the leaves of a grouping
+  key computed through the JVM codegen dispatcher add `codegenDispatch` once, in the phase that computes it.
 - `window` over the leaves of its input, plus `windowAggregate`, `windowOffset` or `windowRank` for each window
   function, at `L` the number of window functions; `wglPartial` and `wglFinal` for window group limits.
 - `expand`, per projection, and `generate`: free with Spark's whole-stage codegen, `expandNoCodegen` and
