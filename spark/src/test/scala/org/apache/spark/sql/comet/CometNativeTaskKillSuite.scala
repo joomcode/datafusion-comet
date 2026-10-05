@@ -165,10 +165,13 @@ class CometNativeTaskKillSuite extends CometTestBase {
         .selectExpr("id * 0 AS k", "id AS p")
         .join(broadcast(build), "k")
         .agg(sum(col("p") + col("b")))
-      assertRunsNatively(
-        df,
-        classOf[CometSparkToColumnarExec],
-        classOf[CometBroadcastHashJoinExec])
+      assertRunsNatively(df, classOf[CometSparkToColumnarExec])
+      val plan = df.queryExecution.executedPlan
+      assert(
+        plan.collectFirst {
+          case j @ (_: CometBroadcastHashJoinExec | _: CometBroadcastNestedLoopJoinExec) => j
+        }.isDefined,
+        s"expected a native broadcast join in\n$plan")
       assertKilledPromptly(df)
     }
   }

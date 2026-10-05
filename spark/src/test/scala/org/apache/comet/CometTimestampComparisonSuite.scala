@@ -53,7 +53,7 @@ class CometTimestampComparisonSuite extends CometTestBase {
 
   private def inZones(zones: Seq[String])(f: => Unit): Unit =
     zones.foreach { zone =>
-      withSQLConf("spark.sql.session.timeZone" -> zone) {
+      withSQLConf("spark.sql.session.timeZone" -> zone, "spark.sql.ansi.enabled" -> "false") {
         withClue(s"session time zone $zone: ")(f)
       }
     }
