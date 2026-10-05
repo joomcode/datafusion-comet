@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+pub mod cancellation;
 mod error;
 pub mod offset_extents;
 mod query_context;

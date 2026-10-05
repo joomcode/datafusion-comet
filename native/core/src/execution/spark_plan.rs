@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use crate::execution::operators::CancellableExec;
 use arrow::datatypes::SchemaRef;
 use datafusion::physical_plan::ExecutionPlan;
 use std::sync::Arc;
@@ -44,7 +45,7 @@ impl SparkPlan {
     ) -> Self {
         Self {
             plan_id,
-            native_plan,
+            native_plan: CancellableExec::wrap(native_plan),
             children,
             additional_native_plans: vec![],
         }
@@ -63,7 +64,7 @@ impl SparkPlan {
         }
         Self {
             plan_id,
-            native_plan,
+            native_plan: CancellableExec::wrap(native_plan),
             children,
             additional_native_plans: accum,
         }

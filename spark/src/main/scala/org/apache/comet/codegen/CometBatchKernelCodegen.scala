@@ -327,7 +327,11 @@ object CometBatchKernelCodegen extends Logging with CometExprTraitShim with Come
          |    // `splitExpressions` also take `InternalRow row` as a parameter; `this` flows
          |    // implicitly via INPUT_ROW.
          |    org.apache.spark.sql.catalyst.InternalRow row = this;
+         |    org.apache.spark.TaskContext killCheckContext = org.apache.spark.TaskContext.get();
          |    for (int i = 0; i < numRows; i++) {
+         |      if ((i & 255) == 0 && killCheckContext != null) {
+         |        killCheckContext.killTaskIfInterrupted();
+         |      }
          |      this.rowIdx = i;
          |      $perRowBody
          |    }

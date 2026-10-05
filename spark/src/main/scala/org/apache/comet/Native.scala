@@ -139,6 +139,16 @@ class Native extends NativeBase {
   @native def releasePlan(plan: Long): Unit
 
   /**
+   * Cancel a native query plan whose task has been killed: an `executePlan` in progress, or the
+   * next one, fails at its next check instead of running the plan to completion. Safe to call
+   * from any thread until the plan is released.
+   *
+   * @param plan
+   *   the address to native query plan.
+   */
+  @native def cancelPlan(plan: Long): Unit
+
+  /**
    * Used by Comet shuffle external sorter to write sorted records to disk.
    *
    * @param addresses

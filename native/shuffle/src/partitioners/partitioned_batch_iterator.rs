@@ -21,6 +21,8 @@ use arrow::compute::{concat_batches, interleave_record_batch};
 use datafusion::common::utils::proxy::VecAllocExt;
 use datafusion::common::DataFusionError;
 use datafusion::physical_plan::metrics::Time;
+use datafusion_comet_common::cancellation::{cancelled_error, PlanCancellation};
+use std::sync::Arc;
 
 /// A contiguous run of rows within one buffered batch, bound for one output partition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +93,7 @@ pub(super) struct PartitionedBatchesProducer {
     buffered_batches: Vec<RecordBatch>,
     partition_indices: PartitionIndices,
     batch_size: usize,
+    cancellation: Option<Arc<PlanCancellation>>,
 }
 
 impl PartitionedBatchesProducer {
@@ -103,7 +106,15 @@ impl PartitionedBatchesProducer {
             partition_indices: indices,
             buffered_batches,
             batch_size,
+            cancellation: None,
         }
+    }
+
+    /// Makes every partition's batches end with an error once the plan is cancelled, so that
+    /// a spill or the final write of a killed task stops at its next batch.
+    pub(super) fn with_cancellation(mut self, cancellation: Option<Arc<PlanCancellation>>) -> Self {
+        self.cancellation = cancellation;
+        self
     }
 
     /// References to all buffered batches. Build this once per write cycle and share it
@@ -129,19 +140,23 @@ impl PartitionedBatchesProducer {
             self.buffered_batches.len(),
             "refs slice must cover every buffered batch"
         );
-        match &self.partition_indices {
-            PartitionIndices::Rows(indices) => PartitionedBatchIterator::Rows(RowIterator::new(
+        let batches = match &self.partition_indices {
+            PartitionIndices::Rows(indices) => PartitionBatches::Rows(RowIterator::new(
                 &indices[partition_id],
                 refs,
                 self.batch_size,
                 interleave_time,
             )),
-            PartitionIndices::Runs(runs) => PartitionedBatchIterator::Runs(RunIterator::new(
+            PartitionIndices::Runs(runs) => PartitionBatches::Runs(RunIterator::new(
                 &runs[partition_id],
                 refs,
                 self.batch_size,
                 interleave_time,
             )),
+        };
+        PartitionedBatchIterator {
+            batches,
+            cancellation: self.cancellation.as_deref(),
         }
     }
 }
@@ -150,7 +165,12 @@ impl PartitionedBatchesProducer {
 ///
 /// One concrete type covering both index shapes, because [`crate::writers::PartitionWriter`] is
 /// generic over a single iterator type rather than taking a trait object.
-pub(crate) enum PartitionedBatchIterator<'a> {
+pub(crate) struct PartitionedBatchIterator<'a> {
+    batches: PartitionBatches<'a>,
+    cancellation: Option<&'a PlanCancellation>,
+}
+
+enum PartitionBatches<'a> {
     Rows(RowIterator<'a>),
     Runs(RunIterator<'a>),
 }
@@ -159,9 +179,15 @@ impl Iterator for PartitionedBatchIterator<'_> {
     type Item = datafusion::common::Result<RecordBatch>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Rows(iter) => iter.next(),
-            Self::Runs(iter) => iter.next(),
+        if self
+            .cancellation
+            .is_some_and(PlanCancellation::is_cancelled)
+        {
+            return Some(Err(cancelled_error()));
+        }
+        match &mut self.batches {
+            PartitionBatches::Rows(iter) => iter.next(),
+            PartitionBatches::Runs(iter) => iter.next(),
         }
     }
 }

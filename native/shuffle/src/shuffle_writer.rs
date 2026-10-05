@@ -41,6 +41,7 @@ use datafusion::{
         DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
     },
 };
+use datafusion_comet_common::cancellation::PlanCancellation;
 use datafusion_comet_jni_bridge::ShufflePartitionPusher;
 use futures::{StreamExt, TryStreamExt};
 use std::{
@@ -475,16 +476,19 @@ fn create_repartitioner<T: PartitionWriter + 'static>(
             writer, metrics,
         )))
     } else {
-        Ok(Box::new(MultiPartitionShuffleRepartitioner::try_new(
-            partition,
-            writer,
-            partitioning,
-            metrics,
-            context.runtime_env(),
-            context.session_config().batch_size(),
-            tracing_enabled,
-            max_buffer_bytes,
-        )?))
+        Ok(Box::new(
+            MultiPartitionShuffleRepartitioner::try_new(
+                partition,
+                writer,
+                partitioning,
+                metrics,
+                context.runtime_env(),
+                context.session_config().batch_size(),
+                tracing_enabled,
+                max_buffer_bytes,
+            )?
+            .with_cancellation(PlanCancellation::of(context)),
+        ))
     }
 }
 

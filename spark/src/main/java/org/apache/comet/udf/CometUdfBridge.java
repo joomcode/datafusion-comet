@@ -128,6 +128,9 @@ public class CometUdfBridge {
     // ground truth for this call. Any value already on the thread is either (a) the same object
     // on a Spark task thread, or (b) stale from a prior task on a reused Tokio worker. The same
     // reasoning applies to the propagated `classLoader`.
+    if (taskContext != null) {
+      taskContext.killTaskIfInterrupted();
+    }
     TaskContext prior = TaskContext.get();
     if (taskContext != null) {
       CometTaskContextShim.set(taskContext);

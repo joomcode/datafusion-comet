@@ -28,6 +28,7 @@ use datafusion::common::utils::proxy::VecAllocExt;
 use datafusion::common::{DataFusionError, HashSet};
 use datafusion::execution::memory_pool::{MemoryConsumer, MemoryReservation};
 use datafusion::execution::runtime_env::RuntimeEnv;
+use datafusion_comet_common::cancellation::PlanCancellation;
 use datafusion_comet_common::tracing::{with_trace, with_trace_async};
 use datafusion_comet_spark_expr::murmur3::create_murmur3_hashes;
 use itertools::Itertools;
@@ -128,6 +129,7 @@ pub(crate) struct MultiPartitionShuffleRepartitioner<T: PartitionWriter> {
     /// Rows this task has placed so far, which is the ordinal positional round robin keys on.
     /// A `u64` because it counts a whole task's input, not one batch.
     row_seq: u64,
+    cancellation: Option<Arc<PlanCancellation>>,
 }
 
 /// Sum of the capacities of the backing buffers reachable from `batch` whose start address is
@@ -253,7 +255,13 @@ impl<T: PartitionWriter> MultiPartitionShuffleRepartitioner<T> {
             tracing_enabled,
             pinned_buffers: HashSet::new(),
             row_seq: 0,
+            cancellation: None,
         })
+    }
+
+    pub(crate) fn with_cancellation(mut self, cancellation: Option<Arc<PlanCancellation>>) -> Self {
+        self.cancellation = cancellation;
+        self
     }
 
     /// Shuffles rows in input batch into corresponding partition buffer.
@@ -614,6 +622,7 @@ impl<T: PartitionWriter> MultiPartitionShuffleRepartitioner<T> {
         let empty = self.partition_indices.empty_like();
         let indices = std::mem::replace(&mut self.partition_indices, empty);
         PartitionedBatchesProducer::new(buffered_batches, indices, self.batch_size)
+            .with_cancellation(self.cancellation.clone())
     }
 
     pub(crate) fn spill(&mut self, unreserved_bytes: usize) -> datafusion::common::Result<()> {

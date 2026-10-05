@@ -25,6 +25,8 @@ pub use iceberg_scan::*;
 pub use scan::*;
 
 mod aligned_stream_reader;
+mod cancellable;
+pub(crate) use cancellable::CancellableExec;
 mod copy;
 mod dynamic_filter;
 pub(crate) use dynamic_filter::DynamicFilterJoinExec;
