@@ -4114,3 +4114,114 @@ mod native_sort_spill_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod aggregate_offset_overflow_tests {
+    use arrow::array::{Int32Array, StringArray};
+    use arrow::buffer::{Buffer, OffsetBuffer};
+    use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+    use arrow::record_batch::RecordBatch;
+    use datafusion::datasource::memory::MemorySourceConfig;
+    use datafusion::execution::TaskContext;
+    use datafusion::physical_expr::expressions::col;
+    use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
+    use datafusion::physical_plan::ExecutionPlan;
+    use datafusion::prelude::SessionConfig;
+    use futures::StreamExt;
+    use std::sync::Arc;
+
+    const KEY_BYTES: usize = 1 << 20;
+    const ROWS: usize = 1024;
+    const BATCHES: usize = 3;
+
+    /// `(day, product_id)` batches of distinct 1 MiB keys, 1 GiB per batch and 3 GiB in all,
+    /// sharing one buffer of pseudo-random letters so that the input itself stays at 1 GiB.
+    fn wide_keys(schema: &SchemaRef) -> Vec<RecordBatch> {
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let letters: Vec<u8> = (0..ROWS * KEY_BYTES + BATCHES)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                b'a' + (seed % 26) as u8
+            })
+            .collect();
+        let values = Buffer::from_vec(letters);
+        (0..BATCHES)
+            .map(|batch| {
+                let offsets = OffsetBuffer::new(
+                    (0..=ROWS)
+                        .map(|row| (batch + row * KEY_BYTES) as i32)
+                        .collect(),
+                );
+                RecordBatch::try_new(
+                    Arc::clone(schema),
+                    vec![
+                        Arc::new(Int32Array::from(vec![20_000; ROWS])),
+                        Arc::new(StringArray::try_new(offsets, values.clone(), None).unwrap()),
+                    ],
+                )
+                .unwrap()
+            })
+            .collect()
+    }
+
+    /// `SELECT DISTINCT` of `columns` in one aggregate of `mode`, with nothing but the
+    /// 32-bit offsets of its group keys to stop it from holding every group.
+    async fn distinct_wide_keys(
+        mode: AggregateMode,
+        columns: &[&str],
+    ) -> datafusion::common::Result<usize> {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("day", DataType::Int32, false),
+            Field::new("product_id", DataType::Utf8, false),
+        ]));
+        let input =
+            MemorySourceConfig::try_new_exec(&[wide_keys(&schema)], Arc::clone(&schema), None)?;
+        let group_by = PhysicalGroupBy::new_single(
+            columns
+                .iter()
+                .map(|name| Ok((col(name, &schema)?, name.to_string())))
+                .collect::<datafusion::common::Result<_>>()?,
+        );
+        let aggregate = AggregateExec::try_new(mode, group_by, vec![], vec![], input, schema)?;
+        let ctx =
+            TaskContext::default().with_session_config(SessionConfig::new().with_batch_size(64));
+        let mut stream = aggregate.execute(0, Arc::new(ctx))?;
+        let mut rows = 0;
+        while let Some(batch) = stream.next().await {
+            rows += batch?.num_rows();
+        }
+        Ok(rows)
+    }
+
+    #[tokio::test]
+    async fn partial_aggregate_emits_before_group_keys_overflow_32_bit_offsets() {
+        assert_eq!(
+            distinct_wide_keys(AggregateMode::Partial, &["day", "product_id"])
+                .await
+                .unwrap(),
+            ROWS * BATCHES
+        );
+    }
+
+    #[tokio::test]
+    async fn final_aggregate_spills_before_group_keys_overflow_32_bit_offsets() {
+        assert_eq!(
+            distinct_wide_keys(AggregateMode::Final, &["day", "product_id"])
+                .await
+                .unwrap(),
+            ROWS * BATCHES
+        );
+    }
+
+    #[tokio::test]
+    async fn single_key_aggregate_emits_before_group_keys_overflow_32_bit_offsets() {
+        assert_eq!(
+            distinct_wide_keys(AggregateMode::Partial, &["product_id"])
+                .await
+                .unwrap(),
+            ROWS * BATCHES
+        );
+    }
+}

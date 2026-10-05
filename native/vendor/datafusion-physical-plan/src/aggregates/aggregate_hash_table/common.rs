@@ -185,12 +185,27 @@ impl<AggrMode> AggregateHashTable<AggrMode> {
     /// Each aggregation mode chooses a different `aggregate_fn` according to its
     /// semantics. For example, partial aggregation takes raw inputs, and update them
     /// into stored partial states, so [`GroupsAccumulator::update_batch`] is used.
+    ///
+    /// If the batch's group keys could overflow the 32-bit offsets of the stored group
+    /// values, every group accumulated so far is first taken out as by
+    /// [`Self::take_state_batch`] and returned, for the caller to emit or spill.
     pub(super) fn aggregate_batch_inner(
         &mut self,
         batch: &RecordBatch,
         aggregate_fn: AggregateBatchFn,
-    ) -> Result<()> {
+    ) -> Result<Option<RecordBatch>> {
         let evaluated_batch = self.evaluate_batch(batch)?;
+        let state = self.state.building();
+        let taken = if !state.group_values.is_empty()
+            && !evaluated_batch
+                .grouping_set_args
+                .iter()
+                .all(|group_values| state.group_values.has_offset_room(group_values))
+        {
+            self.take_state_batch()?
+        } else {
+            None
+        };
         let state = self.state.building_mut();
 
         let _timer = self.group_by_metrics.aggregation_time.timer();
@@ -210,7 +225,7 @@ impl<AggrMode> AggregateHashTable<AggrMode> {
             }
         }
 
-        Ok(())
+        Ok(taken)
     }
 
     /// Materializes the full output once, then returns it downstream incrementally
