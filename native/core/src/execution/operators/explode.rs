@@ -60,6 +60,7 @@ use arrow::array::{
     LargeListArray, LargeListViewArray, ListArray, ListViewArray, PrimitiveArray, Scalar,
     StructArray,
 };
+use arrow::buffer::OffsetBuffer;
 use arrow::compute::kernels::length::length;
 use arrow::compute::kernels::zip::zip;
 use arrow::compute::{cast, is_not_null, kernels, sum};
@@ -89,6 +90,9 @@ use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, EmptyRecordBatchStream, ExecutionPlan, ExecutionPlanProperties,
     PlanProperties, RecordBatchStream, SendableRecordBatchStream,
 };
+use datafusion_comet_common::offset_extents::{
+    max_row_offset_extents, offset_extents, MAX_OFFSET_EXTENT,
+};
 use futures::{Stream, StreamExt};
 use std::cmp::{self, Ordering};
 use std::pin::Pin;
@@ -106,6 +110,7 @@ pub struct ExplodeExec {
     options: UnnestOptions,
     metrics: ExecutionPlanMetricsSet,
     cache: Arc<PlanProperties>,
+    offset_limit: usize,
 }
 
 impl ExplodeExec {
@@ -131,7 +136,14 @@ impl ExplodeExec {
             options,
             metrics: ExecutionPlanMetricsSet::new(),
             cache: Arc::new(cache),
+            offset_limit: MAX_OFFSET_EXTENT,
         })
+    }
+
+    #[cfg(test)]
+    fn with_offset_limit(mut self, offset_limit: usize) -> Self {
+        self.offset_limit = offset_limit;
+        self
     }
 
     /// Compute the plan properties, keeping whatever the child guarantees about the columns
@@ -273,6 +285,7 @@ impl ExecutionPlan for ExplodeExec {
             input_batches: MetricBuilder::new(&self.metrics).counter("input_batches", partition),
             input_rows: MetricBuilder::new(&self.metrics).counter("input_rows", partition),
             batch_size,
+            offset_limit: self.offset_limit,
             pending_input: None,
         });
 
@@ -308,6 +321,13 @@ struct PendingInput {
     /// case the whole remaining input is unnested in one call and only the output is split.
     /// See [`ExplodeStream::predict_output_lens`].
     output_lens: Option<PrimitiveArray<Int64Type>>,
+    /// Per input row, the largest extent it has in any 32-bit offset buffer of the columns that
+    /// unnesting repeats, when repeating them as often as the input asks could overflow one.
+    /// See [`ExplodeStream::repeated_row_extents`].
+    row_extents: Option<Vec<usize>>,
+    /// Output rows of the row at `row_offset` already unnested, when that row alone repeats
+    /// too much to be unnested in one build.
+    element_offset: usize,
 }
 
 impl PendingInput {
@@ -316,27 +336,85 @@ impl PendingInput {
     }
 
     /// How many input rows to unnest next so the resulting batch holds at most `batch_size`
-    /// rows.
+    /// rows and repeats the other columns no further than `offset_limit`.
     ///
     /// Always returns at least 1 while rows remain, so the stream always makes progress: a
-    /// single input row is never split across output batches, so one row whose array is
-    /// longer than `batch_size` still produces one oversized build, which `BatchSplitStream`
-    /// slices down on the way out.
-    fn next_chunk_rows(&self, batch_size: usize) -> usize {
+    /// single input row is only split across builds when repeating it would overflow an offset
+    /// buffer (see [`Self::row_split`]), so one row whose array is longer than `batch_size`
+    /// still produces one oversized build, which `BatchSplitStream` slices down on the way out.
+    fn next_chunk_rows(&self, batch_size: usize, offset_limit: usize) -> usize {
         let Some(output_lens) = &self.output_lens else {
             return self.remaining_rows();
         };
 
         let lens = &output_lens.values()[self.row_offset..];
+        let extents = self.row_extents.as_deref().map(|e| &e[self.row_offset..]);
         let batch_size = batch_size as i64;
         let mut output_rows = 0i64;
+        let mut repeated = 0usize;
         for (rows, len) in lens.iter().enumerate() {
-            if rows > 0 && output_rows + len > batch_size {
+            let added = extents.map_or(0, |e| e[rows].saturating_mul(*len as usize));
+            if rows > 0 && (output_rows + len > batch_size || repeated + added > offset_limit) {
                 return rows;
             }
             output_rows += len;
+            repeated += added;
         }
         lens.len()
+    }
+
+    /// How many output rows of the row at `row_offset` to unnest per build, when repeating the
+    /// other columns for all of them at once would overflow a 32-bit offset buffer.
+    fn row_split(&self, offset_limit: usize) -> Option<usize> {
+        let extent = self.row_extents.as_ref()?[self.row_offset];
+        let len = self.output_lens.as_ref()?.value(self.row_offset) as usize;
+        (self.element_offset > 0 || extent.saturating_mul(len) > offset_limit)
+            .then(|| (offset_limit / extent.max(1)).max(1))
+    }
+
+    /// The next `step` output rows of the row at `row_offset`, as that row with each unnested
+    /// list narrowed to the elements those output rows come from, and their count.
+    fn next_row_part(
+        &mut self,
+        step: usize,
+        list_columns: &[ListUnnest],
+    ) -> Result<(RecordBatch, PrimitiveArray<Int64Type>)> {
+        let len = self.output_lens.as_ref().unwrap().value(self.row_offset) as usize;
+        let start = self.element_offset;
+        let end = (start + step).min(len);
+        let row = self.batch.slice(self.row_offset, 1);
+        let mut columns = row.columns().to_vec();
+        for unnest in list_columns {
+            let list = columns[unnest.index_in_input_schema].as_list::<i32>();
+            let DataType::List(field) = list.data_type() else {
+                return internal_err!("expected a List column to unnest, got {}", list.data_type());
+            };
+            let offsets = list.value_offsets();
+            let (first, last) = (offsets[0] as usize, offsets[1] as usize);
+            let narrowed = ListArray::try_new(
+                Arc::clone(field),
+                OffsetBuffer::new(
+                    vec![
+                        (first + start).min(last) as i32,
+                        (first + end).min(last) as i32,
+                    ]
+                    .into(),
+                ),
+                Arc::clone(list.values()),
+                list.nulls().cloned(),
+            )?;
+            columns[unnest.index_in_input_schema] = Arc::new(narrowed);
+        }
+        if end == len {
+            self.row_offset += 1;
+            self.element_offset = 0;
+        } else {
+            self.element_offset = end;
+        }
+        Ok((
+            RecordBatch::try_new(row.schema(), columns)?,
+            PrimitiveArray::from(vec![(end - start) as i64]),
+        ))
     }
 
     /// The per-row output lengths covering the next `rows` input rows, so the unnesting does
@@ -360,6 +438,8 @@ struct ExplodeStream {
     input_rows: Count,
     /// Target number of rows per output batch, from `datafusion.execution.batch_size`.
     batch_size: usize,
+    /// The extent a build may give any 32-bit offset buffer of the columns it repeats.
+    offset_limit: usize,
     /// Rows of the current input batch that have not been unnested yet. Unnesting one input
     /// batch can produce arbitrarily many output rows, so the input is consumed in chunks
     /// small enough that each chunk's output stays near `batch_size`.
@@ -367,7 +447,8 @@ struct ExplodeStream {
     /// Note the scope of the memory bound this buys: chunking removes the input batch size
     /// from the peak, but not the length of an individual list. A single row whose list is
     /// longer than `batch_size`, and recursive unnesting (where the expansion cannot be
-    /// predicted up front), both still materialize their full expansion in one build.
+    /// predicted up front), both still materialize their full expansion in one build, unless
+    /// that build would overflow an offset buffer of a repeated column.
     pending_input: Option<PendingInput>,
 }
 
@@ -394,10 +475,20 @@ impl ExplodeStream {
                 // always consumes at least one row, so it is dropped the moment it drains.
                 debug_assert!(pending.remaining_rows() > 0);
 
-                let rows = pending.next_chunk_rows(self.batch_size);
-                let chunk = pending.batch.slice(pending.row_offset, rows);
-                let chunk_lengths = pending.chunk_lengths(rows);
-                pending.row_offset += rows;
+                let (chunk, chunk_lengths) = match pending.row_split(self.offset_limit) {
+                    Some(step) => {
+                        let (part, lengths) =
+                            pending.next_row_part(step, &self.list_type_columns)?;
+                        (part, Some(lengths))
+                    }
+                    None => {
+                        let rows = pending.next_chunk_rows(self.batch_size, self.offset_limit);
+                        let chunk = pending.batch.slice(pending.row_offset, rows);
+                        let chunk_lengths = pending.chunk_lengths(rows);
+                        pending.row_offset += rows;
+                        (chunk, chunk_lengths)
+                    }
+                };
                 let drained = pending.remaining_rows() == 0;
 
                 let timer = self.baseline_metrics.elapsed_compute().timer();
@@ -437,12 +528,15 @@ impl ExplodeStream {
                     self.input_rows.add(batch.num_rows());
                     if batch.num_rows() > 0 {
                         let timer = self.baseline_metrics.elapsed_compute().timer();
-                        let output_lens = self.predict_output_lens(&batch);
+                        let output_lens = self.predict_output_lens(&batch)?;
+                        let row_extents = self.repeated_row_extents(&batch, output_lens.as_ref());
                         timer.done();
                         self.pending_input = Some(PendingInput {
                             batch,
                             row_offset: 0,
-                            output_lens: output_lens?,
+                            output_lens,
+                            row_extents,
+                            element_offset: 0,
                         });
                     }
                 }
@@ -503,6 +597,54 @@ impl ExplodeStream {
         }
         let longest_length = find_longest_length(&list_arrays, &self.options)?;
         Ok(Some(longest_length.as_primitive::<Int64Type>().clone()))
+    }
+
+    /// The per-row extents [`PendingInput::row_extents`] describes, or `None` when no build of
+    /// `batch` can overflow: every build then repeats each row at most the longest output length
+    /// times, which bounds what it adds to an offset buffer by that length times the buffer's
+    /// extent in the whole batch. Rows are only bounded or split for a single level of plain
+    /// `List` columns, each unnested once, which is every explode Comet plans.
+    fn repeated_row_extents(
+        &self,
+        batch: &RecordBatch,
+        output_lens: Option<&PrimitiveArray<Int64Type>>,
+    ) -> Option<Vec<usize>> {
+        let output_lens = output_lens?;
+        let unnested: HashSet<usize> = self
+            .list_type_columns
+            .iter()
+            .map(|unnest| unnest.index_in_input_schema)
+            .collect();
+        if unnested.len() != self.list_type_columns.len()
+            || unnested
+                .iter()
+                .any(|&index| !matches!(batch.column(index).data_type(), DataType::List(_)))
+        {
+            return None;
+        }
+        let repeated: Vec<&ArrayRef> = batch
+            .columns()
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !unnested.contains(index))
+            .map(|(_, column)| column)
+            .collect();
+        let longest = output_lens.values().iter().copied().max().unwrap_or(0) as usize;
+        let mut extents = vec![];
+        for column in &repeated {
+            offset_extents(column.as_ref(), &mut extents);
+        }
+        if extents
+            .iter()
+            .all(|&e| e.saturating_mul(longest) <= self.offset_limit)
+        {
+            return None;
+        }
+        let mut row_extents = vec![0; batch.num_rows()];
+        for column in repeated {
+            max_row_offset_extents(column.as_ref(), &mut row_extents);
+        }
+        Some(row_extents)
     }
 }
 
@@ -1573,6 +1715,7 @@ mod tests {
             input_batches: MetricBuilder::new(&metrics).counter("input_batches", 0),
             input_rows: MetricBuilder::new(&metrics).counter("input_rows", 0),
             batch_size: 4,
+            offset_limit: MAX_OFFSET_EXTENT,
             pending_input: None,
         };
 
@@ -1876,5 +2019,236 @@ mod tests {
             Some(vec![true, false, true, true]),
         );
         assert_output_lens(with_nulls.slice(1, 3), [&[0, 0, 3], &[1, 0, 3], &[1, 1, 3]]);
+    }
+
+    /// One row whose `status_history` holds a `variant_id` of `bytes` bytes, alongside a list
+    /// of `variants` ints to explode, as in a proposal exploded by its target variants.
+    fn price_history_row(
+        values: &arrow::buffer::Buffer,
+        bytes: usize,
+        variants: i32,
+    ) -> RecordBatch {
+        let variant_id: ArrayRef = Arc::new(unsafe {
+            arrow::array::StringArray::new_unchecked(
+                OffsetBuffer::new(vec![0, bytes as i32].into()),
+                values.clone(),
+                None,
+            )
+        });
+        let price = arrow::datatypes::Fields::from(vec![
+            Field::new("variant_id", DataType::Utf8, true),
+            Field::new("price", DataType::Int64, true),
+        ]);
+        let prices = StructArray::new(
+            price.clone(),
+            vec![variant_id, Arc::new(Int64Array::from(vec![1]))],
+            None,
+        );
+        let price_list = Arc::new(Field::new_list_field(DataType::Struct(price), true));
+        let merchant_variant_prices: ArrayRef = Arc::new(ListArray::new(
+            Arc::clone(&price_list),
+            OffsetBuffer::new(vec![0, 1].into()),
+            Arc::new(prices),
+            None,
+        ));
+        let status = arrow::datatypes::Fields::from(vec![
+            Field::new("status", DataType::Utf8, true),
+            Field::new("updated_time", DataType::Int64, true),
+            Field::new("merchant_variant_prices", DataType::List(price_list), true),
+        ]);
+        let history = StructArray::new(
+            status.clone(),
+            vec![
+                Arc::new(arrow::array::StringArray::from(vec!["pending"])),
+                Arc::new(Int64Array::from(vec![7])),
+                merchant_variant_prices,
+            ],
+            None,
+        );
+        let history_list = Arc::new(Field::new_list_field(DataType::Struct(status), true));
+        let status_history = ListArray::new(
+            Arc::clone(&history_list),
+            OffsetBuffer::new(vec![0, 1].into()),
+            Arc::new(history),
+            None,
+        );
+        let targets = ListArray::from_iter_primitive::<Int32Type, _, _>(vec![Some(
+            (0..variants).map(Some).collect::<Vec<_>>(),
+        )]);
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("status_history", DataType::List(history_list), true),
+            Field::new("targets", targets.data_type().clone(), true),
+        ]));
+        RecordBatch::try_new(schema, vec![Arc::new(status_history), Arc::new(targets)]).unwrap()
+    }
+
+    #[tokio::test]
+    async fn repeated_nested_strings_never_overflow_32_bit_offsets() {
+        let bytes = 600 << 20;
+        let values = arrow::buffer::Buffer::from(vec![b'v'; bytes]);
+        let input = price_history_row(&values, bytes, 4);
+        let output_schema = Arc::new(Schema::new(vec![
+            input.schema().field(0).clone(),
+            Field::new("targets", DataType::Int32, true),
+        ]));
+        let source =
+            MemorySourceConfig::try_new_exec(&[vec![input.clone()]], input.schema(), None).unwrap();
+        let explode = ExplodeExec::new(
+            source,
+            vec![ListUnnest {
+                index_in_input_schema: 1,
+                depth: 1,
+            }],
+            vec![],
+            output_schema,
+            UnnestOptions::new().with_null_handling(NullHandling::Drop),
+        )
+        .unwrap();
+        let mut stream = explode
+            .execute(0, Arc::new(TaskContext::default()))
+            .unwrap();
+        let mut targets = vec![];
+        while let Some(batch) = stream.next().await {
+            let batch = batch.unwrap();
+            let history = batch.column(0).as_list::<i32>();
+            assert_eq!(history.value_length(0), 1);
+            let row = history.value(0);
+            let mvp = row.as_struct().column(2).as_list::<i32>().value(0);
+            assert_eq!(
+                mvp.as_struct().column(0).as_string::<i32>().value_length(0) as usize,
+                bytes
+            );
+            targets.extend(batch.column(1).as_primitive::<Int32Type>().iter());
+        }
+        assert_eq!(targets, seq(4));
+    }
+
+    async fn explode_with_offset_limit(
+        input: RecordBatch,
+        lists: &[usize],
+        output_schema: SchemaRef,
+        offset_limit: usize,
+    ) -> Vec<RecordBatch> {
+        let source =
+            MemorySourceConfig::try_new_exec(&[vec![input.clone()]], input.schema(), None).unwrap();
+        let explode = ExplodeExec::new(
+            source,
+            lists
+                .iter()
+                .map(|&index_in_input_schema| ListUnnest {
+                    index_in_input_schema,
+                    depth: 1,
+                })
+                .collect(),
+            vec![],
+            output_schema,
+            UnnestOptions::new().with_null_handling(NullHandling::Drop),
+        )
+        .unwrap()
+        .with_offset_limit(offset_limit);
+        datafusion::physical_plan::common::collect(
+            explode
+                .execute(0, Arc::new(TaskContext::default()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    fn strings(batches: &[RecordBatch], column: usize) -> Vec<String> {
+        batches
+            .iter()
+            .flat_map(|b| {
+                b.column(column)
+                    .as_string::<i32>()
+                    .iter()
+                    .map(|v| v.unwrap().to_owned())
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn bounds_repeated_offsets_across_rows_and_within_a_row() {
+        let names = arrow::array::StringArray::from(vec!["aaaa", "bbbbbbbbbb", "c"]);
+        let lists = list_batch(&[Some(3), Some(5), Some(2)]);
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("s", DataType::Utf8, true),
+            lists.schema().field(0).clone(),
+        ]));
+        let input =
+            RecordBatch::try_new(schema, vec![Arc::new(names), Arc::clone(lists.column(0))])
+                .unwrap();
+        let output_schema = Arc::new(Schema::new(vec![
+            Field::new("s", DataType::Utf8, true),
+            Field::new("l", DataType::Int32, true),
+        ]));
+        let batches = explode_with_offset_limit(input, &[1], output_schema, 20).await;
+        assert_eq!(sizes(&batches), vec![3, 2, 2, 1, 2]);
+        for batch in &batches {
+            let s = batch.column(0).as_string::<i32>();
+            assert!(s.value_offsets()[s.len()] - s.value_offsets()[0] <= 20);
+        }
+        let expected: Vec<String> = [("aaaa", 3), ("bbbbbbbbbb", 5), ("c", 2)]
+            .iter()
+            .flat_map(|(s, n)| std::iter::repeat_n(s.to_string(), *n))
+            .collect();
+        assert_eq!(strings(&batches, 0), expected);
+        let values: Vec<Option<i32>> = batches
+            .iter()
+            .flat_map(|b| {
+                b.column(1)
+                    .as_primitive::<Int32Type>()
+                    .iter()
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(values, seq(10));
+    }
+
+    #[tokio::test]
+    async fn splitting_a_row_keeps_parallel_lists_aligned() {
+        let names = arrow::array::StringArray::from(vec!["xxxxxxxx"]);
+        let positions = list_batch(&[Some(5)]);
+        let tags = ListArray::from_iter_primitive::<Int32Type, _, _>(vec![Some(vec![
+            Some(10),
+            Some(11),
+            Some(12),
+        ])]);
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("s", DataType::Utf8, true),
+            Field::new("p", positions.column(0).data_type().clone(), true),
+            Field::new("t", tags.data_type().clone(), true),
+        ]));
+        let input = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(names),
+                Arc::clone(positions.column(0)),
+                Arc::new(tags),
+            ],
+        )
+        .unwrap();
+        let output_schema = Arc::new(Schema::new(vec![
+            Field::new("s", DataType::Utf8, true),
+            Field::new("p", DataType::Int32, true),
+            Field::new("t", DataType::Int32, true),
+        ]));
+        let batches = explode_with_offset_limit(input, &[1, 2], output_schema, 16).await;
+        assert_eq!(sizes(&batches), vec![2, 2, 1]);
+        let column = |i: usize| -> Vec<Option<i32>> {
+            batches
+                .iter()
+                .flat_map(|b| {
+                    b.column(i)
+                        .as_primitive::<Int32Type>()
+                        .iter()
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+        assert_eq!(column(1), seq(5));
+        assert_eq!(column(2), vec![Some(10), Some(11), Some(12), None, None]);
+        assert_eq!(strings(&batches, 0), vec!["xxxxxxxx".to_owned(); 5]);
     }
 }

@@ -18,6 +18,7 @@
 use arrow::array::RecordBatch;
 use arrow::compute::concat_batches;
 use datafusion::error::Result;
+use datafusion_comet_common::offset_extents::OffsetBudget;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -25,14 +26,20 @@ pub struct ShuffleReadCoalescer {
     target_rows: usize,
     pending: Vec<RecordBatch>,
     pending_rows: usize,
+    offsets: OffsetBudget,
 }
 
 impl ShuffleReadCoalescer {
     pub fn new(target_rows: usize) -> Self {
+        Self::with_offset_budget(target_rows, OffsetBudget::default())
+    }
+
+    fn with_offset_budget(target_rows: usize, offsets: OffsetBudget) -> Self {
         Self {
             target_rows: target_rows.max(1),
             pending: Vec::new(),
             pending_rows: 0,
+            offsets,
         }
     }
 
@@ -46,8 +53,12 @@ impl ShuffleReadCoalescer {
         }
         let flushed = match self.pending.first() {
             Some(first) if !same_schema(first, &batch) => self.take()?,
+            Some(_) if !self.offsets.try_add(batch.columns()) => self.take()?,
             _ => None,
         };
+        if self.pending.is_empty() {
+            self.offsets.try_add(batch.columns());
+        }
         self.pending_rows += batch.num_rows();
         self.pending.push(batch);
         if flushed.is_some() {
@@ -65,6 +76,7 @@ impl ShuffleReadCoalescer {
 
     fn take(&mut self) -> Result<Option<RecordBatch>> {
         self.pending_rows = 0;
+        self.offsets.clear();
         match self.pending.len() {
             0 => Ok(None),
             1 => Ok(self.pending.pop()),
@@ -89,6 +101,7 @@ mod tests {
         Array, ArrayRef, DictionaryArray, Int32Array, Int64Array, ListArray, StringArray,
         StructArray,
     };
+    use arrow::buffer::OffsetBuffer;
     use arrow::datatypes::{DataType, Field, Fields, Int32Type, Schema};
     use arrow::record_batch::RecordBatchOptions;
 
@@ -233,6 +246,89 @@ mod tests {
             vec![12, 2]
         );
         assert!(out.iter().all(|b| b.num_columns() == 0));
+    }
+
+    fn price_history(values: &arrow::buffer::Buffer, bytes: usize) -> RecordBatch {
+        let variant_id: ArrayRef = Arc::new(unsafe {
+            StringArray::new_unchecked(
+                OffsetBuffer::new(vec![0, bytes as i32].into()),
+                values.clone(),
+                None,
+            )
+        });
+        let price = Fields::from(vec![
+            Field::new("variant_id", DataType::Utf8, true),
+            Field::new("price", DataType::Int64, true),
+        ]);
+        let prices = StructArray::new(
+            price.clone(),
+            vec![variant_id, Arc::new(Int64Array::from(vec![1]))],
+            None,
+        );
+        let price_list = Arc::new(Field::new_list_field(DataType::Struct(price), true));
+        let merchant_variant_prices: ArrayRef = Arc::new(ListArray::new(
+            Arc::clone(&price_list),
+            OffsetBuffer::new(vec![0, 1].into()),
+            Arc::new(prices),
+            None,
+        ));
+        let status = Fields::from(vec![
+            Field::new("status", DataType::Utf8, true),
+            Field::new("updated_time", DataType::Int64, true),
+            Field::new("merchant_variant_prices", DataType::List(price_list), true),
+        ]);
+        let history = StructArray::new(
+            status.clone(),
+            vec![
+                Arc::new(StringArray::from(vec!["pending"])),
+                Arc::new(Int64Array::from(vec![7])),
+                merchant_variant_prices,
+            ],
+            None,
+        );
+        let history_list = Arc::new(Field::new_list_field(DataType::Struct(status), true));
+        let status_history = ListArray::new(
+            Arc::clone(&history_list),
+            OffsetBuffer::new(vec![0, 1].into()),
+            Arc::new(history),
+            None,
+        );
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "status_history",
+            DataType::List(history_list),
+            true,
+        )]));
+        RecordBatch::try_new(schema, vec![Arc::new(status_history)]).unwrap()
+    }
+
+    #[test]
+    fn does_not_join_blocks_whose_nested_strings_overflow_32_bit_offsets() {
+        let bytes = (i32::MAX as usize) / 2 + (64 << 20);
+        let values = arrow::buffer::Buffer::from(vec![b'v'; bytes]);
+        let blocks: Vec<_> = (0..2).map(|_| price_history(&values, bytes)).collect();
+        let out = drain(&mut ShuffleReadCoalescer::new(100), blocks.clone());
+        assert_eq!(out, blocks);
+    }
+
+    #[test]
+    fn joins_blocks_only_while_every_nested_offset_fits() {
+        let schema = schema();
+        let blocks: Vec<_> = (0..10).map(|i| block(&schema, i * 4, 4)).collect();
+        let expected = concat_batches(&schema, &blocks).unwrap();
+        let mut coalescer =
+            ShuffleReadCoalescer::with_offset_budget(1000, OffsetBudget::with_limit(30));
+        let out = drain(&mut coalescer, blocks);
+        assert!(out.len() > 1);
+        for batch in &out {
+            let p = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<StructArray>()
+                .unwrap();
+            let tag = p.column(1).as_any().downcast_ref::<StringArray>().unwrap();
+            assert!(tag.value_offsets()[tag.len()] - tag.value_offsets()[0] <= 30);
+        }
+        assert_eq!(concat_batches(&schema, &out).unwrap(), expected);
     }
 
     #[test]

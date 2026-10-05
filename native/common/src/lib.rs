@@ -16,6 +16,7 @@
 // under the License.
 
 mod error;
+pub mod offset_extents;
 mod query_context;
 mod schema;
 pub mod struct_nulls;
