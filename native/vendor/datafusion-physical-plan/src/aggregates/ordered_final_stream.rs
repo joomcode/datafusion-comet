@@ -67,6 +67,9 @@ pub(crate) struct OrderedFinalAggregateStream {
     reservation: MemoryReservation,
     baseline_metrics: BaselineMetrics,
     state: Option<OrderedFinalAggregateState>,
+    /// COMET PATCH: the group keys are fully ordered, so the table holds only the groups
+    /// the last batch may continue.
+    fully_ordered: bool,
 }
 
 /// Spill configuration and accumulated runs for partially ordered final
@@ -370,6 +373,7 @@ impl OrderedFinalAggregateStream {
                 table,
                 spill_context,
             }),
+            fully_ordered: *input_order_mode == InputOrderMode::Sorted,
         })
     }
 
@@ -446,15 +450,21 @@ impl OrderedFinalAggregateStream {
 
                 // Check memory reservation, and potentially spill.
                 let timer = elapsed_compute.timer();
-                let resize_result =
-                    self.reservation
-                        .try_resize(Self::reservation_size_for_table(
-                            &table,
-                            spill_context.as_deref(),
-                        ));
+                let size =
+                    Self::reservation_size_for_table(&table, spill_context.as_deref());
+                let resize_result = self.reservation.try_resize(size);
                 timer.done();
                 match resize_result {
                     Ok(()) => {}
+                    // COMET PATCH: a fully ordered table cannot spill and holds only memory
+                    // already allocated for the groups the last batch may continue. Record
+                    // it: Comet carries the shortfall as overcommit and refuses the next
+                    // fallible request, such as the native shuffle writer's, until repaid.
+                    Err(DataFusionError::ResourcesExhausted(_))
+                        if spill_context.is_none() && self.fully_ordered =>
+                    {
+                        self.reservation.resize(size);
+                    }
                     Err(e @ DataFusionError::ResourcesExhausted(_)) => {
                         let Some(spill_context) = spill_context else {
                             // `None` means spilling is not supported, see comments

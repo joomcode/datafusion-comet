@@ -3809,4 +3809,155 @@ mod native_sort_spill_tests {
             }
         }
     }
+
+    /// Partial states of `count(v)` and `sum(v)` per `(a, b)` for 400k groups in random
+    /// order, as a final aggregate reads them from a shuffle.
+    #[derive(Debug)]
+    struct GroupStates {
+        schema: SchemaRef,
+        rows_per_batch: usize,
+        num_batches: usize,
+    }
+
+    impl GroupStates {
+        fn new(rows_per_batch: usize, num_batches: usize) -> Self {
+            Self {
+                schema: Arc::new(Schema::new(vec![
+                    Field::new("a", DataType::Int32, false),
+                    Field::new("b", DataType::Utf8, false),
+                    Field::new("count_v[count]", DataType::Int64, false),
+                    Field::new("sum_v[sum]", DataType::Int64, true),
+                ])),
+                rows_per_batch,
+                num_batches,
+            }
+        }
+
+        fn batch(&self, index: usize) -> RecordBatch {
+            let start = (index * self.rows_per_batch) as u64;
+            let keys: Vec<u64> = (start..start + self.rows_per_batch as u64)
+                .map(|r| mix(r) % 400_000)
+                .collect();
+            RecordBatch::try_new(
+                Arc::clone(&self.schema),
+                vec![
+                    Arc::new(Int32Array::from_iter_values(
+                        keys.iter().map(|&k| (k % 1000) as i32),
+                    )),
+                    Arc::new(StringArray::from_iter_values(
+                        keys.iter().map(|&k| format!("key-{k:020}")),
+                    )),
+                    Arc::new(Int64Array::from_iter_values(keys.iter().map(|_| 1))),
+                    Arc::new(Int64Array::from_iter_values(keys.iter().map(|&k| k as i64))),
+                ],
+            )
+            .unwrap()
+        }
+    }
+
+    impl PartitionStream for GroupStates {
+        fn schema(&self) -> &SchemaRef {
+            &self.schema
+        }
+
+        fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+            let batches: Vec<_> = (0..self.num_batches).map(|i| Ok(self.batch(i))).collect();
+            Box::pin(RecordBatchStreamAdapter::new(
+                Arc::clone(&self.schema),
+                futures::stream::iter(batches),
+            ))
+        }
+    }
+
+    /// The final aggregate of `GroupStates` written by the native shuffle writer, as the
+    /// stage of ads_manual_product_rank_cohorts that failed.
+    fn aggregate_into_shuffle(
+        max_buffer_bytes: Option<usize>,
+        output: &std::path::Path,
+    ) -> (Arc<dyn ExecutionPlan>, Arc<dyn ExecutionPlan>) {
+        use datafusion::functions_aggregate::count::count_udaf;
+        use datafusion::functions_aggregate::sum::sum_udaf;
+        use datafusion::physical_expr::aggregate::AggregateExprBuilder;
+        use datafusion::physical_plan::aggregates::{
+            AggregateExec, AggregateMode, PhysicalGroupBy,
+        };
+        use datafusion_comet_shuffle::{CometPartitioning, CompressionCodec, ShuffleWriterExec};
+
+        let source = Arc::new(GroupStates::new(4096, 200));
+        let states = Arc::clone(&source.schema);
+        let raw = Arc::new(Schema::new(vec![
+            Field::new("a", DataType::Int32, false),
+            Field::new("b", DataType::Utf8, false),
+            Field::new("v", DataType::Int64, false),
+        ]));
+        let aggregate = |udaf, alias: &str| {
+            Arc::new(
+                AggregateExprBuilder::new(udaf, vec![col("v", &raw).unwrap()])
+                    .schema(Arc::clone(&raw))
+                    .alias(alias)
+                    .build()
+                    .unwrap(),
+            )
+        };
+        let group_by = PhysicalGroupBy::new_single(
+            ["a", "b"]
+                .map(|key| (col(key, &states).unwrap(), key.to_string()))
+                .to_vec(),
+        );
+        let final_aggregate: Arc<dyn ExecutionPlan> = Arc::new(
+            AggregateExec::try_new(
+                AggregateMode::Final,
+                group_by,
+                vec![
+                    aggregate(count_udaf(), "count_v"),
+                    aggregate(sum_udaf(), "sum_v"),
+                ],
+                vec![None, None],
+                streaming(source),
+                raw,
+            )
+            .unwrap(),
+        );
+        let output_schema = final_aggregate.schema();
+        let writer: Arc<dyn ExecutionPlan> = Arc::new(
+            ShuffleWriterExec::try_new(
+                Arc::clone(&final_aggregate),
+                CometPartitioning::Hash(vec![col("b", &output_schema).unwrap()], 16),
+                CompressionCodec::None,
+                output.to_string_lossy().into_owned(),
+                false,
+                1024 * 1024,
+                max_buffer_bytes,
+            )
+            .unwrap(),
+        );
+        (writer, final_aggregate)
+    }
+
+    /// A final aggregate that spilled replays its runs through a fully ordered aggregate,
+    /// which cannot spill. The native shuffle writer above it buffers the replay's output
+    /// until Spark refuses it, so it soon holds the share the aggregate released, and
+    /// Spark cannot make it spill. Without a buffer limit the replay then failed with
+    /// "Additional allocation failed for FinalHashAggregateStream[0] ...
+    /// ShuffleRepartitioner[0] ... consumed", as ads_manual_product_rank_cohorts did.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn spilled_final_aggregate_feeding_the_native_shuffle_writer_finishes() {
+        let output = tempfile::tempdir().unwrap();
+        for share in [8, 12, 16, 24].map(|mb| mb * MB) {
+            for max_buffer_bytes in [None, Some(share / 4)] {
+                let (writer, aggregate) =
+                    aggregate_into_shuffle(max_buffer_bytes, &output.path().join("data"));
+                match run_with_fixed_share(share, 8, Arc::clone(&writer)).await {
+                    Ok((_, peak)) => {
+                        assert!(peak <= share + share / 20, "{peak} reserved of {share}")
+                    }
+                    Err(e) => panic!(
+                        "aggregate failed instead of spilling at {share}, \
+                         max_buffer_bytes {max_buffer_bytes:?}: {e}"
+                    ),
+                }
+                assert!(spill_count(&aggregate) > 0, "the aggregate did not spill");
+            }
+        }
+    }
 }
