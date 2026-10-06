@@ -21,14 +21,16 @@ package org.apache.comet.rules
 
 import scala.collection.mutable
 
-import org.apache.spark.sql.catalyst.expressions.{Add, AddMonths, Alias, And, Attribute, AttributeSet, Cast, Coalesce, DateAdd, DateAddInterval, DateAddYMInterval, DateSub, Expression, ExprId, GreaterThan, GreaterThanOrEqual, IsNull, LessThan, LessThanOrEqual, Or, Subtract, TimeAdd, TimestampAddYMInterval, TruncDate, TruncTimestamp}
+import org.apache.spark.sql.catalyst.expressions.{Add, AddMonths, Alias, And, Attribute, AttributeSet, Cast, Coalesce, DateAdd, DateAddInterval, DateAddYMInterval, DateSub, Expression, ExprId, GreaterThan, GreaterThanOrEqual, IsNull, LessThan, LessThanOrEqual, Or, Subtract, TimeAdd, TimestampAddYMInterval, TruncDate, TruncTimestamp, WindowExpression}
 import org.apache.spark.sql.comet.CometExec
-import org.apache.spark.sql.execution.SparkPlan
-import org.apache.spark.sql.execution.adaptive.QueryStageExec
+import org.apache.spark.sql.execution.{ProjectExec, SparkPlan, UnionExec}
+import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, QueryStageExec}
+import org.apache.spark.sql.execution.exchange.ReusedExchangeExec
 
 /**
  * Recognizes a join condition that is a single validity interval: `L <= V < U` with `V` from one
- * side, `L` and `U` from the other, and `U` not derived from `L` by a constant offset.
+ * side, `L` and `U` from the other, `U` not derived from `L` by a constant offset, and `L` and
+ * `U` read from one row of one input of the other side, with no join or union between them.
  */
 object JoinConditionShape {
 
@@ -110,20 +112,80 @@ object JoinConditionShape {
     strip(e) match {
       case a: Attribute =>
         aliases.get(a.exprId) match {
+          case Some(_: WindowExpression) => Set(a.exprId)
           case Some(child) if depth < 64 => sources(child, aliases, depth + 1)
           case _ => Set(a.exprId)
         }
       case other => other.references.map(_.exprId).toSet
     }
 
+  private def inputs(node: SparkPlan): Seq[SparkPlan] = node match {
+    case s: QueryStageExec => Seq(s.plan)
+    case a: AdaptiveSparkPlanExec => Seq(a.executedPlan)
+    case other => other.children
+  }
+
+  private def original(node: SparkPlan): SparkPlan = node match {
+    case c: CometExec => c.originalPlan
+    case other => other
+  }
+
+  private def outputs(node: SparkPlan, id: ExprId): Boolean = node.output.exists(_.exprId == id)
+
+  private def producers(node: SparkPlan, id: ExprId, depth: Int): Option[Seq[List[SparkPlan]]] =
+    if (depth > 256 || !outputs(node, id)) {
+      None
+    } else {
+      node match {
+        case r: ReusedExchangeExec =>
+          val i = r.output.indexWhere(_.exprId == id)
+          producers(r.child, r.child.output(i).exprId, depth + 1).map(_.map(r :: _))
+        case _ =>
+          inputs(node).find(outputs(_, id)) match {
+            case Some(child) => producers(child, id, depth + 1).map(_.map(node :: _))
+            case None =>
+              val projected = original(node) match {
+                case p: ProjectExec =>
+                  p.projectList.collectFirst { case a: Alias if a.exprId == id => a.child }
+                case _ => None
+              }
+              (projected, inputs(node)) match {
+                case (Some(e), Seq(child)) if e.references.nonEmpty =>
+                  val traced = e.references.toSeq.map(a => producers(child, a.exprId, depth + 1))
+                  if (traced.forall(_.isDefined)) {
+                    Some(traced.flatMap(_.get).map(node :: _))
+                  } else {
+                    None
+                  }
+                case _ => Some(Seq(List(node)))
+              }
+          }
+      }
+    }
+
+  private def oneRow(side: SparkPlan, refs: AttributeSet): Boolean = {
+    val traced = refs.toSeq.map(a => producers(side, a.exprId, 0))
+    traced.nonEmpty && traced.forall(_.isDefined) && {
+      val paths = traced.flatMap(_.get)
+      val common = (0 until paths.map(_.size).min)
+        .takeWhile(i => paths.forall(_(i) eq paths.head(i)))
+        .size
+      val below = paths.map(_.drop(common))
+      val heads = below.flatMap(_.headOption)
+      heads.forall(_ eq heads.head) &&
+      paths.forall(_.forall(n => !original(n).isInstanceOf[UnionExec])) &&
+      below.forall(_.forall(n => inputs(n).size <= 1))
+    }
+  }
+
   /**
-   * Whether `condition` of a join between `left` and `right` outputs is one validity interval
-   * whose bounds `aliases` does not derive from one another.
+   * Whether `condition` of a join between `left` and `right` is one validity interval whose
+   * bounds `aliases` does not derive from one another and that read one row of one input.
    */
   def isValidityInterval(
       condition: Expression,
-      left: AttributeSet,
-      right: AttributeSet,
+      left: SparkPlan,
+      right: SparkPlan,
       aliases: Map[ExprId, Expression]): Boolean = {
     conjuncts(condition).map(bound) match {
       case Seq(Some(first), Some(second)) =>
@@ -133,12 +195,17 @@ object JoinConditionShape {
         }
         shapes.exists { case (v, l, u, nullCheck) =>
           val (vRefs, lRefs, uRefs) = (v.references, l.references, u.references)
-          def onOtherSides(side: AttributeSet, other: AttributeSet): Boolean =
-            vRefs.subsetOf(side) && lRefs.subsetOf(other) && uRefs.subsetOf(other)
+          def onOtherSides(side: SparkPlan, other: SparkPlan): Boolean =
+            vRefs.subsetOf(side.outputSet) && lRefs.subsetOf(other.outputSet) &&
+              uRefs.subsetOf(other.outputSet)
+          val boundsSide =
+            if (onOtherSides(left, right)) Some(right)
+            else if (onOtherSides(right, left)) Some(left)
+            else None
           vRefs.nonEmpty && lRefs.nonEmpty && uRefs.nonEmpty &&
-          (onOtherSides(left, right) || onOtherSides(right, left)) &&
           nullCheck.forall(same(_, u)) &&
-          sources(l, aliases, 0).intersect(sources(u, aliases, 0)).isEmpty
+          sources(l, aliases, 0).intersect(sources(u, aliases, 0)).isEmpty &&
+          boundsSide.exists(oneRow(_, lRefs ++ uRefs))
         }
       case _ => false
     }

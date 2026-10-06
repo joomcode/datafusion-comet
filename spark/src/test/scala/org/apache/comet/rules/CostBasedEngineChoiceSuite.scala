@@ -968,7 +968,11 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
         .parquet(s"${dir.getCanonicalPath}/dim")
       spark.read.parquet(s"${dir.getCanonicalPath}/ev").createOrReplaceTempView("ev")
       spark.read.parquet(s"${dir.getCanonicalPath}/dim").createOrReplaceTempView("dim")
-      withTempView("ev", "dim")(f)
+      sql(
+        "CREATE OR REPLACE TEMP VIEW rates AS SELECT s AS currency, " +
+          "CAST(to_date(l) AS timestamp) AS effective_date, " +
+          "CAST(to_date(u) AS timestamp) AS next_effective_date FROM dim")
+      withTempView("ev", "dim", "rates")(f)
     }
   }
 
@@ -980,7 +984,21 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     "to_date(e.v) >= to_date(d.l) AND CAST(e.v AS date) < CAST(d.u AS date)",
     "date_trunc('day', e.v) >= d.l AND e.v < date_trunc('day', d.u)")
 
+  private val intervalQueries = Seq(
+    "SELECT e.k, e.v, r.effective_date FROM ev e LEFT JOIN rates r ON e.s = r.currency " +
+      "AND e.v > r.effective_date AND e.v <= r.next_effective_date",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k AND e.v >= d.l " +
+      "AND e.v < CAST(COALESCE(CAST(d.u AS string), '9999-12-31') AS timestamp)",
+    "WITH p AS (SELECT k, l, LEAD(l) OVER (PARTITION BY k ORDER BY l) AS nl FROM dim) " +
+      "SELECT e.k, e.v, p.l FROM ev e LEFT JOIN p ON e.k = p.k AND e.v >= p.l " +
+      "AND e.v < COALESCE(p.nl, timestamp '9999-12-31')")
+
+  private val crossInputBounds =
+    "SELECT o.k, o.v, g.v AS gv FROM ev o JOIN dim p ON o.k = p.k " +
+      "LEFT JOIN ev g ON o.k = g.k AND p.completed_dt < g.v AND o.v > g.v"
+
   private val chargedConditions = Seq(
+    crossInputBounds,
     "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k " +
       "AND e.vs BETWEEN d.ls - 2592000 AND d.ls",
     "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k " +
@@ -1021,6 +1039,9 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
               s"SELECT e.k, e.v, d.l FROM ev e $joinType dim d ON e.k = d.k AND $condition"
             assert(conditionTerms(query).forall(_.isEmpty), query)
           }
+          for (query <- intervalQueries) {
+            assert(conditionTerms(query).forall(_.isEmpty), query)
+          }
           for (query <- chargedConditions) {
             assert(conditionTerms(query).exists(_.nonEmpty), query)
           }
@@ -1043,9 +1064,14 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
           val (intervalOff, intervalOn) = offAndOn(run(interval))
           assert(joins(intervalOff) == (1, 0), s"plan:\n$intervalOff")
           assert(joins(intervalOn) == (1, 0), s"plan:\n$intervalOn")
-          val (bandOff, bandOn) = offAndOn(run(chargedConditions.head))
+          val (bandOff, bandOn) = offAndOn(run(chargedConditions(1)))
           assert(joins(bandOff) == (1, 0), s"plan:\n$bandOff")
           assert(joins(bandOn) == (0, 1), s"plan:\n$bandOn")
+          val (crossOff, crossOn) = offAndOn(run(crossInputBounds))
+          assert(joins(crossOff) == (2, 0), s"plan:\n$crossOff")
+          assert(
+            count(crossOn) { case j: SortMergeJoinExec if j.condition.isDefined => j } == 1,
+            s"plan:\n$crossOn")
         }
       }
     }

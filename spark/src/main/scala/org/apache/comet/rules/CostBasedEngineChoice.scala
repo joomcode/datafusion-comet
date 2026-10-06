@@ -125,12 +125,17 @@ class EngineCostModel(
     if (agg.aggregateExpressions.exists(_.mode == Complete)) 1.0 else 0.5
 
   /** Whether `condition` of `join`, run as `plan`, is one validity interval. */
-  def validityInterval(condition: Expression, join: SortMergeJoinExec, plan: SparkPlan): Boolean =
+  def validityInterval(
+      condition: Expression,
+      join: SortMergeJoinExec,
+      plan: SparkPlan): Boolean = {
+    val sides = if (plan.children.size == 2) plan.children else join.children
     JoinConditionShape.isValidityInterval(
       condition,
-      join.left.outputSet,
-      join.right.outputSet,
+      sides.head,
+      sides(1),
       JoinConditionShape.aliases(plan.children ++ join.children))
+  }
 
   private def classTerms(costClass: CostClass, plan: SparkPlan, engine: Engine): Seq[Term] = {
     val op = sparkOperator(plan)

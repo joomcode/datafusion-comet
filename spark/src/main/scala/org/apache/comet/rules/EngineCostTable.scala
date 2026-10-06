@@ -313,8 +313,9 @@ object EngineCostTable {
    *     left band joins took 23 to 28 us per output row natively against 6 to 8 in Spark. The
    *     pairs per output row are not estimated, so the line keeps the ratio of 3.5 at a price
    *     between the two, high enough to outweigh `smj` and the conversions around the join at any
-   *     width. A condition that is one validity interval ([[JoinConditionShape]]), where Comet
-   *     costs about what Spark does, adds nothing.
+   *     width. A condition that is one validity interval ([[JoinConditionShape]]) with both
+   *     bounds from one row of one input, where Comet costs about what Spark does, adds nothing;
+   *     bounds from two inputs joined below make a band again.
    *   - `predicate`: a filter over the leaves its predicate reads, Spark noisy (maxrel 0.5 to
    *     0.8); passing rows costs the filter scalars.
    *   - `projectPassThrough`: a project over every output leaf. Spark copies the row only when
