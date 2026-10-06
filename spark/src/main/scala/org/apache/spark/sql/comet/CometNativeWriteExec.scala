@@ -68,7 +68,7 @@ import org.apache.comet.serde.OperatorOuterClass.Operator
  *   Unique identifier for this write job
  */
 case class CometNativeWriteExec(
-    nativeOp: Operator,
+    @transient nativeOp: Operator,
     child: SparkPlan,
     outputPath: String,
     mode: SaveMode,

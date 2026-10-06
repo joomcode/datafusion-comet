@@ -84,13 +84,13 @@ object CometSampleExec extends CometOperatorSerde[SampleExec] {
  * order.
  */
 case class CometSampleExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     lowerBound: Double,
     upperBound: Double,
     seed: Long,
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
 
   override def output: Seq[Attribute] = child.output

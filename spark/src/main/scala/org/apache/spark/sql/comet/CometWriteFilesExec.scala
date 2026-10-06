@@ -80,7 +80,7 @@ import org.apache.comet.shims.ShimCometWriteFilesExec
  *   The Comet native operator producing the batches to write.
  */
 case class CometWriteFilesExec(
-    nativeOp: Operator,
+    @transient nativeOp: Operator,
     override val originalPlan: SparkPlan,
     child: SparkPlan)
     extends CometNativeExec

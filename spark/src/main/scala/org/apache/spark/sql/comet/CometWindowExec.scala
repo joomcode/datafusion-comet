@@ -641,14 +641,14 @@ object CometWindowExec extends CometOperatorSerde[WindowExec] {
  * executions separated by a Comet shuffle exchange.
  */
 case class CometWindowExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     windowExpression: Seq[NamedExpression],
     partitionSpec: Seq[Expression],
     orderSpec: Seq[SortOrder],
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
 
   override def nodeName: String = "CometWindowExec"

@@ -59,7 +59,7 @@ import org.apache.comet.shims.ShimFileFormat
  * each executor task receives only its partition's file list rather than all files.
  */
 case class CometNativeScanExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     @transient relation: HadoopFsRelation,
     override val output: Seq[Attribute],
     requiredSchema: StructType,
@@ -70,7 +70,7 @@ case class CometNativeScanExec(
     tableIdentifier: Option[TableIdentifier],
     disableBucketedScan: Boolean = false,
     originalPlan: FileSourceScanExec,
-    override val serializedPlanOpt: SerializedPlan,
+    @transient override val serializedPlanOpt: SerializedPlan,
     @transient scan: CometScanExec, // Lazy access to file partitions without serializing with plan
     sourceKey: String) // Key for PlanDataInjector to match common+partition data at runtime
     extends CometLeafExec
