@@ -604,7 +604,9 @@ prices per row from a table of measurements: `c0 + k0*L + k1*L*min(L, 600)` ns n
   price of a spill to a fraction `sortSpillFraction` of rows, none by default. `smj` prices a sort-merge join and `bhj`
   the probe side of a broadcast hash join, over every output leaf. A sort-merge join with a join condition adds
   `smjCondition`, also over every output leaf: Comet builds every pair of rows of equal keys before the condition drops
-  them, about 3.5 times Spark's price on band joins.
+  them, about 3.5 times Spark's price on band joins. A condition that is one validity interval, `L <= V < U` with `V`
+  from one input and `L` and `U` from the other (casts, date truncations, `COALESCE(U, literal)` and `U IS NULL OR`
+  allowed), adds nothing when `U` is not `L` shifted by a constant through the projections below the join.
 - `predicate` for filters, over the leaves their predicate references, plus a pass-through of 1.5 ns per output leaf
   natively and none in Spark. A native filter over a native scan, and the native projects over it, stay native
   whatever their prices (`keepFiltersOverNativeScans=false` lets them move): the rows a filter drops are not estimated,

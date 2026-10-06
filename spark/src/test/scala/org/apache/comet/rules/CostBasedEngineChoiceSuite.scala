@@ -943,6 +943,114 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     }
   }
 
+  private def withIntervals(f: => Unit): Unit = {
+    withTempPath { dir =>
+      spark
+        .range(2000)
+        .selectExpr(
+          "cast(id % 97 AS int) AS k",
+          "timestamp_seconds(id * 3600) AS v",
+          "id * 3600 AS vs",
+          "concat('s', cast(id % 7 AS string)) AS s")
+        .write
+        .parquet(s"${dir.getCanonicalPath}/ev")
+      spark
+        .range(500)
+        .selectExpr(
+          "cast(id % 97 AS int) AS k",
+          "timestamp_seconds(id * 7200) AS l",
+          "id * 7200 AS ls",
+          "IF(id % 5 = 0, NULL, timestamp_seconds(id * 7200 + 259200)) AS u",
+          "timestamp_seconds(id * 7200) AS created_at",
+          "IF(id % 5 = 0, NULL, timestamp_seconds(id * 7200 + 259200)) AS completed_dt",
+          "concat('s', cast(id % 5 AS string)) AS s")
+        .write
+        .parquet(s"${dir.getCanonicalPath}/dim")
+      spark.read.parquet(s"${dir.getCanonicalPath}/ev").createOrReplaceTempView("ev")
+      spark.read.parquet(s"${dir.getCanonicalPath}/dim").createOrReplaceTempView("dim")
+      withTempView("ev", "dim")(f)
+    }
+  }
+
+  private val validityIntervals = Seq(
+    "e.v >= d.l AND e.v < d.u",
+    "e.v BETWEEN d.l AND d.u",
+    "e.v > d.l AND e.v <= COALESCE(d.u, timestamp '9999-12-31')",
+    "(d.u IS NULL OR e.v < d.u) AND e.v >= d.l",
+    "to_date(e.v) >= to_date(d.l) AND CAST(e.v AS date) < CAST(d.u AS date)",
+    "date_trunc('day', e.v) >= d.l AND e.v < date_trunc('day', d.u)")
+
+  private val chargedConditions = Seq(
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k " +
+      "AND e.vs BETWEEN d.ls - 2592000 AND d.ls",
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k " +
+      "AND e.v BETWEEN d.l - INTERVAL 30 DAYS AND d.l",
+    "WITH p AS (SELECT k, l, l + INTERVAL 30 DAYS AS l_end FROM dim) " +
+      "SELECT e.k, e.v, p.l FROM ev e JOIN p ON e.k = p.k AND e.v >= p.l AND e.v < p.l_end",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k AND e.v > d.created_at " +
+      "AND COALESCE(d.completed_dt, timestamp '5999-12-31') <= e.v",
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k " +
+      "JOIN dim x ON e.k = x.k AND e.v >= d.l AND e.v < x.u",
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k AND e.v >= d.l",
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k AND e.v >= d.l AND e.v < d.u " +
+      "AND e.s <> d.s")
+
+  private def conditionTerms(query: String): Seq[Seq[Term]] = {
+    val plan = runUnordered(sql(query))
+    val joins = nodes(plan).collect {
+      case j: CometSortMergeJoinExec
+          if j.originalPlan.asInstanceOf[SortMergeJoinExec].condition.isDefined =>
+        j
+      case j: SortMergeJoinExec if j.condition.isDefined => j
+    }
+    assert(joins.nonEmpty, s"plan:\n$plan")
+    joins.map(j => model.terms(j, Engine.Comet).filter(_.costClass == SmjCondition))
+  }
+
+  for (aqe <- Seq("false", "true")) {
+    test(
+      s"a validity interval adds no smjCondition, a band or another condition does (AQE=$aqe)") {
+      withIntervals {
+        withAqe(
+          aqe,
+          flag -> "false",
+          SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+          SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+          for (condition <- validityIntervals; joinType <- Seq("JOIN", "LEFT JOIN")) {
+            val query =
+              s"SELECT e.k, e.v, d.l FROM ev e $joinType dim d ON e.k = d.k AND $condition"
+            assert(conditionTerms(query).forall(_.isEmpty), query)
+          }
+          for (query <- chargedConditions) {
+            assert(conditionTerms(query).exists(_.nonEmpty), query)
+          }
+        }
+      }
+    }
+
+    test(s"a validity interval join stays native, a band join runs in Spark (AQE=$aqe)") {
+      withIntervals {
+        withAqe(
+          aqe,
+          SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+          SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+          def joins(plan: SparkPlan): (Int, Int) =
+            (
+              count(plan) { case j: CometSortMergeJoinExec => j },
+              count(plan) { case j: SortMergeJoinExec => j })
+          val interval = "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+            "AND e.v >= d.l AND e.v < COALESCE(d.u, timestamp '9999-12-31')"
+          val (intervalOff, intervalOn) = offAndOn(run(interval))
+          assert(joins(intervalOff) == (1, 0), s"plan:\n$intervalOff")
+          assert(joins(intervalOn) == (1, 0), s"plan:\n$intervalOn")
+          val (bandOff, bandOn) = offAndOn(run(chargedConditions.head))
+          assert(joins(bandOff) == (1, 0), s"plan:\n$bandOff")
+          assert(joins(bandOn) == (0, 1), s"plan:\n$bandOn")
+        }
+      }
+    }
+  }
+
   test("a window costs its line and the classes of its functions") {
     withTables {
       withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "false") {
