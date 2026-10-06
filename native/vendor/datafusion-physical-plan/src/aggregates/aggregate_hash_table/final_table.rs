@@ -61,6 +61,14 @@ impl AggregateHashTable<FinalMarker> {
         self.next_output_batch_inner(HashAggregateAccumulator::evaluate_to_columns)
     }
 
+    /// COMET PATCH: emits group keys with merged states, for a
+    /// [`crate::aggregates::AggregateMode::PartialReduce`] run by the final stream.
+    pub(in crate::aggregates) fn next_state_output_batch(
+        &mut self,
+    ) -> Result<Option<RecordBatch>> {
+        self.next_output_batch_inner(HashAggregateAccumulator::state)
+    }
+
     /// Final aggregation consumes partial aggregate states and merges them into
     /// the table's partial-state accumulators.
     pub(in crate::aggregates) fn aggregate_batch(

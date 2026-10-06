@@ -1359,6 +1359,42 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
     })
   }
 
+  test("partialMerge - single count distinct is exact when the PartialMerge aggregate spills") {
+    withTempPath { dir =>
+      withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+        spark
+          .range(0, 180000, 1, 6)
+          .selectExpr("(id * 7919) % 60000 AS x", "id AS v")
+          .selectExpr("x % 7 AS k", "x", "v")
+          .write
+          .parquet(dir.getAbsolutePath)
+      }
+      spark.read.parquet(dir.getAbsolutePath).createOrReplaceTempView("pm_spill")
+      for (partitions <- Seq(1, 3)) {
+        withSQLConf(
+          CometConf.COMET_OFFHEAP_MEMORY_POOL_FRACTION.key -> "0.00005",
+          CometConf.COMET_BATCH_SIZE.key -> "64",
+          SQLConf.SHUFFLE_PARTITIONS.key -> partitions.toString) {
+          for (q <- Seq(
+              "SELECT k, count(DISTINCT x), sum(v), max(v) FROM pm_spill GROUP BY k",
+              "SELECT count(DISTINCT x), sum(v), min(v) FROM pm_spill")) {
+            val (_, plan) = checkSparkAnswerAndOperator(sql(q))
+            val partialMerges = collect(plan) {
+              case a: CometHashAggregateExec
+                  if a.aggregateExpressions.nonEmpty &&
+                    a.aggregateExpressions.forall(_.mode == PartialMerge) =>
+                a
+            }
+            assert(partialMerges.nonEmpty, s"no PartialMerge aggregate in:\n$plan")
+            val spills =
+              partialMerges.map(_.metrics.get("spill_count").map(_.value).getOrElse(0L)).sum
+            assert(spills > 0, s"the PartialMerge aggregate did not spill: $q")
+          }
+        }
+      }
+    }
+  }
+
   test("partialMerge - distinct + non-distinct aggregates (Expand pattern)") {
     withParquetTable((1 to 100).map(i => (i, i.toString)), "tbl", false) {
       checkSparkAnswerAndOperator("SELECT avg(_1), sum(_1), count(distinct _1) FROM tbl")

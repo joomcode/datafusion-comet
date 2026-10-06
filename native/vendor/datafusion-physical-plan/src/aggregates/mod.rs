@@ -1254,7 +1254,9 @@ impl AggregateExec {
     fn should_use_final_hash_stream(&self, _context: &TaskContext) -> bool {
         matches!(
             self.mode,
-            AggregateMode::Final | AggregateMode::FinalPartitioned
+            AggregateMode::Final
+                | AggregateMode::FinalPartitioned
+                | AggregateMode::PartialReduce
         ) && self.limit_options_supported_by_hash_stream()
             && self.input_order_mode == InputOrderMode::Linear
             && !self.group_by.is_true_no_grouping()
@@ -1263,7 +1265,9 @@ impl AggregateExec {
 
     fn should_use_partial_reduce_hash_stream(&self, context: &TaskContext) -> bool {
         // TODO: implement memory-limited path and remove this limitation
-        if matches!(context.memory_pool().memory_limit(), MemoryLimit::Finite(_)) {
+        // COMET PATCH: a pool of unknown size can refuse memory too, and this stream fails
+        // then. Leave it to the final hash stream, which spills.
+        if !matches!(context.memory_pool().memory_limit(), MemoryLimit::Infinite) {
             return false;
         }
 
@@ -1287,7 +1291,9 @@ impl AggregateExec {
     fn should_use_ordered_final_aggregate_stream(&self, _context: &TaskContext) -> bool {
         matches!(
             self.mode,
-            AggregateMode::Final | AggregateMode::FinalPartitioned
+            AggregateMode::Final
+                | AggregateMode::FinalPartitioned
+                | AggregateMode::PartialReduce
         ) && self.limit_options_supported_by_hash_stream()
             && self.input_order_mode != InputOrderMode::Linear
             && !self.group_by.is_true_no_grouping()
@@ -4336,8 +4342,8 @@ mod tests {
         Ok(())
     }
 
-    /// Spilling behavior is not implemented for partial-reduce stream yet, so fall
-    /// back to the existing `GroupedHashAggregateStream`
+    /// Spilling behavior is not implemented for partial-reduce stream yet.
+    /// COMET PATCH: fall back to `FinalHashAggregateStream`, which spills and emits states.
     #[tokio::test]
     async fn partial_reduce_aggregate_with_memory_limit_planning() -> Result<()> {
         let partial_reduce = partial_reduce_test_aggregate()?;
@@ -4355,7 +4361,11 @@ mod tests {
             );
 
         let stream = partial_reduce.execute_typed(0, &task_ctx)?;
-        assert!(matches!(stream, StreamType::GroupedHash(_)));
+        assert!(matches!(stream, StreamType::FinalHash(_)));
+        let stream: SendableRecordBatchStream = stream.into();
+        let output = collect(stream).await?;
+        assert_eq!(output.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
+        assert_eq!(output[0].schema(), partial_reduce.schema());
 
         Ok(())
     }

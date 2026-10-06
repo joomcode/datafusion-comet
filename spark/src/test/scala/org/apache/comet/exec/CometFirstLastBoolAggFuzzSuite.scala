@@ -631,12 +631,11 @@ class CometFirstLastBoolAggFuzzSuite extends CometTestBase with AdaptiveSparkPla
     runCase("distinct_one", ds, singleAqe, Seq("k1"), singleDistinctAggs, expectNative = true)
   }
 
-  // Comet runs Spark's PartialMerge aggregate as a DataFusion Partial aggregate, which emits
-  // groups early under memory pressure, so the de-duplicating aggregate of a single COUNT(DISTINCT)
-  // passes duplicates to the count in the same stage.
-  ignore("known bug: COUNT(DISTINCT) over a spilling PartialMerge aggregate overcounts") {
+  test("COUNT(DISTINCT) over a spilling PartialMerge aggregate") {
     val ds = dataSet("mixed")
-    runCase("distinct_one", ds, multiSpill, Seq("k1"), singleDistinctAggs, expectNative = true)
+    val r =
+      runCase("distinct_one", ds, multiSpill, Seq("k1"), singleDistinctAggs, expectNative = true)
+    assert(r.aggSpills > 0, s"[seed=$seed] the aggregate did not spill")
   }
 
   // ---------------------------------------------------------------- full matrix
@@ -649,8 +648,7 @@ class CometFirstLastBoolAggFuzzSuite extends CometTestBase with AdaptiveSparkPla
         Query("distinct", distinctAggs(native = true), expectNative = true),
         Query("distinct_fallback_types", distinctAggs(native = false), expectNative = false),
         Query("distinct_one", singleDistinctAggs, expectNative = true))
-      val runnable =
-        if (shape.spill) all.filter(q => q.expectNative && q.label != "distinct_one") else all
+      val runnable = if (shape.spill) all.filter(_.expectNative) else all
       runAll(ds, shape, keys, runnable)
     }
   }

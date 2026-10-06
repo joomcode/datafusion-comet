@@ -251,6 +251,10 @@ pub(crate) struct FinalHashAggregateStream {
     /// See comments for the same variable in [`PartialHashAggregateStream`].
     group_values_soft_limit: Option<usize>,
 
+    /// COMET PATCH: a `PartialReduce` aggregate runs here so that it spills under memory
+    /// pressure, and emits merged states instead of final values.
+    emit_states: bool,
+
     /// Tracks the high-level stream lifecycle. The hash table owns the lower-level
     /// state for emitting output batches.
     state: Option<FinalHashAggregateState>,
@@ -1031,7 +1035,9 @@ impl FinalHashAggregateStream {
     ) -> Result<Self> {
         debug_assert!(matches!(
             agg.mode,
-            super::AggregateMode::Final | super::AggregateMode::FinalPartitioned
+            super::AggregateMode::Final
+                | super::AggregateMode::FinalPartitioned
+                | super::AggregateMode::PartialReduce
         ));
         debug_assert_eq!(agg.input_order_mode, InputOrderMode::Linear);
 
@@ -1074,6 +1080,7 @@ impl FinalHashAggregateStream {
             baseline_metrics,
             reservation,
             group_values_soft_limit: agg.limit_options().map(|config| config.limit()),
+            emit_states: agg.mode == super::AggregateMode::PartialReduce,
             state: Some(FinalHashAggregateState::ReadingInput {
                 hash_table,
                 spill_context,
@@ -1435,7 +1442,11 @@ impl FinalHashAggregateStream {
 
         let elapsed_compute = self.baseline_metrics.elapsed_compute().clone();
         let timer = elapsed_compute.timer();
-        let result = hash_table.next_output_batch();
+        let result = if self.emit_states {
+            hash_table.next_state_output_batch()
+        } else {
+            hash_table.next_output_batch()
+        };
         timer.done();
 
         match result {

@@ -1544,19 +1544,20 @@ impl PhysicalPlanner {
                         agg.mode
                     ))
                 })?;
+                // A PartialMerge feeds groups it must not repeat (the distinct values of a
+                // single COUNT(DISTINCT)), so it runs as PartialReduce, which spills under
+                // memory pressure where Partial emits groups early.
                 let mode = match proto_mode {
                     ProtoAggregateMode::Partial => DFAggregateMode::Partial,
                     ProtoAggregateMode::Final => DFAggregateMode::Final,
-                    // PartialMerge: Partial + MergeAsPartial
-                    ProtoAggregateMode::PartialMerge => DFAggregateMode::Partial,
+                    ProtoAggregateMode::PartialMerge => DFAggregateMode::PartialReduce,
                 };
 
-                // Check if any expression uses PartialMerge mode. When present,
-                // those expressions are wrapped with MergeAsPartial to get merge
-                // semantics inside a Partial-mode AggregateExec.
+                // A mixed {Partial, PartialMerge} aggregate runs as Partial and wraps its
+                // PartialMerge expressions with MergeAsPartial to get merge semantics.
                 let partial_merge_value = ProtoAggregateMode::PartialMerge as i32;
-                let has_partial_merge = proto_mode == ProtoAggregateMode::PartialMerge
-                    || agg.expr_modes.contains(&partial_merge_value);
+                let has_partial_merge = proto_mode == ProtoAggregateMode::Partial
+                    && agg.expr_modes.contains(&partial_merge_value);
 
                 let agg_exprs: PhyAggResult = agg
                     .agg_exprs

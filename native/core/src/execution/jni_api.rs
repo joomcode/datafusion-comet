@@ -4225,3 +4225,170 @@ mod aggregate_offset_overflow_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod partial_merge_spill_tests {
+    use super::*;
+    use crate::execution::memory_pools::fair_unified_pool_with_fake_spark;
+    use crate::execution::operators::InputBatch;
+    use arrow::array::{Int32Array, Int64Array};
+    use datafusion_comet_proto::spark_expression::{self, Expr};
+    use datafusion_comet_proto::spark_operator::{self, operator::OpStruct};
+    use std::collections::HashMap as StdHashMap;
+
+    const KEYS: i32 = 4;
+    const VALUES: i32 = 6000;
+    const COPIES: usize = 3;
+    const BATCH_ROWS: usize = 1024;
+
+    fn data_type(type_id: i32) -> spark_expression::DataType {
+        spark_expression::DataType {
+            type_id,
+            type_info: None,
+        }
+    }
+
+    fn bound(index: i32, type_id: i32) -> Expr {
+        Expr {
+            expr_struct: Some(spark_expression::expr::ExprStruct::Bound(
+                spark_expression::BoundReference {
+                    index,
+                    datatype: Some(data_type(type_id)),
+                },
+            )),
+            query_context: None,
+            expr_id: None,
+        }
+    }
+
+    /// `HashAggregate(keys = [k, x], functions = [merge count])`: the de-duplicating stage
+    /// Spark plans under a single COUNT(DISTINCT x) GROUP BY k, fed `(k, x, count)` states.
+    fn partial_merge_count() -> Operator {
+        let scan = Operator {
+            op_struct: Some(OpStruct::Scan(spark_operator::Scan {
+                fields: vec![data_type(3), data_type(3), data_type(4)],
+                source: "states".to_string(),
+            })),
+            ..Default::default()
+        };
+        let count = spark_expression::AggExpr {
+            expr_struct: Some(AggExprStruct::Count(spark_expression::Count {
+                children: vec![bound(1, 3)],
+            })),
+            ..Default::default()
+        };
+        Operator {
+            children: vec![scan],
+            op_struct: Some(OpStruct::HashAgg(spark_operator::HashAggregate {
+                grouping_exprs: vec![bound(0, 3), bound(1, 3)],
+                agg_exprs: vec![count],
+                mode: AggregateMode::PartialMerge as i32,
+                expr_modes: vec![AggregateMode::PartialMerge as i32],
+                initial_input_buffer_offset: 2,
+            })),
+            ..Default::default()
+        }
+    }
+
+    fn input_batches() -> Vec<InputBatch> {
+        let mut rows: Vec<(i32, i32)> = (0..COPIES)
+            .flat_map(|_| (0..KEYS).flat_map(|k| (0..VALUES).map(move |x| (k, x))))
+            .collect();
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        for i in (1..rows.len()).rev() {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            rows.swap(i, (seed % (i as u64 + 1)) as usize);
+        }
+        rows.chunks(BATCH_ROWS)
+            .map(|chunk| {
+                InputBatch::Batch(
+                    vec![
+                        Arc::new(Int32Array::from_iter_values(chunk.iter().map(|r| r.0))),
+                        Arc::new(Int32Array::from_iter_values(chunk.iter().map(|r| r.1))),
+                        Arc::new(Int64Array::from(vec![1i64; chunk.len()])),
+                    ],
+                    chunk.len(),
+                )
+            })
+            .chain(std::iter::once(InputBatch::EOF))
+            .collect()
+    }
+
+    /// Under memory pressure a PartialMerge must spill rather than emit a group twice, or the
+    /// COUNT(DISTINCT) above it counts the repeated value again.
+    #[tokio::test]
+    async fn partial_merge_spills_instead_of_emitting_a_group_twice() {
+        let share = 256 * 1024;
+        let (pool, _spark) = fair_unified_pool_with_fake_spark(share, share);
+        let spill_dir = tempfile::tempdir().unwrap();
+        let operator = partial_merge_count();
+        let session = Arc::new(
+            prepare_datafusion_session_context(
+                BATCH_ROWS,
+                PlanCancellation::new(),
+                pool,
+                vec![spill_dir.path().to_string_lossy().into_owned()],
+                u64::MAX,
+                1,
+                &StdHashMap::new(),
+                &operator,
+                Some(share),
+            )
+            .unwrap(),
+        );
+        let planner = PhysicalPlanner::new(Arc::clone(&session), 0);
+        let (mut scans, _, plan) = planner.create_plan(&operator, &mut vec![], 1).unwrap();
+        let mut stream = plan.native_plan.execute(0, session.task_ctx()).unwrap();
+        let mut input = input_batches().into_iter();
+
+        let mut counts: StdHashMap<(i32, i32), Vec<i64>> = StdHashMap::new();
+        while let Some(batch) = futures::future::poll_fn(|cx| {
+            let result = stream.poll_next_unpin(cx);
+            if result.is_pending() && scans[0].batch.try_lock().unwrap().is_none() {
+                if let Some(batch) = input.next() {
+                    scans[0].set_input_batch(batch);
+                    cx.waker().wake_by_ref();
+                }
+            }
+            result
+        })
+        .await
+        {
+            let batch = batch.unwrap();
+            let k = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .unwrap();
+            let x = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .unwrap();
+            let c = batch
+                .column(2)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap();
+            for row in 0..batch.num_rows() {
+                counts
+                    .entry((k.value(row), x.value(row)))
+                    .or_default()
+                    .push(c.value(row));
+            }
+        }
+
+        let spills = plan
+            .native_plan
+            .metrics()
+            .and_then(|m| m.spill_count())
+            .unwrap_or(0);
+        let repeated = counts.values().filter(|c| c.len() > 1).count();
+        assert_eq!(repeated, 0, "{repeated} groups emitted more than once");
+        assert_eq!(counts.len(), (KEYS * VALUES) as usize);
+        assert!(counts.values().all(|c| c == &[COPIES as i64]));
+        assert!(spills > 0, "the PartialMerge aggregate did not spill");
+    }
+}
