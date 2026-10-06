@@ -172,6 +172,7 @@ object EngineCostTable {
     case object Sort extends CostClass("sort")
     case object SortSpill extends CostClass("sortSpill")
     case object Smj extends CostClass("smj")
+    case object SmjCondition extends CostClass("smjCondition")
     case object Bhj extends CostClass("bhj")
     case object Predicate extends CostClass("predicate")
     case object ProjectPassThrough extends CostClass("projectPassThrough")
@@ -207,6 +208,7 @@ object EngineCostTable {
       Sort,
       SortSpill,
       Smj,
+      SmjCondition,
       Bhj,
       Predicate,
       ProjectPassThrough,
@@ -301,7 +303,17 @@ object EngineCostTable {
    *     cannot be predicted.
    *   - `smj`: the join over its sorted inputs, every output leaf, noisy. `bhj`: the probe side,
    *     every output leaf; the nested `bhj` is noisy (Comet 0 to 350, Spark 50 to 4200 ns) and
-   *     takes the flat line.
+   *     takes the flat line. `smjCondition`: what a join condition adds to `smj`, every output
+   *     leaf. Comet joins every pair of rows of equal keys into a batch of all its output columns
+   *     before the condition drops most of them; Spark tests the condition on the pair first. In
+   *     a local micro-benchmark of left joins on a 14-day band (1 to 4% of 20 to 100 million
+   *     pairs passing), Comet cost what the join without the condition cost, 0.44 to 1.2 us per
+   *     output row and 21 ns per output leaf, Spark 3.6 to 4 times less (0.12 to 0.30 us, 4.5 ns
+   *     per leaf); inner joins and small key groups ran 1 to 1.8 times slower. fbj_order_type's
+   *     left band joins took 23 to 28 us per output row natively against 6 to 8 in Spark. The
+   *     pairs per output row are not estimated, so the line keeps the ratio of 3.5 at a price
+   *     between the two, high enough to outweigh `smj` and the conversions around the join at any
+   *     width.
    *   - `predicate`: a filter over the leaves its predicate reads, Spark noisy (maxrel 0.5 to
    *     0.8); passing rows costs the filter scalars.
    *   - `projectPassThrough`: a project over every output leaf. Spark copies the row only when
@@ -385,6 +397,7 @@ object EngineCostTable {
     (R2C, Flat) -> Line(3.4, 7.67, 0.036, 0, 0),
     (R2C, Nested) -> Line(0, 9.74, 0.040, 0, 0)) ++
     both(ExprOverScan, Line(0, 0, 0, 2.5, 0)) ++
+    both(SmjCondition, Line(3000, 80, 0, 850, 23)) ++
     both(AggObjectHash, Line(1000, 0, 0, 2500, 0)) ++
     both(AggDeclarative, Line(6, 0, 0, 15, 0)) ++
     both(AggDeclarativeNoCodegen, Line(0, 0, 0, 170, 0)) ++
@@ -447,7 +460,7 @@ object EngineCostTable {
    */
   val operatorClasses: Map[String, Seq[CostClass]] = Map(
     "SortExec" -> Seq(Sort),
-    "SortMergeJoinExec" -> Seq(Smj),
+    "SortMergeJoinExec" -> Seq(Smj, SmjCondition),
     "BroadcastHashJoinExec" -> Seq(Bhj),
     "WindowExec" -> Seq(Window),
     "WindowGroupLimitExec" -> Seq(WglPartial, WglFinal),
