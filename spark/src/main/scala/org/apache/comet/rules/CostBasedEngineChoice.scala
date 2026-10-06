@@ -349,7 +349,8 @@ object EngineCostModel {
  *     keep the engine they were converted to (the aggregate test is the one of
  *     `COMET_UNSAFE_PARTIAL` and [[RevertNativeForTransitionHeavyStages]]).
  *   - Materialized and reused stages are leaves of fixed format, and a boundary with no consumer
- *     in the plan (a subquery or stage root) keeps its format.
+ *     in the plan (a subquery or stage root) keeps its output, Arrow or rows: a Comet shuffle
+ *     there may switch between native and columnar, so its producer may run in Spark.
  *   - The plan's own output is rows, so a native root pays one conversion. The root of a subquery
  *     keeps its engine: an operator outside the plan, such as the broadcast that dynamic
  *     partition pruning builds around it, may rely on it.

@@ -56,9 +56,11 @@ import org.apache.comet.shims.CometTypeShim
  * Spark when their keys may hash differently (see [[modes]]).
  *
  * Boundaries whose format is fixed: materialized or reused query stages (`QueryStageExec`,
- * `ReusedExchangeExec`, `AQEShuffleReadExec`), any other exchange implementation, and a boundary
- * with no consumer in the plan (the root of a subquery or query stage, or an exchange directly
- * over another exchange). Their consumers still pay the conversion their fixed format implies.
+ * `ReusedExchangeExec`, `AQEShuffleReadExec`) and any other exchange implementation. Their
+ * consumers still pay the conversion their fixed format implies. A boundary with no consumer in
+ * the plan (the root of a subquery or query stage, or an exchange directly over another exchange)
+ * keeps its output: a broadcast keeps its format, and a Comet shuffle stays a Comet shuffle,
+ * native or columnar, so that a Spark producer can still feed it.
  *
  * Range and round-robin shuffles, and single-partition ones, are never co-partitioned with
  * another input, so only their conversions count. `shuffleOrigin` and the advisory partition size
@@ -363,8 +365,7 @@ object BoundaryFormats extends Logging with CometTypeShim {
             conversionsInto(input.consumer, NativeShuffle),
             CometHash))
         }
-        if ((!keep || current == ColumnarShuffle) && current != SparkShuffle &&
-          columnarAvailable(input)) {
+        if (current != SparkShuffle && columnarAvailable(input)) {
           val write = if (producerIsComet) 2 else 1
           candidates += ((
             ColumnarShuffle,

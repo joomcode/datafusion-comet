@@ -1077,6 +1077,360 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     }
   }
 
+  private def withFbj(f: => Unit): Unit = {
+    withTempPath { dir =>
+      spark
+        .range(4000)
+        .selectExpr(
+          "cast(id AS string) AS order_id",
+          "timestamp_seconds(1735689600 + id * 3600) AS order_datetime_utc",
+          "concat('m', cast(id % 13 AS string)) AS merchant_id",
+          "concat('p', cast(id % 41 AS string)) AS product_id",
+          "concat('v', cast(id % 61 AS string)) AS product_variant_id",
+          "IF(id % 10 = 0, 'Other', 'Chinese') AS origin_name",
+          "id % 3 + 1 AS product_quantity",
+          "id % 4 = 0 AS is_fbj",
+          "cast(date_trunc('month', timestamp_seconds(1735689600 + id * 3600)) AS date) " +
+            "AS order_month_msk")
+        .write
+        .parquet(s"${dir.getCanonicalPath}/orders")
+      spark
+        .range(600)
+        .selectExpr(
+          "concat('v', cast(id % 61 AS string)) AS variant_id",
+          "concat('g', cast(id DIV 2 AS string)) AS replenishment_group_id",
+          "concat('g', cast(id DIV 2 + id % 2 * 100000 AS string)) AS replenishment_id",
+          "IF(id % 7 = 0, 'Merchant', 'Joom') AS source",
+          "cast(timestamp_seconds(1735689600 + id * 20000) AS date) AS partition_date",
+          "timestamp_seconds(1735689600 + id * 20000) AS created_at",
+          "'completed' AS current_status",
+          "timestamp_seconds(1735689600 + id * 20000 + 3600) AS 2_pending_inbound_dt",
+          "timestamp_seconds(1735689600 + id * 20000 + 7200) AS 3_pending_shipping_dt",
+          "timestamp_seconds(1735689600 + id * 20000 + 10800) AS 4_shipped_dt",
+          "timestamp_seconds(1735689600 + id * 20000 + 14400) AS 5_action_required_dt",
+          "timestamp_seconds(1735689600 + id * 20000 + 18000) AS 6_on_review_dt",
+          "IF(id % 5 = 0, NULL, timestamp_seconds(1735689600 + id * 20000 + 604800)) " +
+            "AS completed_dt",
+          "id % 20 + 5 AS min_count",
+          "id % 20 + 50 AS max_count",
+          "id % 30 AS requested_count",
+          "id % 25 AS accepted_count")
+        .write
+        .parquet(s"${dir.getCanonicalPath}/repl")
+      spark
+        .range(200)
+        .selectExpr(
+          "cast(date_trunc('quarter', timestamp_seconds(1735689600 + (id % 4) * 7776000)) " +
+            "AS date) AS quarter",
+          "concat('m', cast(id % 13 AS string)) AS merchant_id",
+          "concat('name', cast(id AS string)) AS merchant_name",
+          "concat('main', cast(id AS string)) AS main_merchant_name",
+          "concat('kam', cast(id % 3 AS string)) AS kam_email")
+        .write
+        .parquet(s"${dir.getCanonicalPath}/kam")
+      spark.read.parquet(s"${dir.getCanonicalPath}/orders").createOrReplaceTempView("gold_orders")
+      spark.read.parquet(s"${dir.getCanonicalPath}/repl").createOrReplaceTempView("fbj_repl")
+      spark.read.parquet(s"${dir.getCanonicalPath}/kam").createOrReplaceTempView("fbj_kam")
+      withTempView("gold_orders", "fbj_repl", "fbj_kam")(f)
+    }
+  }
+
+  private val fbjOrderType =
+    """
+      |WITH orders AS (
+      |    SELECT
+      |        order_datetime_utc,
+      |        CAST(order_datetime_utc AS DATE) AS dt,
+      |        order_id,
+      |        product_variant_id,
+      |        product_quantity,
+      |        is_fbj,
+      |        product_id,
+      |        merchant_id
+      |    FROM gold_orders
+      |    WHERE
+      |        origin_name = 'Chinese'
+      |        AND order_datetime_utc >= '2025-01-01'
+      |        AND order_month_msk >= '2024-12-01'
+      |),
+      |
+      |variant_daily_demand AS (
+      |    SELECT
+      |        product_variant_id,
+      |        dt,
+      |        SUM(product_quantity) AS daily_qty
+      |    FROM orders
+      |    GROUP BY product_variant_id, dt
+      |),
+      |
+      |forward_demand AS (
+      |    SELECT
+      |        a.product_variant_id,
+      |        a.dt,
+      |        SUM(f.daily_qty) AS forward_14d_qty
+      |    FROM variant_daily_demand AS a
+      |    INNER JOIN variant_daily_demand AS f
+      |        ON
+      |            a.product_variant_id = f.product_variant_id
+      |            AND a.dt <= f.dt
+      |            AND f.dt <= DATE_ADD(a.dt, 13)
+      |    GROUP BY a.product_variant_id, a.dt
+      |),
+      |
+      |parent_repl AS (
+      |    SELECT
+      |        variant_id,
+      |        replenishment_group_id,
+      |        partition_date,
+      |        created_at,
+      |        current_status,
+      |        2_pending_inbound_dt,
+      |        3_pending_shipping_dt,
+      |        4_shipped_dt,
+      |        5_action_required_dt,
+      |        6_on_review_dt,
+      |        completed_dt,
+      |        min_count,
+      |        max_count,
+      |        requested_count
+      |    FROM fbj_repl
+      |    WHERE
+      |        source IN ('Joom', 'Warehouse')
+      |        AND replenishment_id = replenishment_group_id
+      |),
+      |
+      |parent_repl_amount AS (
+      |    SELECT
+      |        parent_repl.replenishment_group_id,
+      |        parent_repl.min_count,
+      |        SUM(r.accepted_count) AS acc_count
+      |    FROM parent_repl
+      |    INNER JOIN fbj_repl AS r
+      |        ON parent_repl.replenishment_group_id = r.replenishment_group_id
+      |    GROUP BY
+      |        parent_repl.replenishment_group_id,
+      |        parent_repl.min_count
+      |),
+      |
+      |current_active_repl AS (
+      |    SELECT
+      |        o.order_datetime_utc,
+      |        o.dt,
+      |        o.order_id,
+      |        o.product_variant_id,
+      |        pr.replenishment_group_id,
+      |        pr.created_at,
+      |        COALESCE(pr.completed_dt, '5999-12-31 23:59:59') AS completed_dt,
+      |        ROW_NUMBER() OVER (PARTITION BY o.order_id ORDER BY pr.created_at DESC) AS rn
+      |    FROM orders AS o
+      |    LEFT JOIN parent_repl AS pr
+      |        ON
+      |            o.product_variant_id = pr.variant_id
+      |            AND o.order_datetime_utc > pr.created_at
+      |            AND COALESCE(pr.completed_dt, '5999-12-31 23:59:59') > o.order_datetime_utc
+      |),
+      |
+      |previous_completed_repl AS (
+      |    SELECT
+      |        o.order_datetime_utc,
+      |        o.dt,
+      |        o.order_id,
+      |        o.product_variant_id,
+      |        pr.replenishment_group_id,
+      |        pr.created_at,
+      |        COALESCE(pr.completed_dt, '5999-12-31 23:59:59') AS completed_dt,
+      |        pra.min_count,
+      |        pra.acc_count,
+      |        ROW_NUMBER() OVER (
+      |            PARTITION BY o.order_id
+      |            ORDER BY COALESCE(pr.completed_dt, '5999-12-31 23:59:59') DESC
+      |        ) AS rn
+      |    FROM orders AS o
+      |    LEFT JOIN parent_repl AS pr
+      |        ON
+      |            o.product_variant_id = pr.variant_id
+      |            AND o.order_datetime_utc > pr.created_at
+      |            AND COALESCE(pr.completed_dt, '5999-12-31 23:59:59') <= o.order_datetime_utc
+      |    LEFT JOIN parent_repl_amount AS pra
+      |        ON pr.replenishment_group_id = pra.replenishment_group_id
+      |),
+      |
+      |var_kam AS (
+      |    SELECT
+      |        mkm.quarter,
+      |        mkm.merchant_id,
+      |        MAX(mkm.merchant_name) AS merchant_name,
+      |        MAX(mkm.main_merchant_name) AS main_merchant_name,
+      |        MAX(mkm.kam_email) AS kam_email
+      |    FROM fbj_kam AS mkm
+      |    GROUP BY
+      |        mkm.quarter,
+      |        mkm.merchant_id
+      |),
+      |
+      |final AS (
+      |    SELECT /*+ BROADCAST(m_k) */
+      |        o.order_datetime_utc,
+      |        o.dt,
+      |        o.order_id,
+      |        o.product_variant_id,
+      |        o.product_quantity,
+      |        o.is_fbj,
+      |        o.product_id,
+      |        o.merchant_id,
+      |        m_k.kam_email AS kam,
+      |        fd.forward_14d_qty,
+      |        car.replenishment_group_id AS c_replenishment_group_id,
+      |        car.created_at AS c_created_at,
+      |        car.completed_dt AS c_completed_dt,
+      |        pcr.replenishment_group_id AS p_replenishment_group_id,
+      |        pcr.created_at AS p_created_at,
+      |        pcr.completed_dt AS p_completed_dt,
+      |        pcr.min_count AS p_min_count,
+      |        COALESCE(pcr.acc_count, 0) AS p_acc_count,
+      |        COALESCE(SUM(go.product_quantity), 0) AS p_product_qnt
+      |    FROM orders AS o
+      |    LEFT JOIN forward_demand AS fd
+      |        ON
+      |            o.product_variant_id = fd.product_variant_id
+      |            AND o.dt = fd.dt
+      |    LEFT JOIN current_active_repl AS car
+      |        ON
+      |            o.order_id = car.order_id
+      |            AND car.rn = 1
+      |    LEFT JOIN previous_completed_repl AS pcr
+      |        ON
+      |            o.order_id = pcr.order_id
+      |            AND pcr.rn = 1
+      |    LEFT JOIN var_kam AS m_k
+      |        ON
+      |            o.merchant_id = m_k.merchant_id
+      |            AND m_k.quarter = DATE_TRUNC('quarter', o.dt)
+      |    LEFT JOIN gold_orders AS go
+      |        ON
+      |            o.product_variant_id = go.product_variant_id
+      |            AND pcr.completed_dt < go.order_datetime_utc
+      |            AND o.order_datetime_utc > go.order_datetime_utc
+      |    GROUP BY
+      |        o.order_datetime_utc,
+      |        o.dt,
+      |        o.order_id,
+      |        o.product_variant_id,
+      |        o.product_quantity,
+      |        o.is_fbj,
+      |        o.product_id,
+      |        o.merchant_id,
+      |        m_k.kam_email,
+      |        fd.forward_14d_qty,
+      |        car.replenishment_group_id,
+      |        car.created_at,
+      |        car.completed_dt,
+      |        pcr.replenishment_group_id,
+      |        pcr.created_at,
+      |        pcr.completed_dt,
+      |        pcr.min_count,
+      |        COALESCE(pcr.acc_count, 0)
+      |)
+      |
+      |SELECT
+      |    dt AS partition_date,
+      |    order_datetime_utc,
+      |    order_id,
+      |    product_variant_id,
+      |    product_quantity,
+      |    is_fbj,
+      |    product_id,
+      |    merchant_id,
+      |    kam,
+      |    forward_14d_qty,
+      |    forward_14d_qty > 4 AS is_eligible,
+      |    CASE
+      |        WHEN is_fbj AND forward_14d_qty > 4
+      |            THEN '1.1 FBJ | Eligible'
+      |        WHEN is_fbj AND forward_14d_qty <= 4
+      |            THEN '1.2 FBJ | Not Eligible'
+      |        WHEN NOT is_fbj AND forward_14d_qty <= 4
+      |            THEN '2.1 FBM | Not Eligible'
+      |        WHEN
+      |            NOT is_fbj AND forward_14d_qty > 4
+      |            AND p_replenishment_group_id IS NULL
+      |            THEN '2.2.1 FBM Eligible | No previous replenishment'
+      |        WHEN
+      |            NOT is_fbj AND forward_14d_qty > 4
+      |            AND p_replenishment_group_id IS NOT NULL
+      |            AND c_replenishment_group_id IS NULL
+      |            THEN '2.2.2 FBM Eligible | Prev repl completed, no active repl'
+      |        WHEN
+      |            NOT is_fbj AND forward_14d_qty > 4
+      |            AND p_replenishment_group_id IS NOT NULL
+      |            AND c_replenishment_group_id IS NOT NULL
+      |            AND p_acc_count >= p_min_count
+      |            THEN '2.2.3 FBM Eligible | Fully delivered, late new repl'
+      |        WHEN
+      |            NOT is_fbj AND forward_14d_qty > 4
+      |            AND p_replenishment_group_id IS NOT NULL
+      |            AND c_replenishment_group_id IS NOT NULL
+      |            AND p_acc_count < p_min_count
+      |            AND p_product_qnt >= p_min_count - p_acc_count
+      |            THEN '2.2.4 FBM Eligible | Partially delivered, demand covered'
+      |        WHEN
+      |            NOT is_fbj AND forward_14d_qty > 4
+      |            AND p_replenishment_group_id IS NOT NULL
+      |            AND c_replenishment_group_id IS NOT NULL
+      |            AND p_acc_count < p_min_count
+      |            AND p_product_qnt < p_min_count - p_acc_count
+      |            THEN '3.0 FBM Eligible | Partially delivered, demand not covered'
+      |    END AS bucket,
+      |    c_replenishment_group_id,
+      |    c_created_at,
+      |    c_completed_dt,
+      |    p_replenishment_group_id,
+      |    p_created_at,
+      |    p_completed_dt,
+      |    p_min_count,
+      |    p_acc_count,
+      |    p_product_qnt
+      |FROM final
+      |DISTRIBUTE BY partition_date
+      |""".stripMargin
+
+  for (aqe <- Seq("false", "true")) {
+    test(s"fbj_order_type's band join under a root repartition runs in Spark (AQE=$aqe)") {
+      withFbj {
+        withAqe(
+          aqe,
+          SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+          SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+          def conditions(plan: SparkPlan): (Seq[String], Seq[String]) = {
+            val all = nodes(plan).collect {
+              case j: CometSortMergeJoinExec =>
+                (true, j.originalPlan.asInstanceOf[SortMergeJoinExec].condition)
+              case j: SortMergeJoinExec => (false, j.condition)
+            }
+            def named(native: Boolean) =
+              all.collect { case (`native`, Some(c)) => c.references.map(_.name).toSeq.sorted }
+            def kind(refs: Seq[String]): String =
+              if (refs.contains("completed_dt") && refs.count(_ == "order_datetime_utc") == 2) {
+                "band"
+              } else if (refs.contains("created_at")) {
+                "replenishment"
+              } else {
+                "forward"
+              }
+            (named(true).map(kind).sorted, named(false).map(kind).sorted)
+          }
+          val (off, on) = offAndOn(run(fbjOrderType))
+          assert(
+            conditions(off) == (Seq("band", "forward", "replenishment", "replenishment"), Nil),
+            s"plan:\n$off")
+          val (native, spark) = conditions(on)
+          assert(spark.contains("band"), s"plan:\n$on")
+          assert(native.contains("replenishment"), s"plan:\n$on")
+        }
+      }
+    }
+  }
+
   test("a window costs its line and the classes of its functions") {
     withTables {
       withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "false") {
