@@ -96,6 +96,10 @@ name = "aggregate"
 harness = false
 
 [[bench]]
+name = "first_last"
+harness = false
+
+[[bench]]
 name = "approx_percentile"
 harness = false
 
