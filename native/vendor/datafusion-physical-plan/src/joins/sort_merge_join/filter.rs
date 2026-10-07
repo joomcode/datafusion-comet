@@ -26,13 +26,13 @@
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, RecordBatch,
-    RecordBatchOptions, UInt64Array, UInt64Builder, new_null_array,
+    Array, ArrayBuilder, ArrayRef, BooleanArray, BooleanBufferBuilder, BooleanBuilder,
+    RecordBatch, RecordBatchOptions, UInt64Array, UInt64Builder, new_null_array,
 };
 use arrow::compute::kernels::zip::zip;
 use arrow::compute::{self, filter_record_batch};
 use arrow::datatypes::SchemaRef;
-use datafusion_common::{JoinSide, JoinType, Result};
+use datafusion_common::{JoinType, Result};
 
 use crate::joins::utils::JoinFilter;
 
@@ -143,37 +143,6 @@ pub fn needs_deferred_filtering(
 ) -> bool {
     filter.is_some()
         && matches!(join_type, JoinType::Left | JoinType::Right | JoinType::Full)
-}
-
-/// Gets the arrays which join filters are applied on
-///
-/// Extracts the columns needed for filter evaluation from left and right batch columns
-pub fn get_filter_columns(
-    join_filter: &Option<JoinFilter>,
-    left_columns: &[ArrayRef],
-    right_columns: &[ArrayRef],
-) -> Vec<ArrayRef> {
-    let mut filter_columns = vec![];
-
-    if let Some(f) = join_filter {
-        let left_columns: Vec<ArrayRef> = f
-            .column_indices()
-            .iter()
-            .filter(|col_index| col_index.side == JoinSide::Left)
-            .map(|i| Arc::clone(&left_columns[i.index]))
-            .collect();
-        let right_columns: Vec<ArrayRef> = f
-            .column_indices()
-            .iter()
-            .filter(|col_index| col_index.side == JoinSide::Right)
-            .map(|i| Arc::clone(&right_columns[i.index]))
-            .collect();
-
-        filter_columns.extend(left_columns);
-        filter_columns.extend(right_columns);
-    }
-
-    filter_columns
 }
 
 /// Determines if current index is the last occurrence of a row
@@ -292,6 +261,61 @@ pub fn get_corrected_filter_mask(
         }
         JoinType::Inner => None,
     }
+}
+
+/// Selects the pairs of one freeze that deferred filtering may output
+///
+/// For each streamed row, `get_corrected_filter_mask` keeps every pair that
+/// passed the filter, or null-joins the row's last pair when none did, and
+/// discards the rest. A row's pairs can span several freezes, so a freeze
+/// cannot tell which of its failing pairs ends up null-joined. Within each
+/// run of one row's pairs it therefore keeps the passing pairs, or only the
+/// run's last pair when none passed. Over the runs of one row this keeps
+/// all of its passing pairs and its overall last pair, which is all
+/// `get_corrected_filter_mask` outputs from it, and the discarded failing
+/// pairs never decide which pair is null-joined.
+///
+/// # Arguments
+/// * `row_indices` - Which streamed row produced each pair (no nulls)
+/// * `filter_mask` - Whether each pair passed the filter (no nulls)
+///
+/// # Returns
+/// A mask that is `true` for the pairs to materialize and keep
+pub fn deferred_filter_candidates(
+    row_indices: &UInt64Array,
+    filter_mask: &BooleanArray,
+) -> BooleanArray {
+    debug_assert_eq!(
+        row_indices.len(),
+        filter_mask.len(),
+        "row_indices and filter_mask must have same length"
+    );
+    debug_assert_eq!(row_indices.null_count(), 0);
+    debug_assert_eq!(filter_mask.null_count(), 0);
+
+    let rows = row_indices.values();
+    let passed = filter_mask.values();
+    let mut keep = BooleanBufferBuilder::new(rows.len());
+    let mut run_start = 0;
+    for i in 0..rows.len() {
+        if i + 1 < rows.len() && rows[i + 1] == rows[i] {
+            continue;
+        }
+        let run_len = i + 1 - run_start;
+        if run_len == 1 {
+            keep.append(true);
+        } else {
+            let run = passed.slice(run_start, run_len);
+            if run.count_set_bits() > 0 {
+                keep.append_buffer(&run);
+            } else {
+                keep.append_n(run_len - 1, false);
+                keep.append(true);
+            }
+        }
+        run_start = i + 1;
+    }
+    BooleanArray::new(keep.finish(), None)
 }
 
 /// Applies corrected filter mask to record batch based on join type
