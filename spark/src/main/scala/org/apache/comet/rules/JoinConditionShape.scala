@@ -21,7 +21,7 @@ package org.apache.comet.rules
 
 import scala.collection.mutable
 
-import org.apache.spark.sql.catalyst.expressions.{Add, AddMonths, Alias, And, Attribute, AttributeSet, Cast, Coalesce, DateAdd, DateAddInterval, DateAddYMInterval, DateSub, Expression, ExprId, GreaterThan, GreaterThanOrEqual, IsNull, LessThan, LessThanOrEqual, Or, Subtract, TimeAdd, TimestampAddYMInterval, TruncDate, TruncTimestamp, WindowExpression}
+import org.apache.spark.sql.catalyst.expressions.{Add, AddMonths, Alias, And, Attribute, AttributeSet, Cast, Coalesce, DateAdd, DateAddInterval, DateAddYMInterval, DateSub, Expression, ExprId, GreaterThan, GreaterThanOrEqual, IsNull, LessThan, LessThanOrEqual, Or, Subtract, TimestampAddYMInterval, TruncDate, TruncTimestamp, WindowExpression}
 import org.apache.spark.sql.comet.CometExec
 import org.apache.spark.sql.execution.{ProjectExec, SparkPlan, UnionExec}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, QueryStageExec}
@@ -45,13 +45,18 @@ object JoinConditionShape {
     case other => other
   }
 
+  private val timeAddClasses = Set("TimeAdd", "TimestampAddInterval")
+
   private def offsetBase(e: Expression): Option[Expression] = e match {
     case a: Add if a.right.foldable => Some(a.left)
     case a: Add if a.left.foldable => Some(a.right)
     case s: Subtract if s.right.foldable => Some(s.left)
     case d: DateAdd if d.days.foldable => Some(d.startDate)
     case d: DateSub if d.days.foldable => Some(d.startDate)
-    case t: TimeAdd if t.interval.foldable => Some(t.start)
+    case t
+        if timeAddClasses(t.getClass.getSimpleName) && t.children.size >= 2 &&
+          t.children(1).foldable =>
+      Some(t.children.head)
     case d: DateAddInterval if d.interval.foldable => Some(d.start)
     case d: DateAddYMInterval if d.interval.foldable => Some(d.date)
     case t: TimestampAddYMInterval if t.interval.foldable => Some(t.timestamp)
