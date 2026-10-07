@@ -290,17 +290,32 @@ object EngineCostTable {
     Seq((costClass, Flat) -> line, (costClass, Nested) -> line)
 
   /**
-   * The default prices, measured on pr29 (calib29, calib29c and calib29d) with L counting every
-   * leaf of the row. Lines are `(class, form) -> Line(Comet c0, Comet k0, Comet k1, Spark c0,
-   * Spark k)`; a class priced alike in both forms has one line for both.
+   * The default prices, measured on pr29 (calib29, calib29c and calib29d) except `sort` and
+   * `sortSpill`, with L counting every leaf of the row. Lines are `(class, form) -> Line(Comet
+   * c0, Comet k0, Comet k1, Spark c0, Spark k)`; a class priced alike in both forms has one line
+   * for both.
    *
    *   - `shuffleWrite` (at `shuffleWritePartitionBase` partitions) and `shuffleRead`: every leaf
    *     of the shuffled rows, Spark's fetch wait and the read conversion excluded. Spark is
    *     averaged over 250 to 4800 partitions, on which it does not depend.
-   *   - `sort`: every leaf of the sorted rows. Spark sorts pointers, so its price barely depends
-   *     on the width; Comet flat is noisy (maxrel 0.6). `sortSpill` is what spilling adds, on a
-   *     fraction `sortSpillFraction` of rows, none by default: rows are not estimated, so a spill
-   *     cannot be predicted.
+   *   - `sort`: every leaf of the sorted rows, measured apart from the other lines in a local
+   *     benchmark on one core: the time of a `sortWithinPartitions` minus that of the same scan
+   *     and conversion without it, so Spark's inserts, copies and output count, not only its
+   *     `sort time` (about 0.7 of it). Rows of 3, 8, 15, 22 and 30 flat leaves (strings, dates,
+   *     longs, doubles, booleans, ints and timestamps, mostly null) sorted by a 24-character id
+   *     and an int, and of 8 and 22 leaves with all but the keys in structs and an array of
+   *     structs, at 1M, 6M and 13M rows per task (6M and 13M twice). The lines are fitted at 13M
+   *     rows, as wide production sorts run, and scaled by 1.6 to the cluster: the pr29 prices of
+   *     small tasks are 1.5 (Comet) and 1.7 (Spark) times this harness at 1M rows. Both engines
+   *     cost more per row the more rows a task sorts, Comet more, and the model does not know the
+   *     rows: at 1M rows Comet costs about 150 ns locally whatever the width, Spark 300 + 5.5 *
+   *     L, a ratio of 0.4; at 13M rows the ratio is 0.75 flat and about 1 nested. Comet gathers
+   *     every leaf of a row from its own column, which outgrows the caches; Spark copies the row
+   *     whole. Comet is noisy (maxrel 0.34), Spark less (0.13), and the nested lines rest on two
+   *     widths. `sortSpill` is what spilling every row once adds, at 6M rows (some in-memory runs
+   *     at 13M spilled on their own), through the origin where the intercept came out negative;
+   *     it is priced on a fraction `sortSpillFraction` of rows, none by default: rows are not
+   *     estimated, so a spill cannot be predicted.
    *   - `smj`: the join over its sorted inputs, every output leaf, noisy. `bhj`: the probe side,
    *     every output leaf; the nested `bhj` is noisy (Comet 0 to 350, Spark 50 to 4200 ns) and
    *     takes the flat line. `smjCondition`: what a join condition adds to `smj`, every output
@@ -366,10 +381,10 @@ object EngineCostTable {
     (ShuffleWrite, Nested) -> Line(46, 39.59, 0.031, 686, 47.77),
     (ShuffleRead, Flat) -> Line(0, 14.73, 0.032, 67, 26.34),
     (ShuffleRead, Nested) -> Line(0, 10.79, 0.019, 167, 19.02),
-    (Sort, Flat) -> Line(224, 0, 0.023, 646, 0),
-    (Sort, Nested) -> Line(244, 2.69, 0.016, 770, 2.34),
-    (SortSpill, Flat) -> Line(265, 49.0, 0, 495, 38.5),
-    (SortSpill, Nested) -> Line(324, 45.3, 0, 502, 33.5),
+    (Sort, Flat) -> Line(321, 21.2, 0, 432, 24.1),
+    (Sort, Nested) -> Line(1110, 3.3, 0, 621, 25.4),
+    (SortSpill, Flat) -> Line(0, 22.2, 0, 93, 39.3),
+    (SortSpill, Nested) -> Line(0, 34.6, 0, 0, 66.7),
     (Smj, Flat) -> Line(0, 4, 0, 0, 35),
     (Smj, Nested) -> Line(0, 0.45, 0.046, 0, 32),
     (Bhj, Flat) -> Line(72, 2.3, 0.002, 0, 20.5),

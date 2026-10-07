@@ -46,6 +46,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
   private val flag = CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.key
   private val costTable = CometConf.COMET_EXEC_COST_BASED_ENGINES_COST_TABLE.key
   private val expensiveNativeSort = costTable -> "sort.flat.comet=1000,0,0"
+  private val cheapNativeSort = costTable -> "sort.flat.comet=0,0,0"
 
   private def same(actual: Double, expected: Double): Unit =
     assert(math.abs(actual - expected) < 1e-9, s"$actual != $expected")
@@ -157,7 +158,14 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
           assert(count(off) { case s: SortAggregateExec => s } == 2, s"plan:\n$off")
           assert(count(off) { case s: CometSortExec => s } == 2, s"plan:\n$off")
           assert(count(on) { case s: SortAggregateExec => s } == 2, s"plan:\n$on")
-          assert(count(on) { case s: CometSortExec => s } == 2, s"plan:\n$on")
+          assert(count(on) { case s: CometSortExec => s } == 1, s"plan:\n$on")
+          assert(count(on) { case s: SortExec => s } == 1, s"plan:\n$on")
+          val mapSide = nodes(on).collectFirst { case s: CometSortExec => s }.get
+          assert(nodes(mapSide).exists(_.isInstanceOf[CometNativeScanExec]), s"plan:\n$on")
+          withSQLConf(flag -> "true", cheapNativeSort) {
+            val kept = run(query)
+            assert(count(kept) { case s: CometSortExec => s } == 2, s"plan:\n$kept")
+          }
           withSQLConf(flag -> "true", expensiveNativeSort) {
             val moved = run(query)
             assert(count(moved) { case s: CometSortExec => s } == 0, s"plan:\n$moved")
@@ -500,7 +508,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
         "keepFiltersOverNativeScans=false;keepPartialAggregatesOverNativeInputs=false;" +
         "shuffleReadPerByte.spark=3;cometShuffleBytesRatio=0.75;quadraticLeafCap=10;" +
         "sortSpillFraction=0.5")
-    assert(table.line(Sort, Form.Flat) == Line(224, 1, 2, 646, 0))
+    assert(table.line(Sort, Form.Flat) == Line(321, 1, 2, 432, 24.1))
     assert(table.line(ShuffleRead, Form.Nested) == Line(0, 10.79, 0.019, 3, 4))
     assert(table.line(ShuffleWrite, Form.Flat) == Line(5, 6, 7, 69, 67.21))
     assert(table.line(C2R, Form.Nested).cometK0 == 7)
@@ -515,7 +523,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     assert(table.filterPassThroughPerLeafSpark == 0)
     same(table.cometShuffleBytes(100), (0.5 + 2) * 0.75 * 100)
     same(table.sparkShuffleBytes(100), (3.6 + 3) * 100)
-    same(table.comet(Sort, Width(20, 0)), 224 + 1 * 20 + 2 * 20 * 10)
+    same(table.comet(Sort, Width(20, 0)), 321 + 1 * 20 + 2 * 20 * 10)
     assert(table.sortSpillFraction == 0.5)
     assert(!table.keepFiltersOverNativeScans)
     assert(EngineCostTable.default.keepFiltersOverNativeScans)
@@ -570,10 +578,11 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     same(t.spark(ShuffleWrite, flat10), 69 + 67.21 * 10)
     same(t.comet(ShuffleRead, Width(4, 4)), 10.79 * 4 + 0.019 * 16)
     same(t.spark(ShuffleRead, Width(4, 4)), 167 + 19.02 * 4)
-    same(t.spark(Sort, Width(200, 0)), 646)
-    same(t.comet(Sort, Width(200, 0)), 224 + 0.023 * 40000)
-    same(t.comet(Sort, Width(200, 200)), 244 + 2.69 * 200 + 0.016 * 40000)
-    same(t.comet(Sort, Width(1000, 0)), 224 + 0.023 * 1000 * 600)
+    same(t.spark(Sort, Width(200, 0)), 432 + 24.1 * 200)
+    same(t.comet(Sort, Width(200, 0)), 321 + 21.2 * 200)
+    same(t.comet(Sort, Width(200, 200)), 1110 + 3.3 * 200)
+    same(t.spark(Sort, Width(200, 200)), 621 + 25.4 * 200)
+    same(t.comet(ShuffleWrite, Width(1000, 0)), 1000 * (48.95 + 0.037 * 600))
     same(t.comet(Smj, flat10), 40)
     same(t.spark(Smj, flat10), 350)
     same(t.comet(Bhj, flat10), 72 + 23 + 0.2)
