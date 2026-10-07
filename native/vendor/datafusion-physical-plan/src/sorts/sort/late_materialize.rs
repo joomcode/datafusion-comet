@@ -224,13 +224,35 @@ fn row_order(rows: &Rows) -> Vec<u32> {
         keys.sort_unstable();
         return keys.into_iter().map(|(_, index)| index).collect();
     }
-    let mut keys: Vec<(&[u8], u32)> = rows
+    let mut keys: Vec<(u64, u32)> = rows
         .iter()
         .enumerate()
-        .map(|(index, row)| (row.data(), index as u32))
+        .map(|(index, row)| (prefix(row.data()), index as u32))
         .collect();
     keys.sort_unstable();
+    let mut start = 0;
+    while start < keys.len() {
+        let mut end = start + 1;
+        while end < keys.len() && keys[end].0 == keys[start].0 {
+            end += 1;
+        }
+        if end - start > 1 {
+            keys[start..end].sort_unstable_by(|a, b| {
+                let left = rows.row(a.1 as usize);
+                let right = rows.row(b.1 as usize);
+                left.data().cmp(right.data()).then(a.1.cmp(&b.1))
+            });
+        }
+        start = end;
+    }
     keys.into_iter().map(|(_, index)| index).collect()
+}
+
+fn prefix(data: &[u8]) -> u64 {
+    let mut bytes = [0u8; 8];
+    let len = data.len().min(8);
+    bytes[..len].copy_from_slice(&data[..len]);
+    u64::from_be_bytes(bytes)
 }
 
 struct Gather {
@@ -1664,6 +1686,71 @@ mod tests {
         assert!(offsets_fit(&[big.clone(), small.clone()]));
         assert!(!offsets_fit(&[big.clone(), small.clone(), small]));
         assert!(!offsets_fit(&[big.clone(), big]));
+        Ok(())
+    }
+
+    #[test]
+    fn row_order_matches_a_full_comparison_of_the_rows() -> Result<()> {
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for options in [
+            SortOptions::default(),
+            SortOptions {
+                descending: true,
+                nulls_first: true,
+            },
+            SortOptions {
+                descending: false,
+                nulls_first: true,
+            },
+            SortOptions {
+                descending: true,
+                nulls_first: false,
+            },
+        ] {
+            let values: Vec<u64> = (0..20000).map(|_| next()).collect();
+            let strings = StringArray::from_iter(values.iter().map(|v| {
+                (v % 9 != 0).then(|| {
+                    let len = (v >> 8) % 14;
+                    let base = ["", "a", "ab", "abcdefg", "abcdefgh", "abcdefghij", "b"]
+                        [(v % 7) as usize];
+                    format!("{base}{}", "z".repeat(len as usize % 3))
+                        .repeat((len / 5) as usize + 1)
+                })
+            }));
+            let ints = Int32Array::from_iter(
+                values
+                    .iter()
+                    .map(|v| (v % 5 != 0).then_some(((v >> 16) % 4) as i32 - 2)),
+            );
+            let bytes = BinaryArray::from_iter(
+                values
+                    .iter()
+                    .map(|v| (v % 6 != 0).then(|| vec![0u8; ((v >> 24) % 10) as usize])),
+            );
+            let columns: Vec<ArrayRef> =
+                vec![Arc::new(strings), Arc::new(ints), Arc::new(bytes)];
+            for width in 1..=3 {
+                let fields = columns[..width]
+                    .iter()
+                    .map(|c| SortField::new_with_options(c.data_type().clone(), options))
+                    .collect();
+                let rows =
+                    RowConverter::new(fields)?.convert_columns(&columns[..width])?;
+                let mut expected: Vec<u32> = (0..rows.num_rows() as u32).collect();
+                expected.sort_by(|a, b| {
+                    rows.row(*a as usize)
+                        .cmp(&rows.row(*b as usize))
+                        .then(a.cmp(b))
+                });
+                assert_eq!(row_order(&rows), expected);
+            }
+        }
         Ok(())
     }
 }
