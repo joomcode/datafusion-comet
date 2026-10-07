@@ -82,4 +82,11 @@ impl OrderedAggregateTable<FinalMarker> {
     ) -> Result<Option<RecordBatch>> {
         self.next_output_batch_for_mode(true)
     }
+
+    /// COMET PATCH: see `AggregateHashTable::<FinalMarker>::next_state_output_batch`.
+    pub(in crate::aggregates) fn next_state_output_batch(
+        &mut self,
+    ) -> Result<Option<RecordBatch>> {
+        self.next_output_batch_for_mode(false)
+    }
 }

@@ -63,7 +63,7 @@ import org.apache.comet.serde.OperatorOuterClass.Operator
  *   with this spec id; required because iceberg-rust's `DataFile` is spec-agnostic at the wire.
  */
 case class CometIcebergWriteExec(
-    nativeOp: Operator,
+    @transient nativeOp: Operator,
     child: SparkPlan,
     @transient batchWrite: BatchWrite,
     @transient table: AnyRef,

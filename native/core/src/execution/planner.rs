@@ -61,6 +61,7 @@ use arrow::datatypes::{
 };
 use arrow::ffi_stream::FFI_ArrowArrayStream;
 use datafusion::functions_aggregate::bit_and_or_xor::{bit_and_udaf, bit_or_udaf, bit_xor_udaf};
+use datafusion::functions_aggregate::bool_and_or::{bool_and_udaf, bool_or_udaf};
 use datafusion::functions_aggregate::count::count_udaf;
 use datafusion::functions_aggregate::min_max::max_udaf;
 use datafusion::functions_aggregate::min_max::min_udaf;
@@ -73,7 +74,6 @@ use datafusion::{
     common::DataFusionError,
     config::ConfigOptions,
     execution::FunctionRegistry,
-    functions_aggregate::first_last::{FirstValue, LastValue},
     logical_expr::Operator as DataFusionOperator,
     physical_expr::{
         expressions::{
@@ -155,8 +155,8 @@ use datafusion_comet_spark_expr::{
     jvm_udf::JvmScalarUdfExpr, spark_in_list, ApproxPercentile, ArrayInsert, Avg, AvgDecimal, Cast,
     CheckOverflow, Correlation, Covariance, CreateNamedStruct, DecimalRescaleCheckOverflow,
     GetArrayStructFields, GetStructField, HllPlusPlus, IfExpr, ListExtract, MaxMinBy, Mode,
-    NormalizeNaNAndZero, Regr, RegrType, SparkCastOptions, Stddev, SumDecimal, ToJson,
-    UnboundColumn, Variance, WideDecimalBinaryExpr, WideDecimalOp,
+    NormalizeNaNAndZero, Regr, RegrType, SparkCastOptions, SparkFirstLast, Stddev, SumDecimal,
+    ToJson, UnboundColumn, Variance, WideDecimalBinaryExpr, WideDecimalOp,
 };
 use itertools::Itertools;
 use jni::objects::{Global, JObject};
@@ -1544,19 +1544,20 @@ impl PhysicalPlanner {
                         agg.mode
                     ))
                 })?;
+                // A PartialMerge feeds groups it must not repeat (the distinct values of a
+                // single COUNT(DISTINCT)), so it runs as PartialReduce, which spills under
+                // memory pressure where Partial emits groups early.
                 let mode = match proto_mode {
                     ProtoAggregateMode::Partial => DFAggregateMode::Partial,
                     ProtoAggregateMode::Final => DFAggregateMode::Final,
-                    // PartialMerge: Partial + MergeAsPartial
-                    ProtoAggregateMode::PartialMerge => DFAggregateMode::Partial,
+                    ProtoAggregateMode::PartialMerge => DFAggregateMode::PartialReduce,
                 };
 
-                // Check if any expression uses PartialMerge mode. When present,
-                // those expressions are wrapped with MergeAsPartial to get merge
-                // semantics inside a Partial-mode AggregateExec.
+                // A mixed {Partial, PartialMerge} aggregate runs as Partial and wraps its
+                // PartialMerge expressions with MergeAsPartial to get merge semantics.
                 let partial_merge_value = ProtoAggregateMode::PartialMerge as i32;
-                let has_partial_merge = proto_mode == ProtoAggregateMode::PartialMerge
-                    || agg.expr_modes.contains(&partial_merge_value);
+                let has_partial_merge = proto_mode == ProtoAggregateMode::Partial
+                    && agg.expr_modes.contains(&partial_merge_value);
 
                 let agg_exprs: PhyAggResult = agg
                     .agg_exprs
@@ -2937,8 +2938,13 @@ impl PhysicalPlanner {
                 let child = self.create_expr(expr.child.as_ref().unwrap(), Arc::clone(&schema))?;
                 let datatype = to_arrow_datatype(expr.datatype.as_ref().unwrap());
                 let child = Arc::new(CastExpr::new(child, datatype.clone(), None));
+                let func = if datatype == DataType::Boolean {
+                    bool_and_udaf()
+                } else {
+                    min_udaf()
+                };
 
-                AggregateExprBuilder::new(min_udaf(), vec![child])
+                AggregateExprBuilder::new(func, vec![child])
                     .schema(schema)
                     .alias("min")
                     .with_ignore_nulls(false)
@@ -2950,8 +2956,13 @@ impl PhysicalPlanner {
                 let child = self.create_expr(expr.child.as_ref().unwrap(), Arc::clone(&schema))?;
                 let datatype = to_arrow_datatype(expr.datatype.as_ref().unwrap());
                 let child = Arc::new(CastExpr::new(child, datatype.clone(), None));
+                let func = if datatype == DataType::Boolean {
+                    bool_or_udaf()
+                } else {
+                    max_udaf()
+                };
 
-                AggregateExprBuilder::new(max_udaf(), vec![child])
+                AggregateExprBuilder::new(func, vec![child])
                     .schema(schema)
                     .alias("max")
                     .with_ignore_nulls(false)
@@ -3032,7 +3043,7 @@ impl PhysicalPlanner {
             }
             AggExprStruct::First(expr) => {
                 let child = self.create_expr(expr.child.as_ref().unwrap(), Arc::clone(&schema))?;
-                let func = AggregateUDF::new_from_impl(FirstValue::new());
+                let func = AggregateUDF::new_from_impl(SparkFirstLast::first());
 
                 AggregateExprBuilder::new(Arc::new(func), vec![child])
                     .schema(schema)
@@ -3044,7 +3055,7 @@ impl PhysicalPlanner {
             }
             AggExprStruct::Last(expr) => {
                 let child = self.create_expr(expr.child.as_ref().unwrap(), Arc::clone(&schema))?;
-                let func = AggregateUDF::new_from_impl(LastValue::new());
+                let func = AggregateUDF::new_from_impl(SparkFirstLast::last());
 
                 AggregateExprBuilder::new(Arc::new(func), vec![child])
                     .schema(schema)

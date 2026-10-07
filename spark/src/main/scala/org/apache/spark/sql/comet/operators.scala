@@ -1384,12 +1384,12 @@ object CometProjectExec extends CometOperatorSerde[ProjectExec] {
 }
 
 case class CometProjectExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     projectList: Seq[NamedExpression],
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec
     with PartitioningPreservingUnaryExecNode {
   override def producedAttributes: AttributeSet = outputSet
@@ -1443,12 +1443,12 @@ object CometFilterExec extends CometOperatorSerde[FilterExec] {
 }
 
 case class CometFilterExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     condition: Expression,
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
 
   override def outputPartitioning: Partitioning = child.outputPartitioning
@@ -1523,13 +1523,13 @@ object CometSortExec extends CometOperatorSerde[SortExec] {
 }
 
 case class CometSortExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     override val outputOrdering: Seq[SortOrder],
     sortOrder: Seq[SortOrder],
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
 
   override def outputPartitioning: Partitioning = child.outputPartitioning
@@ -1589,11 +1589,11 @@ object CometLocalLimitExec extends CometOperatorSerde[LocalLimitExec] {
 }
 
 case class CometLocalLimitExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     limit: Int,
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
 
   override def output: Seq[Attribute] = child.output
@@ -1650,12 +1650,12 @@ object CometGlobalLimitExec extends CometOperatorSerde[GlobalLimitExec] {
 }
 
 case class CometGlobalLimitExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     limit: Int,
     offset: Int,
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
 
   override def output: Seq[Attribute] = child.output
@@ -1714,12 +1714,12 @@ object CometExpandExec extends CometOperatorSerde[ExpandExec] {
 }
 
 case class CometExpandExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     projections: Seq[Seq[Expression]],
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
   override def outputPartitioning: Partitioning = UnknownPartitioning(0)
 
@@ -1823,14 +1823,14 @@ object CometExplodeExec extends CometOperatorSerde[GenerateExec] {
 }
 
 case class CometExplodeExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     generator: Generator,
     generatorOutput: Seq[Attribute],
     outer: Boolean,
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
   override def outputPartitioning: Partitioning = child.outputPartitioning
 
@@ -2427,7 +2427,7 @@ object CometObjectHashAggregateExec
 }
 
 case class CometHashAggregateExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     groupingExpressions: Seq[NamedExpression],
@@ -2436,7 +2436,7 @@ case class CometHashAggregateExec(
     resultExpressions: Seq[NamedExpression],
     input: Seq[Attribute],
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec
     with PartitioningPreservingUnaryExecNode {
 
@@ -2601,7 +2601,7 @@ trait CometHashJoin {
 }
 
 case class CometBroadcastNestedLoopJoinExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     override val outputOrdering: Seq[SortOrder],
@@ -2610,7 +2610,7 @@ case class CometBroadcastNestedLoopJoinExec(
     buildSide: BuildSide,
     override val left: SparkPlan,
     override val right: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometBinaryExec {
 
   // Mirror Spark's BroadcastNestedLoopJoinExec: output partitioning derives from the streamed
@@ -2812,7 +2812,7 @@ object CometHashJoinExec extends CometOperatorSerde[HashJoin] with CometHashJoin
 }
 
 case class CometHashJoinExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     override val outputOrdering: Seq[SortOrder],
@@ -2823,7 +2823,7 @@ case class CometHashJoinExec(
     buildSide: BuildSide,
     override val left: SparkPlan,
     override val right: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometBinaryExec {
 
   override def outputPartitioning: Partitioning = joinType match {
@@ -2874,7 +2874,7 @@ case class CometHashJoinExec(
 }
 
 case class CometBroadcastHashJoinExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     override val outputOrdering: Seq[SortOrder],
@@ -2886,7 +2886,7 @@ case class CometBroadcastHashJoinExec(
     isNullAwareAntiJoin: Boolean,
     override val left: SparkPlan,
     override val right: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometBinaryExec {
 
   // The following logic of `outputPartitioning` is copied from Spark `BroadcastHashJoinExec`.
@@ -3166,7 +3166,7 @@ object CometSortMergeJoinExec extends CometOperatorSerde[SortMergeJoinExec] {
 }
 
 case class CometSortMergeJoinExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     override val outputOrdering: Seq[SortOrder],
@@ -3176,7 +3176,7 @@ case class CometSortMergeJoinExec(
     condition: Option[Expression],
     override val left: SparkPlan,
     override val right: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometBinaryExec {
 
   override def outputPartitioning: Partitioning = joinType match {
@@ -3225,7 +3225,9 @@ object CometScanWrapper extends CometSink[SparkPlan] {
   }
 }
 
-case class CometScanWrapper(override val nativeOp: Operator, override val originalPlan: SparkPlan)
+case class CometScanWrapper(
+    @transient override val nativeOp: Operator,
+    override val originalPlan: SparkPlan)
     extends CometNativeExec
     with LeafExecNode {
   override val serializedPlanOpt: SerializedPlan = SerializedPlan(None)
@@ -3241,7 +3243,7 @@ case class CometScanWrapper(override val nativeOp: Operator, override val origin
  * This is very similar to `CometScanWrapper` above except it has child.
  */
 case class CometSinkPlaceHolder(
-    override val nativeOp: Operator, // Must be a Scan
+    @transient override val nativeOp: Operator, // Must be a Scan
     override val originalPlan: SparkPlan,
     child: SparkPlan)
     extends CometUnaryExec {

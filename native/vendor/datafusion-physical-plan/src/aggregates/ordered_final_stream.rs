@@ -70,6 +70,8 @@ pub(crate) struct OrderedFinalAggregateStream {
     /// COMET PATCH: the group keys are fully ordered, so the table holds only the groups
     /// the last batch may continue.
     fully_ordered: bool,
+    /// COMET PATCH: a `PartialReduce` aggregate emits merged states instead of final values.
+    emit_states: bool,
 }
 
 /// Spill configuration and accumulated runs for partially ordered final
@@ -269,7 +271,9 @@ impl OrderedFinalAggregateStream {
     ) -> Result<Self> {
         debug_assert!(matches!(
             agg.mode,
-            AggregateMode::Final | AggregateMode::FinalPartitioned
+            AggregateMode::Final
+                | AggregateMode::FinalPartitioned
+                | AggregateMode::PartialReduce
         ));
         debug_assert_ne!(agg.input_order_mode, InputOrderMode::Linear);
 
@@ -329,7 +333,9 @@ impl OrderedFinalAggregateStream {
     ) -> Result<Self> {
         debug_assert!(matches!(
             agg.mode,
-            AggregateMode::Final | AggregateMode::FinalPartitioned
+            AggregateMode::Final
+                | AggregateMode::FinalPartitioned
+                | AggregateMode::PartialReduce
         ));
         debug_assert_ne!(*input_order_mode, InputOrderMode::Linear);
 
@@ -374,6 +380,7 @@ impl OrderedFinalAggregateStream {
                 spill_context,
             }),
             fully_ordered: *input_order_mode == InputOrderMode::Sorted,
+            emit_states: agg.mode == AggregateMode::PartialReduce,
         })
     }
 
@@ -504,7 +511,11 @@ impl OrderedFinalAggregateStream {
                     Ok(None)
                 } else {
                     let timer = elapsed_compute.timer();
-                    let result = table.next_output_batch();
+                    let result = if self.emit_states {
+                        table.next_state_output_batch()
+                    } else {
+                        table.next_output_batch()
+                    };
                     timer.done();
                     result
                 };
@@ -760,7 +771,11 @@ impl OrderedFinalAggregateStream {
         let mut table = table;
         let elapsed_compute = self.baseline_metrics.elapsed_compute().clone();
         let timer = elapsed_compute.timer();
-        let result = table.next_output_batch();
+        let result = if self.emit_states {
+            table.next_state_output_batch()
+        } else {
+            table.next_output_batch()
+        };
         timer.done();
 
         match result {

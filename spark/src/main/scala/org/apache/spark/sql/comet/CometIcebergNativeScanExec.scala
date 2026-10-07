@@ -55,11 +55,11 @@ import org.apache.comet.serde.operator.CometIcebergNativeScan
  * `PlanDataInjector.findAllPlanData` before `commonData` is read.
  */
 case class CometIcebergNativeScanExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val output: Seq[Attribute],
     runtimeFilters: Seq[Expression],
     @transient override val originalPlan: BatchScanExec,
-    override val serializedPlanOpt: SerializedPlan,
+    @transient override val serializedPlanOpt: SerializedPlan,
     metadataLocation: String,
     scanHashCode: Int,
     @transient nativeIcebergScanMetadata: CometIcebergNativeScanMetadata)

@@ -844,6 +844,7 @@ impl ExternalSorter {
                 std::mem::take(&mut self.in_mem_batches),
                 self.expr.clone(),
                 rows_per_batch,
+                !is_output_stream,
                 self.reservation.take(),
                 elapsed_compute,
             );

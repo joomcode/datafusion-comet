@@ -41,10 +41,10 @@ import org.apache.comet.serde.operator.{partition2Proto, schema2Proto}
  * Native CSV scan operator that delegates file reading to datafusion.
  */
 case class CometCsvNativeScanExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val output: Seq[Attribute],
     @transient override val originalPlan: BatchScanExec,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometLeafExec {
   override val supportsColumnar: Boolean = true
 

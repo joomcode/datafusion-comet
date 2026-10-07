@@ -1359,6 +1359,42 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
     })
   }
 
+  test("partialMerge - single count distinct is exact when the PartialMerge aggregate spills") {
+    withTempPath { dir =>
+      withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+        spark
+          .range(0, 180000, 1, 6)
+          .selectExpr("(id * 7919) % 60000 AS x", "id AS v")
+          .selectExpr("x % 7 AS k", "x", "v")
+          .write
+          .parquet(dir.getAbsolutePath)
+      }
+      spark.read.parquet(dir.getAbsolutePath).createOrReplaceTempView("pm_spill")
+      for (partitions <- Seq(1, 3)) {
+        withSQLConf(
+          CometConf.COMET_OFFHEAP_MEMORY_POOL_FRACTION.key -> "0.00005",
+          CometConf.COMET_BATCH_SIZE.key -> "64",
+          SQLConf.SHUFFLE_PARTITIONS.key -> partitions.toString) {
+          for (q <- Seq(
+              "SELECT k, count(DISTINCT x), sum(v), max(v) FROM pm_spill GROUP BY k",
+              "SELECT count(DISTINCT x), sum(v), min(v) FROM pm_spill")) {
+            val (_, plan) = checkSparkAnswerAndOperator(sql(q))
+            val partialMerges = collect(plan) {
+              case a: CometHashAggregateExec
+                  if a.aggregateExpressions.nonEmpty &&
+                    a.aggregateExpressions.forall(_.mode == PartialMerge) =>
+                a
+            }
+            assert(partialMerges.nonEmpty, s"no PartialMerge aggregate in:\n$plan")
+            val spills =
+              partialMerges.map(_.metrics.get("spill_count").map(_.value).getOrElse(0L)).sum
+            assert(spills > 0, s"the PartialMerge aggregate did not spill: $q")
+          }
+        }
+      }
+    }
+  }
+
   test("partialMerge - distinct + non-distinct aggregates (Expand pattern)") {
     withParquetTable((1 to 100).map(i => (i, i.toString)), "tbl", false) {
       checkSparkAnswerAndOperator("SELECT avg(_1), sum(_1), count(distinct _1) FROM tbl")
@@ -1538,6 +1574,74 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
             }
           }
         }
+      }
+    }
+  }
+
+  private def withFirstLastTable(f: => Unit): Unit = {
+    withTempDir { dir =>
+      val path = s"${dir.getAbsolutePath}/first_last_groups.parquet"
+      spark
+        .range(0, 200000, 1, 4)
+        .selectExpr(
+          "id % 20011 AS k",
+          "CAST(id % 20011 AS INT) * 3 AS c",
+          "concat('k', id % 20011) AS cs",
+          "IF(id DIV 20011 = 1, id % 2 = 0, NULL) AS one_b",
+          "IF(id DIV 20011 = 2, timestamp_seconds(id), NULL) AS one_ts",
+          "IF(id DIV 20011 = 3, CAST(id AS INT), NULL) AS one_i",
+          "IF(id DIV 20011 = 4, date_add(DATE'2020-01-01', CAST(id % 1000 AS INT)), NULL) AS one_date",
+          "IF(id DIV 20011 = 5, concat('s', id), NULL) AS one_s",
+          "IF(id DIV 20011 = 6, CAST(id AS DOUBLE) / 7, NULL) AS one_f",
+          "IF(id DIV 20011 = 7, CAST(id AS DECIMAL(20, 3)) / 7, NULL) AS one_d",
+          "IF(id % 7 = 0, NULL, id % 3 = 0) AS b",
+          "IF(id % 20011 % 5 = 0, NULL, id % 4 = 0) AS bn")
+        .write
+        .parquet(path)
+      withSQLConf(CometConf.COMET_BATCH_SIZE.key -> "1000") {
+        spark.read.parquet(path).createOrReplaceTempView("first_last_groups")
+        f
+      }
+    }
+  }
+
+  private val firstLastQueries = Seq(
+    """SELECT k, count(DISTINCT cs), count(DISTINCT one_s), first(one_i, true), sum(c),
+      |  max(b), min(bn), first(one_ts, true) FILTER (WHERE k % 2 = 0),
+      |  last(one_d, true) FILTER (WHERE c > 30)
+      |FROM first_last_groups GROUP BY k""".stripMargin,
+    """SELECT k, count(DISTINCT one_i) FILTER (WHERE c % 3 = 0), count(DISTINCT cs),
+      |  first(one_ts, true), last(one_date, true), max(one_b), min(one_b)
+      |FROM first_last_groups GROUP BY k""".stripMargin,
+    """SELECT k, first(c), last(c), first(one_b, true), last(one_b, true), first(one_ts, true),
+      |  last(one_i, true), first(one_date, true), last(one_f, true), first(one_f, true),
+      |  last(one_d, true), max(b), min(b), max(bn), min(bn)
+      |FROM first_last_groups GROUP BY k""".stripMargin,
+    """SELECT k % 3, first(one_d, true) FILTER (WHERE k = 7),
+      |  last(one_i, true) FILTER (WHERE k = 9), first(c) FILTER (WHERE k = 11),
+      |  max(bn) FILTER (WHERE k % 5 = 0), min(b) FILTER (WHERE k < 100)
+      |FROM first_last_groups GROUP BY k % 3""".stripMargin,
+    "SELECT max(b), min(b), max(bn) FILTER (WHERE k % 5 = 0), min(one_b) FROM first_last_groups")
+
+  test("first/last with ignore nulls and filters, and boolean min/max, match Spark") {
+    withFirstLastTable {
+      firstLastQueries.foreach(q => checkSparkAnswerAndOperator(sql(q)))
+    }
+  }
+
+  test("first/last and boolean min/max match Spark when the aggregate spills") {
+    withFirstLastTable {
+      withSQLConf(
+        CometConf.COMET_OFFHEAP_MEMORY_POOL_TYPE.key -> "fair_unified",
+        CometConf.COMET_OFFHEAP_MEMORY_POOL_FRACTION.key -> "0.0003",
+        SQLConf.SHUFFLE_PARTITIONS.key -> "2") {
+        val spills = firstLastQueries.map { q =>
+          val (_, plan) = checkSparkAnswerAndOperator(sql(q))
+          stripAQEPlan(plan).collect { case a: CometHashAggregateExec =>
+            a.metrics.get("spill_count").map(_.value).getOrElse(0L)
+          }.sum
+        }
+        assert(spills.count(_ > 0) >= 3, s"spills per query: $spills")
       }
     }
   }

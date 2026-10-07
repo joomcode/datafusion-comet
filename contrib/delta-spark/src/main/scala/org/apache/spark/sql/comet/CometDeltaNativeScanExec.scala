@@ -47,14 +47,14 @@ import org.apache.comet.serde.OperatorOuterClass.Operator
  * `TreeNode.makeCopy` on MERGE re-planning (the CometIcebergNativeScanExec lesson).
  */
 case class CometDeltaNativeScanExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val output: Seq[Attribute],
     requiredSchema: StructType,
     runtimeFilters: Seq[Expression],
     dataFilters: Seq[Expression],
     @transient relation: HadoopFsRelation,
     originalPlan: FileSourceScanExec,
-    override val serializedPlanOpt: SerializedPlan,
+    @transient override val serializedPlanOpt: SerializedPlan,
     sourceKey: String)
     extends CometLeafExec
     with CometScanWithPlanData {

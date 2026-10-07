@@ -24,6 +24,9 @@ import scala.collection.mutable
 import org.apache.spark.{ShuffleDependency, SparkEnv, TaskContext}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{CometTestBase, DataFrame}
+import org.apache.spark.sql.comet.CometNativeExec
+import org.apache.spark.sql.execution.{CommandResultExec, SortExec, SparkPlan}
+import org.apache.spark.sql.execution.datasources.WriteFilesExec
 import org.apache.spark.sql.internal.SQLConf
 
 import org.apache.comet.CometConf
@@ -47,6 +50,10 @@ class CometTaskBinarySizeSuite extends CometTestBase {
 
   private def stageBinaries(df: DataFrame): Seq[StageBinary] = {
     if (spark.conf.get(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key).toBoolean) df.collect()
+    rddBinaries(df.queryExecution.executedPlan.execute())
+  }
+
+  private def rddBinaries(root: RDD[_]): Seq[StageBinary] = {
     val serializer = SparkEnv.get.closureSerializer.newInstance()
     val func = (_: TaskContext, it: Iterator[_]) => it.size
     val out = mutable.ArrayBuffer.empty[StageBinary]
@@ -66,7 +73,7 @@ class CometTaskBinarySizeSuite extends CometTestBase {
         case _ =>
       }
     }
-    visit(df.queryExecution.executedPlan.execute(), None)
+    visit(root, None)
     out.toSeq
   }
 
@@ -194,6 +201,156 @@ class CometTaskBinarySizeSuite extends CometTestBase {
             val bound = vanilla.map(_.bytes).max + 2 * sql.length
             comet.foreach(stage => assert(stage.bytes < bound, s"${stage.name} over $bound"))
           }
+        }
+      }
+    }
+  }
+
+  private def javaSize(obj: AnyRef): Long =
+    SparkEnv.get.closureSerializer.newInstance().serialize(obj).limit().toLong
+
+  private case class WriteStage(planBytes: Long, stageBytes: Long, nativeNodes: Int)
+
+  private def writeStage(insert: String): WriteStage = {
+    val command = spark.sql(insert).queryExecution.executedPlan match {
+      case c: CommandResultExec => c.commandPhysicalPlan
+      case p => p
+    }
+    val write = collectFirst(command) { case w: WriteFilesExec => w }
+      .getOrElse(fail(s"no WriteFilesExec in\n$command"))
+    assert(write.child.exists(_.isInstanceOf[SortExec]), write)
+    val nativeNodes = collectWithSubqueries(write) { case n: CometNativeExec => n }.size
+    val stage = rddBinaries(write.child.execute()).head
+    WriteStage(javaSize(write.child), stage.bytes, nativeNodes)
+  }
+
+  private def longViewSql(events: String, dim: String, cols: Int): String = {
+    val derived = (0 until cols)
+      .map(i =>
+        s"CASE WHEN c$i > ${i * 7} THEN c$i * ${i + 3} WHEN s${i % 4} LIKE 'x$i%' THEN " +
+          s"length(s${i % 4}) ELSE coalesce(c${(i + 1) % cols}, 0) END AS d$i")
+      .mkString(",\n  ")
+    val outs = (0 until cols)
+      .map(i => s"coalesce(b.d$i, 0) + dim.w * ${i + 1} - abs(b.d${(i + 3) % cols}) AS o$i")
+      .mkString(",\n  ")
+    val finals = (0 until cols)
+      .map(i => s"CASE WHEN o$i % 3 = 0 THEN o$i ELSE o$i + ${i + 11} END AS f$i")
+      .mkString(",\n  ")
+    s"""WITH base AS (
+       |  SELECT k, s0, s1, $derived
+       |  FROM parquet.`$events`
+       |  WHERE c0 IS NOT NULL AND s1 NOT LIKE '%zzz%'
+       |), joined AS (
+       |  SELECT b.k, b.s0, b.s1, $outs
+       |  FROM base b JOIN parquet.`$dim` dim ON b.k = dim.k
+       |  WHERE b.s0 NOT LIKE '%qqq%'
+       |)
+       |SELECT k, s1, $finals, s0 AS p
+       |FROM joined
+       |WHERE k % 11 <> 5""".stripMargin
+  }
+
+  test("a dynamic partition overwrite does not carry every native operator's plan") {
+    withTempDir { dir =>
+      val cols = 40
+      val events = new java.io.File(dir, "events").getCanonicalPath
+      spark
+        .range(5000)
+        .selectExpr(
+          Seq("id % 97 AS k") ++ (0 until cols).map(i => s"(id * ${i + 1}) % 1013 AS c$i") ++
+            (0 until 4).map(i => s"concat('x', cast(id % ${i + 5} AS string)) AS s$i"): _*)
+        .repartition(4)
+        .write
+        .parquet(events)
+      val dim = new java.io.File(dir, "dim").getCanonicalPath
+      spark.range(97).selectExpr("id AS k", "id % 7 AS w").write.parquet(dim)
+      val viewSql = longViewSql(events, dim, cols)
+      withView("jms_orders_src") {
+        withTable("jms_orders") {
+          spark.sql(s"CREATE VIEW jms_orders_src AS $viewSql")
+          spark.sql(
+            "CREATE TABLE jms_orders (k BIGINT, s1 STRING, " +
+              (0 until cols).map(i => s"f$i BIGINT").mkString(", ") +
+              ", p STRING) USING parquet PARTITIONED BY (p)")
+          val insert =
+            "INSERT OVERWRITE TABLE jms_orders PARTITION (p) SELECT * FROM jms_orders_src"
+          withSQLConf(
+            CometConf.COMET_EXEC_SORT_ENABLED.key -> "false",
+            SQLConf.SHUFFLE_PARTITIONS.key -> "8") {
+            Seq(false, true).foreach { aqe =>
+              def run(cometEnabled: Boolean): WriteStage = {
+                var result: WriteStage = null
+                withSQLConf(
+                  CometConf.COMET_ENABLED.key -> cometEnabled.toString,
+                  SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe.toString) {
+                  result = writeStage(insert)
+                }
+                result
+              }
+              val vanilla = run(cometEnabled = false)
+              val expected = spark.table("jms_orders").collect().toSet
+              val comet = run(cometEnabled = true)
+              assert(spark.table("jms_orders").collect().toSet == expected)
+              withClue(s"aqe=$aqe vanilla=$vanilla comet=$comet") {
+                assert(comet.nativeNodes >= 8)
+                val bound = 2 * viewSql.length
+                assert(comet.planBytes < 2 * vanilla.planBytes + bound)
+                assert(comet.stageBytes < vanilla.stageBytes + bound)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  test("native operators keep their plan through copies and drop it when serialized") {
+    withTempDir { dir =>
+      val path = new java.io.File(dir, "t").getCanonicalPath
+      spark
+        .range(1000)
+        .selectExpr("id % 13 AS k", "id AS v", "cast(id AS string) AS s")
+        .write
+        .parquet(path)
+      val sql =
+        s"SELECT k, sum(v + 1) AS sv, max(length(s)) AS ms FROM parquet.`$path` " +
+          "WHERE v % 3 <> 0 GROUP BY k"
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+        val df = spark.sql(sql)
+        checkSparkAnswer(df)
+        val plan = df.queryExecution.executedPlan
+        val natives = collect(plan) { case n: CometNativeExec => n }
+        assert(natives.size >= 4, plan)
+        assert(natives.exists(_.serializedPlanOpt.isDefined), plan)
+        natives.foreach(n => assert(n.nativeOp != null, n))
+
+        def assertKept(copy: SparkPlan): Unit = {
+          val copies = collect(copy) { case n: CometNativeExec => n }
+          assert(copies.size == natives.size)
+          natives.zip(copies).foreach { case (n, c) =>
+            assert(c ne n)
+            assert(c.nativeOp == n.nativeOp)
+            assert(c.serializedPlanOpt.plan.map(_.toSeq) == n.serializedPlanOpt.plan.map(_.toSeq))
+          }
+          assert(copy.canonicalized == plan.canonicalized)
+          assert(copy.sameResult(plan))
+        }
+        assertKept(plan.clone())
+        def remake(p: SparkPlan): SparkPlan =
+          p.makeCopy(p.productIterator.map {
+            case c: SparkPlan if p.children.exists(_ eq c) => remake(c)
+            case other => other.asInstanceOf[AnyRef]
+          }.toArray)
+        assertKept(remake(plan))
+
+        val serializer = SparkEnv.get.closureSerializer.newInstance()
+        val restored = serializer.deserialize[SparkPlan](serializer.serialize(plan))
+        assert(restored.output == plan.output)
+        val restoredNatives = collect(restored) { case n: CometNativeExec => n }
+        assert(restoredNatives.map(_.getClass) == natives.map(_.getClass))
+        restoredNatives.foreach { n =>
+          assert(n.nativeOp == null, n)
+          assert(n.serializedPlanOpt == null, n)
         }
       }
     }
