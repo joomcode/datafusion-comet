@@ -17,15 +17,15 @@
 
 //! COMET PATCH: sort the keys of the buffered batches and gather each payload once.
 
+use std::ops::Range;
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, ArrayData, ArrayRef, RecordBatch, RecordBatchOptions, UInt32Array,
+    Array, ArrayData, ArrayRef, AsArray, RecordBatch, RecordBatchOptions, UInt32Array,
+    new_empty_array,
 };
-use arrow::compute::{
-    SortColumn, concat, interleave, lexsort_to_indices, take_record_batch,
-};
-use arrow::datatypes::SchemaRef;
+use arrow::compute::{SortColumn, concat, interleave, lexsort_to_indices, take};
+use arrow::datatypes::{DataType, SchemaRef};
 use arrow::row::{RowConverter, Rows, SortField};
 use datafusion_common::HashMap;
 use datafusion_common::Result;
@@ -45,6 +45,10 @@ const ORDER_BYTES_PER_ROW: usize = 48;
 const OUTPUT_BATCH_BYTES: usize = 4 << 20;
 const MIN_SPILL_BATCH_BYTES: usize = 16 << 10;
 const SPILL_BATCHES_PER_RUN: usize = 64;
+const LOCAL_SOURCES: usize = 16;
+const SAMPLED_CHUNKS: usize = 16;
+const SPILL_COLUMN_SHARE: usize = 16;
+const CHUNKS_PER_COLUMN: usize = 16;
 
 #[derive(Debug)]
 pub(super) struct LateMaterialization {
@@ -130,6 +134,7 @@ impl LateMaterialization {
         batches: Vec<RecordBatch>,
         ordering: LexOrdering,
         rows_per_batch: usize,
+        spilling: bool,
         reservation: MemoryReservation,
         elapsed_compute: Time,
     ) -> SendableRecordBatchStream {
@@ -143,6 +148,7 @@ impl LateMaterialization {
                         batches,
                         &ordering,
                         rows_per_batch,
+                        spilling,
                         reservation,
                         elapsed_compute.clone(),
                     )?
@@ -229,18 +235,92 @@ fn row_order(rows: &Rows) -> Vec<u32> {
 
 struct Gather {
     schema: SchemaRef,
-    batches: Vec<RecordBatch>,
-    starts: Vec<usize>,
+    columns: Vec<Pieces>,
+    layouts: Vec<Layout>,
+    holders: Vec<Vec<Vec<usize>>>,
+    gathered_bytes: usize,
+    local: bool,
     remaining: Vec<usize>,
-    buffers: Vec<Vec<usize>>,
     owners: HashMap<usize, (usize, usize)>,
     live_bytes: usize,
-    slots: Vec<usize>,
     order: UInt32Array,
     cursor: usize,
     rows_per_batch: usize,
     reservation: MemoryReservation,
     elapsed_compute: Time,
+}
+
+struct Pieces {
+    arrays: Vec<ArrayRef>,
+    starts: Vec<usize>,
+    batches: Vec<Range<usize>>,
+    layout: usize,
+}
+
+struct Layout {
+    starts: Vec<usize>,
+    slots: Vec<usize>,
+    used: Vec<usize>,
+    indices: Vec<(usize, usize)>,
+    local: Option<UInt32Array>,
+}
+
+impl Layout {
+    fn new(starts: Vec<usize>) -> Self {
+        Self {
+            slots: vec![usize::MAX; starts.len()],
+            starts,
+            used: vec![],
+            indices: vec![],
+            local: None,
+        }
+    }
+
+    fn piece_of(starts: &[usize], row: usize) -> usize {
+        starts.partition_point(|&start| start <= row) - 1
+    }
+
+    fn map(&mut self, order: &UInt32Array) {
+        self.used.clear();
+        self.indices.clear();
+        self.local = None;
+        if self.starts.len() == 1 {
+            return;
+        }
+        for &row in order.values() {
+            let row = row as usize;
+            let piece = Self::piece_of(&self.starts, row);
+            if self.slots[piece] == usize::MAX {
+                self.slots[piece] = self.used.len();
+                self.used.push(piece);
+            }
+            self.indices
+                .push((self.slots[piece], row - self.starts[piece]));
+        }
+        for &piece in &self.used {
+            self.slots[piece] = usize::MAX;
+        }
+        if self.used.len() == 1 {
+            self.local = Some(UInt32Array::from_iter_values(
+                self.indices.iter().map(|&(_, row)| row as u32),
+            ));
+        }
+    }
+
+    fn gather(&self, arrays: &[ArrayRef], order: &UInt32Array) -> Result<ArrayRef> {
+        if self.starts.len() == 1 {
+            return Ok(take(&arrays[0], order, None)?);
+        }
+        if let Some(local) = &self.local {
+            return Ok(take(&arrays[self.used[0]], local, None)?);
+        }
+        let used: Vec<&dyn Array> = self
+            .used
+            .iter()
+            .map(|&piece| arrays[piece].as_ref())
+            .collect();
+        Ok(interleave(&used, &self.indices)?)
+    }
 }
 
 fn collect_buffers(data: &ArrayData, buffers: &mut Vec<(usize, usize)>) {
@@ -256,46 +336,137 @@ fn collect_buffers(data: &ArrayData, buffers: &mut Vec<(usize, usize)>) {
     }
 }
 
+fn sliced_bytes(array: &dyn Array) -> Result<usize> {
+    let mut bytes = array.to_data().get_slice_memory_size()?;
+    match array.data_type() {
+        DataType::Utf8View => {
+            bytes += array
+                .as_string_view()
+                .data_buffers()
+                .iter()
+                .map(|b| b.len())
+                .sum::<usize>()
+        }
+        DataType::BinaryView => {
+            bytes += array
+                .as_binary_view()
+                .data_buffers()
+                .iter()
+                .map(|b| b.len())
+                .sum::<usize>()
+        }
+        _ => {}
+    }
+    Ok(bytes)
+}
+
+fn offsets_fit(arrays: &[ArrayData]) -> bool {
+    match arrays[0].data_type() {
+        DataType::List(_) | DataType::Map(_, _) => {
+            let mut total = 0usize;
+            let mut children = Vec::with_capacity(arrays.len());
+            for data in arrays {
+                let offsets =
+                    &data.buffer::<i32>(0)[data.offset()..=data.offset() + data.len()];
+                let start = offsets[0] as usize;
+                let end = offsets[data.len()] as usize;
+                total += end - start;
+                children.push(data.child_data()[0].slice(start, end - start));
+            }
+            total <= i32::MAX as usize && offsets_fit(&children)
+        }
+        DataType::LargeList(_) => {
+            let mut children = Vec::with_capacity(arrays.len());
+            for data in arrays {
+                let offsets =
+                    &data.buffer::<i64>(0)[data.offset()..=data.offset() + data.len()];
+                let start = offsets[0] as usize;
+                let end = offsets[data.len()] as usize;
+                children.push(data.child_data()[0].slice(start, end - start));
+            }
+            offsets_fit(&children)
+        }
+        DataType::FixedSizeList(_, size) => {
+            let size = *size as usize;
+            let children: Vec<ArrayData> = arrays
+                .iter()
+                .map(|data| {
+                    data.child_data()[0].slice(data.offset() * size, data.len() * size)
+                })
+                .collect();
+            offsets_fit(&children)
+        }
+        DataType::Struct(fields) => (0..fields.len()).all(|field| {
+            let children: Vec<ArrayData> = arrays
+                .iter()
+                .map(|data| data.child_data()[field].slice(data.offset(), data.len()))
+                .collect();
+            offsets_fit(&children)
+        }),
+        DataType::ListView(_)
+        | DataType::LargeListView(_)
+        | DataType::Union(_, _)
+        | DataType::RunEndEncoded(_, _) => false,
+        _ => true,
+    }
+}
+
 impl Gather {
     fn try_new(
         schema: SchemaRef,
         batches: Vec<RecordBatch>,
         ordering: &LexOrdering,
         rows_per_batch: usize,
+        spilling: bool,
         reservation: MemoryReservation,
         elapsed_compute: Time,
     ) -> Result<Self> {
         let order = sort_order(&batches, ordering)?;
+        let width = schema.fields().len();
         let mut starts = Vec::with_capacity(batches.len());
-        let mut buffers = Vec::with_capacity(batches.len());
+        let mut holders = Vec::with_capacity(batches.len());
         let mut owners: HashMap<usize, (usize, usize)> = HashMap::new();
         let mut live_bytes = 0;
         let mut rows = 0;
         for batch in &batches {
             starts.push(rows);
             rows += batch.num_rows();
-            let mut found = vec![];
+            let mut held = Vec::with_capacity(width);
             for column in batch.columns() {
+                let mut found = vec![];
                 collect_buffers(&column.to_data(), &mut found);
+                found.sort_unstable();
+                found.dedup_by_key(|(ptr, _)| *ptr);
+                for &(ptr, capacity) in &found {
+                    let owner = owners.entry(ptr).or_insert_with(|| {
+                        live_bytes += capacity;
+                        (0, capacity)
+                    });
+                    owner.0 += 1;
+                }
+                held.push(found.into_iter().map(|(ptr, _)| ptr).collect());
             }
-            found.sort_unstable();
-            found.dedup_by_key(|(ptr, _)| *ptr);
-            for &(ptr, capacity) in &found {
-                let owner = owners.entry(ptr).or_insert_with(|| {
-                    live_bytes += capacity;
-                    (0, capacity)
-                });
-                owner.0 += 1;
-            }
-            buffers.push(found.into_iter().map(|(ptr, _)| ptr).collect());
+            holders.push(held);
         }
+        let columns = (0..width)
+            .map(|column| Pieces {
+                arrays: batches
+                    .iter()
+                    .map(|batch| Arc::clone(batch.column(column)))
+                    .collect(),
+                starts: starts.clone(),
+                batches: (0..batches.len()).map(|batch| batch..batch + 1).collect(),
+                layout: 0,
+            })
+            .collect();
         let mut gather = Self {
             schema,
+            columns,
+            layouts: vec![],
+            holders,
+            gathered_bytes: 0,
+            local: true,
             remaining: batches.iter().map(RecordBatch::num_rows).collect(),
-            slots: vec![usize::MAX; batches.len()],
-            batches,
-            starts,
-            buffers,
             owners,
             live_bytes,
             order,
@@ -304,20 +475,176 @@ impl Gather {
             reservation,
             elapsed_compute,
         };
-        gather.shrink();
+        drop(batches);
+        gather.fit();
+        if starts.len() > 1 && !gather.scattered_sources_fit_locally(&starts) {
+            gather.local = false;
+            let buffered = gather.live_bytes;
+            for column in 0..width {
+                if spilling {
+                    gather.concatenate(column, buffered / SPILL_COLUMN_SHARE)?;
+                } else {
+                    gather.concatenate(column, usize::MAX)?;
+                    let total = gather.column_bytes(column)?;
+                    gather.concatenate(column, total / CHUNKS_PER_COLUMN)?;
+                }
+            }
+        }
+        let mut layouts: Vec<Layout> = vec![];
+        for column in gather.columns.iter_mut() {
+            column.layout = match layouts
+                .iter()
+                .position(|layout| layout.starts == column.starts)
+            {
+                Some(layout) => layout,
+                None => {
+                    layouts.push(Layout::new(column.starts.clone()));
+                    layouts.len() - 1
+                }
+            };
+        }
+        gather.layouts = layouts;
         Ok(gather)
     }
 
-    fn shrink(&mut self) {
-        let needed = self.live_bytes + self.order.get_array_memory_size();
-        if self.reservation.size() > needed {
-            self.reservation.shrink(self.reservation.size() - needed);
+    fn needed(&self) -> usize {
+        self.live_bytes + self.gathered_bytes + self.order.get_array_memory_size()
+    }
+
+    fn fit(&mut self) {
+        let needed = self.needed();
+        let size = self.reservation.size();
+        if size > needed {
+            self.reservation.shrink(size - needed);
+        } else if size < needed {
+            self.reservation.grow(needed - size);
         }
     }
 
-    fn finish(&mut self, batch: usize) {
-        self.batches[batch] = RecordBatch::new_empty(Arc::clone(&self.schema));
-        for ptr in std::mem::take(&mut self.buffers[batch]) {
+    fn scattered_sources_fit_locally(&self, starts: &[usize]) -> bool {
+        let chunks = self.order.len().div_ceil(self.rows_per_batch);
+        let sampled = chunks.min(SAMPLED_CHUNKS);
+        let mut slots = vec![false; starts.len()];
+        let mut used = vec![];
+        let mut sources = 0;
+        for sample in 0..sampled {
+            let start = sample * chunks / sampled * self.rows_per_batch;
+            let end = (start + self.rows_per_batch).min(self.order.len());
+            for &row in &self.order.values()[start..end] {
+                let batch = Layout::piece_of(starts, row as usize);
+                if !slots[batch] {
+                    slots[batch] = true;
+                    used.push(batch);
+                }
+            }
+            sources += used.len();
+            for batch in used.drain(..) {
+                slots[batch] = false;
+            }
+        }
+        sources <= LOCAL_SOURCES * sampled
+    }
+
+    fn column_bytes(&self, column: usize) -> Result<usize> {
+        let mut bytes = 0;
+        for array in &self.columns[column].arrays {
+            bytes += sliced_bytes(array.as_ref())?;
+        }
+        Ok(bytes)
+    }
+
+    fn concatenate(&mut self, column: usize, budget: usize) -> Result<()> {
+        let mut sizes = Vec::with_capacity(self.columns[column].arrays.len());
+        for array in &self.columns[column].arrays {
+            sizes.push(sliced_bytes(array.as_ref())?);
+        }
+        let mut groups = vec![];
+        let mut start = 0;
+        while start < sizes.len() {
+            let mut end = start + 1;
+            let mut bytes = sizes[start];
+            while end < sizes.len() && bytes + sizes[end] <= budget {
+                bytes += sizes[end];
+                end += 1;
+            }
+            groups.push((start..end, bytes));
+            start = end;
+        }
+        if groups.len() == sizes.len() {
+            return Ok(());
+        }
+        let old = std::mem::replace(
+            &mut self.columns[column],
+            Pieces {
+                arrays: vec![],
+                starts: vec![],
+                batches: vec![],
+                layout: 0,
+            },
+        );
+        let mut pieces = Pieces {
+            arrays: Vec::with_capacity(groups.len()),
+            starts: Vec::with_capacity(groups.len()),
+            batches: Vec::with_capacity(groups.len()),
+            layout: 0,
+        };
+        for (group, bytes) in groups {
+            let merged = if group.len() > 1 {
+                self.merge(&old.arrays[group.clone()], bytes)
+            } else {
+                None
+            };
+            match merged {
+                Some(array) => {
+                    let batches =
+                        old.batches[group.start].start..old.batches[group.end - 1].end;
+                    self.gathered_bytes += array.get_array_memory_size();
+                    for batch in batches.clone() {
+                        self.release(batch, column);
+                    }
+                    self.fit();
+                    pieces.arrays.push(array);
+                    pieces.starts.push(old.starts[group.start]);
+                    pieces.batches.push(batches);
+                }
+                None => {
+                    for piece in group {
+                        pieces.arrays.push(Arc::clone(&old.arrays[piece]));
+                        pieces.starts.push(old.starts[piece]);
+                        pieces.batches.push(old.batches[piece].clone());
+                    }
+                }
+            }
+        }
+        drop(old);
+        self.columns[column] = pieces;
+        self.fit();
+        Ok(())
+    }
+
+    fn merge(&mut self, arrays: &[ArrayRef], bytes: usize) -> Option<ArrayRef> {
+        let data: Vec<ArrayData> = arrays.iter().map(|array| array.to_data()).collect();
+        if !offsets_fit(&data) {
+            return None;
+        }
+        drop(data);
+        let needed = self.needed() + bytes;
+        let size = self.reservation.size();
+        if size < needed && self.reservation.try_grow(needed - size).is_err() {
+            return None;
+        }
+        let arrays: Vec<&dyn Array> = arrays.iter().map(|array| array.as_ref()).collect();
+        let merged = concat(&arrays)
+            .ok()
+            .filter(|array| take(array, &UInt32Array::from(vec![0u32]), None).is_ok());
+        if merged.is_none() {
+            self.fit();
+        }
+        merged
+    }
+
+    fn release(&mut self, batch: usize, column: usize) {
+        for ptr in std::mem::take(&mut self.holders[batch][column]) {
             if let Some(owner) = self.owners.get_mut(&ptr) {
                 owner.0 -= 1;
                 if owner.0 == 0 {
@@ -328,67 +655,69 @@ impl Gather {
         }
     }
 
+    fn finish(&mut self, batch: usize) {
+        for column in 0..self.columns.len() {
+            let pieces = &mut self.columns[column];
+            pieces.arrays[batch] = new_empty_array(pieces.arrays[batch].data_type());
+            self.release(batch, column);
+        }
+    }
+
     fn next_batch(&mut self) -> Result<RecordBatch> {
         let elapsed_compute = self.elapsed_compute.clone();
         let _timer = elapsed_compute.timer();
         let end = (self.cursor + self.rows_per_batch).min(self.order.len());
         let order = self.order.slice(self.cursor, end - self.cursor);
         self.cursor = end;
+        for layout in self.layouts.iter_mut() {
+            layout.map(&order);
+        }
+        let columns = self
+            .columns
+            .iter()
+            .map(|pieces| self.layouts[pieces.layout].gather(&pieces.arrays, &order))
+            .collect::<Result<Vec<_>>>()?;
         let mut finished = vec![];
-        let batch = if self.batches.len() == 1 {
-            let batch = take_record_batch(&self.batches[0], &order)?;
-            self.remaining[0] -= order.len();
-            if self.remaining[0] == 0 {
-                finished.push(0);
-            }
-            batch
-        } else {
-            let mut used = vec![];
-            let indices: Vec<(usize, usize)> = order
-                .values()
-                .iter()
-                .map(|&row| {
-                    let row = row as usize;
-                    let batch = self.starts.partition_point(|&start| start <= row) - 1;
-                    if self.slots[batch] == usize::MAX {
-                        self.slots[batch] = used.len();
-                        used.push(batch);
+        if self.local {
+            let layout = &self.layouts[0];
+            if layout.starts.len() == 1 {
+                self.remaining[0] -= order.len();
+                if self.remaining[0] == 0 {
+                    finished.push(0);
+                }
+            } else {
+                for &(slot, _) in &layout.indices {
+                    let batch = layout.used[slot];
+                    self.remaining[batch] -= 1;
+                    if self.remaining[batch] == 0 {
+                        finished.push(batch);
                     }
-                    (self.slots[batch], row - self.starts[batch])
-                })
-                .collect();
-            let columns = (0..self.schema.fields().len())
-                .map(|column| {
-                    let arrays: Vec<&dyn Array> = used
-                        .iter()
-                        .map(|&batch| self.batches[batch].column(column).as_ref())
-                        .collect();
-                    interleave(&arrays, &indices)
-                })
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            for &batch in &used {
-                self.slots[batch] = usize::MAX;
-            }
-            for &(slot, _) in &indices {
-                let batch = used[slot];
-                self.remaining[batch] -= 1;
-                if self.remaining[batch] == 0 {
-                    finished.push(batch);
                 }
             }
-            RecordBatch::try_new_with_options(
-                Arc::clone(&self.schema),
-                columns,
-                &RecordBatchOptions::new().with_row_count(Some(indices.len())),
-            )?
-        };
-        if !finished.is_empty() {
-            for batch in finished {
-                self.finish(batch);
-            }
-            self.shrink();
         }
-        Ok(batch)
+        for batch in &finished {
+            self.finish(*batch);
+        }
+        let done = self.cursor == self.order.len();
+        if done {
+            for pieces in self.columns.iter_mut() {
+                pieces.arrays.clear();
+            }
+            for batch in 0..self.holders.len() {
+                for column in 0..self.columns.len() {
+                    self.release(batch, column);
+                }
+            }
+            self.gathered_bytes = 0;
+        }
+        if !finished.is_empty() || done {
+            self.fit();
+        }
+        Ok(RecordBatch::try_new_with_options(
+            Arc::clone(&self.schema),
+            columns,
+            &RecordBatchOptions::new().with_row_count(Some(order.len())),
+        )?)
     }
 }
 
@@ -411,6 +740,7 @@ mod tests {
     use arrow::array::{
         BinaryArray, DictionaryArray, Int32Array, ListArray, StringArray, StringViewArray,
     };
+    use arrow::compute::take_record_batch;
     use arrow::compute::{SortOptions, concat_batches};
     use arrow::datatypes::{DataType, Field, Int32Type, Schema};
     use datafusion_common::config::SpillCompression;
@@ -868,6 +1198,472 @@ mod tests {
         assert!(lowest < held / 4);
         drop(stream);
         assert_eq!(pool.reserved(), 0);
+        Ok(())
+    }
+
+    fn mixed_schema() -> SchemaRef {
+        let item = Arc::new(Field::new_list_field(DataType::Int32, true));
+        Arc::new(Schema::new(vec![
+            Field::new("k", DataType::Int32, true),
+            Field::new("s", DataType::Utf8, true),
+            Field::new("flag", DataType::Boolean, true),
+            Field::new("day", DataType::Date32, true),
+            Field::new("amount", DataType::Float64, true),
+            Field::new("count", DataType::Int64, true),
+            Field::new("name", DataType::Utf8, true),
+            Field::new("blob", DataType::Binary, true),
+            Field::new(
+                "dict",
+                DataType::Dictionary(Box::new(DataType::Int8), Box::new(DataType::Utf8)),
+                true,
+            ),
+            Field::new("list", DataType::List(Arc::clone(&item)), true),
+            Field::new(
+                "pair",
+                DataType::Struct(
+                    vec![
+                        Field::new("a", DataType::Int64, true),
+                        Field::new("b", DataType::Utf8, true),
+                    ]
+                    .into(),
+                ),
+                true,
+            ),
+            Field::new("view", DataType::Utf8View, true),
+        ]))
+    }
+
+    fn mixed_batches(count: usize, rows: usize, seed: u64) -> Vec<RecordBatch> {
+        use arrow::array::{
+            BooleanArray, Date32Array, Float64Array, Int64Array, StructArray,
+        };
+        let schema = mixed_schema();
+        let mut state = seed | 1;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        (0..count)
+            .map(|_| {
+                let values: Vec<u64> = (0..rows).map(|_| next()).collect();
+                let k = Int32Array::from_iter(
+                    values
+                        .iter()
+                        .map(|v| (v % 9 != 0).then_some((v % 7) as i32 - 3)),
+                );
+                let s = StringArray::from_iter(values.iter().map(|v| {
+                    (v % 5 != 0).then(|| {
+                        format!("{:0>w$}", (v >> 20) % 300, w = (v % 12) as usize)
+                    })
+                }));
+                let flag = BooleanArray::from_iter(
+                    values.iter().map(|v| (v % 3 != 0).then_some(v & 64 != 0)),
+                );
+                let day = Date32Array::from_iter(
+                    values
+                        .iter()
+                        .map(|v| (v % 4 == 0).then_some((v % 400) as i32)),
+                );
+                let amount = Float64Array::from_iter(
+                    values
+                        .iter()
+                        .map(|v| (v % 6 == 0).then_some((v % 1000) as f64 / 7.0)),
+                );
+                let count = Int64Array::from_iter(
+                    values
+                        .iter()
+                        .map(|v| (v % 2 == 0).then_some((v >> 3) as i64)),
+                );
+                let name = StringArray::from_iter(values.iter().map(|v| {
+                    (v % 8 == 0).then(|| {
+                        format!("name-{}-{}", v % 977, "x".repeat((v % 40) as usize))
+                    })
+                }));
+                let blob = BinaryArray::from_iter(
+                    values
+                        .iter()
+                        .map(|v| (v % 10 != 0).then(|| v.to_le_bytes().repeat(20))),
+                );
+                let dict: DictionaryArray<arrow::datatypes::Int8Type> = values
+                    .iter()
+                    .map(|v| (v % 7 != 0).then_some(["p", "qq", "rrr"][(v % 3) as usize]))
+                    .collect();
+                let list = ListArray::from_iter_primitive::<Int32Type, _, _>(
+                    values.iter().map(|v| {
+                        (v % 5 != 1).then(|| (0..(v % 3) as i32).map(|i| Some(i + 1)))
+                    }),
+                );
+                let pair = StructArray::from(vec![
+                    (
+                        Arc::new(Field::new("a", DataType::Int64, true)),
+                        Arc::new(Int64Array::from_iter(
+                            values.iter().map(|v| (v % 3 == 1).then_some(*v as i64)),
+                        )) as ArrayRef,
+                    ),
+                    (
+                        Arc::new(Field::new("b", DataType::Utf8, true)),
+                        Arc::new(StringArray::from_iter(
+                            values
+                                .iter()
+                                .map(|v| (v % 4 == 1).then(|| format!("b{}", v % 13))),
+                        )) as ArrayRef,
+                    ),
+                ]);
+                let view = StringViewArray::from_iter(values.iter().map(|v| {
+                    (v % 11 != 0)
+                        .then(|| format!("a view of more than twelve bytes {}", v % 51))
+                }));
+                RecordBatch::try_new(
+                    Arc::clone(&schema),
+                    vec![
+                        Arc::new(k),
+                        Arc::new(s),
+                        Arc::new(flag),
+                        Arc::new(day),
+                        Arc::new(amount),
+                        Arc::new(count),
+                        Arc::new(name),
+                        Arc::new(blob),
+                        Arc::new(dict),
+                        Arc::new(list),
+                        Arc::new(pair),
+                        Arc::new(view),
+                    ],
+                )
+                .unwrap()
+            })
+            .collect()
+    }
+
+    fn mixed_ordering(options: &[(&str, bool, bool)]) -> LexOrdering {
+        let schema = mixed_schema();
+        LexOrdering::new(options.iter().map(|(name, descending, nulls_first)| {
+            PhysicalSortExpr::new(
+                col(name, &schema).unwrap(),
+                SortOptions {
+                    descending: *descending,
+                    nulls_first: *nulls_first,
+                },
+            )
+        }))
+        .unwrap()
+    }
+
+    fn mixed_orderings() -> Vec<LexOrdering> {
+        vec![
+            mixed_ordering(&[("k", false, false)]),
+            mixed_ordering(&[("k", true, true)]),
+            mixed_ordering(&[("k", true, false), ("s", false, true)]),
+            mixed_ordering(&[
+                ("s", true, true),
+                ("day", false, false),
+                ("k", false, true),
+            ]),
+            mixed_ordering(&[("flag", false, true), ("s", false, false)]),
+        ]
+    }
+
+    fn reference(input: &[RecordBatch], ordering: &LexOrdering) -> RecordBatch {
+        let batch = concat_batches(&input[0].schema(), input).unwrap();
+        let columns: Vec<SortColumn> = ordering
+            .iter()
+            .map(|sort| sort.evaluate_to_sort_column(&batch).unwrap())
+            .collect();
+        let fields: Vec<SortField> = columns
+            .iter()
+            .map(|c| {
+                SortField::new_with_options(
+                    c.values.data_type().clone(),
+                    c.options.unwrap(),
+                )
+            })
+            .collect();
+        let values: Vec<ArrayRef> = columns.into_iter().map(|c| c.values).collect();
+        let rows = RowConverter::new(fields)
+            .unwrap()
+            .convert_columns(&values)
+            .unwrap();
+        let mut order: Vec<u32> = (0..batch.num_rows() as u32).collect();
+        order.sort_by(|a, b| {
+            rows.row(*a as usize)
+                .cmp(&rows.row(*b as usize))
+                .then(a.cmp(b))
+        });
+        take_record_batch(&batch, &UInt32Array::from(order)).unwrap()
+    }
+
+    fn assert_matches_reference(
+        input: &[RecordBatch],
+        output: &[RecordBatch],
+        ordering: &LexOrdering,
+    ) {
+        let expected = reference(input, ordering);
+        let actual = concat_batches(&input[0].schema(), output).unwrap();
+        assert_eq!(expected.num_rows(), actual.num_rows());
+        let key_columns: Vec<usize> = ordering
+            .iter()
+            .flat_map(|sort| collect_columns(&sort.expr))
+            .map(|column| column.index())
+            .collect();
+        for column in key_columns {
+            assert_eq!(expected.column(column), actual.column(column));
+        }
+        let all = |batch: &RecordBatch| {
+            let fields = batch
+                .schema()
+                .fields()
+                .iter()
+                .map(|field| SortField::new(field.data_type().clone()))
+                .collect();
+            let mut rows = encoded_rows(batch, batch.columns(), fields);
+            rows.sort();
+            rows
+        };
+        assert!(all(&expected) == all(&actual));
+        let fields = actual
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| SortField::new(field.data_type().clone()))
+            .collect::<Vec<_>>();
+        let expected_rows = encoded_rows(&expected, expected.columns(), fields.clone());
+        let actual_rows = encoded_rows(&actual, actual.columns(), fields);
+        let keys = |batch: &RecordBatch| {
+            let columns: Vec<SortColumn> = ordering
+                .iter()
+                .map(|sort| sort.evaluate_to_sort_column(batch).unwrap())
+                .collect();
+            let fields = columns
+                .iter()
+                .map(|c| {
+                    SortField::new_with_options(
+                        c.values.data_type().clone(),
+                        c.options.unwrap(),
+                    )
+                })
+                .collect();
+            let values: Vec<ArrayRef> = columns.into_iter().map(|c| c.values).collect();
+            encoded_rows(batch, &values, fields)
+        };
+        let (expected_keys, actual_keys) = (keys(&expected), keys(&actual));
+        let mut start = 0;
+        while start < expected_keys.len() {
+            let mut end = start + 1;
+            while end < expected_keys.len() && expected_keys[end] == expected_keys[start]
+            {
+                end += 1;
+            }
+            assert!(
+                actual_keys[start..end]
+                    .iter()
+                    .all(|k| k == &expected_keys[start])
+            );
+            let mut want = expected_rows[start..end].to_vec();
+            let mut got = actual_rows[start..end].to_vec();
+            want.sort();
+            got.sort();
+            assert!(want == got);
+            start = end;
+        }
+    }
+
+    fn mixed_sort_exec(input: &[RecordBatch], ordering: LexOrdering) -> Arc<SortExec> {
+        let source =
+            TestMemoryExec::try_new_exec(&[input.to_vec()], mixed_schema(), None)
+                .unwrap();
+        Arc::new(SortExec::new(ordering, source))
+    }
+
+    fn gather(
+        input: Vec<RecordBatch>,
+        ordering: &LexOrdering,
+        rows_per_batch: usize,
+        spilling: bool,
+        pool: &Arc<dyn MemoryPool>,
+    ) -> Result<Gather> {
+        let reservation =
+            datafusion_execution::memory_pool::MemoryConsumer::new("gather")
+                .register(pool);
+        let mut counter = RecordBatchMemoryCounter::new();
+        let late = LateMaterialization::select(&input[0], ordering)?.unwrap();
+        let mut size = 0;
+        for batch in &input {
+            size += late.reserved_bytes(batch, &mut counter)?;
+        }
+        reservation.try_grow(size)?;
+        Gather::try_new(
+            mixed_schema(),
+            input,
+            ordering,
+            rows_per_batch,
+            spilling,
+            reservation,
+            Time::new(),
+        )
+    }
+
+    #[tokio::test]
+    async fn wide_mixed_rows_in_many_batches_match_the_reference() -> Result<()> {
+        for (count, rows, batch_size) in [(1, 3000, 512), (40, 97, 256), (300, 7, 8192)] {
+            let input = mixed_batches(count, rows, count as u64 * 7919 + rows as u64);
+            assert!(
+                LateMaterialization::select(&input[0], &mixed_orderings()[0])?.is_some()
+            );
+            for ordering in mixed_orderings() {
+                let sort = mixed_sort_exec(&input, ordering.clone());
+                let output = collect(sort, context(None, batch_size, 1 << 20)).await?;
+                assert_matches_reference(&input, &output, &ordering);
+                assert!(output.iter().all(|batch| batch.num_rows() <= batch_size));
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn spilled_wide_mixed_rows_match_the_reference() -> Result<()> {
+        let input = mixed_batches(64, 150, 42);
+        let bytes: usize = input.iter().map(RecordBatch::get_array_memory_size).sum();
+        for ordering in mixed_orderings() {
+            let pool = PeakPool::new(bytes / 3);
+            let sort = mixed_sort_exec(&input, ordering.clone());
+            let output = collect(
+                Arc::clone(&sort) as Arc<dyn ExecutionPlan>,
+                context(Some(Arc::clone(&pool) as _), 1024, 256 << 10),
+            )
+            .await?;
+            assert!(sort.metrics().unwrap().spill_count().unwrap() > 0);
+            assert_matches_reference(&input, &output, &ordering);
+            assert_eq!(pool.reserved(), 0);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn concatenates_every_column_of_a_scattered_order() -> Result<()> {
+        let input = mixed_batches(50, 100, 7);
+        let ordering = mixed_ordering(&[("k", false, true), ("s", true, false)]);
+        let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(1 << 30));
+        let mut gather = gather(input.clone(), &ordering, 256, false, &pool)?;
+        assert!(!gather.local);
+        assert!(gather.columns.iter().all(|pieces| pieces.arrays.len() == 1));
+        assert_eq!(gather.layouts.len(), 1);
+        assert_eq!(gather.live_bytes, 0);
+        assert_eq!(pool.reserved(), gather.needed());
+        let mut output = vec![];
+        while gather.cursor < gather.order.len() {
+            output.push(gather.next_batch()?);
+            assert_eq!(pool.reserved(), gather.needed());
+        }
+        assert_eq!(gather.gathered_bytes, 0);
+        assert_eq!(pool.reserved(), gather.order.get_array_memory_size());
+        drop(gather);
+        assert_eq!(pool.reserved(), 0);
+        assert_matches_reference(&input, &output, &ordering);
+        Ok(())
+    }
+
+    #[test]
+    fn interleaves_an_order_that_reads_few_batches_at_a_time() -> Result<()> {
+        let input = mixed_batches(50, 100, 7);
+        let mut keyed = vec![];
+        for (i, batch) in input.iter().enumerate() {
+            let mut columns = batch.columns().to_vec();
+            columns[0] = Arc::new(Int32Array::from(vec![i as i32; batch.num_rows()]));
+            keyed.push(RecordBatch::try_new(mixed_schema(), columns)?);
+        }
+        let ordering = mixed_ordering(&[("k", false, true)]);
+        let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(1 << 30));
+        let mut gather = gather(keyed.clone(), &ordering, 64, false, &pool)?;
+        assert!(gather.local);
+        assert!(
+            gather
+                .columns
+                .iter()
+                .all(|pieces| pieces.arrays.len() == 50)
+        );
+        let held = pool.reserved();
+        let mut output = vec![gather.next_batch()?];
+        let mut lowest = held;
+        while gather.cursor < gather.order.len() {
+            output.push(gather.next_batch()?);
+            lowest = lowest.min(pool.reserved());
+        }
+        assert!(lowest < held / 4);
+        drop(gather);
+        assert_matches_reference(&keyed, &output, &ordering);
+        assert_eq!(pool.reserved(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn concatenates_in_chunks_a_column_the_pool_cannot_hold_twice() -> Result<()> {
+        let input = mixed_batches(50, 100, 11);
+        let ordering = mixed_ordering(&[("s", false, true), ("k", true, true)]);
+        let late = LateMaterialization::select(&input[0], &ordering)?.unwrap();
+        let mut counter = RecordBatchMemoryCounter::new();
+        let mut held = 0;
+        for batch in &input {
+            held += late.reserved_bytes(batch, &mut counter)?;
+        }
+        let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(held));
+        let gather = gather(input.clone(), &ordering, 256, false, &pool)?;
+        let blob = gather.columns[7].arrays.len();
+        assert!(blob > 1 && blob < 50, "{blob} pieces");
+        assert_eq!(gather.columns[2].arrays.len(), 1);
+        assert_eq!(gather.layouts.len(), 2);
+        assert_eq!(pool.reserved(), gather.needed());
+        let output = gather.collect::<Result<Vec<_>>>()?;
+        assert_matches_reference(&input, &output, &ordering);
+        assert_eq!(pool.reserved(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn a_spill_concatenates_columns_in_chunks_of_a_share_of_its_input() -> Result<()> {
+        let input = mixed_batches(50, 100, 13);
+        let ordering = mixed_ordering(&[("k", false, false), ("s", false, false)]);
+        let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(1 << 30));
+        let gather = gather(input.clone(), &ordering, 256, true, &pool)?;
+        let buffered: usize = input.iter().map(|b| b.get_sliced_size().unwrap()).sum();
+        for pieces in &gather.columns {
+            assert!(pieces.arrays.len() < 50);
+            for (array, batches) in pieces.arrays.iter().zip(&pieces.batches) {
+                if batches.len() > 1 {
+                    let bytes = sliced_bytes(array.as_ref())?;
+                    assert!(
+                        bytes <= 2 * buffered / SPILL_COLUMN_SHARE,
+                        "{bytes} of {buffered}"
+                    );
+                }
+            }
+        }
+        assert!(gather.columns[7].arrays.len() > 1);
+        assert_eq!(gather.columns[2].arrays.len(), 1);
+        let output = gather.collect::<Result<Vec<_>>>()?;
+        assert_matches_reference(&input, &output, &ordering);
+        assert_eq!(pool.reserved(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn list_offsets_that_would_overflow_are_not_concatenated() -> Result<()> {
+        let list_type =
+            DataType::List(Arc::new(Field::new_list_field(DataType::Null, true)));
+        let list = |len: i32| {
+            ArrayData::builder(list_type.clone())
+                .len(1)
+                .add_buffer(arrow::buffer::Buffer::from_slice_ref([0i32, len]))
+                .add_child_data(ArrayData::new_null(&DataType::Null, len as usize))
+                .build()
+        };
+        let small = list(1)?;
+        let big = list(i32::MAX - 1)?;
+        assert!(offsets_fit(&[small.clone(), small.clone()]));
+        assert!(offsets_fit(&[big.clone(), small.clone()]));
+        assert!(!offsets_fit(&[big.clone(), small.clone(), small]));
+        assert!(!offsets_fit(&[big.clone(), big]));
         Ok(())
     }
 }
