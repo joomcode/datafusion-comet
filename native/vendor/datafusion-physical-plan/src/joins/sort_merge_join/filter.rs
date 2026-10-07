@@ -145,51 +145,31 @@ pub fn needs_deferred_filtering(
         && matches!(join_type, JoinType::Left | JoinType::Right | JoinType::Full)
 }
 
-/// Determines if current index is the last occurrence of a row
+/// Marks the entries that are the last of their input row
 ///
 /// Used during filter mask correction to detect row boundaries when grouping
-/// output rows by input row.
-fn last_index_for_row(
-    row_index: usize,
-    indices: &UInt64Array,
-    batch_ids: &[usize],
-    indices_len: usize,
-) -> bool {
-    debug_assert_eq!(
-        indices.len(),
-        indices_len,
-        "indices.len() should match indices_len parameter"
-    );
+/// output rows by input row. Entries without a row index (null-joined rows
+/// that belong to no input row group) are not marked and do not end a
+/// group: a FULL join stages the null-joined rows of unmatched buffered rows
+/// ahead of the pairs a freeze materializes, so they can fall between two
+/// runs of one streamed row's pairs.
+fn last_entries_of_rows(indices: &UInt64Array, batch_ids: &[usize]) -> Vec<bool> {
     debug_assert_eq!(
         batch_ids.len(),
-        indices_len,
-        "batch_ids.len() should match indices_len"
+        indices.len(),
+        "batch_ids.len() should match indices.len()"
     );
-    debug_assert!(
-        row_index < indices_len,
-        "row_index {row_index} should be < indices_len {indices_len}",
-    );
-
-    // If this is the last index overall, it's definitely the last for this row
-    if row_index == indices_len - 1 {
-        return true;
+    let mut last = vec![false; indices.len()];
+    let mut next_row: Option<(usize, u64)> = None;
+    for i in (0..indices.len()).rev() {
+        if indices.is_null(i) {
+            continue;
+        }
+        let row = (batch_ids[i], indices.value(i));
+        last[i] = next_row != Some(row);
+        next_row = Some(row);
     }
-
-    // Check if next row has different (batch_id, index) pair
-    let current_batch_id = batch_ids[row_index];
-    let next_batch_id = batch_ids[row_index + 1];
-
-    if current_batch_id != next_batch_id {
-        return true;
-    }
-
-    // Same batch_id, check if row index is different
-    // Both current and next should be non-null (already joined rows)
-    if indices.is_null(row_index) || indices.is_null(row_index + 1) {
-        return true;
-    }
-
-    indices.value(row_index) != indices.value(row_index + 1)
+    last
 }
 
 /// Corrects the filter mask for joins with deferred filtering
@@ -229,9 +209,8 @@ pub fn get_corrected_filter_mask(
             // discard (null) remaining matches, null-join if none passed.
             // Null metadata entries are already-null-joined rows that
             // flow through unchanged to preserve output ordering.
-            for i in 0..row_indices_length {
-                let last_index =
-                    last_index_for_row(i, row_indices, batch_ids, row_indices_length);
+            let last_entries = last_entries_of_rows(row_indices, batch_ids);
+            for (i, &last_index) in last_entries.iter().enumerate() {
                 if filter_mask.is_null(i) {
                     corrected_mask.append_value(true);
                 } else if filter_mask.value(i) {

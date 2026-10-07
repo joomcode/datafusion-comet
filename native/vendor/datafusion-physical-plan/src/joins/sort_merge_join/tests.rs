@@ -4757,6 +4757,78 @@ async fn join_filter_streamed_rows_across_freezes() -> Result<()> {
     Ok(())
 }
 
+/// Key groups larger than the batch size on both sides, with streamed rows
+/// passing the filter for none, one or several buffered rows, and buffered
+/// key groups no streamed row matches between them. A FULL join stages the
+/// null-joined rows of such a group at the next freeze, which can fall
+/// between two runs of one streamed row's pairs; the row must still be
+/// emitted null-joined at most once.
+#[tokio::test]
+async fn join_filter_large_groups_on_both_sides() -> Result<()> {
+    let mut state = 11u64;
+    let mut next = move || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (state >> 33) as i64
+    };
+    let mut buffered = vec![];
+    let mut streamed = vec![];
+    for (key, streamed_rows, buffered_rows, width) in [
+        (0, 140, 140, 1),
+        (1, 0, 50, 1),
+        (2, 200, 70, 2),
+        (3, 0, 3, 1),
+        (4, 3, 140, 1),
+        (5, 140, 2, 1),
+        (6, 5, 0, 1),
+        (7, 70, 70, 1),
+    ] {
+        let first_bid = buffered.len() as i32;
+        buffered.extend(interval_group(key, first_bid, buffered_rows, width));
+        for _ in 0..streamed_rows {
+            let t = match next() % 4 {
+                0 => None,
+                1 => Some(-1 - next() % 10),
+                _ => Some(next() % (buffered_rows as i64 * 12 + 1)),
+            };
+            streamed.push((key, streamed.len() as i32, t));
+        }
+    }
+    let never: Vec<IntervalStreamedRow> = streamed
+        .iter()
+        .map(|&(key, sid, _)| (key, sid, Some(-1)))
+        .collect();
+    for (name, streamed) in [("mixed", &streamed), ("never", &never)] {
+        for join_type in [Inner, Left, Right, Full] {
+            for (streamed_batch_rows, buffered_batch_rows) in
+                [(64, 64), (1000, 37), (7, 1000)]
+            {
+                for batch_size in [64, 100, 8192] {
+                    for spill in [false, true] {
+                        check_interval_join(
+                            join_type,
+                            streamed,
+                            &buffered,
+                            streamed_batch_rows,
+                            buffered_batch_rows,
+                            batch_size,
+                            spill,
+                            &format!(
+                                "{name} {join_type} streamed_batch_rows={streamed_batch_rows} \
+                                 buffered_batch_rows={buffered_batch_rows} \
+                                 batch_size={batch_size} spill={spill}"
+                            ),
+                        )
+                        .await?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Returns the column names on the schema
 fn columns(schema: &Schema) -> Vec<String> {
     schema.fields().iter().map(|f| f.name().clone()).collect()
