@@ -1190,7 +1190,7 @@ class CometJoinSuite extends CometTestBase {
             checkSparkAnswerAndOperator(
               sql(s"SELECT o.*, r.* FROM rates r RIGHT JOIN orders o ON $condition"))
             checkSparkAnswerAndOperator(
-              sql(s"SELECT o.id, count(r.rate), sum(o.p28) " +
+              sql("SELECT o.id, count(r.rate), sum(o.p28) " +
                 s"FROM orders o LEFT JOIN rates r ON $condition GROUP BY o.id"))
           }
         }
