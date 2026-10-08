@@ -3866,6 +3866,25 @@ class CometExecSuite extends CometTestBase {
     }
   }
 
+  test("boolean two struct levels deep sliced by an OFFSET keeps its values") {
+    withTempPath { dir =>
+      withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+        spark
+          .range(0, 1000, 1, 1)
+          .selectExpr(
+            "id AS v",
+            "named_struct('d', IF(id % 4 = 0, NULL, named_struct('lost', " +
+              "IF(id % 13 = 0, NULL, id % 11 = 0), 't', id)), 'p', named_struct('t', id)) AS ops")
+          .write
+          .parquet(dir.getCanonicalPath)
+      }
+      withParquetTable(dir.getCanonicalPath, "t") {
+        checkSparkAnswerAndOperator("SELECT ops FROM t ORDER BY v LIMIT 40 OFFSET 17")
+        checkSparkAnswerAndOperator("SELECT v, ops FROM t ORDER BY v LIMIT 500 OFFSET 333")
+      }
+    }
+  }
+
   test("collect limit") {
     Seq("true", "false").foreach(aqe => {
       withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe) {
