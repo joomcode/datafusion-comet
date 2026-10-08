@@ -520,6 +520,7 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
     SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
     SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
     SQLConf.PREFER_SORTMERGEJOIN.key -> "true",
+    SQLConf.ANSI_ENABLED.key -> "false",
     CometConf.COMET_EXEC_SORT_MERGE_JOIN_ENABLED.key -> "true",
     CometConf.COMET_EXEC_SORT_MERGE_JOIN_WITH_JOIN_FILTER_ENABLED.key -> "true",
     CometConf.COMET_FORCE_SHJ.key -> "false")
