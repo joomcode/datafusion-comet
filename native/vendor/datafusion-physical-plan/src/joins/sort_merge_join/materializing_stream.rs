@@ -620,7 +620,12 @@ impl MaterializingSortMergeJoinStream {
         let hoisted_filter = filter
             .as_ref()
             .map(|filter| {
-                HoistedJoinFilter::try_new(filter, buffered_side, &buffered_schema)
+                HoistedJoinFilter::try_new(
+                    filter,
+                    buffered_side,
+                    &streamed_schema,
+                    &buffered_schema,
+                )
             })
             .transpose()?
             .flatten();
@@ -1631,7 +1636,12 @@ impl MaterializingSortMergeJoinStream {
             as_uint64_array(&compute::concat(&refs)?)?.clone()
         };
 
-        let evaluation = if self.cache_hoisted_filter(matched_chunks)? {
+        let hoisted = self
+            .hoisted_filter
+            .as_ref()
+            .is_some_and(|hoisted| hoisted.buffered_exprs.is_empty())
+            || self.cache_hoisted_filter(matched_chunks)?;
+        let evaluation = if hoisted {
             Some(self.evaluate_hoisted_join_filter(
                 &combined_left_indices,
                 matched_chunks,
@@ -1935,7 +1945,8 @@ impl MaterializingSortMergeJoinStream {
     }
 
     /// Evaluates the hoisted join filter over the given pairs, whose
-    /// buffered rows [`Self::cache_hoisted_filter`] cached.
+    /// buffered rows [`Self::cache_hoisted_filter`] cached when the filter
+    /// lifts buffered subexpressions.
     fn evaluate_hoisted_join_filter(
         &self,
         left_indices: &UInt64Array,
@@ -1987,6 +1998,11 @@ impl MaterializingSortMergeJoinStream {
         };
         let cached_columns = self
             .gather_cached_filter_columns(matched_chunks, hoisted.buffered_exprs.len())?;
+        let streamed_lifted_columns = evaluate_streamed_filter_exprs(
+            hoisted,
+            &self.streamed_batch.batch,
+            left_indices,
+        )?;
 
         let filter_columns = hoisted
             .inputs
@@ -2003,6 +2019,9 @@ impl MaterializingSortMergeJoinStream {
                 }
                 HoistedFilterInput::Buffered(position) => {
                     Arc::clone(&cached_columns[*position])
+                }
+                HoistedFilterInput::Streamed(position) => {
+                    Arc::clone(&streamed_lifted_columns[*position])
                 }
             })
             .collect::<Vec<_>>();
@@ -2033,6 +2052,9 @@ impl MaterializingSortMergeJoinStream {
         matched_chunks: &[(usize, UInt64Array, UInt64Array)],
         num_columns: usize,
     ) -> Result<Vec<ArrayRef>> {
+        if num_columns == 0 {
+            return Ok(vec![]);
+        }
         let mut pieces: Vec<Vec<ArrayRef>> =
             vec![Vec::with_capacity(matched_chunks.len()); num_columns];
         for (batch_idx, _, right) in matched_chunks {
@@ -2389,6 +2411,13 @@ impl MaterializingSortMergeJoinStream {
             return Ok(record_batch);
         }
 
+        // No pair failed the filter: the corrected mask keeps every row.
+        if !out_mask.has_false() {
+            self.joined_record_batches
+                .clear(&self.schema, self.batch_size);
+            return Ok(record_batch);
+        }
+
         // Validate inputs to get_corrected_filter_mask
         debug_assert_eq!(
             out_indices.len(),
@@ -2448,6 +2477,50 @@ fn materialize_left_columns(
     } else {
         Ok(take_arrays(batch.columns(), indices, None)?)
     }
+}
+
+/// Evaluates the lifted streamed subexpressions of `hoisted` for the
+/// streamed rows `indices` of `batch`: once per run of equal indices, as a
+/// streamed row's pairs form, unless the runs are short.
+fn evaluate_streamed_filter_exprs(
+    hoisted: &HoistedJoinFilter,
+    batch: &RecordBatch,
+    indices: &UInt64Array,
+) -> Result<Vec<ArrayRef>> {
+    if hoisted.streamed_exprs.is_empty() {
+        return Ok(vec![]);
+    }
+    let evaluate = |rows: &UInt64Array| {
+        let projected = batch.project(&hoisted.streamed_projection)?;
+        let rows = RecordBatch::try_new_with_options(
+            projected.schema(),
+            materialize_left_columns(&projected, rows)?,
+            &RecordBatchOptions::new().with_row_count(Some(rows.len())),
+        )?;
+        hoisted
+            .streamed_exprs
+            .iter()
+            .map(|expr| expr.evaluate(&rows)?.into_array(rows.num_rows()))
+            .collect::<Result<Vec<_>>>()
+    };
+    let values = indices.values();
+    let num_runs = values.windows(2).filter(|w| w[0] != w[1]).count() + 1;
+    if num_runs * 2 > values.len() {
+        return evaluate(indices);
+    }
+    let mut run_rows = Vec::with_capacity(num_runs);
+    let mut positions = Vec::with_capacity(values.len());
+    for (i, &row) in values.iter().enumerate() {
+        if i == 0 || row != values[i - 1] {
+            run_rows.push(row);
+        }
+        positions.push((run_rows.len() - 1) as u32);
+    }
+    let positions = UInt32Array::from(positions);
+    evaluate(&UInt64Array::from(run_rows))?
+        .iter()
+        .map(|column| Ok(compute::take(column, &positions, None)?))
+        .collect()
 }
 
 /// Average length of the runs of consecutive buffered rows from which

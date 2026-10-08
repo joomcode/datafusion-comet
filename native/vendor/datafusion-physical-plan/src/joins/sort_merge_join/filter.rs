@@ -394,9 +394,9 @@ pub fn filter_record_batch_by_join_type(
     }
 }
 
-/// A join filter whose largest subexpressions over buffered columns alone
-/// are lifted out, so they can be evaluated once per buffered row instead of
-/// once per pair.
+/// A join filter whose largest subexpressions over the columns of one input
+/// alone are lifted out, so they can be evaluated once per buffered or
+/// streamed row instead of once per pair.
 #[derive(Debug)]
 pub(super) struct HoistedJoinFilter {
     /// The filter over `schema`, reading each lifted subexpression's result
@@ -406,8 +406,14 @@ pub(super) struct HoistedJoinFilter {
     pub schema: SchemaRef,
     /// Where each column of `schema` comes from
     pub inputs: Vec<HoistedFilterInput>,
-    /// The lifted subexpressions, over the buffered input's columns
+    /// The lifted subexpressions over buffered columns, over the buffered
+    /// input's columns
     pub buffered_exprs: Vec<PhysicalExprRef>,
+    /// The lifted subexpressions over streamed columns, over the streamed
+    /// input's columns in `streamed_projection`
+    pub streamed_exprs: Vec<PhysicalExprRef>,
+    /// The streamed input's columns `streamed_exprs` read
+    pub streamed_projection: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -416,43 +422,52 @@ pub(super) enum HoistedFilterInput {
     Column(ColumnIndex),
     /// The result of `buffered_exprs[i]`
     Buffered(usize),
+    /// The result of `streamed_exprs[i]`
+    Streamed(usize),
 }
 
 impl HoistedJoinFilter {
-    /// Lifts the non-volatile subexpressions of `filter` that read buffered
-    /// columns and no streamed ones. Returns `None` when there is none
-    /// besides bare columns.
+    /// Lifts the non-volatile subexpressions of `filter` that read the
+    /// columns of one input and none of the other. Returns `None` when there
+    /// is none besides bare columns.
     pub fn try_new(
         filter: &JoinFilter,
         buffered_side: JoinSide,
+        streamed_schema: &Schema,
         buffered_schema: &Schema,
     ) -> Result<Option<Self>> {
         let column_indices = filter.column_indices();
         let num_filter_columns = column_indices.len();
-        let mut lifted: Vec<PhysicalExprRef> = vec![];
+        let mut lifted: Vec<(JoinSide, PhysicalExprRef)> = vec![];
         let expression = Arc::clone(filter.expression())
             .transform_down(|expr| {
                 if expr.downcast_ref::<Column>().is_some() || is_volatile(&expr) {
                     return Ok(Transformed::no(expr));
                 }
                 let columns = collect_columns(&expr);
-                if columns.is_empty()
-                    || columns
-                        .iter()
-                        .any(|c| column_indices[c.index()].side != buffered_side)
+                let Some(side) = columns
+                    .iter()
+                    .next()
+                    .map(|c| column_indices[c.index()].side)
+                else {
+                    return Ok(Transformed::no(expr));
+                };
+                if columns
+                    .iter()
+                    .any(|c| column_indices[c.index()].side != side)
                 {
                     return Ok(Transformed::no(expr));
                 }
-                let position = match lifted.iter().position(|e| **e == *expr) {
+                let position = match lifted.iter().position(|(_, e)| **e == *expr) {
                     Some(position) => position,
                     None => {
-                        lifted.push(Arc::clone(&expr));
+                        lifted.push((side, Arc::clone(&expr)));
                         lifted.len() - 1
                     }
                 };
                 Ok(Transformed::new(
                     Arc::new(Column::new(
-                        &format!("__buffered_{position}"),
+                        &lifted_name(&lifted, position, buffered_side),
                         num_filter_columns + position,
                     )),
                     true,
@@ -479,13 +494,21 @@ impl HoistedJoinFilter {
             .iter()
             .map(|&index| HoistedFilterInput::Column(column_indices[index].clone()))
             .collect();
-        for (position, expr) in lifted.iter().enumerate() {
+        let mut buffered_exprs = vec![];
+        let mut streamed_exprs = vec![];
+        for (position, (side, expr)) in lifted.iter().enumerate() {
             fields.push(Field::new(
-                format!("__buffered_{position}"),
+                lifted_name(&lifted, position, buffered_side),
                 expr.data_type(filter.schema())?,
                 expr.nullable(filter.schema())?,
             ));
-            inputs.push(HoistedFilterInput::Buffered(position));
+            if *side == buffered_side {
+                inputs.push(HoistedFilterInput::Buffered(buffered_exprs.len()));
+                buffered_exprs.push(Arc::clone(expr));
+            } else {
+                inputs.push(HoistedFilterInput::Streamed(streamed_exprs.len()));
+                streamed_exprs.push(Arc::clone(expr));
+            }
         }
 
         let expression = expression
@@ -502,28 +525,67 @@ impl HoistedJoinFilter {
                 ))
             })?
             .data;
-        let buffered_exprs = lifted
-            .into_iter()
-            .map(|expr| {
-                expr.transform_up(|expr| {
-                    let Some(column) = expr.downcast_ref::<Column>() else {
-                        return Ok(Transformed::no(expr));
-                    };
-                    let index = column_indices[column.index()].index;
-                    Ok(Transformed::yes(Arc::new(Column::new(
-                        buffered_schema.field(index).name(),
-                        index,
-                    )) as PhysicalExprRef))
+        let rebind = |exprs: Vec<PhysicalExprRef>,
+                      schema: &Schema,
+                      projection: Option<&[usize]>| {
+            exprs
+                .into_iter()
+                .map(|expr| {
+                    expr.transform_up(|expr| {
+                        let Some(column) = expr.downcast_ref::<Column>() else {
+                            return Ok(Transformed::no(expr));
+                        };
+                        let index = column_indices[column.index()].index;
+                        let position = match projection {
+                            Some(projection) => projection.binary_search(&index).unwrap(),
+                            None => index,
+                        };
+                        Ok(Transformed::yes(Arc::new(Column::new(
+                            schema.field(index).name(),
+                            position,
+                        ))
+                            as PhysicalExprRef))
+                    })
+                    .map(|transformed| transformed.data)
                 })
-                .map(|transformed| transformed.data)
-            })
-            .collect::<Result<Vec<_>>>()?;
+                .collect::<Result<Vec<_>>>()
+        };
+        let mut streamed_projection: Vec<usize> = streamed_exprs
+            .iter()
+            .flat_map(collect_columns)
+            .map(|c| column_indices[c.index()].index)
+            .collect();
+        streamed_projection.sort_unstable();
+        streamed_projection.dedup();
+        let buffered_exprs = rebind(buffered_exprs, buffered_schema, None)?;
+        let streamed_exprs =
+            rebind(streamed_exprs, streamed_schema, Some(&streamed_projection))?;
 
         Ok(Some(Self {
             expression,
             schema: Arc::new(Schema::new(fields)),
             inputs,
             buffered_exprs,
+            streamed_exprs,
+            streamed_projection,
         }))
+    }
+}
+
+/// Name of the column holding the result of `lifted[position]`
+fn lifted_name(
+    lifted: &[(JoinSide, PhysicalExprRef)],
+    position: usize,
+    buffered_side: JoinSide,
+) -> String {
+    let side = lifted[position].0;
+    let side_position = lifted[..position]
+        .iter()
+        .filter(|(s, _)| *s == side)
+        .count();
+    if side == buffered_side {
+        format!("__buffered_{side_position}")
+    } else {
+        format!("__streamed_{side_position}")
     }
 }

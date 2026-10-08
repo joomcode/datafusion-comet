@@ -4818,13 +4818,22 @@ fn hoisted_join_filter_lifts_buffered_subexpressions() -> Result<()> {
     for streamed_side in [JoinSide::Left, JoinSide::Right] {
         let plain = build_interval_filter(&streamed, &buffered, streamed_side, false);
         assert!(
-            HoistedJoinFilter::try_new(&plain, streamed_side.negate(), &buffered)?
-                .is_none()
+            HoistedJoinFilter::try_new(
+                &plain,
+                streamed_side.negate(),
+                &streamed,
+                &buffered
+            )?
+            .is_none()
         );
         let filter = build_interval_filter(&streamed, &buffered, streamed_side, true);
-        let hoisted =
-            HoistedJoinFilter::try_new(&filter, streamed_side.negate(), &buffered)?
-                .unwrap();
+        let hoisted = HoistedJoinFilter::try_new(
+            &filter,
+            streamed_side.negate(),
+            &streamed,
+            &buffered,
+        )?
+        .unwrap();
         let lifted: Vec<String> = hoisted
             .buffered_exprs
             .iter()
