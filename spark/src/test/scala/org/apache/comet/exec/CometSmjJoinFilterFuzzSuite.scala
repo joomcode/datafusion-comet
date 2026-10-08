@@ -426,7 +426,7 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
     s"CASE WHEN l.flag THEN $rts > TIMESTAMP '1970-01-06 00:00:00' ELSE r.rk2 > 2 END")
   private val caseNested = Filter(
     "case_nested",
-    s"CASE WHEN l.k2 IS NULL THEN r.rv IS NULL WHEN l.k2 > 2 THEN " +
+    "CASE WHEN l.k2 IS NULL THEN r.rv IS NULL WHEN l.k2 > 2 THEN " +
       s"CASE WHEN $lts IS NULL THEN r.rk2 = l.k2 ELSE $lts < r.rt END " +
       s"ELSE CASE WHEN r.rk2 IS NULL THEN l.flag ELSE $lint < r.rv END END")
   private val caseValue =
