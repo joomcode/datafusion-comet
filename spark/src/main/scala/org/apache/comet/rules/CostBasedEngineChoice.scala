@@ -33,7 +33,6 @@ import org.apache.spark.sql.comet.{CometExec, CometFilterExec, CometHashAggregat
 import org.apache.spark.sql.execution.{ColumnarToRowTransition, ExpandExec, FilterExec, ProjectExec, SortExec, SparkPlan}
 import org.apache.spark.sql.execution.aggregate.BaseAggregateExec
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
-import org.apache.spark.sql.execution.joins.SortMergeJoinExec
 import org.apache.spark.sql.execution.window.WindowExec
 import org.apache.spark.sql.internal.SQLConf
 
@@ -124,19 +123,6 @@ class EngineCostModel(
   private def aggregateShare(agg: BaseAggregateExec): Double =
     if (agg.aggregateExpressions.exists(_.mode == Complete)) 1.0 else 0.5
 
-  /** Whether `condition` of `join`, run as `plan`, is one validity interval. */
-  def validityInterval(
-      condition: Expression,
-      join: SortMergeJoinExec,
-      plan: SparkPlan): Boolean = {
-    val sides = if (plan.children.size == 2) plan.children else join.children
-    JoinConditionShape.isValidityInterval(
-      condition,
-      sides.head,
-      sides(1),
-      JoinConditionShape.aliases(plan.children ++ join.children))
-  }
-
   private def classTerms(costClass: CostClass, plan: SparkPlan, engine: Engine): Seq[Term] = {
     val op = sparkOperator(plan)
     lazy val out = widthOf(op.output)
@@ -184,12 +170,6 @@ class EngineCostModel(
           functions.distinct.map { c =>
             Term(c, Width(functions.size, 0), share * functions.count(_ == c))
           }
-      case (SmjCondition, join: SortMergeJoinExec) =>
-        if (join.condition.exists(c => !validityInterval(c, join, plan))) {
-          Seq(Term(SmjCondition, out))
-        } else {
-          Nil
-        }
       case (AggObjectHash, agg: BaseAggregateExec) =>
         Seq(Term(AggObjectHash, Width(0, 0), aggregateShare(agg)))
       case _ => Seq(Term(costClass, out))
