@@ -39,7 +39,10 @@ use crate::test::exec::BarrierExec;
 use crate::test::{build_table_i32, build_table_i32_two_cols};
 use crate::{ExecutionPlan, RecordBatchStream, common};
 use crate::{
-    expressions::Column, joins::sort_merge_join::filter::get_corrected_filter_mask,
+    expressions::Column,
+    joins::sort_merge_join::filter::{
+        deferred_filter_candidates, get_corrected_filter_mask,
+    },
     joins::sort_merge_join::materializing_stream::JoinedRecordBatches,
 };
 use arrow::array::{
@@ -3182,6 +3185,113 @@ fn build_joined_record_batches() -> Result<JoinedRecordBatches> {
     Ok(batches)
 }
 
+/// Output of `get_corrected_filter_mask` over deferred-filter metadata, as
+/// `(pair, passed)` per output row: a passing pair, a pair null-joined
+/// because its row found no passing pair (`false`), or a null-metadata row.
+fn corrected_output(
+    pairs: &[usize],
+    rows: &[Option<u64>],
+    mask: &[Option<bool>],
+) -> Vec<(usize, Option<bool>)> {
+    use arrow::array::Array;
+    let row_indices = UInt64Array::from(rows.to_vec());
+    let filter_mask = BooleanArray::from(mask.to_vec());
+    let batch_ids = vec![1; rows.len()];
+    let corrected = get_corrected_filter_mask(
+        Left,
+        &row_indices,
+        &batch_ids,
+        &filter_mask,
+        rows.len(),
+    )
+    .unwrap();
+    (0..rows.len())
+        .filter(|&i| corrected.is_valid(i))
+        .map(|i| {
+            let passed = filter_mask.is_valid(i).then(|| corrected.value(i));
+            (pairs[i], passed)
+        })
+        .collect()
+}
+
+/// Reducing each freeze's pairs to `deferred_filter_candidates` leaves the
+/// corrected output unchanged, wherever the freeze boundaries cut the pairs
+/// of one streamed row.
+#[test]
+fn deferred_filter_candidates_keep_corrected_output() {
+    let mut state = 11u64;
+    let mut next = move |n: u64| {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (state >> 33) % n
+    };
+    for _ in 0..2000 {
+        // Pairs of consecutive streamed rows, with null-metadata rows
+        // (unmatched rows) between some of them.
+        let mut rows: Vec<Option<u64>> = vec![];
+        let mut mask: Vec<Option<bool>> = vec![];
+        let pass_rate = next(4);
+        for row in 0..1 + next(6) {
+            if next(4) == 0 {
+                rows.push(None);
+                mask.push(None);
+            }
+            for _ in 0..1 + next(12) {
+                rows.push(Some(row));
+                mask.push(Some(next(4) < pass_rate));
+            }
+        }
+        let pairs: Vec<usize> = (0..rows.len()).collect();
+        let expected = corrected_output(&pairs, &rows, &mask);
+
+        // Cut the pairs into freezes and reduce each freeze's matched pairs.
+        let mut kept_pairs = vec![];
+        let mut start = 0;
+        while start < rows.len() {
+            let end = (start + 1 + next(10) as usize).min(rows.len());
+            let mut segment_start = start;
+            while segment_start < end {
+                if rows[segment_start].is_none() {
+                    kept_pairs.push(segment_start);
+                    segment_start += 1;
+                    continue;
+                }
+                let mut segment_end = segment_start;
+                while segment_end < end && rows[segment_end].is_some() {
+                    segment_end += 1;
+                }
+                let segment = segment_start..segment_end;
+                let keep = deferred_filter_candidates(
+                    &UInt64Array::from_iter_values(
+                        rows[segment.clone()].iter().map(|r| r.unwrap()),
+                    ),
+                    &BooleanArray::from_iter(mask[segment.clone()].iter().copied()),
+                );
+                kept_pairs.extend(segment.filter(|&i| keep.value(i - segment_start)));
+                segment_start = segment_end;
+            }
+            start = end;
+        }
+        let kept_rows: Vec<_> = kept_pairs.iter().map(|&i| rows[i]).collect();
+        let kept_mask: Vec<_> = kept_pairs.iter().map(|&i| mask[i]).collect();
+        let actual = corrected_output(&kept_pairs, &kept_rows, &kept_mask);
+
+        // A null-joined row may come from any pair of its streamed row: they
+        // differ only in the buffered side, which is nulled.
+        let as_rows = |output: Vec<(usize, Option<bool>)>| {
+            output
+                .into_iter()
+                .map(|(pair, passed)| match passed {
+                    Some(false) => (rows[pair], None),
+                    _ => (rows[pair], Some(pair)),
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(as_rows(actual), as_rows(expected), "{rows:?} {mask:?}");
+    }
+}
+
 #[tokio::test]
 async fn test_left_outer_join_filtered_mask() -> Result<()> {
     let mut joined_batches = build_joined_record_batches()?;
@@ -4184,6 +4294,716 @@ async fn join_wrapped_multi_source_freeze_with_null_buffered_index() -> Result<(
     +-----+-------+-----+-------+
     ");
 
+    Ok(())
+}
+
+/// A streamed row of the validity-interval tests: key, row id, lookup time.
+type IntervalStreamedRow = (i32, i32, Option<i64>);
+/// A buffered row of the validity-interval tests: key, row id, `(eff, next_eff]`.
+type IntervalBufferedRow = (i32, i32, i64, i64);
+
+const INTERVAL_PAYLOAD_COLS: usize = 24;
+
+fn interval_payload(col: usize, sid: i32) -> String {
+    format!("p{col}_{sid}")
+}
+
+/// Streamed table `(key, sid, t, p0..)` with `INTERVAL_PAYLOAD_COLS`
+/// payload columns alternating Int64 and Utf8, split into batches.
+fn build_interval_streamed(
+    rows: &[IntervalStreamedRow],
+    batch_rows: usize,
+) -> Arc<dyn ExecutionPlan> {
+    use arrow::array::{ArrayRef, Int64Array, StringArray};
+    let mut fields = vec![
+        Field::new("key", DataType::Int32, false),
+        Field::new("sid", DataType::Int32, false),
+        Field::new("t", DataType::Int64, true),
+    ];
+    for c in 0..INTERVAL_PAYLOAD_COLS {
+        let data_type = if c % 2 == 0 {
+            DataType::Int64
+        } else {
+            DataType::Utf8
+        };
+        fields.push(Field::new(format!("p{c}"), data_type, false));
+    }
+    let schema = Arc::new(Schema::new(fields));
+    let batches = rows
+        .chunks(batch_rows)
+        .map(|chunk| {
+            let mut columns: Vec<ArrayRef> = vec![
+                Arc::new(Int32Array::from_iter_values(chunk.iter().map(|r| r.0))),
+                Arc::new(Int32Array::from_iter_values(chunk.iter().map(|r| r.1))),
+                Arc::new(Int64Array::from_iter(chunk.iter().map(|r| r.2))),
+            ];
+            for c in 0..INTERVAL_PAYLOAD_COLS {
+                if c % 2 == 0 {
+                    columns.push(Arc::new(Int64Array::from_iter_values(
+                        chunk.iter().map(|r| r.1 as i64 * 1000 + c as i64),
+                    )));
+                } else {
+                    columns.push(Arc::new(StringArray::from_iter_values(
+                        chunk.iter().map(|r| interval_payload(c, r.1)),
+                    )));
+                }
+            }
+            RecordBatch::try_new(Arc::clone(&schema), columns).unwrap()
+        })
+        .collect::<Vec<_>>();
+    TestMemoryExec::try_new_exec(&[batches], schema, None).unwrap()
+}
+
+/// Buffered table `(bkey, bid, eff, next_eff, val)`, split into batches.
+fn build_interval_buffered(
+    rows: &[IntervalBufferedRow],
+    batch_rows: usize,
+) -> Arc<dyn ExecutionPlan> {
+    use arrow::array::{Int64Array, StringArray};
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("bkey", DataType::Int32, false),
+        Field::new("bid", DataType::Int32, false),
+        Field::new("eff", DataType::Int64, false),
+        Field::new("next_eff", DataType::Int64, false),
+        Field::new("val", DataType::Utf8, false),
+    ]));
+    let batches = rows
+        .chunks(batch_rows)
+        .map(|chunk| {
+            RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![
+                    Arc::new(Int32Array::from_iter_values(chunk.iter().map(|r| r.0))),
+                    Arc::new(Int32Array::from_iter_values(chunk.iter().map(|r| r.1))),
+                    Arc::new(Int64Array::from_iter_values(chunk.iter().map(|r| r.2))),
+                    Arc::new(Int64Array::from_iter_values(chunk.iter().map(|r| r.3))),
+                    Arc::new(StringArray::from_iter_values(
+                        chunk.iter().map(|r| format!("v{}", r.1)),
+                    )),
+                ],
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    TestMemoryExec::try_new_exec(&[batches], schema, None).unwrap()
+}
+
+/// Forms of the validity-interval filter `t > eff AND t <= next_eff`, all
+/// with the same result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IntervalFilter {
+    /// `t > eff AND t <= next_eff`
+    Plain,
+    /// `t > eff + 0 AND t <= next_eff + 0 AND next_eff - eff > 0`: with
+    /// subexpressions over buffered columns alone, which the join evaluates
+    /// once per buffered row
+    Buffered,
+    /// `t + 0 > eff AND t - 0 <= next_eff AND t + 0 >= t - 0`: with
+    /// subexpressions over streamed columns alone, which the join evaluates
+    /// once per streamed row
+    Streamed,
+    /// `t + 0 > eff + 0 AND t - 0 <= next_eff + 0 AND next_eff - eff > 0
+    /// AND t + 0 >= t - 0`: with both
+    Both,
+}
+
+const INTERVAL_FILTERS: [IntervalFilter; 4] = [
+    IntervalFilter::Plain,
+    IntervalFilter::Buffered,
+    IntervalFilter::Streamed,
+    IntervalFilter::Both,
+];
+
+/// The validity-interval filter in the given form, with the streamed table
+/// on `streamed_side`.
+fn build_interval_filter(
+    streamed: &Schema,
+    buffered: &Schema,
+    streamed_side: JoinSide,
+    form: IntervalFilter,
+) -> JoinFilter {
+    let t_field = streamed
+        .field_with_name("t")
+        .unwrap()
+        .clone()
+        .with_nullable(true);
+    let eff_field = buffered
+        .field_with_name("eff")
+        .unwrap()
+        .clone()
+        .with_nullable(true);
+    let next_eff_field = buffered
+        .field_with_name("next_eff")
+        .unwrap()
+        .clone()
+        .with_nullable(true);
+    let t = ColumnIndex {
+        index: 2,
+        side: streamed_side,
+    };
+    let eff = ColumnIndex {
+        index: 2,
+        side: streamed_side.negate(),
+    };
+    let next_eff = ColumnIndex {
+        index: 3,
+        side: streamed_side.negate(),
+    };
+    let (column_indices, fields, t_idx, eff_idx, next_eff_idx) =
+        if streamed_side == JoinSide::Left {
+            (
+                vec![t, eff, next_eff],
+                vec![t_field, eff_field, next_eff_field],
+                0,
+                1,
+                2,
+            )
+        } else {
+            (
+                vec![eff, next_eff, t],
+                vec![eff_field, next_eff_field, t_field],
+                2,
+                0,
+                1,
+            )
+        };
+    let t_col: PhysicalExprRef = Arc::new(Column::new("t", t_idx));
+    let eff: PhysicalExprRef = Arc::new(Column::new("eff", eff_idx));
+    let next_eff: PhysicalExprRef = Arc::new(Column::new("next_eff", next_eff_idx));
+    let zero = |expr: &PhysicalExprRef, op: Operator| -> PhysicalExprRef {
+        Arc::new(BinaryExpr::new(
+            Arc::clone(expr),
+            op,
+            Arc::new(Literal::new(ScalarValue::Int64(Some(0)))),
+        ))
+    };
+    let lift_buffered = matches!(form, IntervalFilter::Buffered | IntervalFilter::Both);
+    let lift_streamed = matches!(form, IntervalFilter::Streamed | IntervalFilter::Both);
+    let (lower, upper) = if lift_buffered {
+        (zero(&eff, Operator::Plus), zero(&next_eff, Operator::Plus))
+    } else {
+        (Arc::clone(&eff), Arc::clone(&next_eff))
+    };
+    let (t_lower, t_upper) = if lift_streamed {
+        (zero(&t_col, Operator::Plus), zero(&t_col, Operator::Minus))
+    } else {
+        (Arc::clone(&t_col), Arc::clone(&t_col))
+    };
+    let mut expression: PhysicalExprRef = Arc::new(BinaryExpr::new(
+        Arc::new(BinaryExpr::new(Arc::clone(&t_lower), Operator::Gt, lower)),
+        Operator::And,
+        Arc::new(BinaryExpr::new(Arc::clone(&t_upper), Operator::LtEq, upper)),
+    ));
+    if lift_buffered {
+        expression = Arc::new(BinaryExpr::new(
+            expression,
+            Operator::And,
+            Arc::new(BinaryExpr::new(
+                Arc::new(BinaryExpr::new(next_eff, Operator::Minus, eff)),
+                Operator::Gt,
+                Arc::new(Literal::new(ScalarValue::Int64(Some(0)))),
+            )),
+        ));
+    }
+    if lift_streamed {
+        expression = Arc::new(BinaryExpr::new(
+            expression,
+            Operator::And,
+            Arc::new(BinaryExpr::new(t_lower, Operator::GtEq, t_upper)),
+        ));
+    }
+    JoinFilter::new(expression, column_indices, Arc::new(Schema::new(fields)))
+}
+
+/// Expected `(sid, bid)` output of the validity-interval join, in the
+/// streamed order the join preserves: each streamed row's passing buffered
+/// rows in buffered order, or the row null-joined when none passed. FULL
+/// joins append the buffered rows no streamed row passed with.
+fn expected_interval_join(
+    join_type: JoinType,
+    streamed: &[IntervalStreamedRow],
+    buffered: &[IntervalBufferedRow],
+) -> Vec<(Option<i32>, Option<i32>)> {
+    let mut expected = vec![];
+    let mut buffered_passed = vec![false; buffered.len()];
+    for &(key, sid, t) in streamed {
+        let mut any = false;
+        for (b, &(bkey, bid, eff, next_eff)) in buffered.iter().enumerate() {
+            if bkey == key && t.is_some_and(|t| t > eff && t <= next_eff) {
+                expected.push((Some(sid), Some(bid)));
+                buffered_passed[b] = true;
+                any = true;
+            }
+        }
+        if !any && join_type != Inner {
+            expected.push((Some(sid), None));
+        }
+    }
+    if join_type == Full {
+        for (b, &(_, bid, _, _)) in buffered.iter().enumerate() {
+            if !buffered_passed[b] {
+                expected.push((None, Some(bid)));
+            }
+        }
+    }
+    expected
+}
+
+/// Reads `(sid, bid)` from each output row, checking that every streamed
+/// and buffered column belongs to that row (or is null with it).
+fn interval_join_output(
+    batches: &[RecordBatch],
+    streamed_offset: usize,
+    buffered_offset: usize,
+) -> Vec<(Option<i32>, Option<i32>)> {
+    use arrow::array::{Array, AsArray};
+    use arrow::datatypes::{Int32Type, Int64Type};
+    let mut output = vec![];
+    for batch in batches {
+        let sid = batch
+            .column(streamed_offset + 1)
+            .as_primitive::<Int32Type>();
+        let bid = batch
+            .column(buffered_offset + 1)
+            .as_primitive::<Int32Type>();
+        for row in 0..batch.num_rows() {
+            let s = sid.is_valid(row).then(|| sid.value(row));
+            let b = bid.is_valid(row).then(|| bid.value(row));
+            for c in (0..3 + INTERVAL_PAYLOAD_COLS).filter(|&c| c != 2) {
+                let col = batch.column(streamed_offset + c);
+                assert_eq!(col.is_valid(row), s.is_some(), "column {c}");
+            }
+            if let Some(s) = s {
+                for c in 0..INTERVAL_PAYLOAD_COLS {
+                    let col = batch.column(streamed_offset + 3 + c);
+                    if c % 2 == 0 {
+                        assert_eq!(
+                            col.as_primitive::<Int64Type>().value(row),
+                            s as i64 * 1000 + c as i64
+                        );
+                    } else {
+                        assert_eq!(
+                            col.as_string::<i32>().value(row),
+                            interval_payload(c, s)
+                        );
+                    }
+                }
+            }
+            for c in 0..5 {
+                assert_eq!(batch.column(buffered_offset + c).is_valid(row), b.is_some());
+            }
+            if let Some(b) = b {
+                assert_eq!(
+                    batch
+                        .column(buffered_offset + 4)
+                        .as_string::<i32>()
+                        .value(row),
+                    format!("v{b}")
+                );
+            }
+            output.push((s, b));
+        }
+    }
+    output
+}
+
+/// Runs the validity-interval join with the streamed table on the outer
+/// side of `join_type` (the right side for RIGHT joins) and checks it
+/// against [`expected_interval_join`]: in order where the streamed order is
+/// preserved, as a multiset for FULL joins.
+#[expect(clippy::too_many_arguments)]
+async fn check_interval_join(
+    join_type: JoinType,
+    streamed: &[IntervalStreamedRow],
+    buffered: &[IntervalBufferedRow],
+    streamed_batch_rows: usize,
+    buffered_batch_rows: usize,
+    batch_size: usize,
+    spill: bool,
+    case: &str,
+) -> Result<()> {
+    for form in INTERVAL_FILTERS {
+        check_interval_join_with_filter(
+            join_type,
+            streamed,
+            buffered,
+            streamed_batch_rows,
+            buffered_batch_rows,
+            batch_size,
+            spill,
+            form,
+            &format!("{case} filter={form:?}"),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// [`check_interval_join`] with one form of the filter.
+#[expect(clippy::too_many_arguments)]
+async fn check_interval_join_with_filter(
+    join_type: JoinType,
+    streamed: &[IntervalStreamedRow],
+    buffered: &[IntervalBufferedRow],
+    streamed_batch_rows: usize,
+    buffered_batch_rows: usize,
+    batch_size: usize,
+    spill: bool,
+    form: IntervalFilter,
+    case: &str,
+) -> Result<()> {
+    let streamed_plan = build_interval_streamed(streamed, streamed_batch_rows);
+    let buffered_plan = build_interval_buffered(buffered, buffered_batch_rows);
+    let streamed_side = if join_type == Right {
+        JoinSide::Right
+    } else {
+        JoinSide::Left
+    };
+    let filter = build_interval_filter(
+        &streamed_plan.schema(),
+        &buffered_plan.schema(),
+        streamed_side,
+        form,
+    );
+    let (left, right) = if join_type == Right {
+        (buffered_plan, streamed_plan)
+    } else {
+        (streamed_plan, buffered_plan)
+    };
+    let on = vec![(
+        Arc::new(Column::new_with_schema(
+            if join_type == Right { "bkey" } else { "key" },
+            &left.schema(),
+        )?) as _,
+        Arc::new(Column::new_with_schema(
+            if join_type == Right { "key" } else { "bkey" },
+            &right.schema(),
+        )?) as _,
+    )];
+    let (streamed_offset, buffered_offset) = if join_type == Right {
+        (5, 0)
+    } else {
+        (0, 3 + INTERVAL_PAYLOAD_COLS)
+    };
+
+    let mut task_ctx = TaskContext::default()
+        .with_session_config(SessionConfig::default().with_batch_size(batch_size));
+    if spill {
+        task_ctx = task_ctx.with_runtime(
+            RuntimeEnvBuilder::new()
+                .with_memory_limit(100, 1.0)
+                .with_disk_manager_builder(
+                    DiskManagerBuilder::default()
+                        .with_mode(DiskManagerMode::OsTmpDirectory),
+                )
+                .build_arc()?,
+        );
+    }
+    let join = join_with_filter(
+        left,
+        right,
+        on,
+        filter,
+        join_type,
+        vec![SortOptions::default()],
+        NullEquality::NullEqualsNothing,
+    )?;
+    let batches = common::collect(join.execute(0, Arc::new(task_ctx))?).await?;
+    if spill && !buffered.is_empty() {
+        assert!(
+            join.metrics().unwrap().spill_count().unwrap() > 0,
+            "{case}: expected spilling"
+        );
+    }
+
+    let mut actual = interval_join_output(&batches, streamed_offset, buffered_offset);
+    let mut expected = expected_interval_join(join_type, streamed, buffered);
+    if join_type == Full {
+        actual.sort();
+        expected.sort();
+    }
+    assert_eq!(actual, expected, "{case}");
+    Ok(())
+}
+
+/// Buffered key group of `rows` consecutive intervals `(10i, 10i + 10 * width]`.
+fn interval_group(
+    key: i32,
+    first_bid: i32,
+    rows: i32,
+    width: i64,
+) -> Vec<IntervalBufferedRow> {
+    (0..rows)
+        .map(|i| {
+            (
+                key,
+                first_bid + i,
+                i as i64 * 10,
+                i as i64 * 10 + 10 * width,
+            )
+        })
+        .collect()
+}
+
+/// One streamed row against a buffered key group much larger than the batch
+/// size and spanning several buffered batches, passing the filter for none,
+/// one or a few of its rows (or NULL when the streamed time is NULL). The
+/// join filter is evaluated for every pair, but only the pairs that can be
+/// output are materialized; the result must be the same either way.
+#[tokio::test]
+async fn join_filter_single_streamed_row_large_buffered_group() -> Result<()> {
+    let group = interval_group(1, 0, 1000, 1);
+    let overlapping = interval_group(1, 0, 1000, 3);
+    let cases: Vec<(&str, Option<i64>, &[IntervalBufferedRow])> = vec![
+        ("none", Some(-5), &group),
+        ("null", None, &group),
+        ("first", Some(5), &group),
+        ("middle", Some(7775), &group),
+        ("last", Some(9999), &group),
+        ("several", Some(7775), &overlapping),
+    ];
+    for (name, t, buffered) in cases {
+        let streamed = [(1, 0, t)];
+        for join_type in [Inner, Left, Right, Full] {
+            for batch_size in [64, 333, 8192] {
+                for spill in [false, true] {
+                    check_interval_join(
+                        join_type,
+                        &streamed,
+                        buffered,
+                        1,
+                        128,
+                        batch_size,
+                        spill,
+                        &format!(
+                            "{name} {join_type} batch_size={batch_size} spill={spill}"
+                        ),
+                    )
+                    .await?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Many streamed rows over key groups of various sizes, some larger than
+/// the batch size: freezes cut through one streamed row's pairs and hold
+/// the pairs of several rows, rows pass for none, one or several buffered
+/// rows, and some keys exist on one side only.
+#[tokio::test]
+async fn join_filter_streamed_rows_across_freezes() -> Result<()> {
+    let mut buffered = vec![];
+    for (key, rows, width) in [(0, 3, 1), (1, 150, 1), (2, 400, 2), (4, 1, 1), (5, 90, 4)]
+    {
+        let first_bid = buffered.len() as i32;
+        buffered.extend(interval_group(key, first_bid, rows, width));
+    }
+    let mut state = 7u64;
+    let mut next = move || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (state >> 33) as i64
+    };
+    let mut streamed = vec![];
+    for (key, rows) in [(0, 2), (1, 7), (2, 5), (3, 2), (5, 9), (6, 1)] {
+        for _ in 0..rows {
+            let t = match next() % 6 {
+                0 => None,
+                1 => Some(-1 - next() % 10),
+                2 => Some(5000 + next() % 10),
+                _ => Some(next() % 4100),
+            };
+            streamed.push((key, streamed.len() as i32, t));
+        }
+    }
+    for join_type in [Inner, Left, Right, Full] {
+        for (streamed_batch_rows, buffered_batch_rows) in [(4, 64), (1000, 37)] {
+            for batch_size in [50, 128, 1000] {
+                for spill in [false, true] {
+                    check_interval_join(
+                        join_type,
+                        &streamed,
+                        &buffered,
+                        streamed_batch_rows,
+                        buffered_batch_rows,
+                        batch_size,
+                        spill,
+                        &format!(
+                            "{join_type} streamed_batch_rows={streamed_batch_rows} \
+                             buffered_batch_rows={buffered_batch_rows} \
+                             batch_size={batch_size} spill={spill}"
+                        ),
+                    )
+                    .await?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Each form of the interval filter lifts its subexpressions over one input
+/// alone, and the bare columns it still reads stay input columns; the plain
+/// form has nothing to lift.
+#[test]
+fn hoisted_join_filter_lifts_single_side_subexpressions() -> Result<()> {
+    use super::filter::{HoistedFilterInput, HoistedJoinFilter};
+    use HoistedFilterInput::{Buffered, Column as Input, Streamed};
+    let streamed = build_interval_streamed(&[(1, 0, Some(1))], 1).schema();
+    let buffered = build_interval_buffered(&interval_group(1, 0, 1, 1), 1).schema();
+    for streamed_side in [JoinSide::Left, JoinSide::Right] {
+        let buffered_side = streamed_side.negate();
+        let hoist = |form| {
+            let filter = build_interval_filter(&streamed, &buffered, streamed_side, form);
+            HoistedJoinFilter::try_new(&filter, buffered_side, &streamed, &buffered)
+        };
+        let to_strings = |exprs: &[PhysicalExprRef]| -> Vec<String> {
+            exprs.iter().map(|e| e.to_string()).collect()
+        };
+        assert!(hoist(IntervalFilter::Plain)?.is_none());
+
+        let hoisted = hoist(IntervalFilter::Buffered)?.unwrap();
+        assert_eq!(
+            to_strings(&hoisted.buffered_exprs),
+            vec!["eff@2 + 0", "next_eff@3 + 0", "next_eff@3 - eff@2 > 0"]
+        );
+        assert!(hoisted.streamed_exprs.is_empty());
+        assert!(matches!(
+            hoisted.inputs.as_slice(),
+            [
+                Input(ColumnIndex { index: 2, side }),
+                Buffered(0),
+                Buffered(1),
+                Buffered(2),
+            ] if *side == streamed_side
+        ));
+        assert_eq!(
+            hoisted.expression.to_string(),
+            "t@0 > __buffered_0@1 AND t@0 <= __buffered_1@2 AND __buffered_2@3"
+        );
+
+        let hoisted = hoist(IntervalFilter::Streamed)?.unwrap();
+        assert!(hoisted.buffered_exprs.is_empty());
+        assert_eq!(
+            to_strings(&hoisted.streamed_exprs),
+            vec!["t@0 + 0", "t@0 - 0", "t@0 + 0 >= t@0 - 0"]
+        );
+        assert_eq!(hoisted.streamed_projection, vec![2]);
+        assert!(matches!(
+            hoisted.inputs.as_slice(),
+            [
+                Input(ColumnIndex { index: 2, side: eff_side }),
+                Input(ColumnIndex { index: 3, side: next_eff_side }),
+                Streamed(0),
+                Streamed(1),
+                Streamed(2),
+            ] if *eff_side == buffered_side && *next_eff_side == buffered_side
+        ));
+        assert_eq!(
+            hoisted.expression.to_string(),
+            "__streamed_0@2 > eff@0 AND __streamed_1@3 <= next_eff@1 AND __streamed_2@4"
+        );
+
+        let hoisted = hoist(IntervalFilter::Both)?.unwrap();
+        assert_eq!(
+            to_strings(&hoisted.buffered_exprs),
+            vec!["eff@2 + 0", "next_eff@3 + 0", "next_eff@3 - eff@2 > 0"]
+        );
+        assert_eq!(
+            to_strings(&hoisted.streamed_exprs),
+            vec!["t@0 + 0", "t@0 - 0", "t@0 + 0 >= t@0 - 0"]
+        );
+        assert!(matches!(
+            hoisted.inputs.as_slice(),
+            [
+                Streamed(0),
+                Buffered(0),
+                Streamed(1),
+                Buffered(1),
+                Buffered(2),
+                Streamed(2),
+            ]
+        ));
+        assert_eq!(
+            hoisted.expression.to_string(),
+            "__streamed_0@0 > __buffered_0@1 AND __streamed_1@2 <= __buffered_1@3 \
+             AND __buffered_2@4 AND __streamed_2@5"
+        );
+    }
+    Ok(())
+}
+
+/// Key groups larger than the batch size on both sides, with streamed rows
+/// passing the filter for none, one or several buffered rows, and buffered
+/// key groups no streamed row matches between them. A FULL join stages the
+/// null-joined rows of such a group at the next freeze, which can fall
+/// between two runs of one streamed row's pairs; the row must still be
+/// emitted null-joined at most once.
+#[tokio::test]
+async fn join_filter_large_groups_on_both_sides() -> Result<()> {
+    let mut state = 11u64;
+    let mut next = move || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (state >> 33) as i64
+    };
+    let mut buffered = vec![];
+    let mut streamed = vec![];
+    for (key, streamed_rows, buffered_rows, width) in [
+        (0, 140, 140, 1),
+        (1, 0, 50, 1),
+        (2, 200, 70, 2),
+        (3, 0, 3, 1),
+        (4, 3, 140, 1),
+        (5, 140, 2, 1),
+        (6, 5, 0, 1),
+        (7, 70, 70, 1),
+    ] {
+        let first_bid = buffered.len() as i32;
+        buffered.extend(interval_group(key, first_bid, buffered_rows, width));
+        for _ in 0..streamed_rows {
+            let t = match next() % 4 {
+                0 => None,
+                1 => Some(-1 - next() % 10),
+                _ => Some(next() % (buffered_rows as i64 * 12 + 1)),
+            };
+            streamed.push((key, streamed.len() as i32, t));
+        }
+    }
+    let never: Vec<IntervalStreamedRow> = streamed
+        .iter()
+        .map(|&(key, sid, _)| (key, sid, Some(-1)))
+        .collect();
+    for (name, streamed) in [("mixed", &streamed), ("never", &never)] {
+        for join_type in [Inner, Left, Right, Full] {
+            for (streamed_batch_rows, buffered_batch_rows) in
+                [(64, 64), (1000, 37), (7, 1000)]
+            {
+                for batch_size in [64, 100, 8192] {
+                    for spill in [false, true] {
+                        check_interval_join(
+                            join_type,
+                            streamed,
+                            &buffered,
+                            streamed_batch_rows,
+                            buffered_batch_rows,
+                            batch_size,
+                            spill,
+                            &format!(
+                                "{name} {join_type} streamed_batch_rows={streamed_batch_rows} \
+                                 buffered_batch_rows={buffered_batch_rows} \
+                                 batch_size={batch_size} spill={spill}"
+                            ),
+                        )
+                        .await?;
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 

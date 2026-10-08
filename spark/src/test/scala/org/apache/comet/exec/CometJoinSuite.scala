@@ -1142,6 +1142,62 @@ class CometJoinSuite extends CometTestBase {
     }
   }
 
+  test("SortMergeJoin with a validity-interval join filter over wide rows and large key groups") {
+    withTempPath { dir =>
+      withSQLConf(
+        CometConf.COMET_EXEC_SORT_MERGE_JOIN_ENABLED.key -> "true",
+        CometConf.COMET_EXEC_SORT_MERGE_JOIN_WITH_JOIN_FILTER_ENABLED.key -> "true",
+        CometConf.COMET_BATCH_SIZE.key -> "1000",
+        SQLConf.SHUFFLE_PARTITIONS.key -> "2",
+        SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+        SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+        // Each currency but the last has 3000 consecutive validity intervals, so an
+        // order meets a key group three times the batch size and passes for one
+        // interval (several for the overlapping currency 3), or for none when its
+        // time is out of range or NULL. Currency 4 has no rates, currency 5 no orders.
+        val payload = (0 until 30).map { c =>
+          if (c % 2 == 0) s"id * $c AS p$c" else s"concat('payload_$c', '_', id) AS p$c"
+        }
+        val ordersPath = s"${dir.getCanonicalPath}/orders"
+        spark
+          .range(0, 600, 1, 1)
+          .selectExpr(Seq(
+            "id",
+            "CAST(id % 5 AS INT) AS cur",
+            "CASE WHEN id % 11 = 0 THEN NULL WHEN id % 13 = 0 THEN -5 " +
+              "WHEN id % 17 = 0 THEN 50000 ELSE (id * 7919) % 30000 + 1 END AS t") ++
+            payload: _*)
+          .write
+          .parquet(ordersPath)
+        val ratesPath = s"${dir.getCanonicalPath}/rates"
+        spark
+          .range(0, 15000, 1, 1)
+          .selectExpr(
+            "CAST(CASE WHEN id < 12000 THEN id DIV 3000 ELSE 5 END AS INT) AS cur",
+            "(id % 3000) * 10 AS eff",
+            "(id % 3000) * 10 + CASE WHEN id DIV 3000 = 3 THEN 30 ELSE 10 END AS next_eff",
+            "concat('rate_', id) AS rate")
+          .write
+          .parquet(ratesPath)
+
+        withParquetTable(ordersPath, "orders") {
+          withParquetTable(ratesPath, "rates") {
+            val condition = "o.cur = r.cur AND o.t > r.eff AND o.t <= r.next_eff"
+            for (joinType <- Seq("INNER", "LEFT", "FULL")) {
+              checkSparkAnswerAndOperator(
+                sql(s"SELECT o.*, r.* FROM orders o $joinType JOIN rates r ON $condition"))
+            }
+            checkSparkAnswerAndOperator(
+              sql(s"SELECT o.*, r.* FROM rates r RIGHT JOIN orders o ON $condition"))
+            checkSparkAnswerAndOperator(
+              sql("SELECT o.id, count(r.rate), sum(o.p28) " +
+                s"FROM orders o LEFT JOIN rates r ON $condition GROUP BY o.id"))
+          }
+        }
+      }
+    }
+  }
+
   test("full outer join") {
     withTempView("`left`", "`right`", "allNulls") {
       allNulls.createOrReplaceTempView("allNulls")

@@ -888,7 +888,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     }
   }
 
-  test("a sort-merge join adds smjCondition only with a join condition") {
+  test("a sort-merge join adds smjCrossCondition only with a CASE or IF over both inputs") {
     withTables {
       withSQLConf(
         SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
@@ -902,28 +902,39 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
         }
         val out = Width(4, 0)
         val equi = join("SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k")
-        assert(model.terms(equi, Engine.Comet) == Seq(Term(Smj, out)))
-        assert(model.terms(equi, Engine.Spark) == Seq(Term(Smj, out)))
-        same(model.operatorPrice(equi, Engine.Comet), EngineCostTable.default.comet(Smj, out))
-
         val band = join(
           "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
             "AND a.v <= b.v AND b.v <= a.v + 13")
-        assert(model.terms(band, Engine.Comet) == Seq(Term(Smj, out), Term(SmjCondition, out)))
-        assert(model.terms(band, Engine.Spark) == Seq(Term(Smj, out), Term(SmjCondition, out)))
+        val oneSide = join(
+          "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
+            "AND a.v <= CASE WHEN b.v > 500 THEN b.v ELSE b.v + 13 END")
+        val crossCase = join(crossCaseOnT)
+        assert(band.originalPlan.asInstanceOf[SortMergeJoinExec].condition.isDefined)
+        for (engine <- Engine.all; j <- Seq(equi, band, oneSide)) {
+          assert(model.terms(j, engine) == Seq(Term(Smj, out)))
+        }
+        same(model.operatorPrice(equi, Engine.Comet), EngineCostTable.default.comet(Smj, out))
         val table = EngineCostTable.default
         for (engine <- Engine.all) {
+          same(model.operatorPrice(band, engine), model.operatorPrice(equi, engine))
+          assert(
+            model.terms(crossCase, engine) == Seq(Term(Smj, out), Term(SmjCrossCondition, out)))
           val price: (CostClass, Width) => Double =
             if (engine == Engine.Comet) table.comet else table.spark
-          same(model.operatorPrice(band, engine), price(Smj, out) + price(SmjCondition, out))
+          same(
+            model.operatorPrice(crossCase, engine),
+            price(Smj, out) + price(SmjCrossCondition, out))
         }
       }
     }
   }
 
+  private val crossCaseOnT =
+    "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
+      "AND CASE WHEN a.v % 2 = b.v % 2 THEN a.v - b.v ELSE 10 - (b.v - a.v) END BETWEEN 1 AND 10"
+
   for (aqe <- Seq("false", "true")) {
-    test(
-      s"a sort-merge join with a join condition runs in Spark, without one natively (AQE=$aqe)") {
+    test(s"a sort-merge join runs in Spark only under a cross-input CASE or IF (AQE=$aqe)") {
       withTables {
         withAqe(
           aqe,
@@ -935,17 +946,19 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
               count(plan) { case j: SortMergeJoinExec => j })
           val equi = "SELECT a.k, a.v, b.s FROM t a JOIN t b ON a.k = b.k"
           val band = equi + " AND a.v <= b.v AND b.v <= a.v + 13"
-          val (equiOff, equiOn) = offAndOn(run(equi))
-          assert(joins(equiOff) == (1, 0), s"plan:\n$equiOff")
-          assert(joins(equiOn) == (1, 0), s"plan:\n$equiOn")
-          assert(cometOperatorNames(equiOff) == cometOperatorNames(equiOn), s"$equiOff\n$equiOn")
-          val (bandOff, bandOn) = offAndOn(run(band))
-          assert(joins(bandOff) == (1, 0), s"plan:\n$bandOff")
-          assert(joins(bandOn) == (0, 1), s"plan:\n$bandOn")
+          for (query <- Seq(equi, band)) {
+            val (off, on) = offAndOn(run(query))
+            assert(joins(off) == (1, 0), s"plan:\n$off")
+            assert(joins(on) == (1, 0), s"plan:\n$on")
+            assert(cometOperatorNames(off) == cometOperatorNames(on), s"$off\n$on")
+          }
+          val (crossOff, crossOn) = offAndOn(run(crossCaseOnT))
+          assert(joins(crossOff) == (1, 0), s"plan:\n$crossOff")
+          assert(joins(crossOn) == (0, 1), s"plan:\n$crossOn")
           withSQLConf(
             flag -> "true",
-            costTable -> "smjCondition.comet=0,0,0;smjCondition.spark=0,0") {
-            val plan = run(band)
+            costTable -> "smjCrossCondition.comet=0,0,0;smjCrossCondition.spark=0,0") {
+            val plan = run(crossCaseOnT)
             assert(joins(plan) == (1, 0), s"plan:\n$plan")
           }
         }
@@ -1007,7 +1020,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     "SELECT o.k, o.v, g.v AS gv FROM ev o JOIN dim p ON o.k = p.k " +
       "LEFT JOIN ev g ON o.k = g.k AND p.completed_dt < g.v AND o.v > g.v"
 
-  private val chargedConditions = Seq(
+  private val otherConditions = Seq(
     crossInputBounds,
     "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k " +
       "AND e.vs BETWEEN d.ls - 2592000 AND d.ls",
@@ -1023,6 +1036,24 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k AND e.v >= d.l AND e.v < d.u " +
       "AND e.s <> d.s")
 
+  private val crossConditionals = Seq(
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k AND CASE WHEN e.s = d.s " +
+      "THEN e.vs - d.ls ELSE 10 - (d.ls - e.vs) END BETWEEN 1 AND 10",
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k AND e.v >= d.l " +
+      "AND IF(d.u IS NULL, e.vs < d.ls + 2592000, e.v < d.u)")
+
+  private val unchargedConditions = Seq(
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND e.v >= CASE WHEN d.s = 's1' THEN d.l ELSE d.created_at END AND e.v < d.u",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND IF(e.s = 's1', e.vs, e.vs + 3600) BETWEEN d.ls AND d.ls + 86400",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND datediff(e.v, d.l) BETWEEN 0 AND 30",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND e.vs - d.ls BETWEEN 1 AND 3600",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND (e.s = d.s OR CAST(d.ls AS string) = e.s)")
+
   private def conditionTerms(query: String): Seq[Seq[Term]] = {
     val plan = runUnordered(sql(query))
     val joins = nodes(plan).collect {
@@ -1032,34 +1063,33 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
       case j: SortMergeJoinExec if j.condition.isDefined => j
     }
     assert(joins.nonEmpty, s"plan:\n$plan")
-    joins.map(j => model.terms(j, Engine.Comet).filter(_.costClass == SmjCondition))
+    joins.map(j => model.terms(j, Engine.Comet))
   }
 
   for (aqe <- Seq("false", "true")) {
-    test(
-      s"a validity interval adds no smjCondition, a band or another condition does (AQE=$aqe)") {
+    test(s"only a CASE or IF over both inputs adds smjCrossCondition (AQE=$aqe)") {
       withIntervals {
         withAqe(
           aqe,
           flag -> "false",
           SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
           SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
-          for (condition <- validityIntervals; joinType <- Seq("JOIN", "LEFT JOIN")) {
-            val query =
-              s"SELECT e.k, e.v, d.l FROM ev e $joinType dim d ON e.k = d.k AND $condition"
-            assert(conditionTerms(query).forall(_.isEmpty), query)
+          val intervals =
+            for (condition <- validityIntervals; joinType <- Seq("JOIN", "LEFT JOIN"))
+              yield s"SELECT e.k, e.v, d.l FROM ev e $joinType dim d ON e.k = d.k AND $condition"
+          for (query <- intervals ++ intervalQueries ++ otherConditions ++ unchargedConditions) {
+            assert(conditionTerms(query).forall(_.map(_.costClass) == Seq(Smj)), query)
           }
-          for (query <- intervalQueries) {
-            assert(conditionTerms(query).forall(_.isEmpty), query)
-          }
-          for (query <- chargedConditions) {
-            assert(conditionTerms(query).exists(_.nonEmpty), query)
+          for (query <- crossConditionals) {
+            assert(
+              conditionTerms(query).exists(_.map(_.costClass) == Seq(Smj, SmjCrossCondition)),
+              query)
           }
         }
       }
     }
 
-    test(s"a validity interval join stays native, a band join runs in Spark (AQE=$aqe)") {
+    test(s"a join under a CASE or IF over both inputs runs in Spark, others native (AQE=$aqe)") {
       withIntervals {
         withAqe(
           aqe,
@@ -1071,17 +1101,19 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
               count(plan) { case j: SortMergeJoinExec => j })
           val interval = "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
             "AND e.v >= d.l AND e.v < COALESCE(d.u, timestamp '9999-12-31')"
-          val (intervalOff, intervalOn) = offAndOn(run(interval))
-          assert(joins(intervalOff) == (1, 0), s"plan:\n$intervalOff")
-          assert(joins(intervalOn) == (1, 0), s"plan:\n$intervalOn")
-          val (bandOff, bandOn) = offAndOn(run(chargedConditions(1)))
-          assert(joins(bandOff) == (1, 0), s"plan:\n$bandOff")
-          assert(joins(bandOn) == (0, 1), s"plan:\n$bandOn")
-          val (crossOff, crossOn) = offAndOn(run(crossInputBounds))
-          assert(joins(crossOff) == (2, 0), s"plan:\n$crossOff")
-          assert(
-            count(crossOn) { case j: SortMergeJoinExec if j.condition.isDefined => j } == 1,
-            s"plan:\n$crossOn")
+          for ((query, native) <- Seq(
+              interval -> 1,
+              otherConditions(1) -> 1,
+              crossInputBounds -> 2) ++ unchargedConditions.map(_ -> 1)) {
+            val (off, on) = offAndOn(run(query))
+            assert(joins(off) == (native, 0), s"plan:\n$off")
+            assert(joins(on) == (native, 0), s"plan:\n$on")
+          }
+          for (query <- crossConditionals) {
+            val (off, on) = offAndOn(run(query))
+            assert(joins(off) == (1, 0), s"plan:\n$off")
+            assert(joins(on) == (0, 1), s"plan:\n$on")
+          }
         }
       }
     }
@@ -1405,7 +1437,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
       |""".stripMargin
 
   for (aqe <- Seq("false", "true")) {
-    test(s"fbj_order_type's band join under a root repartition runs in Spark (AQE=$aqe)") {
+    test(s"fbj_order_type's band join under a root repartition stays native (AQE=$aqe)") {
       withFbj {
         withAqe(
           aqe,
@@ -1434,7 +1466,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
             conditions(off) == (Seq("band", "forward", "replenishment", "replenishment"), Nil),
             s"plan:\n$off")
           val (native, spark) = conditions(on)
-          assert(spark.contains("band"), s"plan:\n$on")
+          assert(native.contains("band") && !spark.contains("band"), s"plan:\n$on")
           assert(native.contains("replenishment"), s"plan:\n$on")
         }
       }

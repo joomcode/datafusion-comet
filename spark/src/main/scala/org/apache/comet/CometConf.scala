@@ -689,8 +689,8 @@ object CometConf extends ShimCometConf {
         "(or `k0,k1`, keeping c0), or spark, with `c0,k` for c0 + k*L ns per row, where L is " +
         "the number of leaf columns the class prices (for the functions of an aggregate or a " +
         "window, the number of functions). The classes are shuffleWrite, shuffleRead, sort, " +
-        "sortSpill, smj, smjCondition, bhj, predicate, projectPassThrough, expression, agg, " +
-        "aggObjectHash, aggDeclarative, aggCollectList, aggCollectSet, aggPercentile, " +
+        "sortSpill, smj, smjCrossCondition, bhj, predicate, projectPassThrough, expression, " +
+        "agg, aggObjectHash, aggDeclarative, aggCollectList, aggCollectSet, aggPercentile, " +
         "aggPercentileApprox, aggOther, aggArrayKey, codegenDispatch, window, " +
         "windowAggregate, windowOffset, windowRank, wglPartial, wglFinal, expand, generate, " +
         "rowLocal, the comet-only c2r and r2c, and the spark-only " +

@@ -442,3 +442,11 @@ harness = false
 [[bench]]
 name = "nested_comparison"
 harness = false
+
+[[bench]]
+name = "smj_interval_filter"
+harness = false
+
+[[bench]]
+name = "smj_streamed_filter"
+harness = false
