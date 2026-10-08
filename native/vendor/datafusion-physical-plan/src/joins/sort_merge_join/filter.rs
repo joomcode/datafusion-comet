@@ -31,10 +31,14 @@ use arrow::array::{
 };
 use arrow::compute::kernels::zip::zip;
 use arrow::compute::{self, filter_record_batch};
-use arrow::datatypes::SchemaRef;
-use datafusion_common::{JoinType, Result};
+use arrow::datatypes::{Field, Schema, SchemaRef};
+use datafusion_common::tree_node::{Transformed, TreeNode, TreeNodeRecursion};
+use datafusion_common::{JoinSide, JoinType, Result};
+use datafusion_physical_expr::expressions::Column;
+use datafusion_physical_expr::utils::collect_columns;
+use datafusion_physical_expr_common::physical_expr::{PhysicalExprRef, is_volatile};
 
-use crate::joins::utils::JoinFilter;
+use crate::joins::utils::{ColumnIndex, JoinFilter};
 
 /// Metadata for tracking filter results during deferred filtering
 ///
@@ -387,5 +391,139 @@ pub fn filter_record_batch_by_join_type(
             "Semi/anti/mark joins are handled by SemiAntiMarkSortMergeJoinStream"
         ),
         JoinType::Inner => Ok(filter_record_batch(record_batch, corrected_mask)?),
+    }
+}
+
+/// A join filter whose largest subexpressions over buffered columns alone
+/// are lifted out, so they can be evaluated once per buffered row instead of
+/// once per pair.
+#[derive(Debug)]
+pub(super) struct HoistedJoinFilter {
+    /// The filter over `schema`, reading each lifted subexpression's result
+    /// from a column
+    pub expression: PhysicalExprRef,
+    /// Schema of the batch `expression` is evaluated against
+    pub schema: SchemaRef,
+    /// Where each column of `schema` comes from
+    pub inputs: Vec<HoistedFilterInput>,
+    /// The lifted subexpressions, over the buffered input's columns
+    pub buffered_exprs: Vec<PhysicalExprRef>,
+}
+
+#[derive(Debug)]
+pub(super) enum HoistedFilterInput {
+    /// A column of the streamed or the buffered input
+    Column(ColumnIndex),
+    /// The result of `buffered_exprs[i]`
+    Buffered(usize),
+}
+
+impl HoistedJoinFilter {
+    /// Lifts the non-volatile subexpressions of `filter` that read buffered
+    /// columns and no streamed ones. Returns `None` when there is none
+    /// besides bare columns.
+    pub fn try_new(
+        filter: &JoinFilter,
+        buffered_side: JoinSide,
+        buffered_schema: &Schema,
+    ) -> Result<Option<Self>> {
+        let column_indices = filter.column_indices();
+        let num_filter_columns = column_indices.len();
+        let mut lifted: Vec<PhysicalExprRef> = vec![];
+        let expression = Arc::clone(filter.expression())
+            .transform_down(|expr| {
+                if expr.downcast_ref::<Column>().is_some() || is_volatile(&expr) {
+                    return Ok(Transformed::no(expr));
+                }
+                let columns = collect_columns(&expr);
+                if columns.is_empty()
+                    || columns
+                        .iter()
+                        .any(|c| column_indices[c.index()].side != buffered_side)
+                {
+                    return Ok(Transformed::no(expr));
+                }
+                let position = match lifted.iter().position(|e| **e == *expr) {
+                    Some(position) => position,
+                    None => {
+                        lifted.push(Arc::clone(&expr));
+                        lifted.len() - 1
+                    }
+                };
+                Ok(Transformed::new(
+                    Arc::new(Column::new(
+                        &format!("__buffered_{position}"),
+                        num_filter_columns + position,
+                    )),
+                    true,
+                    TreeNodeRecursion::Jump,
+                ))
+            })?
+            .data;
+        if lifted.is_empty() {
+            return Ok(None);
+        }
+
+        let mut used: Vec<usize> = collect_columns(&expression)
+            .iter()
+            .map(|c| c.index())
+            .filter(|&index| index < num_filter_columns)
+            .collect();
+        used.sort_unstable();
+        used.dedup();
+        let mut fields: Vec<Field> = used
+            .iter()
+            .map(|&index| filter.schema().field(index).clone())
+            .collect();
+        let mut inputs: Vec<HoistedFilterInput> = used
+            .iter()
+            .map(|&index| HoistedFilterInput::Column(column_indices[index].clone()))
+            .collect();
+        for (position, expr) in lifted.iter().enumerate() {
+            fields.push(Field::new(
+                format!("__buffered_{position}"),
+                expr.data_type(filter.schema())?,
+                expr.nullable(filter.schema())?,
+            ));
+            inputs.push(HoistedFilterInput::Buffered(position));
+        }
+
+        let expression = expression
+            .transform_up(|expr| {
+                let Some(column) = expr.downcast_ref::<Column>() else {
+                    return Ok(Transformed::no(expr));
+                };
+                let index = match used.binary_search(&column.index()) {
+                    Ok(position) => position,
+                    Err(_) => used.len() + column.index() - num_filter_columns,
+                };
+                Ok(Transformed::yes(
+                    Arc::new(Column::new(column.name(), index)) as PhysicalExprRef,
+                ))
+            })?
+            .data;
+        let buffered_exprs = lifted
+            .into_iter()
+            .map(|expr| {
+                expr.transform_up(|expr| {
+                    let Some(column) = expr.downcast_ref::<Column>() else {
+                        return Ok(Transformed::no(expr));
+                    };
+                    let index = column_indices[column.index()].index;
+                    Ok(Transformed::yes(Arc::new(Column::new(
+                        buffered_schema.field(index).name(),
+                        index,
+                    )) as PhysicalExprRef))
+                })
+                .map(|transformed| transformed.data)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Some(Self {
+            expression,
+            schema: Arc::new(Schema::new(fields)),
+            inputs,
+            buffered_exprs,
+        }))
     }
 }
