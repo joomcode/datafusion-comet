@@ -22,7 +22,8 @@ package org.apache.comet.exec
 import java.io.File
 import java.nio.file.Files
 import java.sql.{Date, Timestamp}
-import java.time.{Instant, LocalDate}
+import java.time.{Instant, LocalDate, LocalDateTime, ZoneOffset}
+import java.time.format.DateTimeFormatter
 
 import scala.collection.mutable
 import scala.util.Random
@@ -84,7 +85,12 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
             StructField("b", StringType),
             StructField("c", ArrayType(IntegerType))))),
       StructField("arr", ArrayType(StringType)),
-      StructField("m", MapType(StringType, IntegerType))))
+      StructField("m", MapType(StringType, IntegerType)),
+      StructField("ss", StringType),
+      StructField("li", StringType),
+      StructField("k2", IntegerType),
+      StructField("flag", BooleanType),
+      StructField("ldt", DateType)))
 
   private val rightSchema = StructType(
     Seq(
@@ -99,7 +105,11 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
       StructField("rarr", ArrayType(IntegerType)),
       StructField(
         "rst",
-        StructType(Seq(StructField("x", DoubleType), StructField("y", StringType))))))
+        StructType(Seq(StructField("x", DoubleType), StructField("y", StringType)))),
+      StructField("rt", TimestampType),
+      StructField("rss", StringType),
+      StructField("rk2", IntegerType),
+      StructField("rdt", DateType)))
 
   private case class DataSet(name: String, left: String, right: String, stats: String)
 
@@ -194,6 +204,60 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
       orNull(r, 10)(Row(orNull(r, 20)(randomDouble(r)), orNull(r, 20)(randomString(r)))))
   }
 
+  private val tsFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
+  private def formatSeconds(sec: Long): String =
+    LocalDateTime.ofEpochSecond(sec, 0, ZoneOffset.UTC).format(tsFormat)
+
+  // A string column cast to TIMESTAMP in the filters: mostly valid timestamps near the key
+  // group's values, but also NULL, empty, malformed, out of range, date-only, padded and
+  // year-only strings, which Legacy casts turn into NULL or partial values.
+  private def timestampString(r: Random, sec: Long): Any = r.nextInt(24) match {
+    case 0 | 1 | 2 => null
+    case 3 => ""
+    case 4 => "not a timestamp"
+    case 5 => "2026-13-45 99:00:00"
+    case 6 => formatSeconds(sec).replace(' ', 'T').dropRight(3) + ":75"
+    case 7 => "  " + formatSeconds(sec) + " "
+    case 8 => formatSeconds(sec).take(10)
+    case 9 => formatSeconds(sec).take(4)
+    case 10 => String.valueOf(sec)
+    case 11 => "ж€😀"
+    case _ => formatSeconds(sec)
+  }
+
+  // A string column cast to INT in the filters: numbers, padded numbers, fractions, NULL and
+  // strings that Legacy casts turn into NULL.
+  private def intString(r: Random): Any = r.nextInt(16) match {
+    case 0 | 1 => null
+    case 2 => ""
+    case 3 => "x1"
+    case 4 => " " + r.nextInt(100) + " "
+    case 5 => s"${r.nextInt(100)}.${r.nextInt(10)}"
+    case 6 => "99999999999"
+    case _ => String.valueOf(r.nextInt(100))
+  }
+
+  private def leftExtra(r: Random, g: KeyGroup): Seq[Any] = {
+    val span = math.max(g.nr, 1) * 10L + 40
+    val sec = g.base - 20 + r.nextInt(span.toInt)
+    Seq(
+      timestampString(r, sec),
+      intString(r),
+      orNull(r, 10)(r.nextInt(6)),
+      orNull(r, 15)(r.nextBoolean()),
+      orNull(r, 30)(Date.valueOf(LocalDate.ofEpochDay(sec / 86400 + r.nextInt(3) - 1))))
+  }
+
+  private def rightExtra(r: Random, g: KeyGroup, j: Int): Seq[Any] = {
+    val sec = g.base + j * 10L + r.nextInt(31) - 15
+    Seq(
+      orNull(r, 10)(Timestamp.from(Instant.ofEpochSecond(sec))),
+      timestampString(r, sec + r.nextInt(21) - 10),
+      orNull(r, 10)(r.nextInt(6)),
+      orNull(r, 30)(Date.valueOf(LocalDate.ofEpochDay(sec / 86400 + r.nextInt(3) - 1))))
+  }
+
   private val mainCombos: Seq[(Int, Int)] = Seq(
     1 -> 1,
     1 -> 7,
@@ -249,9 +313,12 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
     val groups = sized.zipWithIndex.map { case ((nl, nr), i) =>
       KeyGroup(i * 3 + r.nextInt(3), nl, nr, r.nextInt(100000) * 10L, r.nextInt(3))
     } ++ Seq(KeyGroup(-1, 40 + r.nextInt(40), 40 + r.nextInt(40), 5000L, 0))
-    val leftRows = r.shuffle(groups.flatMap(g => Seq.fill(g.nl)(leftRow(r, g))))
-    val rightRows =
-      r.shuffle(groups.flatMap(g => (0 until g.nr).map(j => rightRow(r, g, j))))
+    val lx = new Random(dataSeed ^ name.hashCode ^ 0x5eed1L)
+    val rx = new Random(dataSeed ^ name.hashCode ^ 0x5eed2L)
+    val leftRows =
+      r.shuffle(groups.flatMap(g => Seq.fill(g.nl)(leftRow(r, g) ++ leftExtra(lx, g))))
+    val rightRows = r.shuffle(
+      groups.flatMap(g => (0 until g.nr).map(j => rightRow(r, g, j) ++ rightExtra(rx, g, j))))
 
     if (tempRoot == null) tempRoot = Files.createTempDirectory("comet-smj-fuzz").toFile
     val leftPath = new File(tempRoot, s"$name-left").getCanonicalPath
@@ -330,6 +397,98 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
       leftCast,
       leftTimestampCast,
       bothCast)
+
+  // Boolean and conditional operators around subexpressions that read one side only, which
+  // the native join lifts out of the filter and evaluates once per row: OR, CASE, IF, NOT,
+  // IS [NOT] NULL, IN and NOT IN, COALESCE and null-safe equality, with casts of strings that
+  // are often invalid, so the lifted parts are often NULL and three-valued logic matters.
+  private val lts = "CAST(l.ss AS TIMESTAMP)"
+  private val rts = "CAST(r.rss AS TIMESTAMP)"
+  private val lint = "CAST(l.li AS INT)"
+  private val orTs = Filter("or_ts", s"l.t > r.eff OR $lts < r.rt")
+  private val orTsNull = Filter("or_ts_null", s"$lts < r.rt OR l.lv IS NULL")
+  private val orMostlyTrue =
+    Filter("or_mostly_true", s"(l.id + r.id) % 10 <> 0 OR $lts >= r.rt")
+  private val orBufferedLifted =
+    Filter("or_buffered_lifted", s"l.lv < r.rv OR $rts > CAST(l.t AS TIMESTAMP)")
+  private val orSingleSides =
+    Filter("or_single_sides", s"(l.flag AND $lts IS NOT NULL) OR r.rv % 3 = 0")
+  private val orBothLifted =
+    Filter("or_both_lifted", s"$lts < $rts OR ($lts IS NULL AND $rts IS NULL)")
+  private val caseFlag =
+    Filter("case_flag", s"CASE WHEN l.flag THEN $lts < r.rt ELSE r.eff <= l.t END")
+  private val caseRightWhen = Filter(
+    "case_right_when",
+    s"CASE WHEN r.rv % 2 = 0 THEN $lts < TIMESTAMP '1970-01-06 00:00:00' " +
+      s"WHEN r.rv IS NULL THEN l.flag ELSE $lint > 50 END")
+  private val caseLeftWhen = Filter(
+    "case_left_when",
+    s"CASE WHEN l.flag THEN $rts > TIMESTAMP '1970-01-06 00:00:00' ELSE r.rk2 > 2 END")
+  private val caseNested = Filter(
+    "case_nested",
+    s"CASE WHEN l.k2 IS NULL THEN r.rv IS NULL WHEN l.k2 > 2 THEN " +
+      s"CASE WHEN $lts IS NULL THEN r.rk2 = l.k2 ELSE $lts < r.rt END " +
+      s"ELSE CASE WHEN r.rk2 IS NULL THEN l.flag ELSE $lint < r.rv END END")
+  private val caseValue =
+    Filter("case_value", s"CASE WHEN l.flag THEN $lts ELSE CAST(l.t AS TIMESTAMP) END < r.rt")
+  private val ifNull =
+    Filter("if_null", s"IF($lint IS NULL, r.rk2 > 2, $lint <= r.rv)")
+  private val notAndUpper = Filter("not_and_upper", "NOT (l.lv > r.rv AND upper(l.s) = r.rs)")
+  private val notOr = Filter("not_or", s"NOT ($lts >= r.rt OR l.flag)")
+  private val isNullMix =
+    Filter("is_null_mix", s"($lts IS NULL) = (r.rt IS NULL) OR ($lint + r.rv) IS NULL")
+  private val isNotNullCmp =
+    Filter("is_not_null_cmp", s"($lts < r.rt) IS NOT NULL AND NOT ($lts < r.rt)")
+  private val inList =
+    Filter("in_list", "l.k2 IN (1, 2, 3) AND l.t > r.eff OR r.rk2 IN (0, 4) AND l.lv < r.rv")
+  private val notInList = Filter(
+    "not_in_list",
+    s"l.k2 NOT IN (1, 3) AND r.rk2 NOT IN (2) OR $lint NOT IN (1, 2, 50) AND l.t <= r.next_eff")
+  private val inCross =
+    Filter("in_cross", s"r.rk2 IN (l.k2, l.k2 + 1, $lint) OR l.k2 IN (r.rk2, 3)")
+  private val coalesceTs =
+    Filter("coalesce_ts", s"coalesce($lts, r.rt) > CAST(r.eff AS TIMESTAMP)")
+  private val coalesceDate =
+    Filter("coalesce_date", "coalesce(l.ldt, r.rdt) >= CAST(r.rt AS DATE)")
+  private val threeValued =
+    Filter("three_valued", s"($lint > r.rv OR $lts < r.rt) AND NOT ($rts > $lts AND l.flag)")
+  private val notNullPart =
+    Filter("not_null_part", "NOT (CAST(l.ss AS INT) > 0) OR r.rv > 50")
+  private val nullSafeEq =
+    Filter("null_safe_eq", s"$lts <=> r.rt OR $lint <=> r.rk2")
+  private val liftedTwice =
+    Filter("lifted_twice", s"$lts >= r.rt AND $lts <= CAST(r.eff + 20 AS TIMESTAMP)")
+  private val upperInvalid =
+    Filter("upper_invalid", "upper(l.ss) = upper(r.rss) OR upper(l.s) < r.rs")
+  private val boolFilters = Seq(
+    orTs,
+    orTsNull,
+    orMostlyTrue,
+    orBufferedLifted,
+    orSingleSides,
+    orBothLifted,
+    caseFlag,
+    caseRightWhen,
+    caseLeftWhen,
+    caseNested,
+    caseValue,
+    ifNull,
+    notAndUpper,
+    notOr,
+    isNullMix,
+    isNotNullCmp,
+    inList,
+    notInList,
+    inCross,
+    coalesceTs,
+    coalesceDate,
+    threeValued,
+    notNullPart,
+    nullSafeEq,
+    liftedTwice,
+    upperInvalid)
+  private val defaultBoolFilters =
+    Seq(orTs, caseFlag, notAndUpper, inList, coalesceTs, threeValued)
 
   private case class Shape(name: String, confs: Seq[(String, String)], spill: Boolean = false)
 
@@ -569,6 +728,17 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
     runAll(ds, b1024, matrix(ds, joinKinds, Seq(interval, rare, alwaysTrue)))
   }
 
+  test("boolean and conditional operators around lifted subexpressions, batch 64") {
+    val ds = dataSet("main")
+    runAll(ds, b64, matrix(ds, joinKinds, defaultBoolFilters))
+  }
+
+  test("boolean and conditional operators, batch 7 and spilling") {
+    val ds = dataSet("main")
+    runAll(ds, b7, matrix(ds, joinKinds, Seq(caseFlag, threeValued)))
+    runAll(ds, spill64, matrix(ds, Seq(inner, fullOuter, leftAnti), Seq(orTs, coalesceTs)))
+  }
+
   test("spilling join under a tiny memory pool") {
     val ds = dataSet("main")
     val outcomes = runAll(ds, spill64, matrix(ds, joinKinds, Seq(interval, most)))
@@ -596,6 +766,37 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
       if (shape.spill) {
         assert(outcomes.exists(_.spills > 0), s"[seed=$seed] the join did not spill")
       }
+    }
+  }
+
+  for (shape <- allShapes) {
+    test(s"full: ${shape.name}, boolean and conditional operators, both side orders") {
+      assumeFull()
+      val ds = dataSet("main")
+      val outcomes = runAll(
+        ds,
+        shape,
+        matrix(ds, joinKinds, boolFilters) ++ matrix(ds, joinKinds, boolFilters, flipped = true))
+      if (shape.spill) {
+        assert(outcomes.exists(_.spills > 0), s"[seed=$seed] the join did not spill")
+      }
+    }
+  }
+
+  for (shape <- Seq(b7, spill64)) {
+    test(s"full: second seed, boolean and conditional operators, ${shape.name}") {
+      assumeFull()
+      val ds = dataSet("alt")
+      runAll(ds, shape, matrix(ds, joinKinds, boolFilters))
+    }
+  }
+
+  for (shape <- Seq(b1024, spill64)) {
+    test(s"full: groups of thousands of rows, boolean and conditional operators, ${shape.name}") {
+      assumeFull()
+      val ds = dataSet("big")
+      val fs = Seq(orTs, caseFlag, caseNested, notOr, inCross, coalesceTs, threeValued)
+      runAll(ds, shape, matrix(ds, joinKinds, fs) ++ matrix(ds, joinKinds, fs, flipped = true))
     }
   }
 
