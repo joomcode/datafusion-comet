@@ -888,7 +888,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     }
   }
 
-  test("a sort-merge join with a join condition costs what one without does") {
+  test("a sort-merge join adds smjCrossCondition only with a CASE or IF over both inputs") {
     withTables {
       withSQLConf(
         SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
@@ -905,20 +905,36 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
         val band = join(
           "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
             "AND a.v <= b.v AND b.v <= a.v + 13")
+        val oneSide = join(
+          "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
+            "AND a.v <= CASE WHEN b.v > 500 THEN b.v ELSE b.v + 13 END")
+        val crossCase = join(crossCaseOnT)
         assert(band.originalPlan.asInstanceOf[SortMergeJoinExec].condition.isDefined)
-        for (engine <- Engine.all; j <- Seq(equi, band)) {
+        for (engine <- Engine.all; j <- Seq(equi, band, oneSide)) {
           assert(model.terms(j, engine) == Seq(Term(Smj, out)))
         }
         same(model.operatorPrice(equi, Engine.Comet), EngineCostTable.default.comet(Smj, out))
+        val table = EngineCostTable.default
         for (engine <- Engine.all) {
           same(model.operatorPrice(band, engine), model.operatorPrice(equi, engine))
+          assert(
+            model.terms(crossCase, engine) == Seq(Term(Smj, out), Term(SmjCrossCondition, out)))
+          val price: (CostClass, Width) => Double =
+            if (engine == Engine.Comet) table.comet else table.spark
+          same(
+            model.operatorPrice(crossCase, engine),
+            price(Smj, out) + price(SmjCrossCondition, out))
         }
       }
     }
   }
 
+  private val crossCaseOnT =
+    "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
+      "AND CASE WHEN a.v % 2 = b.v % 2 THEN a.v - b.v ELSE 10 - (b.v - a.v) END BETWEEN 1 AND 10"
+
   for (aqe <- Seq("false", "true")) {
-    test(s"a sort-merge join with a join condition stays native, as one without (AQE=$aqe)") {
+    test(s"a sort-merge join runs in Spark only under a cross-input CASE or IF (AQE=$aqe)") {
       withTables {
         withAqe(
           aqe,
@@ -935,6 +951,15 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
             assert(joins(off) == (1, 0), s"plan:\n$off")
             assert(joins(on) == (1, 0), s"plan:\n$on")
             assert(cometOperatorNames(off) == cometOperatorNames(on), s"$off\n$on")
+          }
+          val (crossOff, crossOn) = offAndOn(run(crossCaseOnT))
+          assert(joins(crossOff) == (1, 0), s"plan:\n$crossOff")
+          assert(joins(crossOn) == (0, 1), s"plan:\n$crossOn")
+          withSQLConf(
+            flag -> "true",
+            costTable -> "smjCrossCondition.comet=0,0,0;smjCrossCondition.spark=0,0") {
+            val plan = run(crossCaseOnT)
+            assert(joins(plan) == (1, 0), s"plan:\n$plan")
           }
         }
       }
@@ -1011,6 +1036,24 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k AND e.v >= d.l AND e.v < d.u " +
       "AND e.s <> d.s")
 
+  private val crossConditionals = Seq(
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k AND CASE WHEN e.s = d.s " +
+      "THEN e.vs - d.ls ELSE 10 - (d.ls - e.vs) END BETWEEN 1 AND 10",
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k AND e.v >= d.l " +
+      "AND IF(d.u IS NULL, e.vs < d.ls + 2592000, e.v < d.u)")
+
+  private val unchargedConditions = Seq(
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND e.v >= CASE WHEN d.s = 's1' THEN d.l ELSE d.created_at END AND e.v < d.u",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND IF(e.s = 's1', e.vs, e.vs + 3600) BETWEEN d.ls AND d.ls + 86400",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND datediff(e.v, d.l) BETWEEN 0 AND 30",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND e.vs - d.ls BETWEEN 1 AND 3600",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND (e.s = d.s OR CAST(d.ls AS string) = e.s)")
+
   private def conditionTerms(query: String): Seq[Seq[Term]] = {
     val plan = runUnordered(sql(query))
     val joins = nodes(plan).collect {
@@ -1024,7 +1067,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
   }
 
   for (aqe <- Seq("false", "true")) {
-    test(s"a join condition of any shape adds nothing to smj (AQE=$aqe)") {
+    test(s"only a CASE or IF over both inputs adds smjCrossCondition (AQE=$aqe)") {
       withIntervals {
         withAqe(
           aqe,
@@ -1034,14 +1077,19 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
           val intervals =
             for (condition <- validityIntervals; joinType <- Seq("JOIN", "LEFT JOIN"))
               yield s"SELECT e.k, e.v, d.l FROM ev e $joinType dim d ON e.k = d.k AND $condition"
-          for (query <- intervals ++ intervalQueries ++ otherConditions) {
+          for (query <- intervals ++ intervalQueries ++ otherConditions ++ unchargedConditions) {
             assert(conditionTerms(query).forall(_.map(_.costClass) == Seq(Smj)), query)
+          }
+          for (query <- crossConditionals) {
+            assert(
+              conditionTerms(query).exists(_.map(_.costClass) == Seq(Smj, SmjCrossCondition)),
+              query)
           }
         }
       }
     }
 
-    test(s"validity interval, band and cross-input joins stay native (AQE=$aqe)") {
+    test(s"a join under a CASE or IF over both inputs runs in Spark, others native (AQE=$aqe)") {
       withIntervals {
         withAqe(
           aqe,
@@ -1056,10 +1104,15 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
           for ((query, native) <- Seq(
               interval -> 1,
               otherConditions(1) -> 1,
-              crossInputBounds -> 2)) {
+              crossInputBounds -> 2) ++ unchargedConditions.map(_ -> 1)) {
             val (off, on) = offAndOn(run(query))
             assert(joins(off) == (native, 0), s"plan:\n$off")
             assert(joins(on) == (native, 0), s"plan:\n$on")
+          }
+          for (query <- crossConditionals) {
+            val (off, on) = offAndOn(run(query))
+            assert(joins(off) == (1, 0), s"plan:\n$off")
+            assert(joins(on) == (0, 1), s"plan:\n$on")
           }
         }
       }

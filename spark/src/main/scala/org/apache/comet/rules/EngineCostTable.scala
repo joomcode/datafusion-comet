@@ -172,6 +172,7 @@ object EngineCostTable {
     case object Sort extends CostClass("sort")
     case object SortSpill extends CostClass("sortSpill")
     case object Smj extends CostClass("smj")
+    case object SmjCrossCondition extends CostClass("smjCrossCondition")
     case object Bhj extends CostClass("bhj")
     case object Predicate extends CostClass("predicate")
     case object ProjectPassThrough extends CostClass("projectPassThrough")
@@ -207,6 +208,7 @@ object EngineCostTable {
       Sort,
       SortSpill,
       Smj,
+      SmjCrossCondition,
       Bhj,
       Predicate,
       ProjectPassThrough,
@@ -324,7 +326,16 @@ object EngineCostTable {
    *     each pair of rows of equal keys before building the output, and on the cluster a left
    *     join under a validity interval or a band cost 5.7 to 22 ns per pair natively against 9.6
    *     to 15 in Spark at 15 to 519 output leaves, an inner one 7.4 against 19.3, and one with
-   *     100 pairs per key about what Spark costs per output row.
+   *     100 pairs per key about what Spark costs per output row. The exception is a condition
+   *     holding a CASE or an IF over columns of both inputs, which adds `smjCrossCondition`,
+   *     every output leaf: on the cluster, left joins with about one passing pair per streamed
+   *     row under `CASE WHEN l.c = r.c THEN l.t - r.eff ELSE 10 - (r.nxt - l.t) END BETWEEN 1 AND
+   *     10` cost 28 to 51 ns per pair natively against 8.7 to 17.6 in Spark (1.7 to 4.5 times),
+   *     at 10k and 100 keys and 32 and 128 pairs per key. Cross-input `datediff` cost about what
+   *     Spark does, `instr` and an OR over a cast of one input 4 to 10 times less, and conditions
+   *     over one input at most Spark's price. The pairs per output row are not estimated, so the
+   *     line keeps the former `smjCondition`'s, Comet 3.5 times Spark at a price high enough to
+   *     outweigh `smj` and the conversions around the join at any width.
    *   - `predicate`: a filter over the leaves its predicate reads, Spark noisy (maxrel 0.5 to
    *     0.8); passing rows costs the filter scalars.
    *   - `projectPassThrough`: a project over every output leaf. Spark copies the row only when
@@ -408,6 +419,7 @@ object EngineCostTable {
     (R2C, Flat) -> Line(3.4, 7.67, 0.036, 0, 0),
     (R2C, Nested) -> Line(0, 9.74, 0.040, 0, 0)) ++
     both(ExprOverScan, Line(0, 0, 0, 2.5, 0)) ++
+    both(SmjCrossCondition, Line(3000, 80, 0, 850, 23)) ++
     both(AggObjectHash, Line(1000, 0, 0, 2500, 0)) ++
     both(AggDeclarative, Line(6, 0, 0, 15, 0)) ++
     both(AggDeclarativeNoCodegen, Line(0, 0, 0, 170, 0)) ++
@@ -470,7 +482,7 @@ object EngineCostTable {
    */
   val operatorClasses: Map[String, Seq[CostClass]] = Map(
     "SortExec" -> Seq(Sort),
-    "SortMergeJoinExec" -> Seq(Smj),
+    "SortMergeJoinExec" -> Seq(Smj, SmjCrossCondition),
     "BroadcastHashJoinExec" -> Seq(Bhj),
     "WindowExec" -> Seq(Window),
     "WindowGroupLimitExec" -> Seq(WglPartial, WglFinal),

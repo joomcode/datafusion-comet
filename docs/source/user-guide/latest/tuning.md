@@ -602,7 +602,9 @@ prices per row from a table of measurements: `c0 + k0*L + k1*L*min(L, 600)` ns n
   Spark one.
 - `sort` over every leaf of the sorted rows (Comet also 0.15 ns per byte beyond 12 per leaf); `sortSpill` adds the
   price of a spill to a fraction `sortSpillFraction` of rows, none by default. `smj` prices a sort-merge join and `bhj`
-  the probe side of a broadcast hash join, over every output leaf; a join condition adds nothing.
+  the probe side of a broadcast hash join, over every output leaf. A sort-merge join condition holding a `CASE` or an
+  `IF` over columns of both inputs adds `smjCrossCondition`, also over every output leaf: natively such a condition
+  cost 1.7 to 4.5 times Spark's price per pair of rows of equal keys. Any other condition adds nothing.
 - `predicate` for filters, over the leaves their predicate references, plus a pass-through of 1.5 ns per output leaf
   natively and none in Spark. A native filter over a native scan, and the native projects over it, stay native
   whatever their prices (`keepFiltersOverNativeScans=false` lets them move): the rows a filter drops are not estimated,

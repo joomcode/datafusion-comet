@@ -25,7 +25,7 @@ import scala.collection.mutable
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, NamedExpression, ScalaUDF}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, CaseWhen, Expression, If, NamedExpression, ScalaUDF}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{Complete, Partial}
 import org.apache.spark.sql.catalyst.plans.logical.statsEstimation.EstimationUtils
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -33,6 +33,7 @@ import org.apache.spark.sql.comet.{CometExec, CometFilterExec, CometHashAggregat
 import org.apache.spark.sql.execution.{ColumnarToRowTransition, ExpandExec, FilterExec, ProjectExec, SortExec, SparkPlan}
 import org.apache.spark.sql.execution.aggregate.BaseAggregateExec
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
+import org.apache.spark.sql.execution.joins.SortMergeJoinExec
 import org.apache.spark.sql.execution.window.WindowExec
 import org.apache.spark.sql.internal.SQLConf
 
@@ -123,6 +124,15 @@ class EngineCostModel(
   private def aggregateShare(agg: BaseAggregateExec): Double =
     if (agg.aggregateExpressions.exists(_.mode == Complete)) 1.0 else 0.5
 
+  /** Whether `condition` of `join` holds a CASE or an IF over columns of both its inputs. */
+  def crossInputConditional(condition: Expression, join: SortMergeJoinExec): Boolean =
+    condition.exists {
+      case e @ (_: CaseWhen | _: If) =>
+        e.references.exists(join.left.outputSet.contains) &&
+        e.references.exists(join.right.outputSet.contains)
+      case _ => false
+    }
+
   private def classTerms(costClass: CostClass, plan: SparkPlan, engine: Engine): Seq[Term] = {
     val op = sparkOperator(plan)
     lazy val out = widthOf(op.output)
@@ -170,6 +180,12 @@ class EngineCostModel(
           functions.distinct.map { c =>
             Term(c, Width(functions.size, 0), share * functions.count(_ == c))
           }
+      case (SmjCrossCondition, join: SortMergeJoinExec) =>
+        if (join.condition.exists(crossInputConditional(_, join))) {
+          Seq(Term(SmjCrossCondition, out))
+        } else {
+          Nil
+        }
       case (AggObjectHash, agg: BaseAggregateExec) =>
         Seq(Term(AggObjectHash, Width(0, 0), aggregateShare(agg)))
       case _ => Seq(Term(costClass, out))
