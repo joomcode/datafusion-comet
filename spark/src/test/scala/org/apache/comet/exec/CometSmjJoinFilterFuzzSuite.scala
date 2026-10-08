@@ -45,8 +45,9 @@ import org.apache.comet.CometConf
  *
  * Every join type runs with filters of different shapes and selectivities (a validity interval
  * bounded by one side, a band bounded by the other, one-sided conditions, always true and always
- * false, almost nothing or almost everything passing) at several batch sizes and under a memory
- * pool small enough to make the join spill. Results are compared with Spark as multisets.
+ * false, almost nothing or almost everything passing, casts of one or both sides) at several
+ * batch sizes and under a memory pool small enough to make the join spill. Results are compared
+ * with Spark as multisets.
  *
  * The default run covers each join type and filter at one batch size and a subset at the others.
  * The full matrix runs only with `-Dcomet.test.smjFuzz.full=true`;
@@ -305,8 +306,30 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
   private val most = Filter("most", "(l.id + r.id) % 10 <> 0")
   private val nullable = Filter("nullable_cmp", "l.lv < r.rv")
   private val typed = Filter("typed", "l.d10 * 2 >= r.rdec OR l.s < r.rs")
+  private val leftCast =
+    Filter("left_cast", "CAST(CAST(l.t AS STRING) AS BIGINT) > r.eff AND l.t <= r.next_eff")
+  private val leftTimestampCast = Filter(
+    "left_ts_cast",
+    "CAST(CAST(l.ts AS STRING) AS TIMESTAMP) < CAST(r.eff * 2000 AS TIMESTAMP) AND l.t > r.eff")
+  private val bothCast = Filter(
+    "both_cast",
+    "CAST(CAST(l.t AS STRING) AS BIGINT) > CAST(CAST(r.eff AS STRING) AS BIGINT) AND " +
+      "CAST(l.t AS DECIMAL(20, 0)) <= CAST(r.next_eff AS DECIMAL(20, 0))")
   private val filters =
-    Seq(interval, band, leftOnly, rightOnly, alwaysFalse, alwaysTrue, rare, most, nullable, typed)
+    Seq(
+      interval,
+      band,
+      leftOnly,
+      rightOnly,
+      alwaysFalse,
+      alwaysTrue,
+      rare,
+      most,
+      nullable,
+      typed,
+      leftCast,
+      leftTimestampCast,
+      bothCast)
 
   private case class Shape(name: String, confs: Seq[(String, String)], spill: Boolean = false)
 
@@ -538,7 +561,7 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
 
   test("batch 7: key groups spanning many batches") {
     val ds = dataSet("main")
-    runAll(ds, b7, matrix(ds, joinKinds, Seq(interval, band, most)))
+    runAll(ds, b7, matrix(ds, joinKinds, Seq(interval, band, most, leftCast, bothCast)))
   }
 
   test("batch 1024: key groups around and over one batch") {
@@ -591,7 +614,7 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
     test(s"full: groups of thousands of rows, ${shape.name}") {
       assumeFull()
       val ds = dataSet("big")
-      val fs = Seq(interval, band, rare, alwaysFalse, nullable)
+      val fs = Seq(interval, band, rare, alwaysFalse, nullable, leftCast, bothCast)
       runAll(ds, shape, matrix(ds, joinKinds, fs) ++ matrix(ds, joinKinds, fs, flipped = true))
     }
   }

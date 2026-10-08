@@ -4388,15 +4388,39 @@ fn build_interval_buffered(
     TestMemoryExec::try_new_exec(&[batches], schema, None).unwrap()
 }
 
-/// `t > eff AND t <= next_eff`, with the streamed table on `streamed_side`.
-/// When `hoisted`, `t > eff + 0 AND t <= next_eff + 0 AND next_eff - eff > 0`
-/// instead: the same filter with subexpressions over buffered columns alone,
-/// which the join evaluates once per buffered row.
+/// Forms of the validity-interval filter `t > eff AND t <= next_eff`, all
+/// with the same result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IntervalFilter {
+    /// `t > eff AND t <= next_eff`
+    Plain,
+    /// `t > eff + 0 AND t <= next_eff + 0 AND next_eff - eff > 0`: with
+    /// subexpressions over buffered columns alone, which the join evaluates
+    /// once per buffered row
+    Buffered,
+    /// `t + 0 > eff AND t - 0 <= next_eff AND t + 0 >= t - 0`: with
+    /// subexpressions over streamed columns alone, which the join evaluates
+    /// once per streamed row
+    Streamed,
+    /// `t + 0 > eff + 0 AND t - 0 <= next_eff + 0 AND next_eff - eff > 0
+    /// AND t + 0 >= t - 0`: with both
+    Both,
+}
+
+const INTERVAL_FILTERS: [IntervalFilter; 4] = [
+    IntervalFilter::Plain,
+    IntervalFilter::Buffered,
+    IntervalFilter::Streamed,
+    IntervalFilter::Both,
+];
+
+/// The validity-interval filter in the given form, with the streamed table
+/// on `streamed_side`.
 fn build_interval_filter(
     streamed: &Schema,
     buffered: &Schema,
     streamed_side: JoinSide,
-    hoisted: bool,
+    form: IntervalFilter,
 ) -> JoinFilter {
     let t_field = streamed
         .field_with_name("t")
@@ -4446,24 +4470,31 @@ fn build_interval_filter(
     let t_col: PhysicalExprRef = Arc::new(Column::new("t", t_idx));
     let eff: PhysicalExprRef = Arc::new(Column::new("eff", eff_idx));
     let next_eff: PhysicalExprRef = Arc::new(Column::new("next_eff", next_eff_idx));
-    let plus_zero = |expr: &PhysicalExprRef| -> PhysicalExprRef {
+    let zero = |expr: &PhysicalExprRef, op: Operator| -> PhysicalExprRef {
         Arc::new(BinaryExpr::new(
             Arc::clone(expr),
-            Operator::Plus,
+            op,
             Arc::new(Literal::new(ScalarValue::Int64(Some(0)))),
         ))
     };
-    let (lower, upper) = if hoisted {
-        (plus_zero(&eff), plus_zero(&next_eff))
+    let lift_buffered = matches!(form, IntervalFilter::Buffered | IntervalFilter::Both);
+    let lift_streamed = matches!(form, IntervalFilter::Streamed | IntervalFilter::Both);
+    let (lower, upper) = if lift_buffered {
+        (zero(&eff, Operator::Plus), zero(&next_eff, Operator::Plus))
     } else {
         (Arc::clone(&eff), Arc::clone(&next_eff))
     };
+    let (t_lower, t_upper) = if lift_streamed {
+        (zero(&t_col, Operator::Plus), zero(&t_col, Operator::Minus))
+    } else {
+        (Arc::clone(&t_col), Arc::clone(&t_col))
+    };
     let mut expression: PhysicalExprRef = Arc::new(BinaryExpr::new(
-        Arc::new(BinaryExpr::new(Arc::clone(&t_col), Operator::Gt, lower)),
+        Arc::new(BinaryExpr::new(Arc::clone(&t_lower), Operator::Gt, lower)),
         Operator::And,
-        Arc::new(BinaryExpr::new(t_col, Operator::LtEq, upper)),
+        Arc::new(BinaryExpr::new(Arc::clone(&t_upper), Operator::LtEq, upper)),
     ));
-    if hoisted {
+    if lift_buffered {
         expression = Arc::new(BinaryExpr::new(
             expression,
             Operator::And,
@@ -4472,6 +4503,13 @@ fn build_interval_filter(
                 Operator::Gt,
                 Arc::new(Literal::new(ScalarValue::Int64(Some(0)))),
             )),
+        ));
+    }
+    if lift_streamed {
+        expression = Arc::new(BinaryExpr::new(
+            expression,
+            Operator::And,
+            Arc::new(BinaryExpr::new(t_lower, Operator::GtEq, t_upper)),
         ));
     }
     JoinFilter::new(expression, column_indices, Arc::new(Schema::new(fields)))
@@ -4584,7 +4622,7 @@ async fn check_interval_join(
     spill: bool,
     case: &str,
 ) -> Result<()> {
-    for hoisted in [false, true] {
+    for form in INTERVAL_FILTERS {
         check_interval_join_with_filter(
             join_type,
             streamed,
@@ -4593,16 +4631,15 @@ async fn check_interval_join(
             buffered_batch_rows,
             batch_size,
             spill,
-            hoisted,
-            &format!("{case} hoisted={hoisted}"),
+            form,
+            &format!("{case} filter={form:?}"),
         )
         .await?;
     }
     Ok(())
 }
 
-/// [`check_interval_join`] with the plain or the hoisted form of the filter
-/// (see [`build_interval_filter`]).
+/// [`check_interval_join`] with one form of the filter.
 #[expect(clippy::too_many_arguments)]
 async fn check_interval_join_with_filter(
     join_type: JoinType,
@@ -4612,7 +4649,7 @@ async fn check_interval_join_with_filter(
     buffered_batch_rows: usize,
     batch_size: usize,
     spill: bool,
-    hoisted: bool,
+    form: IntervalFilter,
     case: &str,
 ) -> Result<()> {
     let streamed_plan = build_interval_streamed(streamed, streamed_batch_rows);
@@ -4626,7 +4663,7 @@ async fn check_interval_join_with_filter(
         &streamed_plan.schema(),
         &buffered_plan.schema(),
         streamed_side,
-        hoisted,
+        form,
     );
     let (left, right) = if join_type == Right {
         (buffered_plan, streamed_plan)
@@ -4807,54 +4844,92 @@ async fn join_filter_streamed_rows_across_freezes() -> Result<()> {
     Ok(())
 }
 
-/// The hoisted interval filter lifts `eff + 0`, `next_eff + 0` and the whole
-/// `next_eff - eff > 0`, keeping `t` as the only input column; the plain one
-/// has nothing to lift.
+/// Each form of the interval filter lifts its subexpressions over one input
+/// alone, and the bare columns it still reads stay input columns; the plain
+/// form has nothing to lift.
 #[test]
-fn hoisted_join_filter_lifts_buffered_subexpressions() -> Result<()> {
+fn hoisted_join_filter_lifts_single_side_subexpressions() -> Result<()> {
     use super::filter::{HoistedFilterInput, HoistedJoinFilter};
+    use HoistedFilterInput::{Buffered, Column as Input, Streamed};
     let streamed = build_interval_streamed(&[(1, 0, Some(1))], 1).schema();
     let buffered = build_interval_buffered(&interval_group(1, 0, 1, 1), 1).schema();
     for streamed_side in [JoinSide::Left, JoinSide::Right] {
-        let plain = build_interval_filter(&streamed, &buffered, streamed_side, false);
-        assert!(
-            HoistedJoinFilter::try_new(
-                &plain,
-                streamed_side.negate(),
-                &streamed,
-                &buffered
-            )?
-            .is_none()
-        );
-        let filter = build_interval_filter(&streamed, &buffered, streamed_side, true);
-        let hoisted = HoistedJoinFilter::try_new(
-            &filter,
-            streamed_side.negate(),
-            &streamed,
-            &buffered,
-        )?
-        .unwrap();
-        let lifted: Vec<String> = hoisted
-            .buffered_exprs
-            .iter()
-            .map(|e| e.to_string())
-            .collect();
+        let buffered_side = streamed_side.negate();
+        let hoist = |form| {
+            let filter = build_interval_filter(&streamed, &buffered, streamed_side, form);
+            HoistedJoinFilter::try_new(&filter, buffered_side, &streamed, &buffered)
+        };
+        let to_strings = |exprs: &[PhysicalExprRef]| -> Vec<String> {
+            exprs.iter().map(|e| e.to_string()).collect()
+        };
+        assert!(hoist(IntervalFilter::Plain)?.is_none());
+
+        let hoisted = hoist(IntervalFilter::Buffered)?.unwrap();
         assert_eq!(
-            lifted,
+            to_strings(&hoisted.buffered_exprs),
             vec!["eff@2 + 0", "next_eff@3 + 0", "next_eff@3 - eff@2 > 0"]
         );
+        assert!(hoisted.streamed_exprs.is_empty());
         assert!(matches!(
             hoisted.inputs.as_slice(),
             [
-                HoistedFilterInput::Column(ColumnIndex { index: 2, side }),
-                HoistedFilterInput::Buffered(0),
-                HoistedFilterInput::Buffered(1),
-                HoistedFilterInput::Buffered(2),
+                Input(ColumnIndex { index: 2, side }),
+                Buffered(0),
+                Buffered(1),
+                Buffered(2),
             ] if *side == streamed_side
         ));
         assert_eq!(
             hoisted.expression.to_string(),
             "t@0 > __buffered_0@1 AND t@0 <= __buffered_1@2 AND __buffered_2@3"
+        );
+
+        let hoisted = hoist(IntervalFilter::Streamed)?.unwrap();
+        assert!(hoisted.buffered_exprs.is_empty());
+        assert_eq!(
+            to_strings(&hoisted.streamed_exprs),
+            vec!["t@0 + 0", "t@0 - 0", "t@0 + 0 >= t@0 - 0"]
+        );
+        assert_eq!(hoisted.streamed_projection, vec![2]);
+        assert!(matches!(
+            hoisted.inputs.as_slice(),
+            [
+                Input(ColumnIndex { index: 2, side: eff_side }),
+                Input(ColumnIndex { index: 3, side: next_eff_side }),
+                Streamed(0),
+                Streamed(1),
+                Streamed(2),
+            ] if *eff_side == buffered_side && *next_eff_side == buffered_side
+        ));
+        assert_eq!(
+            hoisted.expression.to_string(),
+            "__streamed_0@2 > eff@0 AND __streamed_1@3 <= next_eff@1 AND __streamed_2@4"
+        );
+
+        let hoisted = hoist(IntervalFilter::Both)?.unwrap();
+        assert_eq!(
+            to_strings(&hoisted.buffered_exprs),
+            vec!["eff@2 + 0", "next_eff@3 + 0", "next_eff@3 - eff@2 > 0"]
+        );
+        assert_eq!(
+            to_strings(&hoisted.streamed_exprs),
+            vec!["t@0 + 0", "t@0 - 0", "t@0 + 0 >= t@0 - 0"]
+        );
+        assert!(matches!(
+            hoisted.inputs.as_slice(),
+            [
+                Streamed(0),
+                Buffered(0),
+                Streamed(1),
+                Buffered(1),
+                Buffered(2),
+                Streamed(2),
+            ]
+        ));
+        assert_eq!(
+            hoisted.expression.to_string(),
+            "__streamed_0@0 > __buffered_0@1 AND __streamed_1@2 <= __buffered_1@3 \
+             AND __buffered_2@4 AND __streamed_2@5"
         );
     }
     Ok(())
