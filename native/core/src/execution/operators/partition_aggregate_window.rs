@@ -125,9 +125,16 @@ impl Spec {
         matches!(self.kind, Kind::CumeDist | Kind::Suffix { .. })
     }
 
-    /// Whether the value is the same for every row of the partition.
-    fn constant(&self) -> bool {
-        matches!(self.kind, Kind::Aggregate(_) | Kind::Value { .. })
+    /// Whether whole partitions within one batch can be evaluated together: everything but
+    /// RANGE frames starting at an offset from the current row.
+    fn batched(&self) -> bool {
+        !matches!(
+            self.kind,
+            Kind::Suffix {
+                start: FrameStart::Range { delta: Some(_), .. },
+                ..
+            }
+        )
     }
 }
 
@@ -136,8 +143,8 @@ impl Spec {
 enum Pending {
     /// Rows of one partition that may extend over other batches, processed row by row.
     Rows(Vec<ScalarValue>, RecordBatch),
-    /// Whole partitions, all within this batch, at `ranges` of it. Evaluated at once when
-    /// every expression is constant within a partition.
+    /// Whole partitions, all within this batch, at `ranges` of it. Evaluated together when
+    /// every expression supports it.
     Partitions(RecordBatch, Vec<Range<usize>>),
 }
 
@@ -441,18 +448,23 @@ impl ExecutionPlan for PartitionAggregateWindowExec {
                     suffix_files: vec![],
                     cursors: vec![],
                     empty: None,
-                    reservation: MemoryConsumer::new("WindowSuffix")
-                        .with_can_spill(true)
-                        .register(&runtime.memory_pool),
+                    reservation: ChunkedReservation::new(
+                        MemoryConsumer::new("WindowSuffix")
+                            .with_can_spill(true)
+                            .register(&runtime.memory_pool),
+                    ),
                 }
             });
         let state = WindowState {
             spill: SpillManager::new(Arc::clone(&runtime), spill_metrics, input.schema()),
-            rows_reservation: MemoryConsumer::new("WindowRows")
-                .with_can_spill(true)
-                .register(&runtime.memory_pool),
-            state_reservation: MemoryConsumer::new("WindowAccumulator")
-                .register(&runtime.memory_pool),
+            rows_reservation: ChunkedReservation::new(
+                MemoryConsumer::new("WindowRows")
+                    .with_can_spill(true)
+                    .register(&runtime.memory_pool),
+            ),
+            state_reservation: ChunkedReservation::new(
+                MemoryConsumer::new("WindowAccumulator").register(&runtime.memory_pool),
+            ),
             baseline: BaselineMetrics::new(&self.metrics, partition),
             input,
             input_done: false,
@@ -461,7 +473,7 @@ impl ExecutionPlan for PartitionAggregateWindowExec {
             keys: self.window.partition_by_sort_keys()?,
             order_by,
             pending: VecDeque::new(),
-            constant: self.specs.iter().all(Spec::constant),
+            batched: self.specs.iter().all(Spec::batched),
             target_rows: context.session_config().batch_size().max(1),
             buffered: vec![],
             buffered_rows: 0,
@@ -874,6 +886,62 @@ impl SuffixState {
     }
 }
 
+/// Memory reservations are taken from the pool in chunks and kept, up to one chunk, from
+/// one window partition to the next: with Spark's memory manager behind the pool, a call
+/// per small partition contends on its lock.
+const RESERVATION_CHUNK: usize = 1 << 20;
+
+#[derive(Debug)]
+struct ChunkedReservation {
+    reservation: MemoryReservation,
+    used: usize,
+}
+
+impl ChunkedReservation {
+    fn new(reservation: MemoryReservation) -> Self {
+        Self {
+            reservation,
+            used: 0,
+        }
+    }
+
+    fn try_resize(&mut self, used: usize) -> Result<()> {
+        if used > self.reservation.size()
+            && self
+                .reservation
+                .try_resize(used.next_multiple_of(RESERVATION_CHUNK))
+                .is_err()
+        {
+            self.reservation.try_resize(used)?;
+        }
+        self.used = used;
+        Ok(())
+    }
+
+    fn try_grow(&mut self, additional: usize) -> Result<()> {
+        self.try_resize(self.used + additional)
+    }
+
+    /// The tracked memory has been released; keeps up to a chunk for the next partition.
+    fn release(&mut self) {
+        self.used = 0;
+        if self.reservation.size() > RESERVATION_CHUNK {
+            self.reservation.resize(RESERVATION_CHUNK);
+        }
+    }
+
+    fn trim(&mut self) {
+        if self.reservation.size() > self.used {
+            self.reservation.resize(self.used);
+        }
+    }
+
+    fn free(&mut self) {
+        self.used = 0;
+        self.reservation.free();
+    }
+}
+
 #[derive(Clone)]
 enum SuffixSource {
     Memory(RecordBatch),
@@ -1055,7 +1123,7 @@ struct ReverseState {
     cursors: Vec<Cursor>,
     /// One-row suffix batch for frames starting past the partition end.
     empty: Option<RecordBatch>,
-    reservation: MemoryReservation,
+    reservation: ChunkedReservation,
 }
 
 impl ReverseState {
@@ -1104,7 +1172,7 @@ impl ReverseState {
         self.suffix_files.clear();
         self.cursors.clear();
         self.empty = None;
-        self.reservation.free();
+        self.reservation.release();
     }
 }
 
@@ -1124,8 +1192,8 @@ struct WindowState {
     rows: Vec<RecordBatch>,
     files: VecDeque<Arc<dyn SpillFile>>,
     spill: SpillManager,
-    rows_reservation: MemoryReservation,
-    state_reservation: MemoryReservation,
+    rows_reservation: ChunkedReservation,
+    state_reservation: ChunkedReservation,
     replay: Option<SendableRecordBatchStream>,
     result: Vec<Option<ScalarValue>>,
     emitting: bool,
@@ -1134,9 +1202,8 @@ struct WindowState {
     /// ORDER BY key and start index of the current percent_rank peer group.
     rank: Option<(Vec<ScalarValue>, usize)>,
     reverse: Option<ReverseState>,
-    /// Every expression is constant within a partition, so partitions inside one input batch
-    /// are evaluated together.
-    constant: bool,
+    /// Partitions inside one input batch are evaluated together.
+    batched: bool,
     /// Output batches smaller than half of this are concatenated up to it.
     target_rows: usize,
     buffered: Vec<RecordBatch>,
@@ -1146,6 +1213,15 @@ struct WindowState {
 }
 
 impl WindowState {
+    /// Returns reserved but unused memory to the pool before spilling.
+    fn trim(&mut self, reverse: Option<&mut ReverseState>) {
+        self.rows_reservation.trim();
+        self.state_reservation.trim();
+        if let Some(reverse) = reverse.or(self.reverse.as_mut()) {
+            reverse.reservation.trim();
+        }
+    }
+
     fn spill_rows(&mut self) -> Result<()> {
         if let Some(reverse) = &mut self.reverse {
             reverse.spill_rows(&self.rows)?;
@@ -1231,11 +1307,19 @@ impl WindowState {
         }
         let state_size = self.state_size();
         if self.state_reservation.try_resize(state_size).is_err() {
-            self.spill_rows()?;
-            self.state_reservation.try_resize(state_size)?;
+            self.trim(None);
+            if self.state_reservation.try_resize(state_size).is_err() {
+                self.spill_rows()?;
+                self.state_reservation.try_resize(state_size)?;
+            }
         }
         let size = batch.get_array_memory_size();
         if self.rows_reservation.try_grow(size).is_err() {
+            self.trim(None);
+            if self.rows_reservation.try_grow(size).is_ok() {
+                self.rows.push(batch);
+                return Ok(());
+            }
             self.spill_rows()?;
             // A single input batch may itself exceed the share. Write it directly, without
             // retaining it or claiming an unbounded memory reservation.
@@ -1287,6 +1371,10 @@ impl WindowState {
         *end -= rows;
         let size = self.state_size() + states.iter().map(|s| s.size()).sum::<usize>();
         if self.state_reservation.try_resize(size).is_err() {
+            self.trim(Some(reverse));
+            if self.state_reservation.try_resize(size).is_ok() {
+                return reverse.push(RecordBatch::try_new(schema, columns)?);
+            }
             reverse.flush()?;
             if self.state_reservation.try_resize(size).is_err() {
                 // The reverse pass works on its own copy of in-memory rows.
@@ -1390,7 +1478,7 @@ impl WindowState {
             self.spill_rows()?;
         }
         self.reverse_pass().await?;
-        self.state_reservation.free();
+        self.state_reservation.release();
         if self.files.is_empty() {
             let batches = std::mem::take(&mut self.rows);
             self.replay = Some(Box::pin(RecordBatchStreamAdapter::new(
@@ -1480,8 +1568,8 @@ impl WindowState {
         Ok(columns)
     }
 
-    /// Queues `batch`, split at its partition `ranges`. When every expression is constant
-    /// within a partition, the partitions that begin and end inside the batch are queued
+    /// Queues `batch`, split at its partition `ranges`. When every expression supports it,
+    /// the partitions that begin and end inside the batch are queued
     /// together; only the first, which may continue the partition in progress, and the last,
     /// which may continue into the next batch, are processed row by row.
     fn split(
@@ -1501,7 +1589,7 @@ impl WindowState {
                 batch.slice(range.start, range.end - range.start),
             ))
         };
-        if !self.constant || ranges.len() < 2 {
+        if !self.batched || ranges.len() < 2 {
             for range in &ranges {
                 let pending = rows(range)?;
                 self.pending.push_back(pending);
@@ -1535,56 +1623,132 @@ impl WindowState {
         Ok(())
     }
 
-    /// Output rows of whole partitions at `ranges` of `batch`, with the value of every
-    /// expression computed once per partition.
+    /// Output rows of whole partitions at `ranges` of `batch`, each evaluated with the rows of
+    /// the batch, without buffering or reserving them.
     fn evaluate_partitions(
         &self,
         batch: &RecordBatch,
         ranges: &[Range<usize>],
     ) -> Result<RecordBatch> {
-        let mut indices = Vec::with_capacity(batch.num_rows());
-        for (i, range) in ranges.iter().enumerate() {
-            indices.extend(std::iter::repeat_n(i as u32, range.len()));
+        let rows = batch.num_rows();
+        let mut partition = Vec::with_capacity(rows);
+        for range in ranges {
+            partition.extend(std::iter::repeat_n(range.clone(), range.len()));
         }
-        let indices = UInt32Array::from(indices);
+        let peers = if self.specs.iter().any(|s| {
+            matches!(
+                s.kind,
+                Kind::PercentRank
+                    | Kind::CumeDist
+                    | Kind::Suffix {
+                        start: FrameStart::Range { .. },
+                        ..
+                    }
+            )
+        }) {
+            let order = self
+                .order_by
+                .iter()
+                .map(|o| o.evaluate_to_sort_column(batch))
+                .collect::<Result<Vec<_>>>()?;
+            let mut peers = Vec::with_capacity(rows);
+            for range in evaluate_partition_ranges(rows, &order)? {
+                let mut start = range.start;
+                while start < range.end {
+                    let end = partition[start].end.min(range.end);
+                    peers.extend(std::iter::repeat_n(start..end, end - start));
+                    start = end;
+                }
+            }
+            peers
+        } else {
+            vec![]
+        };
         let mut columns = batch.columns().to_vec();
         for spec in &self.specs {
             let args = spec
                 .args
                 .iter()
-                .map(|e| e.evaluate(batch)?.into_array(batch.num_rows()))
+                .map(|e| e.evaluate(batch)?.into_array(rows))
                 .collect::<Result<Vec<_>>>()?;
-            let slice = |range: &Range<usize>| {
-                args.iter()
-                    .map(|a| a.slice(range.start, range.len()))
-                    .collect::<Vec<_>>()
-            };
-            let mut values = Vec::with_capacity(ranges.len());
-            for range in ranges {
-                values.push(match &spec.kind {
-                    Kind::Aggregate(aggregate) => {
-                        let mut accumulator = aggregate.create_accumulator()?;
-                        accumulator.update_batch(&slice(range))?;
-                        accumulator.evaluate()?
+            let column: ArrayRef = match &spec.kind {
+                Kind::Aggregate(_) | Kind::Value { .. } => {
+                    let mut values = Vec::with_capacity(ranges.len());
+                    let mut indices = Vec::with_capacity(rows);
+                    for (i, range) in ranges.iter().enumerate() {
+                        values.push(constant_value(spec, &args, range)?);
+                        indices.extend(std::iter::repeat_n(i as u32, range.len()));
                     }
-                    Kind::Value { kind, ignore_nulls } => {
-                        let mut value = ValueState {
-                            kind: *kind,
-                            ignore_nulls: *ignore_nulls,
-                            seen: 0,
-                            value: None,
-                        };
-                        value.update(&slice(range)[0])?;
-                        match value.value {
-                            Some(v) => v,
-                            None => ScalarValue::try_from(&spec.data_type)?,
+                    let values = ScalarValue::iter_to_array(values)?;
+                    take(values.as_ref(), &UInt32Array::from(indices), None)?
+                }
+                Kind::Ntile(n) => Arc::new(UInt64Array::from_iter_values(
+                    partition
+                        .iter()
+                        .enumerate()
+                        .map(|(row, p)| ntile(row - p.start, *n, p.len())),
+                )),
+                Kind::PercentRank => Arc::new(Float64Array::from_iter_values(
+                    partition.iter().zip(&peers).map(|(p, peer)| {
+                        (peer.start - p.start) as f64 / (p.len() as f64 - 1.0).max(1.0)
+                    }),
+                )),
+                Kind::CumeDist => Arc::new(Float64Array::from_iter_values(
+                    partition
+                        .iter()
+                        .zip(&peers)
+                        .map(|(p, peer)| (peer.end - p.start) as f64 / p.len() as f64),
+                )),
+                Kind::Suffix { func, start } => {
+                    let starts = (0..rows).map(|row| {
+                        let p = &partition[row];
+                        match start {
+                            FrameStart::Rows(delta) => (row as i64)
+                                .saturating_add(*delta)
+                                .clamp(p.start as i64, p.end as i64)
+                                as usize,
+                            FrameStart::Range { .. } => peers[row].start,
+                        }
+                    });
+                    match func {
+                        SuffixFn::Value { kind, ignore_nulls } => {
+                            let indices = suffix_value_indices(
+                                &args[0],
+                                &partition,
+                                starts,
+                                *kind,
+                                *ignore_nulls,
+                            );
+                            take(args[0].as_ref(), &UInt32Array::from(indices), None)?
+                        }
+                        SuffixFn::Aggregate(aggregate) => {
+                            let mut suffix = vec![ScalarValue::Null; rows];
+                            for range in ranges {
+                                let mut accumulator = aggregate.create_accumulator()?;
+                                for row in range.clone().rev() {
+                                    let slice =
+                                        args.iter().map(|a| a.slice(row, 1)).collect::<Vec<_>>();
+                                    accumulator.update_batch(&slice)?;
+                                    suffix[row] = accumulator.evaluate()?;
+                                }
+                            }
+                            let empty = empty_value(spec)?;
+                            let values = starts
+                                .zip(&partition)
+                                .map(|(start, p)| {
+                                    if start < p.end {
+                                        suffix[start].clone()
+                                    } else {
+                                        empty.clone()
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+                            ScalarValue::iter_to_array(values)?
                         }
                     }
-                    _ => return Err(internal_datafusion_err!("not a constant window expression")),
-                });
-            }
-            let values = ScalarValue::iter_to_array(values)?;
-            columns.push(take(values.as_ref(), &indices, None)?);
+                }
+            };
+            columns.push(cast_to(column, &spec.data_type)?);
         }
         Ok(RecordBatch::try_new(Arc::clone(&self.schema), columns)?)
     }
@@ -1657,7 +1821,7 @@ impl WindowState {
                     self.replay = Some(self.spill.read_spill_as_stream_unbuffered(file, None)?);
                     continue;
                 }
-                self.rows_reservation.free();
+                self.rows_reservation.release();
                 if let Some(reverse) = &mut self.reverse {
                     reverse.clear();
                 }
@@ -1719,6 +1883,112 @@ impl WindowState {
                 }
                 None => return Ok(None),
             }
+        }
+    }
+}
+
+/// Value of a whole-partition aggregate or `first_value`/`last_value`/`nth_value` over the
+/// rows of `args` at `range`.
+fn constant_value(spec: &Spec, args: &[ArrayRef], range: &Range<usize>) -> Result<ScalarValue> {
+    let slice = args
+        .iter()
+        .map(|a| a.slice(range.start, range.len()))
+        .collect::<Vec<_>>();
+    match &spec.kind {
+        Kind::Aggregate(aggregate) => {
+            let mut accumulator = aggregate.create_accumulator()?;
+            accumulator.update_batch(&slice)?;
+            accumulator.evaluate()
+        }
+        Kind::Value { kind, ignore_nulls } => {
+            let mut value = ValueState {
+                kind: *kind,
+                ignore_nulls: *ignore_nulls,
+                seen: 0,
+                value: None,
+            };
+            value.update(&slice[0])?;
+            match value.value {
+                Some(v) => Ok(v),
+                None => ScalarValue::try_from(&spec.data_type),
+            }
+        }
+        _ => Err(internal_datafusion_err!("not a constant window expression")),
+    }
+}
+
+/// Row of `values` selected by `first_value`/`last_value`/`nth_value` over the frame from
+/// each row's frame start in `starts` to the end of its partition, or `None` for NULL.
+fn suffix_value_indices(
+    values: &ArrayRef,
+    partition: &[Range<usize>],
+    starts: impl Iterator<Item = usize>,
+    kind: ValueKind,
+    ignore_nulls: bool,
+) -> Vec<Option<u32>> {
+    let rows = values.len();
+    let valid = is_valid(values);
+    let found = |index: usize, end: usize| (index < end).then_some(index as u32);
+    if !ignore_nulls {
+        return starts
+            .zip(partition)
+            .map(|(start, p)| match kind {
+                _ if start >= p.end => None,
+                ValueKind::First => found(start, p.end),
+                ValueKind::Last => found(p.end - 1, p.end),
+                ValueKind::Nth(n) => found(start.saturating_add(n - 1), p.end),
+            })
+            .collect();
+    }
+    match kind {
+        ValueKind::First => {
+            let mut next = vec![rows; rows + 1];
+            for row in (0..rows).rev() {
+                next[row] = if valid(row) {
+                    row
+                } else if row + 1 < partition[row].end {
+                    next[row + 1]
+                } else {
+                    rows
+                };
+            }
+            starts
+                .zip(partition)
+                .map(|(start, p)| found(next[start], p.end))
+                .collect()
+        }
+        ValueKind::Last => {
+            let mut last = vec![None; rows];
+            let mut row = 0;
+            while row < rows {
+                let p = &partition[row];
+                let value = p.clone().rev().find(|&i| valid(i));
+                last[p.clone()].fill(value);
+                row = p.end;
+            }
+            starts
+                .zip(&last)
+                .map(|(start, last)| last.filter(|&l| l >= start).map(|l| l as u32))
+                .collect()
+        }
+        ValueKind::Nth(n) => {
+            let mut before = Vec::with_capacity(rows + 1);
+            let mut positions = vec![];
+            for row in 0..rows {
+                before.push(positions.len());
+                if valid(row) {
+                    positions.push(row);
+                }
+            }
+            before.push(positions.len());
+            starts
+                .zip(partition)
+                .map(|(start, p)| {
+                    positions
+                        .get(before[start].saturating_add(n - 1))
+                        .and_then(|&index| found(index, p.end))
+                })
+                .collect()
         }
     }
 }
@@ -2523,6 +2793,310 @@ mod tests {
                     started.elapsed()
                 );
             }
+        }
+        Ok(())
+    }
+
+    /// Memory pool that counts the calls reaching it, as each reaches Spark's memory manager
+    /// through JNI in Comet.
+    #[derive(Debug)]
+    struct CountingPool {
+        inner: GreedyMemoryPool,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl std::fmt::Display for CountingPool {
+        fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+            write!(f, "CountingPool")
+        }
+    }
+
+    impl MemoryPool for CountingPool {
+        fn name(&self) -> &str {
+            "counting"
+        }
+        fn grow(&self, reservation: &MemoryReservation, additional: usize) {
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.inner.grow(reservation, additional)
+        }
+        fn shrink(&self, reservation: &MemoryReservation, shrink: usize) {
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.inner.shrink(reservation, shrink)
+        }
+        fn try_grow(&self, reservation: &MemoryReservation, additional: usize) -> Result<()> {
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.inner.try_grow(reservation, additional)
+        }
+        fn reserved(&self) -> usize {
+            self.inner.reserved()
+        }
+    }
+
+    /// Rows of partitions with `sizes`, sorted by key and `ord`, with NULL values, NULL and
+    /// tied ORDER BY values, and a NULL key for the first partition.
+    fn layout_rows(sizes: &[usize], seed: u64) -> Vec<(Option<i64>, Option<i64>, Option<i64>)> {
+        let mut state = seed;
+        let mut next = move |n: u64| {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) % n
+        };
+        let mut rows = vec![];
+        for (p, &size) in sizes.iter().enumerate() {
+            let mut ord = 0i64;
+            for _ in 0..size {
+                let key = (p > 0).then_some(p as i64);
+                let null_ord = next(10) == 0;
+                ord += next(3) as i64;
+                let value = (next(3) != 0).then(|| next(41) as i64 - 20);
+                rows.push((key, (!null_ord).then_some(ord), value));
+            }
+        }
+        rows
+    }
+
+    fn batched(
+        rows: &[(Option<i64>, Option<i64>, Option<i64>)],
+        chunk: usize,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        let mut rows = rows.to_vec();
+        let options = [SortOptions {
+            descending: false,
+            nulls_first: true,
+        }; 2];
+        rows.sort_by(|a, b| {
+            compare_rows(
+                &[ScalarValue::Int64(a.0), ScalarValue::Int64(a.1)],
+                &[ScalarValue::Int64(b.0), ScalarValue::Int64(b.1)],
+                &options,
+            )
+            .unwrap()
+        });
+        let batch = RecordBatch::try_new(
+            schema(),
+            vec![
+                Arc::new(Int64Array::from_iter(rows.iter().map(|r| r.0))),
+                Arc::new(Int64Array::from_iter(rows.iter().map(|r| r.1))),
+                Arc::new(Int64Array::from_iter(rows.iter().map(|r| r.2))),
+                Arc::new(StringArray::from(vec!["p"; rows.len()])),
+            ],
+        )?;
+        let batches = (0..rows.len())
+            .step_by(chunk)
+            .map(|start| batch.slice(start, chunk.min(rows.len() - start)))
+            .collect::<Vec<_>>();
+        let ordering = LexOrdering::new(vec![sort("key", false), sort("ord", false)]);
+        let config = MemorySourceConfig::try_new(&[batches], schema(), None)?
+            .try_with_sort_information(vec![ordering.unwrap()])?;
+        Ok(Arc::new(DataSourceExec::new(Arc::new(config))))
+    }
+
+    fn every_expression(range_offset: bool) -> Vec<Expr> {
+        let n = |n: i64| lit(ScalarValue::Int64(Some(n)));
+        let mut frames = vec![rows_from(0), rows_from(-2), rows_from(3), range_from(None)];
+        if range_offset {
+            frames.push(range_from(Some(2)));
+        }
+        let mut exprs = vec![
+            expr("sum", vec![col("value")], whole()),
+            expr("count", vec![col("value")], whole()),
+            ignoring_nulls(expr("last_value", vec![col("value")], whole())),
+            expr("nth_value", vec![col("value"), n(2)], whole()),
+            expr("ntile", vec![n(3)], running()),
+            expr("percent_rank", vec![], running()),
+            expr("cume_dist", vec![], running()),
+        ];
+        for frame in frames {
+            exprs.push(expr("sum", vec![col("value")], frame.clone()));
+            exprs.push(expr("count", vec![col("value")], frame.clone()));
+            exprs.push(expr("max", vec![col("value")], frame.clone()));
+            for ignore in [false, true] {
+                let with = |e: Expr| if ignore { ignoring_nulls(e) } else { e };
+                exprs.push(with(expr("first_value", vec![col("value")], frame.clone())));
+                exprs.push(with(expr("last_value", vec![col("value")], frame.clone())));
+                exprs.push(with(expr(
+                    "nth_value",
+                    vec![col("value"), n(2)],
+                    frame.clone(),
+                )));
+                exprs.push(with(expr(
+                    "nth_value",
+                    vec![col("value"), n(4)],
+                    frame.clone(),
+                )));
+            }
+        }
+        exprs
+    }
+
+    /// Compares with `WindowAggExec` over partition size distributions and batch sizes that
+    /// put partitions within batches, across batch boundaries and spanning several batches,
+    /// without and with spilling.
+    #[tokio::test]
+    async fn partition_layouts_match_window_agg_exec() -> Result<()> {
+        let layouts: Vec<Vec<usize>> = vec![
+            vec![1; 300],
+            vec![2; 150],
+            [1, 2, 3, 1, 4, 2, 1, 1, 6].repeat(25),
+            [1, 1, 2, 90, 1, 3, 1, 250, 2, 1, 7].repeat(4),
+            vec![700],
+            [3, 1, 1, 2].repeat(60).into_iter().chain([400]).collect(),
+        ];
+        for range_offset in [false, true] {
+            let exprs = every_expression(range_offset);
+            let window = build(&exprs, true, false)?;
+            let ignore_nulls = exprs.iter().map(|e| e.ignore_nulls).collect::<Vec<_>>();
+            for (l, sizes) in layouts.iter().enumerate() {
+                let rows = layout_rows(sizes, l as u64 + 1);
+                for chunk in [1, 3, 7, 64, 1000] {
+                    let input = batched(&rows, chunk)?;
+                    let reference: Arc<dyn ExecutionPlan> = Arc::new(WindowAggExec::try_new(
+                        window.clone(),
+                        Arc::clone(&input),
+                        true,
+                    )?);
+                    let (ctx, _) = context(LARGE)?;
+                    let expected = concat_batches(
+                        &reference.schema(),
+                        &datafusion::physical_plan::collect(reference, ctx.task_ctx()).await?,
+                    )?;
+                    let plan = PartitionAggregateWindowExec::try_plan(
+                        window.clone(),
+                        input,
+                        true,
+                        ignore_nulls.clone(),
+                    )?
+                    .expect("spilling window plan");
+                    for budget in [LARGE, 16_000] {
+                        let (actual, _) = run(&plan, budget).await?;
+                        assert_eq!(actual.num_rows(), rows.len());
+                        for (i, field) in expected.schema().fields().iter().enumerate() {
+                            assert_eq!(
+                                actual.column(i).as_ref(),
+                                expected.column(i).as_ref(),
+                                "column {i} {} layout={l} chunk={chunk} budget={budget} \
+                                 range_offset={range_offset}",
+                                field.name()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A suffix frame over many small partitions: the memory pool sees a bounded number of
+    /// calls instead of several per partition, and a partition larger than the budget still
+    /// spills.
+    #[tokio::test]
+    async fn small_partitions_do_not_call_the_pool_per_partition() -> Result<()> {
+        let exprs = [ignoring_nulls(expr(
+            "first_value",
+            vec![col("value")],
+            rows_from(0),
+        ))];
+        let window = build(&exprs, true, false)?;
+        let sizes = [1, 2, 3, 2, 4, 1, 3].repeat(1500);
+        let rows = layout_rows(&sizes, 7);
+        let plan = PartitionAggregateWindowExec::try_plan(
+            window.clone(),
+            batched(&rows, 1000)?,
+            true,
+            vec![true],
+        )?
+        .expect("spilling window plan");
+        let pool = Arc::new(CountingPool {
+            inner: GreedyMemoryPool::new(LARGE),
+            calls: Default::default(),
+        });
+        let runtime = Arc::new(
+            RuntimeEnvBuilder::new()
+                .with_memory_pool(Arc::clone(&pool) as Arc<dyn MemoryPool>)
+                .build()?,
+        );
+        let ctx = SessionContext::new_with_config_rt(SessionConfig::new(), runtime);
+        let output = datafusion::physical_plan::collect(Arc::clone(&plan), ctx.task_ctx()).await?;
+        assert_eq!(
+            output.iter().map(|b| b.num_rows()).sum::<usize>(),
+            rows.len()
+        );
+        let calls = pool.calls.load(std::sync::atomic::Ordering::Relaxed);
+        let batches = rows.len().div_ceil(1000);
+        assert!(
+            calls <= 8 * batches,
+            "{calls} pool calls for {} partitions in {batches} batches",
+            sizes.len()
+        );
+        assert_eq!(pool.reserved(), 0);
+
+        let large = layout_rows(&[1, 2, 3000, 1, 2], 3);
+        let plan = PartitionAggregateWindowExec::try_plan(
+            window,
+            batched(&large, 100)?,
+            true,
+            vec![true],
+        )?
+        .expect("spilling window plan");
+        let (_, spills) = run(&plan, 16_000).await?;
+        assert!(spills > 0);
+        Ok(())
+    }
+
+    /// Measures `FIRST_VALUE(x) IGNORE NULLS` over `ROWS BETWEEN CURRENT ROW AND UNBOUNDED
+    /// FOLLOWING` with about 2.3 rows per partition, against DataFusion's `WindowAggExec`.
+    #[tokio::test]
+    #[ignore]
+    async fn bench_small_partitions_suffix_frame() -> Result<()> {
+        let exprs = [ignoring_nulls(expr(
+            "first_value",
+            vec![col("value")],
+            rows_from(0),
+        ))];
+        let window = build(&exprs, true, false)?;
+        let sizes = [1, 2, 3, 2, 4, 1, 3, 2].repeat(250_000);
+        let rows = layout_rows(&sizes, 11);
+        let input = batched(&rows, 8192)?;
+        let plans: Vec<(&str, Arc<dyn ExecutionPlan>)> = vec![
+            (
+                "PartitionAggregateWindowExec",
+                PartitionAggregateWindowExec::try_plan(
+                    window.clone(),
+                    Arc::clone(&input),
+                    true,
+                    vec![true],
+                )?
+                .expect("planned"),
+            ),
+            (
+                "WindowAggExec",
+                Arc::new(WindowAggExec::try_new(window, input, true)?),
+            ),
+        ];
+        for (name, plan) in plans {
+            let pool = Arc::new(CountingPool {
+                inner: GreedyMemoryPool::new(usize::MAX / 2),
+                calls: Default::default(),
+            });
+            let runtime = Arc::new(
+                RuntimeEnvBuilder::new()
+                    .with_memory_pool(Arc::clone(&pool) as Arc<dyn MemoryPool>)
+                    .build()?,
+            );
+            let ctx = SessionContext::new_with_config_rt(SessionConfig::new(), runtime);
+            let started = std::time::Instant::now();
+            let output = datafusion::physical_plan::collect(plan, ctx.task_ctx()).await?;
+            println!(
+                "BENCH {name}: {:?}, {} rows, {} partitions, {} pool calls",
+                started.elapsed(),
+                output.iter().map(|b| b.num_rows()).sum::<usize>(),
+                sizes.len(),
+                pool.calls.load(std::sync::atomic::Ordering::Relaxed)
+            );
         }
         Ok(())
     }
