@@ -157,3 +157,7 @@ harness = false
 [[bench]]
 name = "sort_payload"
 harness = false
+
+[[bench]]
+name = "sorted_window"
+harness = false

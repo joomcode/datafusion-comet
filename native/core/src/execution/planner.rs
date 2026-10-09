@@ -40,14 +40,17 @@ use crate::execution::operators::AlignedArrowStreamReader;
 use crate::execution::operators::DynamicFilterJoinExec;
 use crate::execution::operators::IcebergScanExec;
 use crate::execution::operators::IcebergWriteExec;
-use crate::execution::operators::{PartitionedRankLimitExec, WindowFnKind};
+use crate::execution::operators::{
+    sorted_window_supports_output_type, PartitionedRankLimitExec, WindowFnKind,
+};
 use crate::execution::{
     expressions::list_positions::ListPositionsExpr,
     expressions::subquery::Subquery,
     operators::{
         CometFilterExec, ExecutionError, ExpandExec, ExplodeExec, ParquetCompression,
         ParquetWriterExec, PartitionAggregateWindowEnabled, PartitionAggregateWindowExec,
-        SampleExec, ScanExec, ShuffleScanExec,
+        SampleExec, ScanExec, ShuffleScanExec, SortedWindowEnabled, SortedWindowExec,
+        SortedWindowFunction,
     },
     planner::expression_registry::ExpressionRegistry,
     planner::operator_registry::OperatorRegistry,
@@ -2519,6 +2522,23 @@ impl PhysicalPlanner {
                     .copied_config()
                     .get_extension::<PartitionAggregateWindowEnabled>()
                     .is_some();
+                let sorted_window = if self
+                    .session_ctx
+                    .copied_config()
+                    .get_extension::<SortedWindowEnabled>()
+                    .is_some()
+                {
+                    self.plan_sorted_window(
+                        wnd,
+                        &window_expr,
+                        &child.native_plan,
+                        partition_exprs,
+                        sort_exprs,
+                        &input_schema,
+                    )?
+                } else {
+                    None
+                };
                 let ignore_nulls = wnd.window_expr.iter().map(|e| e.ignore_nulls).collect();
                 let partition_aggregate = if !all_bounded && partition_aggregate_enabled {
                     PartitionAggregateWindowExec::try_plan(
@@ -2530,7 +2550,9 @@ impl PhysicalPlanner {
                 } else {
                     None
                 };
-                let window_agg: Arc<dyn ExecutionPlan> = if all_bounded {
+                let window_agg: Arc<dyn ExecutionPlan> = if let Some(plan) = sorted_window {
+                    plan
+                } else if all_bounded {
                     Arc::new(BoundedWindowAggExec::try_new(
                         window_expr,
                         Arc::clone(&child.native_plan),
@@ -3546,6 +3568,109 @@ impl PhysicalPlanner {
             None,
         )
         .map_err(|e| ExecutionError::DataFusionError(e.to_string()))
+    }
+
+    fn plan_sorted_window(
+        &self,
+        wnd: &spark_operator::Window,
+        window_expr: &[Arc<dyn WindowExpr>],
+        input: &Arc<dyn ExecutionPlan>,
+        partition_exprs: &[Arc<dyn PhysicalExpr>],
+        sort_exprs: &[PhysicalSortExpr],
+        input_schema: &SchemaRef,
+    ) -> Result<Option<Arc<dyn ExecutionPlan>>, ExecutionError> {
+        let mut functions = Vec::with_capacity(window_expr.len());
+        let mut fields = Vec::with_capacity(window_expr.len());
+        for (spark_expr, df_expr) in wnd.window_expr.iter().zip(window_expr.iter()) {
+            if spark_expr.agg_func.is_some() {
+                return Ok(None);
+            }
+            let Some(ExprStruct::ScalarFunc(func)) = spark_expr
+                .built_in_window_function
+                .as_ref()
+                .and_then(|f| f.expr_struct.as_ref())
+            else {
+                return Ok(None);
+            };
+            let function = match func.func.as_str() {
+                "row_number" => SortedWindowFunction::RowNumber,
+                "rank" => SortedWindowFunction::Rank,
+                "dense_rank" => SortedWindowFunction::DenseRank,
+                name @ ("lead" | "lag") => {
+                    if spark_expr.ignore_nulls || func.args.len() != 3 {
+                        return Ok(None);
+                    }
+                    let value = self.create_expr(&func.args[0], Arc::clone(input_schema))?;
+                    let offset = self.create_expr(&func.args[1], Arc::clone(input_schema))?;
+                    let default = self.create_expr(&func.args[2], Arc::clone(input_schema))?;
+                    let (Some(offset), Some(default)) = (
+                        offset.downcast_ref::<Literal>(),
+                        default.downcast_ref::<Literal>(),
+                    ) else {
+                        return Ok(None);
+                    };
+                    let offset = match offset.value() {
+                        ScalarValue::Int8(Some(v)) => *v as i64,
+                        ScalarValue::Int16(Some(v)) => *v as i64,
+                        ScalarValue::Int32(Some(v)) => *v as i64,
+                        ScalarValue::Int64(Some(v)) => *v,
+                        _ => return Ok(None),
+                    };
+                    let Some(offset) = (if name == "lead" {
+                        Some(offset)
+                    } else {
+                        offset.checked_neg()
+                    }) else {
+                        return Ok(None);
+                    };
+                    let value_type = value.data_type(input_schema)?;
+                    let default = if default.value().is_null() {
+                        ScalarValue::try_from(&value_type)?
+                    } else {
+                        match default.value().cast_to(&value_type) {
+                            Ok(v) => v,
+                            Err(_) => return Ok(None),
+                        }
+                    };
+                    SortedWindowFunction::Shift {
+                        value,
+                        offset,
+                        default,
+                    }
+                }
+                _ => return Ok(None),
+            };
+            let result_type = spark_expr.result_type.as_ref().map(to_arrow_datatype);
+            let data_type = match &function {
+                SortedWindowFunction::Shift { value, .. } => {
+                    let value_type = value.data_type(input_schema)?;
+                    if result_type.as_ref().is_some_and(|t| t != &value_type) {
+                        return Ok(None);
+                    }
+                    value_type
+                }
+                _ => result_type.unwrap_or(DataType::UInt64),
+            };
+            if !sorted_window_supports_output_type(&function, &data_type, input_schema)? {
+                return Ok(None);
+            }
+            let nullable = matches!(function, SortedWindowFunction::Shift { .. });
+            let field = df_expr
+                .field()?
+                .as_ref()
+                .clone()
+                .with_data_type(data_type)
+                .with_nullable(nullable);
+            fields.push(Arc::new(field));
+            functions.push(function);
+        }
+        Ok(Some(Arc::new(SortedWindowExec::try_new(
+            Arc::clone(input),
+            partition_exprs.to_vec(),
+            sort_exprs.to_vec(),
+            functions,
+            fields,
+        )?)))
     }
 
     fn process_agg_func(
@@ -6506,6 +6631,117 @@ mod tests {
         );
         assert_eq!(1, projection_exec.children.len());
         assert_eq!("ScanExec", projection_exec.children[0].native_plan.name());
+    }
+
+    fn window_operator(functions: Vec<(&str, Vec<Expr>, bool)>) -> Operator {
+        let int_literal = |value: Option<i32>| Expr {
+            expr_struct: Some(Literal(spark_expression::Literal {
+                value: value.map(literal::Value::IntVal),
+                datatype: Some(create_proto_datatype()),
+                is_null: value.is_none(),
+            })),
+            ..Default::default()
+        };
+        let order = Expr {
+            expr_struct: Some(SortOrder(Box::new(spark_expression::SortOrder {
+                child: Some(Box::new(create_bound_reference(0))),
+                direction: 0,
+                null_ordering: 0,
+            }))),
+            ..Default::default()
+        };
+        let frame = spark_operator::WindowFrame {
+            frame_type: spark_operator::WindowFrameType::Rows as i32,
+            lower_bound: Some(spark_operator::LowerWindowFrameBound {
+                lower_frame_bound_struct: Some(
+                    spark_operator::lower_window_frame_bound::LowerFrameBoundStruct::UnboundedPreceding(
+                        spark_operator::UnboundedPreceding {},
+                    ),
+                ),
+            }),
+            upper_bound: Some(spark_operator::UpperWindowFrameBound {
+                upper_frame_bound_struct: Some(
+                    spark_operator::upper_window_frame_bound::UpperFrameBoundStruct::CurrentRow(
+                        spark_operator::CurrentRow {},
+                    ),
+                ),
+            }),
+        };
+        let window_expr = functions
+            .into_iter()
+            .map(|(func, args, ignore_nulls)| {
+                let args = if func == "lead" || func == "lag" {
+                    let mut args = args;
+                    args.insert(1, int_literal(Some(1)));
+                    args.push(int_literal(None));
+                    args
+                } else {
+                    args
+                };
+                spark_operator::WindowExpr {
+                    built_in_window_function: Some(Expr {
+                        expr_struct: Some(ScalarFunc(spark_expression::ScalarFunc {
+                            func: func.to_string(),
+                            args,
+                            return_type: None,
+                            fail_on_error: false,
+                        })),
+                        ..Default::default()
+                    }),
+                    agg_func: None,
+                    spec: Some(spark_operator::WindowSpecDefinition {
+                        partition_spec: vec![create_bound_reference(0)],
+                        order_spec: vec![order.clone()],
+                        frame_specification: Some(frame.clone()),
+                    }),
+                    ignore_nulls,
+                    result_type: Some(create_proto_datatype()),
+                }
+            })
+            .collect();
+        Operator {
+            plan_id: 0,
+            sql_text_pool: vec![],
+            children: vec![create_scan()],
+            op_struct: Some(OpStruct::Window(Box::new(spark_operator::Window {
+                window_expr,
+                order_by_list: vec![order],
+                partition_by_list: vec![create_bound_reference(0)],
+                child: None,
+            }))),
+        }
+    }
+
+    #[test]
+    fn sorted_window_routing() {
+        use crate::execution::operators::SortedWindowEnabled;
+        let plan_name = |enabled: bool, op: &Operator| {
+            let config = if enabled {
+                SessionConfig::new().with_extension(Arc::new(SortedWindowEnabled))
+            } else {
+                SessionConfig::new()
+            };
+            let planner =
+                PhysicalPlanner::new(Arc::new(SessionContext::new_with_config(config)), 0);
+            let (_, _, plan) = planner.create_plan(op, &mut vec![], 1).unwrap();
+            plan.native_plan.name().to_string()
+        };
+        let simple = window_operator(vec![
+            ("row_number", vec![], false),
+            ("rank", vec![], false),
+            ("dense_rank", vec![], false),
+            ("lead", vec![create_bound_reference(0)], false),
+            ("lag", vec![create_bound_reference(0)], false),
+        ]);
+        assert_eq!(plan_name(true, &simple), "CometSortedWindowExec");
+        assert_ne!(plan_name(false, &simple), "CometSortedWindowExec");
+        let ignore_nulls = window_operator(vec![
+            ("row_number", vec![], false),
+            ("lead", vec![create_bound_reference(0)], true),
+        ]);
+        assert_ne!(plan_name(true, &ignore_nulls), "CometSortedWindowExec");
+        let percent_rank = window_operator(vec![("percent_rank", vec![], false)]);
+        assert_ne!(plan_name(true, &percent_rank), "CometSortedWindowExec");
     }
 
     fn create_bound_reference(index: i32) -> Expr {

@@ -656,7 +656,8 @@ case class CometWindowExec(
 
   override lazy val metrics: Map[String, SQLMetric] = Map(
     "dataSize" -> SQLMetrics.createSizeMetric(sparkContext, "data size"),
-    "numPartitions" -> SQLMetrics.createMetric(sparkContext, "number of partitions"))
+    "numPartitions" -> SQLMetrics.createMetric(sparkContext, "number of partitions")) ++
+    CometMetricNode.baselineMetrics(sparkContext)
 
   override def outputOrdering: Seq[SortOrder] = child.outputOrdering
 
