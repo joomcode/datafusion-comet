@@ -28,6 +28,7 @@ pub(crate) const COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD: &str =
     "spark.comet.exec.sort.spillBeforeOutputThreshold";
 pub(crate) const COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED: &str =
     "spark.comet.exec.window.partitionAggregate.enabled";
+pub(crate) const COMET_EXEC_WINDOW_SORTED_ENABLED: &str = "spark.comet.exec.window.sorted.enabled";
 pub(crate) const SPARK_EXECUTOR_CORES: &str = "spark.executor.cores";
 
 /// Comet configs read through this trait must be resolved by the JVM first:

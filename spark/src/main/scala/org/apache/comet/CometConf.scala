@@ -785,6 +785,18 @@ object CometConf extends ShimCometConf {
       .checkValue(_ >= 1, "Must be >= 1.")
       .createWithDefault(50)
 
+  val COMET_EXEC_WINDOW_SORTED_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.window.sorted.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "Whether native window operators whose expressions are all ROW_NUMBER, RANK, " +
+          "DENSE_RANK, or LEAD/LAG with a constant offset and default and without IGNORE " +
+          "NULLS run in Comet's SortedWindowExec, which processes each sorted input batch as " +
+          "a whole instead of slicing it per window partition. When false, they run in " +
+          "DataFusion's BoundedWindowAggExec, as in upstream Comet.")
+      .booleanConf
+      .createWithDefault(true)
+
   val COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED: ConfigEntry[Boolean] =
     conf(s"$COMET_EXEC_CONFIG_PREFIX.window.partitionAggregate.enabled")
       .category(CATEGORY_EXEC)

@@ -55,8 +55,12 @@ mod rank_limit;
 pub use rank_limit::{PartitionedRankLimitExec, WindowFnKind};
 mod scan;
 mod shuffle_scan;
+mod sorted_window;
 pub use csv_scan::init_csv_datasource_exec;
 pub use shuffle_scan::ShuffleScanExec;
+pub use sorted_window::{
+    sorted_window_supports_output_type, SortedWindowEnabled, SortedWindowExec, SortedWindowFunction,
+};
 
 /// Fixtures for the nested-nullability drift from
 /// <https://github.com/apache/datafusion-comet/issues/5137>, shared by the `expand` and

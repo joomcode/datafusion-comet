@@ -19,6 +19,8 @@
 
 package org.apache.comet.exec
 
+import java.sql.Timestamp
+
 import scala.util.Random
 
 import org.scalactic.source.Position
@@ -1671,6 +1673,156 @@ class CometWindowExecSuite extends CometTestBase {
           assertNoSparkWindow(valuePlan)
         }
       }
+    }
+  }
+
+  private def withTinyPartitions(f: => Unit): Unit = {
+    withTempDir { dir =>
+      val random = new Random(42)
+      val sizes = Seq.fill(700)(1 + random.nextInt(3)) ++ Seq(400) ++ Seq.fill(200)(1)
+      val positiveNaN = java.lang.Double.longBitsToDouble(0x7ff8000000000001L)
+      val negativeNaN = java.lang.Double.longBitsToDouble(0xfff8000000000002L)
+      val doubles = Seq(Some(0.0d), Some(-0.0d), Some(positiveNaN), Some(negativeNaN), None)
+      var id = 0
+      val rows = sizes.zipWithIndex.flatMap { case (size, p) =>
+        val k1 = if (p < 3) None else Some(p / 4)
+        val k2 = if (p % 4 == 0) None else Some(s"key-${p % 4}")
+        (0 until size).map { i =>
+          id += 1
+          val ts =
+            if (i == 0 && p % 5 == 0) None
+            else Some(new Timestamp(1700000000000L + i * 1000L))
+          val eventTimeMs = if (random.nextInt(6) == 0) None else Some(random.nextInt(4).toLong)
+          val v = if (random.nextInt(5) == 0) None else Some(random.nextInt(100))
+          val d = doubles((p / 7) % doubles.size)
+          (id, k1, k2, ts, eventTimeMs, v, s"payload-$id", d)
+        }
+      }
+      rows
+        .toDF("id", "k1", "k2", "effective_ts", "eventTimeMs", "v", "s", "d")
+        .repartition(3)
+        .write
+        .mode("overwrite")
+        .parquet(dir.toString)
+      spark.read.parquet(dir.toString).createOrReplaceTempView("tiny")
+      f
+    }
+  }
+
+  private def checkAllModes(query: String): Unit = {
+    for {
+      sorted <- Seq("true", "false")
+      batchSize <- Seq("3", "8192")
+    } {
+      withSQLConf(
+        CometConf.COMET_EXEC_WINDOW_SORTED_ENABLED.key -> sorted,
+        CometConf.COMET_BATCH_SIZE.key -> batchSize) {
+        val (_, plan) = checkSparkAnswerAndOperator(sql(query))
+        assert(collect(plan) { case w: CometWindowExec => w }.nonEmpty)
+        assert(collect(plan) { case w: SparkWindowExec => w }.isEmpty)
+      }
+    }
+  }
+
+  test("sorted window: LEAD of a timestamp with a far-future default over tiny partitions") {
+    withTinyPartitions {
+      checkAllModes("""
+        SELECT id, k1, k2, effective_ts,
+          lead(effective_ts, 1, TIMESTAMP'9999-12-31 23:59:59')
+            OVER (PARTITION BY k1, k2 ORDER BY effective_ts ASC NULLS FIRST
+                  ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING) AS next_ts
+        FROM tiny
+      """)
+    }
+  }
+
+  test("sorted window: ROW_NUMBER DESC NULLS LAST, alone and filtered to the first row") {
+    withTinyPartitions {
+      checkAllModes("""
+        SELECT id, k1, eventTimeMs,
+          row_number() OVER (PARTITION BY k1 ORDER BY eventTimeMs DESC NULLS LAST, id) AS rn
+        FROM tiny
+      """)
+      checkAllModes("""
+        SELECT id, k1, k2, s FROM (
+          SELECT *,
+            row_number() OVER (PARTITION BY k1, k2 ORDER BY eventTimeMs DESC NULLS LAST, id) AS rn
+          FROM tiny
+        ) WHERE rn = 1
+      """)
+    }
+  }
+
+  test("sorted window: ranking functions with ties and multi-column keys") {
+    withTinyPartitions {
+      checkAllModes("""
+        SELECT id, k1, k2, eventTimeMs,
+          row_number() OVER w AS rn,
+          rank() OVER w AS r,
+          dense_rank() OVER w AS dr
+        FROM tiny
+        WINDOW w AS (PARTITION BY k1, k2 ORDER BY eventTimeMs DESC NULLS LAST, id)
+      """)
+      checkAllModes("""
+        SELECT id, k1, eventTimeMs,
+          rank() OVER (PARTITION BY k1 ORDER BY eventTimeMs ASC NULLS FIRST) AS r,
+          dense_rank() OVER (PARTITION BY k1 ORDER BY eventTimeMs ASC NULLS FIRST) AS dr
+        FROM tiny
+      """)
+      checkAllModes("""
+        SELECT id, k1, k2, eventTimeMs,
+          rank() OVER w AS r,
+          dense_rank() OVER w AS dr
+        FROM tiny
+        WINDOW w AS (PARTITION BY k1, k2 ORDER BY eventTimeMs DESC NULLS LAST)
+      """)
+    }
+  }
+
+  test("sorted window: LEAD and LAG with offsets 1 to 3 and defaults") {
+    withTinyPartitions {
+      checkAllModes("""
+        SELECT id, k1, k2, v, s,
+          lead(v) OVER w AS lead1,
+          lead(v, 2, -1) OVER w AS lead2,
+          lead(s, 3, 'none') OVER w AS lead3,
+          lag(v) OVER w AS lag1,
+          lag(v, 2, -2) OVER w AS lag2,
+          lag(s, 3) OVER w AS lag3,
+          row_number() OVER w AS rn
+        FROM tiny
+        WINDOW w AS (PARTITION BY k1, k2 ORDER BY id)
+      """)
+    }
+  }
+
+  test("sorted window: struct, string and floating-point partition keys and nested values") {
+    withTinyPartitions {
+      checkAllModes("""
+        SELECT id, d, v,
+          row_number() OVER (PARTITION BY d ORDER BY id) AS rn_d,
+          lead(named_struct('v', v, 's', array(s, k2)))
+            OVER (PARTITION BY d ORDER BY id) AS lead_nested,
+          row_number() OVER (PARTITION BY named_struct('a', k1 % 3, 'b', k2) ORDER BY id) AS rn_s
+        FROM tiny
+      """)
+    }
+  }
+
+  test("sorted window: LEAD IGNORE NULLS and other functions keep the existing operators") {
+    withTinyPartitions {
+      checkAllModes("""
+        SELECT id, k1, v,
+          lead(v) IGNORE NULLS OVER (PARTITION BY k1 ORDER BY id) AS lead_in,
+          row_number() OVER (PARTITION BY k1 ORDER BY id) AS rn
+        FROM tiny
+      """)
+      checkAllModes("""
+        SELECT id, k1, v,
+          sum(v) OVER (PARTITION BY k1 ORDER BY id) AS running,
+          lag(v) OVER (PARTITION BY k1 ORDER BY id) AS previous
+        FROM tiny
+      """)
     }
   }
 }
