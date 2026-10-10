@@ -486,6 +486,15 @@ object CometConf extends ShimCometConf {
       .booleanConf
       .createWithDefault(true)
 
+  val COMET_EXEC_FILTER_SHORT_CIRCUIT_JVM_DISPATCH_ENABLED: ConfigEntry[Boolean] =
+    conf("spark.comet.exec.filter.shortCircuitJvmDispatch.enabled")
+      .category(CATEGORY_EXEC)
+      .doc("Whether a native filter evaluates a top-level conjunct that runs through the JVM " +
+        "codegen dispatcher only on rows where all preceding conjuncts are true, by rewriting " +
+        "`a AND b` into `CASE WHEN a THEN b END`. Applies to deterministic conditions only.")
+      .booleanConf
+      .createWithDefault(true)
+
   val COMET_SHUFFLE_NATIVE_HASH_PARTITIONING_ENABLED: ConfigEntry[Boolean] =
     conf("spark.comet.shuffle.native.partitioning.hash.enabled")
       .withAlternative("spark.comet.native.shuffle.partitioning.hash.enabled")
