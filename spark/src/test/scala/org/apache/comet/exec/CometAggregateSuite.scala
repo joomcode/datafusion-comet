@@ -3525,7 +3525,7 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
     }
   }
 
-  test("the ordering sort of a converted partial sort aggregate is dropped under its shuffle") {
+  test("a converted sort aggregate gets no sort without a consumer that needs its ordering") {
     withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
       withStrings {
         val (_, cometPlan) = checkSparkAnswer(sql("SELECT _1, max(_2) FROM str_tbl GROUP BY _1"))
@@ -3533,6 +3533,14 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
         assert(shuffles.nonEmpty, s"plan:\n$cometPlan")
         assert(shuffles.forall(s => !s.child.isInstanceOf[CometSortExec]), s"plan:\n$cometPlan")
         assert(nativeAggregates(cometPlan).size == 2, s"plan:\n$cometPlan")
+        assert(
+          collect(cometPlan) {
+            case s: CometSortExec
+                if s.getTagValue(CometExecRule.SORT_AGGREGATE_ORDER_TAG).isDefined =>
+              s
+          }.isEmpty,
+          s"plan:\n$cometPlan")
+        assert(collect(cometPlan) { case s: CometSortExec => s }.isEmpty, s"plan:\n$cometPlan")
       }
     }
   }

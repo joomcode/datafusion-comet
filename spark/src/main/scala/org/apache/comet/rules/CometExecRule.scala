@@ -22,7 +22,7 @@ package org.apache.comet.rules
 import scala.collection.mutable.ListBuffer
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Divide, DoubleLiteral, EqualNullSafe, EqualTo, Expression, FloatLiteral, GreaterThan, GreaterThanOrEqual, KnownFloatingPointNormalized, LessThan, LessThanOrEqual, NamedExpression, Remainder}
+import org.apache.spark.sql.catalyst.expressions.{Divide, DoubleLiteral, EqualNullSafe, EqualTo, Expression, FloatLiteral, GreaterThan, GreaterThanOrEqual, KnownFloatingPointNormalized, LessThan, LessThanOrEqual, NamedExpression, Remainder, SortOrder}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateFunction, AggregateMode, Average, Count, Final, Max, Min, Partial, PartialMerge, Sum}
 import org.apache.spark.sql.catalyst.optimizer.NormalizeNaNAndZero
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -150,10 +150,13 @@ object CometExecRule {
    */
   val ENGINE_CHOICE_SPARK_TAG: TreeNodeTag[Unit] = TreeNodeTag[Unit]("comet.engineChoiceSpark")
 
+  /** Tag set on a native hash aggregate converted from a `SortAggregateExec`. */
+  val CONVERTED_SORT_AGGREGATE_TAG: TreeNodeTag[Unit] =
+    TreeNodeTag[Unit]("comet.convertedSortAggregate")
+
   /**
-   * Tag set on the native sort that restores the output ordering of a `SortAggregateExec`
-   * converted to a native hash aggregate. A shuffle directly above it discards the ordering, so
-   * the sort is dropped there.
+   * Tag set on the sort inserted above a converted `SortAggregateExec` for a consumer that
+   * requires the ordering the sort aggregate provided.
    */
   val SORT_AGGREGATE_ORDER_TAG: TreeNodeTag[Unit] =
     TreeNodeTag[Unit]("comet.sortAggregateOrder")
@@ -655,7 +658,7 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
     }
 
     plan.transformUp { case op =>
-      val converted = convertNode(dropSortAggregateOrderUnderShuffle(op))
+      val converted = convertNode(restoreSortAggregateOrdering(op))
       // Replace SubqueryBroadcastExec with CometSubqueryBroadcastExec in DPP expressions
       // when the broadcast child has a Comet plan underneath. This enables exchange reuse
       // between the DPP subquery and the join's CometBroadcastExchangeExec because both
@@ -939,15 +942,39 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
     }
   }
 
-  private def dropSortAggregateOrderUnderShuffle(op: SparkPlan): SparkPlan = op match {
-    case shuffle: ShuffleExchangeLike =>
-      shuffle.child match {
-        case sort: CometSortExec
-            if sort.getTagValue(CometExecRule.SORT_AGGREGATE_ORDER_TAG).isDefined =>
-          shuffle.withNewChildren(Seq(sort.child))
-        case _ => shuffle
+  private def leadsToConvertedSortAggregate(plan: SparkPlan): Boolean =
+    plan.getTagValue(CometExecRule.CONVERTED_SORT_AGGREGATE_TAG).isDefined ||
+      (plan.children.size == 1 && leadsToConvertedSortAggregate(plan.children.head))
+
+  /**
+   * Spark's EnsureRequirements left out the sort a consumer needs when a `SortAggregateExec`
+   * below it already provided the ordering. Once that aggregate is a native hash aggregate, the
+   * sort goes back on exactly the edges whose requirement is no longer met, before the consumer
+   * itself is converted.
+   */
+  private def restoreSortAggregateOrdering(op: SparkPlan): SparkPlan = {
+    if (op.isInstanceOf[CometPlan]) return op
+    val required = op.requiredChildOrdering
+    if (required.length != op.children.length || required.forall(_.isEmpty)) return op
+    var changed = false
+    val children = op.children.zip(required).map { case (child, ordering) =>
+      if (ordering.nonEmpty && leadsToConvertedSortAggregate(child) &&
+        !SortOrder.orderingSatisfies(child.outputOrdering, ordering)) {
+        changed = true
+        val sort = SortExec(ordering, global = false, child)
+        child.logicalLink.foreach(sort.setLogicalLink)
+        val restored = if (child.isInstanceOf[CometNativeExec]) {
+          tryConvertToComet(sort, CometSortExec).getOrElse(sort)
+        } else {
+          sort
+        }
+        restored.setTagValue(CometExecRule.SORT_AGGREGATE_ORDER_TAG, ())
+        restored
+      } else {
+        child
       }
-    case other => other
+    }
+    if (changed) op.withNewChildren(children) else op
   }
 
   private def orderInsensitive(fn: AggregateFunction): Boolean = fn match {
@@ -963,7 +990,8 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
    * later stays correct. The sort by the grouping keys directly below the aggregate is dropped,
    * as rows within a group were in no particular order anyway. Without such a sort the input
    * order could carry meaning, so only aggregates that do not depend on it are converted. A
-   * native sort above restores the ordering consumers may rely on.
+   * consumer that relied on the ordering of the sort aggregate gets a sort back, see
+   * [[restoreSortAggregateOrdering]].
    */
   private def convertSortAggregate(agg: SortAggregateExec): Option[SparkPlan] = {
     val required = agg.requiredChildOrdering.headOption.getOrElse(Nil)
@@ -1002,19 +1030,8 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
       agg.resultExpressions,
       input)
     hashAgg.copyTagsFrom(agg)
-    val converted = tryConvertToComet(hashAgg, CometObjectHashAggregateExec).flatMap { native =>
-      val ordering = agg.outputOrdering
-      if (ordering.isEmpty) {
-        Some(native)
-      } else {
-        val sort = SortExec(ordering, global = false, native)
-        agg.logicalLink.foreach(sort.setLogicalLink)
-        tryConvertToComet(sort, CometSortExec).map { nativeSort =>
-          nativeSort.setTagValue(CometExecRule.SORT_AGGREGATE_ORDER_TAG, ())
-          nativeSort
-        }
-      }
-    }
+    val converted = tryConvertToComet(hashAgg, CometObjectHashAggregateExec)
+    converted.foreach(_.setTagValue(CometExecRule.CONVERTED_SORT_AGGREGATE_TAG, ()))
     if (converted.isEmpty) {
       hashAgg
         .getTagValue(CometExplainInfo.FALLBACK_REASONS)
