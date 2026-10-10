@@ -177,6 +177,7 @@ jobs:
               org.apache.comet.exec.CometFirstLastBoolAggFuzzSuite
               org.apache.comet.exec.CometExec3_4PlusSuite
               org.apache.comet.exec.CometExecSuite
+              org.apache.comet.exec.CometFilterShortCircuitSuite
               org.apache.comet.exec.CometTaskBinarySizeSuite
               org.apache.spark.sql.comet.CometNativeTaskKillSuite
               org.apache.comet.exec.CometEmptyRelationExecSuite
