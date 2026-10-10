@@ -987,11 +987,11 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
    * is not mutable, such as MIN or MAX over strings, and runs it over input sorted by the
    * grouping keys. The hash aggregate starts from an `ObjectHashAggregateExec` with the same
    * fields, which Spark runs correctly over any input order, so any operator reverted to Spark
-   * later stays correct. The sort by the grouping keys directly below the aggregate is dropped,
-   * as rows within a group were in no particular order anyway. Without such a sort the input
-   * order could carry meaning, so only aggregates that do not depend on it are converted. A
-   * consumer that relied on the ordering of the sort aggregate gets a sort back, see
-   * [[restoreSortAggregateOrdering]].
+   * later stays correct. Only aggregates whose result does not depend on the input order are
+   * converted: Spark's sort is stable, so FIRST, LAST and the like see the rows of a group in
+   * their input order, which the native hash aggregate does not guarantee. The sort by the
+   * grouping keys directly below the aggregate is then dropped. A consumer that relied on the
+   * ordering of the sort aggregate gets a sort back, see [[restoreSortAggregateOrdering]].
    */
   private def convertSortAggregate(agg: SortAggregateExec): Option[SparkPlan] = {
     val required = agg.requiredChildOrdering.headOption.getOrElse(Nil)
@@ -1008,12 +1008,10 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
       case _ => false
     }
     val input = if (sortedByKeys) agg.child.children.head else agg.child
-    if (!sortedByKeys &&
-      !agg.aggregateExpressions.forall(e => orderInsensitive(e.aggregateFunction))) {
+    if (!agg.aggregateExpressions.forall(e => orderInsensitive(e.aggregateFunction))) {
       withFallbackReason(
         agg,
-        "SortAggregate over input not sorted by its grouping keys alone may depend on the " +
-          "input order")
+        "SortAggregate with an aggregate function that depends on the input order stays in Spark")
       return None
     }
     if (!input.isInstanceOf[CometNativeExec]) {
