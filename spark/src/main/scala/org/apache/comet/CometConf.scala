@@ -237,6 +237,13 @@ object CometConf extends ShimCometConf {
     createExecEnabledConfig("sortMergeJoin", defaultValue = true)
   val COMET_EXEC_AGGREGATE_ENABLED: ConfigEntry[Boolean] =
     createExecEnabledConfig("aggregate", defaultValue = true)
+  val COMET_EXEC_SORT_AGGREGATE_ENABLED: ConfigEntry[Boolean] =
+    createExecEnabledConfig(
+      "sortAggregate",
+      defaultValue = true,
+      notes = Some(
+        "When enabled, a SortAggregate that Comet can run is converted to a native hash " +
+          "aggregate, with a native sort restoring its output ordering"))
   val COMET_EXEC_COLLECT_LIMIT_ENABLED: ConfigEntry[Boolean] =
     createExecEnabledConfig("collectLimit", defaultValue = true)
   val COMET_EXEC_COALESCE_ENABLED: ConfigEntry[Boolean] =

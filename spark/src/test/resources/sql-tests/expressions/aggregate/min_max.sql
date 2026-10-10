@@ -21,7 +21,7 @@ CREATE TABLE test_min_max(i int, d double, s string, grp string) USING parquet
 statement
 INSERT INTO test_min_max VALUES (1, 1.5, 'b', 'x'), (3, 3.5, 'a', 'x'), (2, 2.5, 'c', 'y'), (NULL, NULL, NULL, 'y'), (-1, -1.5, 'z', 'x')
 
-query expect_fallback(SortAggregate is not supported)
+query
 SELECT min(i), max(i), min(d), max(d), min(s), max(s) FROM test_min_max
 
 query

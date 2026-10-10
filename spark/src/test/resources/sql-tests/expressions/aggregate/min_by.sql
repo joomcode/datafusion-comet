@@ -17,9 +17,8 @@
 
 -- min_by(x, y) returns the value of x associated with the minimum value of y.
 --
--- The value (x) must be a fixed-length type: Spark only uses HashAggregate (the aggregate
--- operator Comet accelerates) when the aggregation buffer is mutable, so variable-length
--- value types such as string force SortAggregate and fall back to Spark.
+-- The value (x) must be a fixed-length type or a string. A string value makes Spark plan a
+-- SortAggregate, which Comet converts to a native hash aggregate.
 --
 -- Ordering values are kept unique within each group so results are deterministic (min_by is
 -- non-deterministic when several rows tie on the minimum ordering).
@@ -245,11 +244,11 @@ query
 SELECT grp, min_by(v, ord) FROM mnb_signed_zero GROUP BY grp ORDER BY grp
 
 -- ============================================================
--- Variable-length value or ordering falls back to Spark
+-- Variable-length ordering falls back to Spark
 --
--- See the equivalent section in max_by.sql for why this needs a TypedImperativeAggregate
--- alongside it: without one, Spark plans SortAggregate and Comet never sees the aggregate at all,
--- so the serde's type check would go untested.
+-- A string value runs natively: as a plain aggregate through the converted SortAggregate, and
+-- next to a TypedImperativeAggregate through ObjectHashAggregate. A string ordering stays in
+-- Spark: Arrow's row format compares raw UTF-8 bytes, while Spark compares collation sort keys.
 -- ============================================================
 
 statement
@@ -259,8 +258,31 @@ statement
 INSERT INTO mnb_varlen VALUES
   (1, 'a', 'g1'), (2, 'b', 'g1'), (3, 'c', 'g2')
 
-query expect_fallback(Unsupported value data type)
+query
 SELECT grp, min_by(s, v), percentile(v, 0.5) FROM mnb_varlen GROUP BY grp ORDER BY grp
 
 query expect_fallback(Unsupported ordering data type)
 SELECT grp, min_by(v, s), percentile(v, 0.5) FROM mnb_varlen GROUP BY grp ORDER BY grp
+
+-- ============================================================
+-- String value with an integer ordering
+-- ============================================================
+
+statement
+CREATE TABLE mnb_str(s string, ord int, grp string) USING parquet
+
+statement
+INSERT INTO mnb_str VALUES
+  ('b', 1, 'g1'), ('', 5, 'g1'), (NULL, 3, 'g1'),
+  ('é日本', 2, 'g2'), (NULL, 9, 'g2'), ('😀', 4, 'g2'),
+  ('z', NULL, 'g3'), ('y', NULL, 'g3'),
+  ('x', 6, 'g4')
+
+query
+SELECT grp, min_by(s, ord) FROM mnb_str GROUP BY grp ORDER BY grp
+
+query
+SELECT min_by(s, ord) FROM mnb_str
+
+query
+SELECT grp, min_by(s, ord), max(s), count(*) FROM mnb_str GROUP BY grp ORDER BY grp

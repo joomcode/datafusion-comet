@@ -43,6 +43,7 @@ class WideRowSortFallbackSuite extends CometTestBase {
 
   override protected def sparkConf: SparkConf =
     super.sparkConf
+      .set(CometConf.COMET_EXEC_SORT_AGGREGATE_ENABLED.key, "false")
       .set(shuffleMinLeaves, "0")
       .set(CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.key, "false")
 
