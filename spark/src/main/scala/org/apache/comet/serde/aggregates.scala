@@ -129,27 +129,28 @@ abstract class CometMaxMinBy[T <: MaxMinBy] extends CometAggregateExpressionSerd
       " Results may differ from Spark in that case.")
 
   override def getUnsupportedReasons(): Seq[String] = Seq(
-    "The value and ordering must both be fixed-length types (boolean, integral, floating-point," +
-      " decimal, date, or timestamp). A variable-length or nested type such as string, binary, or" +
-      " struct falls back to Spark.")
+    "The ordering must be a fixed-length type (boolean, integral, floating-point, decimal, date," +
+      " or timestamp). The value may also be a string with the default UTF8_BINARY collation." +
+      " Other variable-length or nested types such as binary or struct fall back to Spark.")
 
   override def getSupportLevel(expr: T): SupportLevel = {
-    // Both the value and ordering must be fixed-length types.
+    // The ordering must be a fixed-length type. The value may also be a UTF8_BINARY string: the
+    // native side only stores it as Arrow row bytes and never compares it.
     //
-    // On its own a variable-length type never reaches here: Spark only uses HashAggregate (the
-    // aggregate operator Comet accelerates) when the aggregation buffer is mutable, and the buffer
-    // holds both the running value and the running ordering, so a StringType in either position
-    // forces SortAggregate, which Comet does not convert.
+    // A string in the buffer makes Spark plan a SortAggregate, which Comet converts to a native
+    // hash aggregate (see `CometExecRule.convertSortAggregate`), or an ObjectHashAggregate when a
+    // TypedImperativeAggregate sits in the same aggregate.
     //
-    // The check is still load-bearing, because a TypedImperativeAggregate elsewhere in the same
-    // aggregate switches Spark to ObjectHashAggregate, which Comet does convert. In that shape a
-    // string ordering would otherwise be compared by Arrow's row format as raw UTF-8 bytes, while
+    // A string ordering stays in Spark: Arrow's row format would compare raw UTF-8 bytes, while
     // Spark compares collation sort keys. See the fallback cases in max_by.sql.
     //
     // The native side compares the ordering column via Arrow's row format, which supports all of
     // the fixed-length orderable types allowed below.
-    if (!AggSerde.minMaxDataTypeSupported(expr.valueExpr.dataType)) {
-      Unsupported(Some(s"Unsupported value data type: ${expr.valueExpr.dataType}"))
+    val valueType = expr.valueExpr.dataType
+    val stringValue =
+      valueType.isInstanceOf[StringType] && !AggSerde.isStringCollationType(valueType)
+    if (!stringValue && !AggSerde.minMaxDataTypeSupported(valueType)) {
+      Unsupported(Some(s"Unsupported value data type: $valueType"))
     } else if (!AggSerde.minMaxDataTypeSupported(expr.orderingExpr.dataType)) {
       Unsupported(Some(s"Unsupported ordering data type: ${expr.orderingExpr.dataType}"))
     } else {

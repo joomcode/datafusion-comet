@@ -3577,4 +3577,69 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
       }
     }
   }
+
+  private val byRows: Seq[(Integer, String, Integer)] = Seq(
+    (1, "b", 1),
+    (1, "", 5),
+    (1, null, 3),
+    (2, "\u00e9\u65e5\u672c", 2),
+    (2, null, 9),
+    (2, "\ud83d\ude00", 4),
+    (3, "z", null),
+    (3, "y", null),
+    (4, "x", 6),
+    (null, "w", 7))
+
+  for (aqe <- Seq("false", "true"); fn <- Seq("max_by", "min_by")) {
+    test(s"$fn over a string value runs natively, grouped and ungrouped (AQE=$aqe)") {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe) {
+        withParquetTable(byRows, "by_tbl") {
+          for (query <- Seq(
+              s"SELECT _1, $fn(_2, _3) FROM by_tbl GROUP BY _1",
+              s"SELECT $fn(_2, _3) FROM by_tbl",
+              s"SELECT _1, $fn(_2, _3), max(_2), count(*) FROM by_tbl GROUP BY _1",
+              s"SELECT $fn(_2, _3) FROM by_tbl WHERE _1 = 3")) {
+            val (sparkPlan, cometPlan) = checkSparkAnswer(sql(query))
+            assert(sortAggregates(sparkPlan).nonEmpty, s"$query:\n$sparkPlan")
+            assert(sortAggregates(cometPlan).isEmpty, s"$query:\n$cometPlan")
+            assert(nativeAggregates(cometPlan).nonEmpty, s"$query:\n$cometPlan")
+          }
+        }
+      }
+    }
+  }
+
+  test("max_by and min_by over a string value pick one of the values tied on the ordering") {
+    val rows = (0 until 400).map(i => (i % 4, s"v${i % 7}", if (i % 3 == 0) 10 else i % 3))
+    withSQLConf(SQLConf.SHUFFLE_PARTITIONS.key -> "3") {
+      withParquetTable(rows, "by_ties") {
+        for ((fn, tiedOrd) <- Seq("max_by" -> 10, "min_by" -> 1)) {
+          val df = sql(s"SELECT _1, $fn(_2, _3) FROM by_ties GROUP BY _1")
+          val result = df.collect().map(r => r.getInt(0) -> r.getString(1)).toMap
+          assert(nativeAggregates(df.queryExecution.executedPlan).nonEmpty)
+          val allowed = rows.filter(_._3 == tiedOrd).groupBy(_._1).map { case (k, v) =>
+            k -> v.map(_._2).toSet
+          }
+          assert(result.keySet == allowed.keySet, s"$fn: $result")
+          result.foreach { case (k, v) => assert(allowed(k).contains(v), s"$fn group $k: $v") }
+        }
+      }
+    }
+  }
+
+  test("max_by over a string value keeps a native partial with a Spark final") {
+    withSQLConf(CometConf.COMET_ENABLE_FINAL_HASH_AGGREGATE.key -> "false") {
+      withParquetTable(byRows, "by_tbl") {
+        checkSparkAnswer(sql("SELECT _1, max_by(_2, _3), min_by(_2, _3) FROM by_tbl GROUP BY _1"))
+      }
+    }
+  }
+
+  test("an ungrouped order-sensitive sort aggregate over an ordered input stays in Spark") {
+    withParquetTable(byRows, "by_tbl") {
+      val (_, cometPlan) = checkSparkAnswer(
+        sql("SELECT max_by(_2, _1), first(_2) FROM (SELECT * FROM by_tbl ORDER BY _3, _2)"))
+      assert(sortAggregates(cometPlan).nonEmpty, s"plan:\n$cometPlan")
+    }
+  }
 }

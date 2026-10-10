@@ -23,7 +23,7 @@ import scala.collection.mutable.ListBuffer
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Divide, DoubleLiteral, EqualNullSafe, EqualTo, Expression, FloatLiteral, GreaterThan, GreaterThanOrEqual, KnownFloatingPointNormalized, LessThan, LessThanOrEqual, NamedExpression, Remainder, SortOrder}
-import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateFunction, AggregateMode, Average, Count, Final, Max, Min, Partial, PartialMerge, Sum}
+import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateFunction, AggregateMode, Average, Count, Final, Max, MaxMinBy, Min, Partial, PartialMerge, Sum}
 import org.apache.spark.sql.catalyst.optimizer.NormalizeNaNAndZero
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
@@ -978,7 +978,7 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
   }
 
   private def orderInsensitive(fn: AggregateFunction): Boolean = fn match {
-    case _: Min | _: Max | _: Count | _: Sum | _: Average => true
+    case _: Min | _: Max | _: Count | _: Sum | _: Average | _: MaxMinBy => true
     case _ => false
   }
 
@@ -989,9 +989,11 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
    * fields, which Spark runs correctly over any input order, so any operator reverted to Spark
    * later stays correct. Only aggregates whose result does not depend on the input order are
    * converted: Spark's sort is stable, so FIRST, LAST and the like see the rows of a group in
-   * their input order, which the native hash aggregate does not guarantee. The sort by the
-   * grouping keys directly below the aggregate is then dropped. A consumer that relied on the
-   * ordering of the sort aggregate gets a sort back, see [[restoreSortAggregateOrdering]].
+   * their input order, which the native hash aggregate does not guarantee. MAX_BY and MIN_BY
+   * depend on it only among rows tied on the ordering, where they are non-deterministic in Spark
+   * too and already differ from it on the native hash aggregate path. The sort by the grouping
+   * keys directly below the aggregate is then dropped. A consumer that relied on the ordering of
+   * the sort aggregate gets a sort back, see [[restoreSortAggregateOrdering]].
    */
   private def convertSortAggregate(agg: SortAggregateExec): Option[SparkPlan] = {
     val required = agg.requiredChildOrdering.headOption.getOrElse(Nil)
