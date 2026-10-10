@@ -183,7 +183,7 @@ SELECT first(val) IGNORE NULLS FROM test_single_null
 -- first IGNORE NULLS: multiple data types
 -- ============================================================
 
-query expect_fallback(SortAggregate is not supported)
+query
 SELECT grp,
   first(i_val) IGNORE NULLS,
   first(l_val) IGNORE NULLS,
@@ -327,7 +327,7 @@ SELECT last(val) IGNORE NULLS FROM test_single_null
 -- last IGNORE NULLS: multiple data types
 -- ============================================================
 
-query expect_fallback(SortAggregate is not supported)
+query
 SELECT grp,
   last(i_val) IGNORE NULLS,
   last(l_val) IGNORE NULLS,

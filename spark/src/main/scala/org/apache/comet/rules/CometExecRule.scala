@@ -23,7 +23,7 @@ import scala.collection.mutable.ListBuffer
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Divide, DoubleLiteral, EqualNullSafe, EqualTo, Expression, FloatLiteral, GreaterThan, GreaterThanOrEqual, KnownFloatingPointNormalized, LessThan, LessThanOrEqual, NamedExpression, Remainder}
-import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateMode, Final, Partial, PartialMerge}
+import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateFunction, AggregateMode, Average, Count, Final, Max, Min, Partial, PartialMerge, Sum}
 import org.apache.spark.sql.catalyst.optimizer.NormalizeNaNAndZero
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
@@ -35,7 +35,7 @@ import org.apache.spark.sql.comet.shims.ShimCometEmptyRelation
 import org.apache.spark.sql.comet.util.Utils
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AQEShuffleReadExec, BroadcastQueryStageExec, LogicalQueryStage, QueryStageExec, ShuffleQueryStageExec}
-import org.apache.spark.sql.execution.aggregate.{BaseAggregateExec, HashAggregateExec, ObjectHashAggregateExec}
+import org.apache.spark.sql.execution.aggregate.{BaseAggregateExec, HashAggregateExec, ObjectHashAggregateExec, SortAggregateExec}
 import org.apache.spark.sql.execution.columnar.InMemoryTableScanExec
 import org.apache.spark.sql.execution.command.{DataWritingCommandExec, ExecutedCommandExec}
 import org.apache.spark.sql.execution.datasources.{InsertIntoHadoopFsRelationCommand, WriteFilesExec}
@@ -149,6 +149,14 @@ object CometExecRule {
    * re-optimizes, including the operators it carries over from the previous plan.
    */
   val ENGINE_CHOICE_SPARK_TAG: TreeNodeTag[Unit] = TreeNodeTag[Unit]("comet.engineChoiceSpark")
+
+  /**
+   * Tag set on the native sort that restores the output ordering of a `SortAggregateExec`
+   * converted to a native hash aggregate. A shuffle directly above it discards the ordering, so
+   * the sort is dropped there.
+   */
+  val SORT_AGGREGATE_ORDER_TAG: TreeNodeTag[Unit] =
+    TreeNodeTag[Unit]("comet.sortAggregateOrder")
 
   /**
    * Serializes the native plan of each block of adjacent native operators into its topmost
@@ -587,6 +595,9 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
         convertToComet(s, CometShuffleExchangeExec)
           .getOrElse(preserveSparkAggregateBuffers(s))
 
+      case agg: SortAggregateExec if CometConf.COMET_EXEC_SORT_AGGREGATE_ENABLED.get(conf) =>
+        convertSortAggregate(agg).getOrElse(agg)
+
       case op =>
         // if all children are native (or if this is a leaf node) then see if there is a
         // registered handler for creating a fully native plan
@@ -644,7 +655,7 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
     }
 
     plan.transformUp { case op =>
-      val converted = convertNode(op)
+      val converted = convertNode(dropSortAggregateOrderUnderShuffle(op))
       // Replace SubqueryBroadcastExec with CometSubqueryBroadcastExec in DPP expressions
       // when the broadcast child has a Comet plan underneath. This enables exchange reuse
       // between the DPP subquery and the join's CometBroadcastExchangeExec because both
@@ -926,6 +937,93 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
       // Convert native execution block by linking consecutive native operators.
       CometExecRule.convertBlocks(newPlan)
     }
+  }
+
+  private def dropSortAggregateOrderUnderShuffle(op: SparkPlan): SparkPlan = op match {
+    case shuffle: ShuffleExchangeLike =>
+      shuffle.child match {
+        case sort: CometSortExec
+            if sort.getTagValue(CometExecRule.SORT_AGGREGATE_ORDER_TAG).isDefined =>
+          shuffle.withNewChildren(Seq(sort.child))
+        case _ => shuffle
+      }
+    case other => other
+  }
+
+  private def orderInsensitive(fn: AggregateFunction): Boolean = fn match {
+    case _: Min | _: Max | _: Count | _: Sum | _: Average => true
+    case _ => false
+  }
+
+  /**
+   * A `SortAggregateExec` as a native hash aggregate. Spark plans one when an aggregation buffer
+   * is not mutable, such as MIN or MAX over strings, and runs it over input sorted by the
+   * grouping keys. The hash aggregate starts from an `ObjectHashAggregateExec` with the same
+   * fields, which Spark runs correctly over any input order, so any operator reverted to Spark
+   * later stays correct. The sort by the grouping keys directly below the aggregate is dropped,
+   * as rows within a group were in no particular order anyway. Without such a sort the input
+   * order could carry meaning, so only aggregates that do not depend on it are converted. A
+   * native sort above restores the ordering consumers may rely on.
+   */
+  private def convertSortAggregate(agg: SortAggregateExec): Option[SparkPlan] = {
+    val required = agg.requiredChildOrdering.headOption.getOrElse(Nil)
+    val sortedByKeys = agg.child match {
+      case sort: CometSortExec =>
+        sort.sortOrder.length == required.length &&
+        sort.sortOrder.zip(required).forall { case (a, b) =>
+          a.semanticEquals(b)
+        } &&
+        (sort.originalPlan match {
+          case s: SortExec => !s.global
+          case _ => false
+        })
+      case _ => false
+    }
+    val input = if (sortedByKeys) agg.child.children.head else agg.child
+    if (!sortedByKeys &&
+      !agg.aggregateExpressions.forall(e => orderInsensitive(e.aggregateFunction))) {
+      withFallbackReason(
+        agg,
+        "SortAggregate over input not sorted by its grouping keys alone may depend on the " +
+          "input order")
+      return None
+    }
+    if (!input.isInstanceOf[CometNativeExec]) {
+      return None
+    }
+    val hashAgg = ObjectHashAggregateExec(
+      agg.requiredChildDistributionExpressions,
+      agg.isStreaming,
+      agg.numShufflePartitions,
+      agg.groupingExpressions,
+      agg.aggregateExpressions,
+      agg.aggregateAttributes,
+      agg.initialInputBufferOffset,
+      agg.resultExpressions,
+      input)
+    hashAgg.copyTagsFrom(agg)
+    val converted = tryConvertToComet(hashAgg, CometObjectHashAggregateExec).flatMap { native =>
+      val ordering = agg.outputOrdering
+      if (ordering.isEmpty) {
+        Some(native)
+      } else {
+        val sort = SortExec(ordering, global = false, native)
+        agg.logicalLink.foreach(sort.setLogicalLink)
+        tryConvertToComet(sort, CometSortExec).map { nativeSort =>
+          nativeSort.setTagValue(CometExecRule.SORT_AGGREGATE_ORDER_TAG, ())
+          nativeSort
+        }
+      }
+    }
+    if (converted.isEmpty) {
+      hashAgg
+        .getTagValue(CometExplainInfo.FALLBACK_REASONS)
+        .foreach(reasons => withFallbackReasons(agg, reasons))
+      if (!hasFallbackReason(agg)) {
+        withFallbackReason(agg, "SortAggregate could not be converted to a native hash aggregate")
+      }
+    }
+    converted
   }
 
   /** Convert a Spark plan to a Comet plan using the specified serde handler */

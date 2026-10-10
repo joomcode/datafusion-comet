@@ -1395,7 +1395,7 @@ object CometMode extends CometAggregateExpressionSerde[Mode] with CometTypeShim 
   }
 }
 
-object AggSerde {
+object AggSerde extends CometTypeShim {
   import org.apache.spark.sql.types._
 
   def minMaxDataTypeSupported(dt: DataType): Boolean = {
@@ -1436,7 +1436,13 @@ object AggSerde {
 
   /** Shared support level for `Min` / `Max` based on the result data type. */
   def minMaxSupportLevel(dt: DataType): SupportLevel = {
-    if (!minMaxDataTypeSupported(dt)) {
+    if (dt.isInstanceOf[StringType]) {
+      if (isStringCollationType(dt)) {
+        Unsupported(Some(s"Unsupported collated string type: $dt"))
+      } else {
+        Compatible()
+      }
+    } else if (!minMaxDataTypeSupported(dt)) {
       Unsupported(Some(s"Unsupported data type: $dt"))
     } else if ((dt == FloatType || dt == DoubleType) &&
       COMET_EXEC_STRICT_FLOATING_POINT.get()) {
