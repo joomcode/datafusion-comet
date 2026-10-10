@@ -53,13 +53,14 @@ import org.apache.spark.util.SerializableConfiguration
 import org.apache.spark.util.io.ChunkedByteBuffer
 
 import com.google.common.base.Objects
-import com.google.protobuf.CodedOutputStream
+import com.google.protobuf.{CodedOutputStream, Message}
 
 import org.apache.comet.{CometConf, CometExecIterator, CometRuntimeException, ConfigEntry, ContribServices}
 import org.apache.comet.CometSparkSessionExtensions.{isCometShuffleEnabled, isSpark35Plus, withFallbackReason}
 import org.apache.comet.parquet.CometParquetUtils
 import org.apache.comet.rules.CometExecRule
-import org.apache.comet.serde.{CometOperatorSerde, Compatible, OperatorOuterClass, QueryContextInterner, SupportLevel, Unsupported}
+import org.apache.comet.serde.{CometOperatorSerde, Compatible, ExprOuterClass, OperatorOuterClass, QueryContextInterner, SupportLevel, Unsupported}
+import org.apache.comet.serde.ExprOuterClass.Expr
 import org.apache.comet.serde.OperatorOuterClass.{AggregateMode => CometAggregateMode, Operator}
 import org.apache.comet.serde.QueryPlanSerde
 import org.apache.comet.serde.QueryPlanSerde.{aggExprToProto, exprToProto, isStringCollationType, supportedSortType}
@@ -1428,13 +1429,88 @@ object CometFilterExec extends CometOperatorSerde[FilterExec] {
     val cond = exprToProto(op.condition, op.child.output)
 
     if (cond.isDefined && childOp.nonEmpty) {
+      val predicate =
+        if (CometConf.COMET_EXEC_FILTER_SHORT_CIRCUIT_JVM_DISPATCH_ENABLED.get() &&
+          op.condition.deterministic) {
+          shortCircuitJvmDispatch(cond.get)
+        } else {
+          cond.get
+        }
       val filterBuilder = OperatorOuterClass.Filter
         .newBuilder()
-        .setPredicate(cond.get)
+        .setPredicate(predicate)
       Some(builder.setFilter(filterBuilder).build())
     } else {
       None
     }
+  }
+
+  def shortCircuitJvmDispatch(predicate: Expr): Expr = {
+    val conjuncts = flattenAnd(predicate)
+    val expensive = conjuncts.map(containsJvmScalarUdf)
+    if (!expensive.drop(1).contains(true)) {
+      predicate
+    } else {
+      val segments = ArrayBuffer(ArrayBuffer(conjuncts.head))
+      conjuncts.zip(expensive).tail.foreach { case (conjunct, isExpensive) =>
+        if (isExpensive) segments += ArrayBuffer(conjunct) else segments.last += conjunct
+      }
+      segments.tail.foldLeft(balancedAnd(segments.head.toIndexedSeq)) { (guard, segment) =>
+        Expr
+          .newBuilder()
+          .setCaseWhen(
+            ExprOuterClass.CaseWhen
+              .newBuilder()
+              .addWhen(guard)
+              .addThen(balancedAnd(segment.toIndexedSeq)))
+          .build()
+      }
+    }
+  }
+
+  private def flattenAnd(predicate: Expr): Seq[Expr] = {
+    val leaves = ArrayBuffer.empty[Expr]
+    var stack: List[Expr] = predicate :: Nil
+    while (stack.nonEmpty) {
+      val current = stack.head
+      stack = stack.tail
+      if (current.hasAnd) {
+        stack = current.getAnd.getLeft :: current.getAnd.getRight :: stack
+      } else {
+        leaves += current
+      }
+    }
+    leaves.toSeq
+  }
+
+  private def balancedAnd(conjuncts: IndexedSeq[Expr]): Expr = {
+    if (conjuncts.length == 1) {
+      conjuncts.head
+    } else {
+      val mid = conjuncts.length / 2
+      Expr
+        .newBuilder()
+        .setAnd(
+          ExprOuterClass.BinaryExpr
+            .newBuilder()
+            .setLeft(balancedAnd(conjuncts.slice(0, mid)))
+            .setRight(balancedAnd(conjuncts.slice(mid, conjuncts.length))))
+        .build()
+    }
+  }
+
+  private def containsJvmScalarUdf(message: Message): Boolean = message match {
+    case e: Expr if e.hasJvmScalarUdf => true
+    case _ =>
+      message.getAllFields.values.asScala.exists {
+        case child: Message => containsJvmScalarUdf(child)
+        case children: java.util.List[_] =>
+          children.asScala.exists {
+            case child: Message => containsJvmScalarUdf(child)
+            case _ => false
+          }
+        case _ => false
+      }
   }
 
   override def createExec(nativeOp: Operator, op: FilterExec): CometNativeExec = {

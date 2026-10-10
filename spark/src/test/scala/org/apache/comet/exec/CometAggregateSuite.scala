@@ -31,11 +31,11 @@ import org.apache.spark.sql.catalyst.expressions.Cast
 import org.apache.spark.sql.catalyst.expressions.aggregate.{Final, Partial, PartialMerge}
 import org.apache.spark.sql.catalyst.optimizer.EliminateSorts
 import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, RangePartitioning}
-import org.apache.spark.sql.comet.{CometFilterExec, CometHashAggregateExec, CometNativeExec, CometProjectExec}
+import org.apache.spark.sql.comet.{CometFilterExec, CometHashAggregateExec, CometNativeExec, CometProjectExec, CometSortExec, CometSortMergeJoinExec}
 import org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec
-import org.apache.spark.sql.execution.SQLExecution
+import org.apache.spark.sql.execution.{SparkPlan, SQLExecution}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AdaptiveSparkPlanHelper, ShuffleQueryStageExec}
-import org.apache.spark.sql.execution.aggregate.{BaseAggregateExec, ObjectHashAggregateExec}
+import org.apache.spark.sql.execution.aggregate.{BaseAggregateExec, ObjectHashAggregateExec, SortAggregateExec}
 import org.apache.spark.sql.execution.exchange.{ReusedExchangeExec, ShuffleExchangeExec}
 import org.apache.spark.sql.functions.{avg, col, count_distinct, expr, sum}
 import org.apache.spark.sql.internal.SQLConf
@@ -3448,4 +3448,198 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
     }
   }
 
+  private val stringRows: Seq[(Integer, String)] = Seq(
+    (1, "b"),
+    (1, ""),
+    (1, null),
+    (1, "a"),
+    (2, null),
+    (2, null),
+    (3, "\u00e9t\u00e9"),
+    (3, "ete"),
+    (3, "\u65e5\u672c"),
+    (4, "\uff61"),
+    (4, "\ud83d\ude00"),
+    (4, "z"),
+    (5, ""),
+    (null, "x"),
+    (null, "\u00ff"))
+
+  private def withStrings(f: => Unit): Unit =
+    withParquetTable(stringRows, "str_tbl")(f)
+
+  private def sortAggregates(plan: SparkPlan): Seq[SortAggregateExec] =
+    collect(plan) { case a: SortAggregateExec => a }
+
+  private def nativeAggregates(plan: SparkPlan): Seq[CometHashAggregateExec] =
+    collect(plan) { case a: CometHashAggregateExec => a }
+
+  for (aqe <- Seq("false", "true")) {
+    test(s"min and max over strings run natively, grouped and ungrouped (AQE=$aqe)") {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe) {
+        withStrings {
+          for (query <- Seq(
+              "SELECT min(_2), max(_2), count(_2) FROM str_tbl",
+              "SELECT _1, min(_2), max(_2) FROM str_tbl GROUP BY _1",
+              "SELECT _1, max(_2) FROM str_tbl WHERE _1 = 2 GROUP BY _1",
+              "SELECT max(_2) FROM str_tbl WHERE _1 > 100",
+              "SELECT _1, min(_2), sum(_1) FROM str_tbl GROUP BY _1")) {
+            val (sparkPlan, cometPlan) = checkSparkAnswer(sql(query))
+            assert(sortAggregates(sparkPlan).nonEmpty, s"$query:\n$sparkPlan")
+            assert(sortAggregates(cometPlan).isEmpty, s"$query:\n$cometPlan")
+            assert(nativeAggregates(cometPlan).nonEmpty, s"$query:\n$cometPlan")
+          }
+        }
+      }
+    }
+  }
+
+  test("min and max over strings compare UTF-8 bytes as Spark does") {
+    withStrings {
+      checkSparkAnswerAndOperator(sql("SELECT min(_2), max(_2) FROM str_tbl WHERE _1 = 4"))
+      checkSparkAnswerAndOperator(sql("SELECT _1, min(_2), max(_2) FROM str_tbl GROUP BY _1"))
+    }
+  }
+
+  test("a converted sort aggregate keeps the ordering a sort-merge join relies on") {
+    withSQLConf(
+      SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+      SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+      withStrings {
+        withParquetTable((0 until 50).map(i => (i % 6, s"v$i")), "str_right") {
+          val query =
+            """SELECT a._1, a.m, r._2 FROM (SELECT _1, max(_2) AS m FROM str_tbl GROUP BY _1) a
+              |JOIN str_right r ON a._1 = r._1""".stripMargin
+          val (_, cometPlan) = checkSparkAnswer(sql(query))
+          assert(sortAggregates(cometPlan).isEmpty, s"plan:\n$cometPlan")
+          val join = collect(cometPlan) { case j: CometSortMergeJoinExec => j }
+          assert(join.size == 1, s"plan:\n$cometPlan")
+          val orderSorts = collect(cometPlan) {
+            case s: CometSortExec
+                if s.getTagValue(CometExecRule.SORT_AGGREGATE_ORDER_TAG).isDefined =>
+              s
+          }
+          assert(orderSorts.nonEmpty, s"plan:\n$cometPlan")
+        }
+      }
+    }
+  }
+
+  test("a converted sort aggregate gets no sort without a consumer that needs its ordering") {
+    withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+      withStrings {
+        val (_, cometPlan) = checkSparkAnswer(sql("SELECT _1, max(_2) FROM str_tbl GROUP BY _1"))
+        val shuffles = collect(cometPlan) { case s: CometShuffleExchangeExec => s }
+        assert(shuffles.nonEmpty, s"plan:\n$cometPlan")
+        assert(shuffles.forall(s => !s.child.isInstanceOf[CometSortExec]), s"plan:\n$cometPlan")
+        assert(nativeAggregates(cometPlan).size == 2, s"plan:\n$cometPlan")
+        assert(
+          collect(cometPlan) {
+            case s: CometSortExec
+                if s.getTagValue(CometExecRule.SORT_AGGREGATE_ORDER_TAG).isDefined =>
+              s
+          }.isEmpty,
+          s"plan:\n$cometPlan")
+        assert(collect(cometPlan) { case s: CometSortExec => s }.isEmpty, s"plan:\n$cometPlan")
+      }
+    }
+  }
+
+  test("a sort aggregate Comet cannot run natively stays in Spark") {
+    withStrings {
+      val (_, cometPlan) =
+        checkSparkAnswer(sql("SELECT _1, max_by(_2, _2) FROM str_tbl GROUP BY _1"))
+      assert(sortAggregates(cometPlan).nonEmpty, s"plan:\n$cometPlan")
+    }
+  }
+
+  test("an order-sensitive sort aggregate over input sorted beyond its keys stays in Spark") {
+    withStrings {
+      val (_, cometPlan) = checkSparkAnswer(
+        sql("SELECT _1, first(_2) FROM (SELECT * FROM str_tbl DISTRIBUTE BY _1 SORT BY _1, _2) " +
+          "GROUP BY _1"))
+      assert(sortAggregates(cometPlan).nonEmpty, s"plan:\n$cometPlan")
+    }
+  }
+
+  test("a converted sort aggregate reverted by the cost-based choice runs as an object hash") {
+    withSQLConf(
+      CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.key -> "true",
+      CometConf.COMET_EXEC_COST_BASED_ENGINES_COST_TABLE.key -> "agg.flat.comet=1000000,0,0",
+      SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+      withStrings {
+        val (_, cometPlan) =
+          checkSparkAnswer(sql("SELECT _1, min(_2), max(_2) FROM str_tbl GROUP BY _1"))
+        assert(sortAggregates(cometPlan).isEmpty, s"plan:\n$cometPlan")
+        assert(
+          collect(cometPlan) { case a: ObjectHashAggregateExec => a }.nonEmpty,
+          s"plan:\n$cometPlan")
+      }
+    }
+  }
+
+  private val byRows: Seq[(Integer, String, Integer)] = Seq(
+    (1, "b", 1),
+    (1, "", 5),
+    (1, null, 3),
+    (2, "\u00e9\u65e5\u672c", 2),
+    (2, null, 9),
+    (2, "\ud83d\ude00", 4),
+    (3, "z", null),
+    (3, "y", null),
+    (4, "x", 6),
+    (null, "w", 7))
+
+  for (aqe <- Seq("false", "true"); fn <- Seq("max_by", "min_by")) {
+    test(s"$fn over a string value runs natively, grouped and ungrouped (AQE=$aqe)") {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe) {
+        withParquetTable(byRows, "by_tbl") {
+          for (query <- Seq(
+              s"SELECT _1, $fn(_2, _3) FROM by_tbl GROUP BY _1",
+              s"SELECT $fn(_2, _3) FROM by_tbl",
+              s"SELECT _1, $fn(_2, _3), max(_2), count(*) FROM by_tbl GROUP BY _1",
+              s"SELECT $fn(_2, _3) FROM by_tbl WHERE _1 = 3")) {
+            val (sparkPlan, cometPlan) = checkSparkAnswer(sql(query))
+            assert(sortAggregates(sparkPlan).nonEmpty, s"$query:\n$sparkPlan")
+            assert(sortAggregates(cometPlan).isEmpty, s"$query:\n$cometPlan")
+            assert(nativeAggregates(cometPlan).nonEmpty, s"$query:\n$cometPlan")
+          }
+        }
+      }
+    }
+  }
+
+  test("max_by and min_by over a string value pick one of the values tied on the ordering") {
+    val rows = (0 until 400).map(i => (i % 4, s"v${i % 7}", if (i % 3 == 0) 10 else i % 3))
+    withSQLConf(SQLConf.SHUFFLE_PARTITIONS.key -> "3") {
+      withParquetTable(rows, "by_ties") {
+        for ((fn, tiedOrd) <- Seq("max_by" -> 10, "min_by" -> 1)) {
+          val df = sql(s"SELECT _1, $fn(_2, _3) FROM by_ties GROUP BY _1")
+          val result = df.collect().map(r => r.getInt(0) -> r.getString(1)).toMap
+          assert(nativeAggregates(df.queryExecution.executedPlan).nonEmpty)
+          val allowed = rows.filter(_._3 == tiedOrd).groupBy(_._1).map { case (k, v) =>
+            k -> v.map(_._2).toSet
+          }
+          assert(result.keySet == allowed.keySet, s"$fn: $result")
+          result.foreach { case (k, v) => assert(allowed(k).contains(v), s"$fn group $k: $v") }
+        }
+      }
+    }
+  }
+
+  test("max_by over a string value keeps a native partial with a Spark final") {
+    withSQLConf(CometConf.COMET_ENABLE_FINAL_HASH_AGGREGATE.key -> "false") {
+      withParquetTable(byRows, "by_tbl") {
+        checkSparkAnswer(sql("SELECT _1, max_by(_2, _3), min_by(_2, _3) FROM by_tbl GROUP BY _1"))
+      }
+    }
+  }
+
+  test("an ungrouped order-sensitive sort aggregate over an ordered input stays in Spark") {
+    withParquetTable(byRows, "by_tbl") {
+      val (_, cometPlan) = checkSparkAnswer(
+        sql("SELECT max_by(_2, _1), first(_2) FROM (SELECT * FROM by_tbl ORDER BY _3, _2)"))
+      assert(sortAggregates(cometPlan).nonEmpty, s"plan:\n$cometPlan")
+    }
+  }
 }

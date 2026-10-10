@@ -136,6 +136,41 @@ class CometExecSuite extends CometTestBase {
     }
   }
 
+  test("a native sort spills before output only when the JVM reads its output") {
+    def sortSpills(plan: SparkPlan): Seq[Long] =
+      collect(plan) { case s: CometSortExec => s.metrics("spill_count").value }
+    withSQLConf(
+      CometConf.COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD.key -> "1",
+      CometConf.COMET_EXEC_WINDOW_ENABLED.key -> "true",
+      SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+      SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+      withParquetTable((0 until 20000).map(i => (i % 37, s"v${i * 7919 % 20000}", i)), "a") {
+        withParquetTable((0 until 5000).map(i => (i % 37, s"w$i")), "b") {
+          val (_, jvmRead) = checkSparkAnswer(sql("SELECT _1, _2, _3 FROM a ORDER BY _2, _3"))
+          assert(sortSpills(jvmRead).nonEmpty)
+          assert(sortSpills(jvmRead).forall(_ > 0), jvmRead)
+
+          val (_, filtered) =
+            checkSparkAnswer(sql("SELECT _2, _3 + 1 FROM a WHERE _1 > 3 ORDER BY _2, _3"))
+          assert(sortSpills(filtered).nonEmpty)
+          assert(sortSpills(filtered).forall(_ > 0), filtered)
+
+          val (_, windowRead) = checkSparkAnswer(
+            sql("SELECT _1, _2, row_number() OVER (PARTITION BY _1 ORDER BY _2, _3) FROM a"))
+          assert(collect(windowRead) { case w: CometWindowExec => w }.nonEmpty, windowRead)
+          assert(sortSpills(windowRead).nonEmpty)
+          assert(sortSpills(windowRead).forall(_ == 0), windowRead)
+
+          val (_, joinRead) = checkSparkAnswer(
+            sql("SELECT a._1, a._2, b._2 FROM a JOIN b ON a._1 = b._1 AND a._3 < 300"))
+          assert(collect(joinRead) { case j: CometSortMergeJoinExec => j }.nonEmpty, joinRead)
+          assert(sortSpills(joinRead).nonEmpty)
+          assert(sortSpills(joinRead).forall(_ == 0), joinRead)
+        }
+      }
+    }
+  }
+
   test("sample without replacement") {
     withParquetTable((0 until 1000).map(i => (i, i + 1)), "tbl") {
       val df = sql("SELECT * FROM tbl").sample(withReplacement = false, fraction = 0.3, seed = 42)

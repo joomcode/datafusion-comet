@@ -314,6 +314,29 @@ pub struct PhysicalPlanner {
     /// Task-owned destination for remote shuffle blocks, registered on the driving Spark task
     /// thread before native planning. Only explicit RSS destinations may use it.
     shuffle_partition_pusher: Option<Arc<dyn ShufflePartitionPusher>>,
+    jvm_output_sorts: std::collections::HashSet<u32>,
+}
+
+pub(crate) fn jvm_output_sorts(root: &Operator) -> std::collections::HashSet<u32> {
+    let mut sorts = std::collections::HashSet::new();
+    let mut pending = vec![root];
+    while let Some(op) = pending.pop() {
+        match op.op_struct.as_ref() {
+            Some(OpStruct::Sort(_)) => {
+                sorts.insert(op.plan_id);
+            }
+            Some(
+                OpStruct::Projection(_)
+                | OpStruct::Filter(_)
+                | OpStruct::Limit(_)
+                | OpStruct::Sample(_)
+                | OpStruct::Expand(_)
+                | OpStruct::Explode(_),
+            ) => pending.extend(op.children.iter()),
+            _ => {}
+        }
+    }
+    sorts
 }
 
 impl Default for PhysicalPlanner {
@@ -333,12 +356,18 @@ impl PhysicalPlanner {
             task_context: None,
             class_loader: None,
             shuffle_partition_pusher: None,
+            jvm_output_sorts: std::collections::HashSet::new(),
         }
     }
 
     /// Load the SQL text pool from the root operator of the plan about to be planned. Must be
     /// called with the *root* operator: the JVM only populates the pool there, and
     /// `QueryContext.sql_text_idx` values are indices into it.
+    pub fn with_jvm_output_sorts(mut self, root: &Operator) -> Self {
+        self.jvm_output_sorts = jvm_output_sorts(root);
+        self
+    }
+
     pub fn with_sql_text_pool(mut self, root: &Operator) -> Self {
         self.sql_text_pool = root
             .sql_text_pool
@@ -1783,7 +1812,8 @@ impl PhysicalPlanner {
                         LexOrdering::new(exprs?).unwrap(),
                         Arc::clone(&child.native_plan),
                     )
-                    .with_fetch(fetch),
+                    .with_fetch(fetch)
+                    .with_spill_before_output(self.jvm_output_sorts.contains(&spark_plan.plan_id)),
                 );
 
                 if let Some(skip) = sort.skip.filter(|&n| n > 0).map(|n| n as usize) {
@@ -5391,7 +5421,7 @@ mod tests {
 
     use crate::execution::operators::{ExecutionError, PartitionedRankLimitExec, WindowFnKind};
     use crate::execution::planner::{
-        convert_spark_types_to_arrow_schema, literal_to_array_ref,
+        convert_spark_types_to_arrow_schema, jvm_output_sorts, literal_to_array_ref,
         parse_file_scan_tasks_from_common,
     };
     use crate::execution::shuffle::CometPartitioning;
@@ -6753,6 +6783,138 @@ mod tests {
             query_context: None,
             expr_id: None,
         }
+    }
+
+    fn op(plan_id: u32, op_struct: OpStruct, children: Vec<Operator>) -> Operator {
+        Operator {
+            plan_id,
+            sql_text_pool: vec![],
+            children,
+            op_struct: Some(op_struct),
+        }
+    }
+
+    fn sort_op(plan_id: u32, child: Operator) -> Operator {
+        let order = spark_expression::Expr {
+            expr_struct: Some(ExprStruct::SortOrder(Box::new(
+                spark_expression::SortOrder {
+                    child: Some(Box::new(spark_expression::Expr {
+                        expr_struct: Some(Bound(spark_expression::BoundReference {
+                            index: 0,
+                            datatype: Some(create_proto_datatype()),
+                        })),
+                        query_context: None,
+                        expr_id: None,
+                    })),
+                    direction: spark_expression::SortDirection::Ascending as i32,
+                    null_ordering: spark_expression::NullOrdering::NullsFirst as i32,
+                },
+            ))),
+            query_context: None,
+            expr_id: None,
+        };
+        op(
+            plan_id,
+            OpStruct::Sort(spark_operator::Sort {
+                sort_orders: vec![order],
+                fetch: None,
+                skip: None,
+            }),
+            vec![child],
+        )
+    }
+
+    fn leaf(plan_id: u32) -> Operator {
+        let mut scan = create_scan();
+        scan.plan_id = plan_id;
+        scan
+    }
+
+    #[test]
+    fn jvm_output_sorts_are_sorts_reached_from_the_root_through_streaming_operators() {
+        use std::collections::HashSet;
+        let ids = |v: &[u32]| v.iter().copied().collect::<HashSet<u32>>();
+
+        assert_eq!(jvm_output_sorts(&sort_op(1, leaf(0))), ids(&[1]));
+
+        let projected = op(
+            3,
+            OpStruct::Projection(Default::default()),
+            vec![op(
+                2,
+                OpStruct::Filter(Default::default()),
+                vec![sort_op(1, leaf(0))],
+            )],
+        );
+        assert_eq!(jvm_output_sorts(&projected), ids(&[1]));
+
+        let nested = sort_op(
+            2,
+            op(
+                3,
+                OpStruct::Window(Default::default()),
+                vec![sort_op(1, leaf(0))],
+            ),
+        );
+        assert_eq!(jvm_output_sorts(&nested), ids(&[2]));
+
+        for consumer in [
+            OpStruct::ShuffleWriter(Default::default()),
+            OpStruct::Window(Default::default()),
+            OpStruct::HashAgg(Default::default()),
+            OpStruct::ParquetWriter(Default::default()),
+            OpStruct::WindowGroupLimit(Default::default()),
+        ] {
+            let plan = op(2, consumer, vec![sort_op(1, leaf(0))]);
+            assert!(jvm_output_sorts(&plan).is_empty(), "{plan:?}");
+        }
+
+        let join = op(
+            5,
+            OpStruct::SortMergeJoin(Default::default()),
+            vec![sort_op(1, leaf(0)), sort_op(2, leaf(3))],
+        );
+        assert!(jvm_output_sorts(&join).is_empty());
+        assert!(
+            jvm_output_sorts(&op(6, OpStruct::Projection(Default::default()), vec![join]))
+                .is_empty()
+        );
+    }
+
+    fn sort_execs(plan: &Arc<dyn ExecutionPlan>, out: &mut Vec<bool>) {
+        if let Some(sort) = plan.downcast_ref::<SortExec>() {
+            out.push(sort.spill_before_output());
+        }
+        for child in plan.children() {
+            sort_execs(child, out);
+        }
+    }
+
+    fn planned_sort_flags(root: &Operator) -> Vec<bool> {
+        let planner = PhysicalPlanner::default().with_jvm_output_sorts(root);
+        let (_, _, plan) = planner.create_plan(root, &mut vec![], 1).unwrap();
+        let mut flags = vec![];
+        sort_execs(&plan.native_plan, &mut flags);
+        flags
+    }
+
+    #[test]
+    fn planner_lets_only_a_sort_read_by_the_jvm_spill_before_output() {
+        assert_eq!(planned_sort_flags(&sort_op(1, leaf(0))), vec![true]);
+        assert_eq!(
+            planned_sort_flags(&create_filter(sort_op(1, leaf(0)), 3)),
+            vec![true]
+        );
+        assert_eq!(
+            planned_sort_flags(&sort_op(2, sort_op(1, leaf(0)))),
+            vec![true, false]
+        );
+        let sort = sort_op(1, leaf(0));
+        let planner = PhysicalPlanner::default();
+        let (_, _, plan) = planner.create_plan(&sort, &mut vec![], 1).unwrap();
+        let mut flags = vec![];
+        sort_execs(&plan.native_plan, &mut flags);
+        assert_eq!(flags, vec![false]);
     }
 
     fn create_scan() -> Operator {

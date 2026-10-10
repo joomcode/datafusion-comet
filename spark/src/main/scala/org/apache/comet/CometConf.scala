@@ -237,6 +237,13 @@ object CometConf extends ShimCometConf {
     createExecEnabledConfig("sortMergeJoin", defaultValue = true)
   val COMET_EXEC_AGGREGATE_ENABLED: ConfigEntry[Boolean] =
     createExecEnabledConfig("aggregate", defaultValue = true)
+  val COMET_EXEC_SORT_AGGREGATE_ENABLED: ConfigEntry[Boolean] =
+    createExecEnabledConfig(
+      "sortAggregate",
+      defaultValue = true,
+      notes = Some(
+        "When enabled, a SortAggregate that Comet can run is converted to a native hash " +
+          "aggregate, with a native sort restoring its output ordering"))
   val COMET_EXEC_COLLECT_LIMIT_ENABLED: ConfigEntry[Boolean] =
     createExecEnabledConfig("collectLimit", defaultValue = true)
   val COMET_EXEC_COALESCE_ENABLED: ConfigEntry[Boolean] =
@@ -483,6 +490,15 @@ object CometConf extends ShimCometConf {
         "enclosing operator. The same dispatcher backs the regex family (`rlike`, " +
         "`regexp_replace`, `split`, `regexp_extract`, `regexp_extract_all`, `regexp_instr`) so " +
         "those route through it by default as well.")
+      .booleanConf
+      .createWithDefault(true)
+
+  val COMET_EXEC_FILTER_SHORT_CIRCUIT_JVM_DISPATCH_ENABLED: ConfigEntry[Boolean] =
+    conf("spark.comet.exec.filter.shortCircuitJvmDispatch.enabled")
+      .category(CATEGORY_EXEC)
+      .doc("Whether a native filter evaluates a top-level conjunct that runs through the JVM " +
+        "codegen dispatcher only on rows where all preceding conjuncts are true, by rewriting " +
+        "`a AND b` into `CASE WHEN a THEN b END`. Applies to deterministic conditions only.")
       .booleanConf
       .createWithDefault(true)
 

@@ -65,6 +65,15 @@ case class CometColumnarToRowExec(child: SparkPlan)
 
   override def outputOrdering: Seq[SortOrder] = child.outputOrdering
 
+  override def supportCodegen: Boolean = !readsBroadcast(child)
+
+  private def readsBroadcast(plan: SparkPlan): Boolean = plan match {
+    case _: CometBroadcastExchangeExec => true
+    case stage: BroadcastQueryStageExec => readsBroadcast(stage.plan)
+    case reused: ReusedExchangeExec => readsBroadcast(reused.child)
+    case _ => false
+  }
+
   // `ColumnarToRowExec` processes the input RDD directly, which is kind of a leaf node in the
   // codegen stage and needs to do the limit check.
   protected override def canCheckLimitNotReached: Boolean = true

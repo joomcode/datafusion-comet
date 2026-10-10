@@ -1241,6 +1241,7 @@ pub struct SortExec {
     /// If `fetch` is `Some`, this will also be set and a TopK operator may be used.
     /// If `fetch` is `None`, this will be `None`.
     filter: Option<Arc<RwLock<TopKDynamicFilters>>>,
+    spill_before_output: bool,
 }
 
 impl SortExec {
@@ -1260,7 +1261,17 @@ impl SortExec {
             common_sort_prefix: sort_prefix,
             cache: Arc::new(cache),
             filter: None,
+            spill_before_output: false,
         }
+    }
+
+    pub fn with_spill_before_output(mut self, spill_before_output: bool) -> Self {
+        self.spill_before_output = spill_before_output;
+        self
+    }
+
+    pub fn spill_before_output(&self) -> bool {
+        self.spill_before_output
     }
 
     /// Whether this `SortExec` preserves partitioning of the children
@@ -1336,6 +1347,7 @@ impl SortExec {
             fetch: self.fetch,
             cache: Arc::clone(&self.cache),
             filter: self.filter.clone(),
+            spill_before_output: self.spill_before_output,
         }
     }
 
@@ -1724,10 +1736,14 @@ impl ExecutionPlan for SortExec {
                     execution_options.sort_spill_reservation_bytes;
                 let in_place_bytes =
                     execution_options.sort_in_place_threshold_bytes;
-                let spill_before_output = context
-                    .session_config()
-                    .get_extension::<SpillBeforeOutputThreshold>()
-                    .map_or(0, |threshold| threshold.0);
+                let spill_before_output = if self.spill_before_output {
+                    context
+                        .session_config()
+                        .get_extension::<SpillBeforeOutputThreshold>()
+                        .map_or(0, |threshold| threshold.0)
+                } else {
+                    0
+                };
                 let compression = context.session_config().spill_compression();
                 let runtime = context.runtime_env();
                 Ok(Box::pin(RecordBatchStreamAdapter::new(
@@ -1867,7 +1883,8 @@ impl ExecutionPlan for SortExec {
         Ok(Some(Arc::new(
             SortExec::new(updated_exprs, make_with_child(projection, self.input())?)
                 .with_fetch(self.fetch())
-                .with_preserve_partitioning(self.preserve_partitioning()),
+                .with_preserve_partitioning(self.preserve_partitioning())
+                .with_spill_before_output(self.spill_before_output),
         )))
     }
 
@@ -1947,7 +1964,8 @@ impl ExecutionPlan for SortExec {
         let new_sort = Arc::new(
             SortExec::new(self.expr.clone(), new_child)
                 .with_fetch(self.fetch())
-                .with_preserve_partitioning(self.preserve_partitioning()),
+                .with_preserve_partitioning(self.preserve_partitioning())
+                .with_spill_before_output(self.spill_before_output),
         ) as Arc<dyn ExecutionPlan>;
 
         Ok(FilterPushdownPropagation {

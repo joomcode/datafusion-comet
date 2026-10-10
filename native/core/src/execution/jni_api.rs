@@ -1241,6 +1241,7 @@ pub unsafe extern "system" fn Java_org_apache_comet_Native_executePlan(
                     PhysicalPlanner::new(Arc::clone(&exec_context.session_ctx), partition)
                         .with_exec_id(exec_context_id)
                         .with_sql_text_pool(&exec_context.spark_plan)
+                        .with_jvm_output_sorts(&exec_context.spark_plan)
                         .with_task_context(exec_context.task_context.clone())
                         .with_class_loader(exec_context.class_loader.clone())
                         .with_shuffle_partition_pusher(
@@ -3657,6 +3658,7 @@ mod native_sort_spill_tests {
         share: usize,
         executor_cores: usize,
         spill_before_output: Option<usize>,
+        jvm_consumer: bool,
     ) -> OutputTrace {
         let shape = source.shape;
         let rows = source.rows;
@@ -3708,7 +3710,8 @@ mod native_sort_spill_tests {
             },
         )])
         .unwrap();
-        let sort: Arc<dyn ExecutionPlan> = Arc::new(SortExec::new(ordering, child));
+        let sort: Arc<dyn ExecutionPlan> =
+            Arc::new(SortExec::new(ordering, child).with_spill_before_output(jvm_consumer));
         let mut stream = sort.execute(0, session.task_ctx()).unwrap();
         let mut trace = OutputTrace {
             reserved: vec![],
@@ -3744,8 +3747,14 @@ mod native_sort_spill_tests {
         let share = SPILL_BEFORE_OUTPUT_SHARE;
         for rows_per_batch in [8192, 3] {
             let case = format!("{shape:?} rows={rows} rows_per_batch={rows_per_batch}");
-            let held =
-                sort_and_trace(KibRows::new(shape, rows, rows_per_batch), share, 8, None).await;
+            let held = sort_and_trace(
+                KibRows::new(shape, rows, rows_per_batch),
+                share,
+                8,
+                None,
+                true,
+            )
+            .await;
             eprintln!(
                 "{case} off: spill_count={} peak={}MiB reserved at 0%={}MiB 50%={}MiB 90%={}MiB",
                 held.spill_count(),
@@ -3762,6 +3771,7 @@ mod native_sort_spill_tests {
                 share,
                 8,
                 Some(share / 4),
+                true,
             )
             .await;
             eprintln!(
@@ -3782,11 +3792,31 @@ mod native_sort_spill_tests {
                 share,
                 8,
                 Some(held.peak_reserved),
+                true,
             )
             .await;
             assert_eq!(below.spill_count(), 0, "{case}");
             assert_eq!(below.reserved.len(), held.reserved.len(), "{case}");
             assert!(below.reserved_at(0.9) >= input_bytes(rows) / 2, "{case}");
+
+            let native_consumer = sort_and_trace(
+                KibRows::new(shape, rows, rows_per_batch),
+                share,
+                8,
+                Some(share / 4),
+                false,
+            )
+            .await;
+            assert_eq!(native_consumer.spill_count(), 0, "{case}");
+            assert_eq!(
+                native_consumer.reserved.len(),
+                held.reserved.len(),
+                "{case}"
+            );
+            assert!(
+                native_consumer.reserved_at(0.9) >= input_bytes(rows) / 2,
+                "{case}"
+            );
         }
     }
 

@@ -19,6 +19,7 @@
 
 package org.apache.comet.rules
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.{CometTestBase, DataFrame}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.catalyst.expressions.aggregate.Partial
@@ -27,7 +28,7 @@ import org.apache.spark.sql.comet._
 import org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec
 import org.apache.spark.sql.execution.{ExpandExec, ProjectExec, SortExec, SparkPlan}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, QueryStageExec}
-import org.apache.spark.sql.execution.aggregate.{HashAggregateExec, SortAggregateExec}
+import org.apache.spark.sql.execution.aggregate.{HashAggregateExec, ObjectHashAggregateExec, SortAggregateExec}
 import org.apache.spark.sql.execution.exchange.ReusedExchangeExec
 import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, SortMergeJoinExec}
 import org.apache.spark.sql.functions.{col, sum}
@@ -42,6 +43,9 @@ import org.apache.comet.rules.EngineCostTable.{CostClass, Form, Line, Width}
 import org.apache.comet.rules.EngineCostTable.CostClass._
 
 class CostBasedEngineChoiceSuite extends CometTestBase {
+
+  override protected def sparkConf: SparkConf =
+    super.sparkConf.set(CometConf.COMET_EXEC_SORT_AGGREGATE_ENABLED.key, "false")
 
   private val flag = CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.key
   private val costTable = CometConf.COMET_EXEC_COST_BASED_ENGINES_COST_TABLE.key
@@ -1665,6 +1669,24 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
           assert(
             count(broadcast) { case a: CometHashAggregateExec => a } == 2,
             s"plan:\n$broadcast")
+        }
+      }
+    }
+  }
+
+  test("a sort aggregate converted to a native hash aggregate is priced as an object hash") {
+    withTables {
+      withSQLConf(
+        CometConf.COMET_EXEC_SORT_AGGREGATE_ENABLED.key -> "true",
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+        flag -> "true") {
+        val plan = run("SELECT k, max(s) FROM t GROUP BY k")
+        assert(count(plan) { case a: SortAggregateExec => a } == 0, s"plan:\n$plan")
+        val aggs = nodes(plan).collect { case a: CometHashAggregateExec => a }
+        assert(aggs.size == 2, s"plan:\n$plan")
+        aggs.foreach { agg =>
+          assert(agg.originalPlan.isInstanceOf[ObjectHashAggregateExec], s"plan:\n$plan")
+          assert(model.costClasses(agg) == Seq(Agg, AggObjectHash), s"plan:\n$plan")
         }
       }
     }
