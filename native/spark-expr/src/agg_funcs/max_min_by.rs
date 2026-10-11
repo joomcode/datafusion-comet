@@ -339,6 +339,7 @@ struct MaxMinByGroupsAccumulator {
     best_ordering: Vec<OwnedRow>,
     /// Per-group flag: has a non-null ordering been seen yet?
     has_ordering: Vec<bool>,
+    row_bytes: usize,
 }
 
 impl MaxMinByGroupsAccumulator {
@@ -364,10 +365,14 @@ impl MaxMinByGroupsAccumulator {
             best_value: Vec::new(),
             best_ordering: Vec::new(),
             has_ordering: Vec::new(),
+            row_bytes: 0,
         })
     }
 
     fn resize(&mut self, total_num_groups: usize) {
+        let added = total_num_groups.saturating_sub(self.best_value.len());
+        self.row_bytes +=
+            added * (row_len(&self.null_value_row) + row_len(&self.null_ordering_row));
         self.best_value
             .resize(total_num_groups, self.null_value_row.clone());
         self.best_ordering
@@ -407,13 +412,34 @@ impl MaxMinByGroupsAccumulator {
             let take = !self.has_ordering[group_index]
                 || candidate >= self.best_ordering[group_index].row();
             if take {
+                let value = value_rows.row(idx);
+                self.row_bytes = self.row_bytes + candidate.as_ref().len() + value.as_ref().len()
+                    - row_len(&self.best_ordering[group_index])
+                    - row_len(&self.best_value[group_index]);
                 self.best_ordering[group_index] = candidate.owned();
-                self.best_value[group_index] = value_rows.row(idx).owned();
+                self.best_value[group_index] = value.owned();
                 self.has_ordering[group_index] = true;
             }
         }
         Ok(())
     }
+
+    fn take_rows(&mut self, emit_to: EmitTo) -> (Vec<OwnedRow>, Vec<OwnedRow>) {
+        let value_rows = emit_to.take_needed(&mut self.best_value);
+        let ordering_rows = emit_to.take_needed(&mut self.best_ordering);
+        let _ = emit_to.take_needed(&mut self.has_ordering);
+        let taken = value_rows
+            .iter()
+            .chain(ordering_rows.iter())
+            .map(row_len)
+            .sum::<usize>();
+        self.row_bytes -= taken;
+        (value_rows, ordering_rows)
+    }
+}
+
+fn row_len(row: &OwnedRow) -> usize {
+    row.row().as_ref().len()
 }
 
 impl GroupsAccumulator for MaxMinByGroupsAccumulator {
@@ -438,9 +464,7 @@ impl GroupsAccumulator for MaxMinByGroupsAccumulator {
     }
 
     fn evaluate(&mut self, emit_to: EmitTo) -> Result<ArrayRef> {
-        let value_rows = emit_to.take_needed(&mut self.best_value);
-        let _ = emit_to.take_needed(&mut self.best_ordering);
-        let _ = emit_to.take_needed(&mut self.has_ordering);
+        let (value_rows, _) = self.take_rows(emit_to);
         let arrays = self
             .value_converter
             .convert_rows(value_rows.iter().map(|r| r.row()))?;
@@ -448,9 +472,7 @@ impl GroupsAccumulator for MaxMinByGroupsAccumulator {
     }
 
     fn state(&mut self, emit_to: EmitTo) -> Result<Vec<ArrayRef>> {
-        let value_rows = emit_to.take_needed(&mut self.best_value);
-        let ordering_rows = emit_to.take_needed(&mut self.best_ordering);
-        let _ = emit_to.take_needed(&mut self.has_ordering);
+        let (value_rows, ordering_rows) = self.take_rows(emit_to);
         let value_arrays = self
             .value_converter
             .convert_rows(value_rows.iter().map(|r| r.row()))?;
@@ -473,16 +495,12 @@ impl GroupsAccumulator for MaxMinByGroupsAccumulator {
 
     fn size(&self) -> usize {
         // `size_of::<OwnedRow>()` only covers the inline `Box<[u8]>` pointer/len, not the row
-        // bytes behind it, so the per-group payloads have to be summed separately. Leaving them
-        // out under-reports to the memory pool that drives spill decisions.
-        let row_bytes = |rows: &Vec<OwnedRow>| -> usize {
-            rows.iter().map(|r| r.row().as_ref().len()).sum::<usize>()
-        };
+        // bytes behind it, so the per-group payloads are counted separately in `row_bytes`.
+        // Leaving them out under-reports to the memory pool that drives spill decisions.
         size_of_val(self)
             + (self.best_value.capacity() + self.best_ordering.capacity())
                 * std::mem::size_of::<OwnedRow>()
-            + row_bytes(&self.best_value)
-            + row_bytes(&self.best_ordering)
+            + self.row_bytes
             + self.has_ordering.capacity()
     }
 }
@@ -891,5 +909,43 @@ mod tests {
              of slot headers",
             acc.size()
         );
+    }
+
+    #[test]
+    fn groups_accumulator_row_bytes_track_updates_and_emits() {
+        let walked = |acc: &MaxMinByGroupsAccumulator| -> usize {
+            acc.best_value
+                .iter()
+                .chain(acc.best_ordering.iter())
+                .map(row_len)
+                .sum()
+        };
+        let mut acc = max_by_groups(DataType::Utf8, DataType::Int64);
+        let values: ArrayRef = Arc::new(StringArray::from(vec![
+            Some("a"),
+            Some("bbbbbbbbbbbbbbbb"),
+            None,
+            Some("cc"),
+            Some("dddddddddddddddddddddddddddddd"),
+        ]));
+        let ordering: ArrayRef = Arc::new(Int64Array::from(vec![
+            Some(1),
+            Some(5),
+            Some(9),
+            None,
+            Some(2),
+        ]));
+        acc.update_batch(&[values, ordering], &[0, 1, 1, 2, 3], None, 6)
+            .unwrap();
+        assert_eq!(acc.row_bytes, walked(&acc));
+        let values: ArrayRef = Arc::new(StringArray::from(vec![Some("eeeeeeeeeeee"), Some("f")]));
+        let ordering: ArrayRef = Arc::new(Int64Array::from(vec![Some(7), Some(0)]));
+        acc.update_batch(&[values, ordering], &[0, 3], None, 6)
+            .unwrap();
+        assert_eq!(acc.row_bytes, walked(&acc));
+        acc.state(EmitTo::First(2)).unwrap();
+        assert_eq!(acc.row_bytes, walked(&acc));
+        acc.evaluate(EmitTo::All).unwrap();
+        assert_eq!(acc.row_bytes, 0);
     }
 }

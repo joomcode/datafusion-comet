@@ -22,7 +22,7 @@ package org.apache.comet.rules
 import scala.collection.mutable.ListBuffer
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Divide, DoubleLiteral, EqualNullSafe, EqualTo, Expression, FloatLiteral, GreaterThan, GreaterThanOrEqual, KnownFloatingPointNormalized, LessThan, LessThanOrEqual, NamedExpression, Remainder, SortOrder}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Divide, DoubleLiteral, EqualNullSafe, EqualTo, Expression, FloatLiteral, GreaterThan, GreaterThanOrEqual, KnownFloatingPointNormalized, LessThan, LessThanOrEqual, NamedExpression, Remainder, SortOrder}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateFunction, AggregateMode, Average, Count, Final, Max, MaxMinBy, Min, Partial, PartialMerge, Sum}
 import org.apache.spark.sql.catalyst.optimizer.NormalizeNaNAndZero
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -160,6 +160,12 @@ object CometExecRule {
    */
   val SORT_AGGREGATE_ORDER_TAG: TreeNodeTag[Unit] =
     TreeNodeTag[Unit]("comet.sortAggregateOrder")
+
+  val SORT_AGGREGATE_ORDER_CONSUMED_TAG: TreeNodeTag[Unit] =
+    TreeNodeTag[Unit]("comet.sortAggregateOrderConsumed")
+
+  val ORDERED_INPUT_AGGREGATE_TAG: TreeNodeTag[Unit] =
+    TreeNodeTag[Unit]("comet.orderedInputAggregate")
 
   /**
    * Serializes the native plan of each block of adjacent native operators into its topmost
@@ -657,6 +663,9 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
         }
     }
 
+    if (CometConf.COMET_EXEC_SORT_AGGREGATE_ENABLED.get(conf)) {
+      markOrderConsumedSortAggregates(plan)
+    }
     plan.transformUp { case op =>
       val converted = convertNode(restoreSortAggregateOrdering(op))
       // Replace SubqueryBroadcastExec with CometSubqueryBroadcastExec in DPP expressions
@@ -977,6 +986,32 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
     if (changed) op.withNewChildren(children) else op
   }
 
+  private def markOrderConsumedSortAggregates(plan: SparkPlan): Unit = plan.foreach { op =>
+    if (!op.isInstanceOf[CometPlan] && op.requiredChildOrdering.length == op.children.length) {
+      op.children.zip(op.requiredChildOrdering).foreach { case (child, ordering) =>
+        if (ordering.nonEmpty) {
+          sortAggregateProviding(child, ordering)
+            .foreach(_.setTagValue(CometExecRule.SORT_AGGREGATE_ORDER_CONSUMED_TAG, ()))
+        }
+      }
+    }
+  }
+
+  private def sortAggregateProviding(
+      plan: SparkPlan,
+      ordering: Seq[SortOrder]): Option[SortAggregateExec] = {
+    if (!SortOrder.orderingSatisfies(plan.outputOrdering, ordering)) {
+      None
+    } else {
+      plan match {
+        case agg: SortAggregateExec => Some(agg)
+        case _: SortExec | _: CometSortExec => None
+        case p if p.children.size == 1 => sortAggregateProviding(p.children.head, ordering)
+        case _ => None
+      }
+    }
+  }
+
   private def orderInsensitive(fn: AggregateFunction): Boolean = fn match {
     case _: Min | _: Max | _: Count | _: Sum | _: Average | _: MaxMinBy => true
     case _ => false
@@ -992,8 +1027,10 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
    * their input order, which the native hash aggregate does not guarantee. MAX_BY and MIN_BY
    * depend on it only among rows tied on the ordering, where they are non-deterministic in Spark
    * too and already differ from it on the native hash aggregate path. The sort by the grouping
-   * keys directly below the aggregate is then dropped. A consumer that relied on the ordering of
-   * the sort aggregate gets a sort back, see [[restoreSortAggregateOrdering]].
+   * keys directly below the aggregate is then dropped, unless a consumer relies on the ordering
+   * of the sort aggregate: then the sort stays and the native aggregate streams over it, keeping
+   * the ordering. Otherwise such a consumer gets a sort back, see
+   * [[restoreSortAggregateOrdering]].
    */
   private def convertSortAggregate(agg: SortAggregateExec): Option[SparkPlan] = {
     val required = agg.requiredChildOrdering.headOption.getOrElse(Nil)
@@ -1009,7 +1046,11 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
         })
       case _ => false
     }
-    val input = if (sortedByKeys) agg.child.children.head else agg.child
+    val keepOrder = agg.getTagValue(CometExecRule.SORT_AGGREGATE_ORDER_CONSUMED_TAG).isDefined &&
+      agg.groupingExpressions.forall(_.isInstanceOf[Attribute]) &&
+      agg.child.isInstanceOf[CometNativeExec] &&
+      SortOrder.orderingSatisfies(agg.child.outputOrdering, required)
+    val input = if (sortedByKeys && !keepOrder) agg.child.children.head else agg.child
     if (!agg.aggregateExpressions.forall(e => orderInsensitive(e.aggregateFunction))) {
       withFallbackReason(
         agg,
@@ -1030,7 +1071,16 @@ case class CometExecRule(session: SparkSession, wholePlan: Boolean = false)
       agg.resultExpressions,
       input)
     hashAgg.copyTagsFrom(agg)
-    val converted = tryConvertToComet(hashAgg, CometObjectHashAggregateExec)
+    if (keepOrder) {
+      hashAgg.setTagValue(CometExecRule.ORDERED_INPUT_AGGREGATE_TAG, ())
+    }
+    val converted = tryConvertToComet(hashAgg, CometObjectHashAggregateExec).map {
+      case native: CometHashAggregateExec if keepOrder =>
+        val ordered = native.copy(originalPlan = agg)
+        ordered.copyTagsFrom(native)
+        ordered
+      case native => native
+    }
     converted.foreach(_.setTagValue(CometExecRule.CONVERTED_SORT_AGGREGATE_TAG, ()))
     if (converted.isEmpty) {
       hashAgg

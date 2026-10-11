@@ -1674,21 +1674,57 @@ impl PhysicalPlanner {
                     })
                     .collect();
 
-                let aggregate: Arc<dyn ExecutionPlan> = Arc::new(
-                    datafusion::physical_plan::aggregates::AggregateExec::try_new(
-                        mode,
-                        group_by,
-                        aggr_expr,
-                        filter_exprs?,
-                        Arc::clone(&child.native_plan),
-                        Arc::clone(&schema),
-                    )?,
-                );
+                let num_group_exprs = group_by.expr().len();
+                let aggregate = datafusion::physical_plan::aggregates::AggregateExec::try_new(
+                    mode,
+                    group_by,
+                    aggr_expr,
+                    filter_exprs?,
+                    Arc::clone(&child.native_plan),
+                    Arc::clone(&schema),
+                )?;
+
+                if agg.ordered_input && *aggregate.input_order_mode() != InputOrderMode::Sorted {
+                    warn!(
+                        "Aggregate {} expected input sorted by its grouping expressions, \
+                         sorting its output instead",
+                        spark_plan.plan_id
+                    );
+                    let aggregate: Arc<dyn ExecutionPlan> = Arc::new(aggregate);
+                    let output_schema = aggregate.schema();
+                    let ordering = (0..num_group_exprs).map(|idx| {
+                        PhysicalSortExpr::new(
+                            Arc::new(Column::new(output_schema.field(idx).name(), idx)),
+                            SortOptions {
+                                descending: false,
+                                nulls_first: true,
+                            },
+                        )
+                    });
+                    let sorted: Arc<dyn ExecutionPlan> = Arc::new(SortExec::new(
+                        LexOrdering::new(ordering).unwrap(),
+                        Arc::clone(&aggregate),
+                    ));
+                    return Ok((
+                        scans,
+                        shuffle_scans,
+                        Arc::new(SparkPlan::new_with_additional(
+                            spark_plan.plan_id,
+                            sorted,
+                            vec![child],
+                            vec![aggregate],
+                        )),
+                    ));
+                }
 
                 Ok((
                     scans,
                     shuffle_scans,
-                    Arc::new(SparkPlan::new(spark_plan.plan_id, aggregate, vec![child])),
+                    Arc::new(SparkPlan::new(
+                        spark_plan.plan_id,
+                        Arc::new(aggregate),
+                        vec![child],
+                    )),
                 ))
             }
 
@@ -6638,6 +6674,7 @@ mod tests {
                 mode: spark_operator::AggregateMode::Partial as i32,
                 expr_modes: vec![],
                 initial_input_buffer_offset: 0,
+                ordered_input: false,
             })),
         };
         let projection = Operator {
@@ -6661,6 +6698,44 @@ mod tests {
         );
         assert_eq!(1, projection_exec.children.len());
         assert_eq!("ScanExec", projection_exec.children[0].native_plan.name());
+    }
+
+    #[test]
+    fn ordered_input_aggregate_streams_over_a_sort_and_sorts_its_output_otherwise() {
+        let aggregate = |child: Operator| {
+            op(
+                2,
+                OpStruct::HashAgg(spark_operator::HashAggregate {
+                    grouping_exprs: vec![create_bound_reference(0)],
+                    agg_exprs: vec![],
+                    mode: spark_operator::AggregateMode::Final as i32,
+                    expr_modes: vec![],
+                    initial_input_buffer_offset: 0,
+                    ordered_input: true,
+                }),
+                vec![child],
+            )
+        };
+        let planner = PhysicalPlanner::default();
+
+        let (_, _, over_sort) = planner
+            .create_plan(&aggregate(sort_op(1, leaf(0))), &mut vec![], 1)
+            .unwrap();
+        assert_eq!("AggregateExec", over_sort.native_plan.name());
+        assert!(over_sort.additional_native_plans.is_empty());
+        let line = datafusion::physical_plan::displayable(over_sort.native_plan.as_ref())
+            .one_line()
+            .to_string();
+        assert!(line.contains("ordering_mode=Sorted"), "{line}");
+
+        let (_, _, over_scan) = planner
+            .create_plan(&aggregate(leaf(0)), &mut vec![], 1)
+            .unwrap();
+        assert_eq!("SortExec", over_scan.native_plan.name());
+        assert_eq!(1, over_scan.additional_native_plans.len());
+        assert_eq!("AggregateExec", over_scan.additional_native_plans[0].name());
+        assert_eq!(1, over_scan.children.len());
+        assert_eq!("ScanExec", over_scan.children[0].native_plan.name());
     }
 
     fn window_operator(functions: Vec<(&str, Vec<Expr>, bool)>) -> Operator {
