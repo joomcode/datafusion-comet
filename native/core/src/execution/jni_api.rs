@@ -4302,6 +4302,7 @@ mod partial_merge_spill_tests {
                 mode: AggregateMode::PartialMerge as i32,
                 expr_modes: vec![AggregateMode::PartialMerge as i32],
                 initial_input_buffer_offset: 2,
+                ordered_input: false,
             })),
             ..Default::default()
         }

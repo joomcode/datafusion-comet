@@ -2236,6 +2236,7 @@ trait CometBaseAggregate {
             resultExpressions,
             aggregate)
         } else {
+          setOrderedInput(hashAggBuilder, aggregate)
           Some(builder.setHashAgg(hashAggBuilder).build())
         }
       } else {
@@ -2254,12 +2255,21 @@ trait CometBaseAggregate {
    * ops share the caller's `plan_id` so the aggregate's native metrics roll up under the same
    * Spark operator.
    */
+  private def setOrderedInput(
+      hashAggBuilder: OperatorOuterClass.HashAggregate.Builder,
+      aggregate: BaseAggregateExec): Unit = {
+    if (aggregate.getTagValue(CometExecRule.ORDERED_INPUT_AGGREGATE_TAG).isDefined) {
+      hashAggBuilder.setOrderedInput(true)
+    }
+  }
+
   private def buildAggOp(
       builder: Operator.Builder,
       hashAggBuilder: OperatorOuterClass.HashAggregate.Builder,
       naturalOutput: Seq[Attribute],
       resultExpressions: Seq[NamedExpression],
       aggregate: BaseAggregateExec): Option[Operator] = {
+    setOrderedInput(hashAggBuilder, aggregate)
     if (resultExpressions.map(_.toAttribute) == naturalOutput) {
       return Some(builder.setHashAgg(hashAggBuilder).build())
     }

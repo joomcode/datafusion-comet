@@ -33,7 +33,7 @@ import org.apache.spark.sql.catalyst.optimizer.EliminateSorts
 import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, RangePartitioning}
 import org.apache.spark.sql.comet.{CometFilterExec, CometHashAggregateExec, CometNativeExec, CometProjectExec, CometSortExec, CometSortMergeJoinExec}
 import org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec
-import org.apache.spark.sql.execution.{SparkPlan, SQLExecution}
+import org.apache.spark.sql.execution.{ExpandExec, SparkPlan, SQLExecution}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AdaptiveSparkPlanHelper, ShuffleQueryStageExec}
 import org.apache.spark.sql.execution.aggregate.{BaseAggregateExec, ObjectHashAggregateExec, SortAggregateExec}
 import org.apache.spark.sql.execution.exchange.{ReusedExchangeExec, ShuffleExchangeExec}
@@ -3501,8 +3501,101 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
     }
   }
 
-  test("a converted sort aggregate keeps the ordering a sort-merge join relies on") {
+  private def orderedAggregates(plan: SparkPlan): Seq[CometHashAggregateExec] =
+    nativeAggregates(plan).filter { a =>
+      a.originalPlan.isInstanceOf[SortAggregateExec] && a.child.isInstanceOf[CometSortExec]
+    }
+
+  private def orderedInput(agg: CometHashAggregateExec): Boolean = {
+    val op = agg.nativeOp
+    val hashAgg = if (op.hasHashAgg) op.getHashAgg else op.getChildren(0).getHashAgg
+    hashAgg.getOrderedInput
+  }
+
+  private def orderSorts(plan: SparkPlan): Seq[CometSortExec] =
+    collect(plan) {
+      case s: CometSortExec if s.getTagValue(CometExecRule.SORT_AGGREGATE_ORDER_TAG).isDefined =>
+        s
+    }
+
+  for (aqe <- Seq("false", "true")) {
+    test(s"a sort aggregate whose ordering a sort-merge join relies on runs ordered (AQE=$aqe)") {
+      withSQLConf(
+        SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+        SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe) {
+        withStrings {
+          withParquetTable((0 until 50).map(i => (i % 6, s"v$i")), "str_right") {
+            val query =
+              """SELECT a._1, a.m, r._2 FROM (SELECT _1, max(_2) AS m FROM str_tbl GROUP BY _1) a
+                |JOIN str_right r ON a._1 = r._1""".stripMargin
+            val (_, cometPlan) = checkSparkAnswer(sql(query))
+            assert(sortAggregates(cometPlan).isEmpty, s"plan:\n$cometPlan")
+            val join = collect(cometPlan) { case j: CometSortMergeJoinExec => j }
+            assert(join.size == 1, s"plan:\n$cometPlan")
+            assert(orderSorts(cometPlan).isEmpty, s"plan:\n$cometPlan")
+            val ordered = orderedAggregates(cometPlan)
+            assert(ordered.size == 1, s"plan:\n$cometPlan")
+            assert(orderedInput(ordered.head), s"plan:\n$cometPlan")
+            assert(ordered.head.modes == Seq(Final), s"plan:\n$cometPlan")
+          }
+        }
+      }
+    }
+  }
+
+  test("sort aggregates over a pre-partitioned input stream into a sort-merge join") {
     withSQLConf(
+      SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+      SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+      withStrings {
+        withParquetTable((0 until 50).map(i => (i % 6, s"v$i")), "str_right") {
+          val query =
+            """SELECT a.k, a.m, r._2 FROM
+              |(SELECT _1 + 1 AS k, max(_2) AS m
+              |FROM (SELECT * FROM str_tbl DISTRIBUTE BY _1 + 1) GROUP BY _1 + 1) a
+              |JOIN str_right r ON a.k = r._1""".stripMargin
+          val (_, cometPlan) = checkSparkAnswer(sql(query))
+          assert(sortAggregates(cometPlan).isEmpty, s"plan:\n$cometPlan")
+          assert(orderSorts(cometPlan).isEmpty, s"plan:\n$cometPlan")
+          val aggs = nativeAggregates(cometPlan)
+          assert(aggs.size == 2, s"plan:\n$cometPlan")
+          assert(aggs.forall(orderedInput), s"plan:\n$cometPlan")
+        }
+      }
+    }
+  }
+
+  for (aqe <- Seq("false", "true")) {
+    test(s"a distinct-expansion aggregate feeding a sort aggregate runs ordered (AQE=$aqe)") {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe) {
+        val rows = (0 until 600).map { i =>
+          (i % 37, if (i % 11 == 0) null else s"s${i % 13}", i % 17, if (i % 5 == 0) "x" else "y")
+        }
+        withParquetTable(rows, "expand_tbl") {
+          val query =
+            """SELECT _1, count(DISTINCT _3), count(DISTINCT _2), max(_2), max_by(_4, _3),
+              |sum(_3), min(_4) FROM expand_tbl GROUP BY _1""".stripMargin
+          val (sparkPlan, cometPlan) = checkSparkAnswer(sql(query))
+          assert(collect(sparkPlan) { case e: ExpandExec => e }.nonEmpty, s"plan:\n$sparkPlan")
+          assert(orderSorts(cometPlan).isEmpty, s"plan:\n$cometPlan")
+          val ordered = orderedAggregates(cometPlan)
+          assert(ordered.size == 1, s"plan:\n$cometPlan")
+          assert(ordered.head.modes == Seq(Final), s"plan:\n$cometPlan")
+          assert(orderedInput(ordered.head), s"plan:\n$cometPlan")
+          assert(
+            nativeAggregates(cometPlan).exists(a =>
+              a.modes == Seq(Partial) && !a.child.isInstanceOf[CometSortExec]),
+            s"plan:\n$cometPlan")
+        }
+      }
+    }
+  }
+
+  test("an ordered sort aggregate reverted by the cost-based choice runs as a sort aggregate") {
+    withSQLConf(
+      CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.key -> "true",
+      CometConf.COMET_EXEC_COST_BASED_ENGINES_COST_TABLE.key -> "agg.flat.comet=1000000,0,0",
       SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
       SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
       withStrings {
@@ -3511,15 +3604,8 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
             """SELECT a._1, a.m, r._2 FROM (SELECT _1, max(_2) AS m FROM str_tbl GROUP BY _1) a
               |JOIN str_right r ON a._1 = r._1""".stripMargin
           val (_, cometPlan) = checkSparkAnswer(sql(query))
-          assert(sortAggregates(cometPlan).isEmpty, s"plan:\n$cometPlan")
-          val join = collect(cometPlan) { case j: CometSortMergeJoinExec => j }
-          assert(join.size == 1, s"plan:\n$cometPlan")
-          val orderSorts = collect(cometPlan) {
-            case s: CometSortExec
-                if s.getTagValue(CometExecRule.SORT_AGGREGATE_ORDER_TAG).isDefined =>
-              s
-          }
-          assert(orderSorts.nonEmpty, s"plan:\n$cometPlan")
+          assert(orderedAggregates(cometPlan).isEmpty, s"plan:\n$cometPlan")
+          assert(sortAggregates(cometPlan).nonEmpty, s"plan:\n$cometPlan")
         }
       }
     }

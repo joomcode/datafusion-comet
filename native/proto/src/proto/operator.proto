@@ -891,6 +891,7 @@ message HashAggregate {
   // Offset in the child's output where aggregate buffer attributes start.
   // Used by PartialMerge to locate state fields in the input.
   int32 initial_input_buffer_offset = 7;
+  bool ordered_input = 9;
 }
 
 message Limit {
