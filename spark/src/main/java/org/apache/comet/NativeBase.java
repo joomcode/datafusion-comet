@@ -48,6 +48,7 @@ public abstract class NativeBase {
 
   private static final String libraryToLoad = System.mapLibraryName(NATIVE_LIB_NAME);
   private static boolean loaded = false;
+  private static boolean libraryLoaded = false;
   private static volatile Throwable loadErr = null;
   private static final String searchPattern = "libcomet-";
   private static final AtomicBoolean released = new AtomicBoolean(false);
@@ -91,13 +92,18 @@ public abstract class NativeBase {
       return;
     }
 
-    // Try to load Comet library from the java.library.path.
-    try {
-      System.loadLibrary(NATIVE_LIB_NAME);
+    if (libraryLoaded) {
       loaded = true;
-    } catch (UnsatisfiedLinkError ex) {
-      // Doesn't exist, so proceed to loading bundled library.
-      bundleLoadLibrary();
+    } else {
+      // Try to load Comet library from the java.library.path.
+      try {
+        System.loadLibrary(NATIVE_LIB_NAME);
+        loaded = true;
+      } catch (UnsatisfiedLinkError ex) {
+        // Doesn't exist, so proceed to loading bundled library.
+        bundleLoadLibrary();
+      }
+      libraryLoaded = loaded;
     }
 
     initWithLogConf();
