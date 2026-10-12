@@ -365,7 +365,8 @@ object BoundaryFormats extends Logging with CometTypeShim {
             conversionsInto(input.consumer, NativeShuffle),
             CometHash))
         }
-        if (current != SparkShuffle && columnarAvailable(input)) {
+        val betweenSparkOperators = !producerIsComet && input.consumer.contains(Engine.Spark)
+        if (current != SparkShuffle && !betweenSparkOperators && columnarAvailable(input)) {
           val write = if (producerIsComet) 2 else 1
           candidates += ((
             ColumnarShuffle,

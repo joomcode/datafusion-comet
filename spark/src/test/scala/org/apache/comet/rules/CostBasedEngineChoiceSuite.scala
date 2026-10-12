@@ -26,7 +26,7 @@ import org.apache.spark.sql.catalyst.expressions.aggregate.Partial
 import org.apache.spark.sql.catalyst.plans.logical.statsEstimation.EstimationUtils
 import org.apache.spark.sql.comet._
 import org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec
-import org.apache.spark.sql.execution.{ExpandExec, ProjectExec, SortExec, SparkPlan}
+import org.apache.spark.sql.execution.{CommandResultExec, ExpandExec, ProjectExec, SortExec, SparkPlan}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, QueryStageExec}
 import org.apache.spark.sql.execution.aggregate.{HashAggregateExec, ObjectHashAggregateExec, SortAggregateExec}
 import org.apache.spark.sql.execution.exchange.ReusedExchangeExec
@@ -152,6 +152,66 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
 
   private def count[T](plan: SparkPlan)(pf: PartialFunction[SparkPlan, T]): Int =
     nodes(plan).collect(pf).size
+
+  /** The executed plan of `INSERT INTO target <query>`, checking the rows it wrote. */
+  private def insertPlan(schema: String, query: String): SparkPlan = {
+    val expected = sql(query).collect().toSeq
+    var plan: SparkPlan = null
+    withTable("target") {
+      sql(s"CREATE TABLE target ($schema) USING parquet")
+      val df = sql(s"INSERT INTO target $query")
+      checkAnswer(spark.table("target"), expected)
+      plan = df.queryExecution.executedPlan match {
+        case c: CommandResultExec => c.commandPhysicalPlan
+        case other => other
+      }
+    }
+    plan
+  }
+
+  private def columnarBetweenSpark(plan: SparkPlan): Seq[Edge] =
+    edges(plan).filter(e => e.format == "columnar" && !e.consumerIsComet && !e.producerIsComet)
+
+  for (aqe <- Seq("false", "true")) {
+    test(s"a shuffle between Spark operators stays a Spark shuffle at any price (AQE=$aqe)") {
+      withWide("w", 20) {
+        withAqe(
+          aqe,
+          flag -> "true",
+          CometConf.COMET_EXEC_PROJECT_ENABLED.key -> "false",
+          CometConf.COMET_EXEC_UNION_ENABLED.key -> "false",
+          CometConf.COMET_EXEC_SORT_ENABLED.key -> "false",
+          costTable -> "shuffleWrite.flat.spark=100000,0") {
+          val payload = (1 to 20).map(i => s"c$i")
+          val schema = ("k INT" +: payload.map(c => s"$c INT")).mkString(", ")
+          val query =
+            s"SELECT /*+ REPARTITION(37, k) */ * FROM (" +
+              s"SELECT k, ${payload.map(c => s"$c + 1 AS $c").mkString(", ")} FROM w " +
+              s"UNION ALL SELECT k, ${payload.mkString(", ")} FROM w) SORT BY k"
+          val plan = insertPlan(schema, query)
+          assert(columnarBetweenSpark(plan).isEmpty, s"columnar shuffle between Spark:\n$plan")
+          assert(
+            edges(plan).exists(e => e.format == "spark" && !e.producerIsComet),
+            s"expected a Spark shuffle under the write:\n$plan")
+        }
+      }
+    }
+
+    test(s"a native producer still writes a Comet shuffle for a Spark write (AQE=$aqe)") {
+      withWide("w", 20) {
+        withAqe(aqe, flag -> "true", costTable -> "shuffleWrite.flat.spark=100000,0") {
+          val payload = (1 to 20).map(i => s"c$i")
+          val schema = ("k INT" +: payload.map(c => s"$c INT")).mkString(", ")
+          val plan = insertPlan(
+            schema,
+            s"SELECT /*+ REPARTITION(37, k) */ k, ${payload.mkString(", ")} FROM w")
+          assert(
+            edges(plan).exists(e => e.format != "spark" && e.producerIsComet),
+            s"expected a Comet shuffle written by a native operator:\n$plan")
+        }
+      }
+    }
+  }
 
   for (aqe <- Seq("false", "true")) {
     test(s"native sorts read by Spark sort aggregates move only by their price (AQE=$aqe)") {
