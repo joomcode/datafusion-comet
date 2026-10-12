@@ -3728,4 +3728,29 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
       assert(sortAggregates(cometPlan).nonEmpty, s"plan:\n$cometPlan")
     }
   }
+
+  test("count distinct over a window-sorted input with one huge ordered key range") {
+    withSQLConf(
+      SQLConf.SHUFFLE_PARTITIONS.key -> "2",
+      CometConf.COMET_BATCH_SIZE.key -> "64") {
+      withTempPath { path =>
+        spark
+          .range(0, 60000, 1, 4)
+          .selectExpr(
+            "CAST(DATE'2026-10-10' + CAST(id % 2 AS INT) AS DATE) AS d",
+            "IF(id % 50 = 0, 'b', 'a') AS t",
+            "concat('r', CAST((id * 7919) % 30000 AS STRING)) AS r",
+            "CAST(id % 13 AS DOUBLE) AS w")
+          .write
+          .parquet(path.getAbsolutePath)
+        withParquetTable(path.getAbsolutePath, "ranked") {
+          val df = sql("""
+            |SELECT d, t, ROUND(MAX(mw), 3) AS mw, COUNT(DISTINCT r) AS rankings
+            |FROM (SELECT d, t, r, MAX(w) OVER (PARTITION BY d, t) AS mw FROM ranked)
+            |GROUP BY d, t""".stripMargin)
+          checkSparkAnswerAndOperator(df)
+        }
+      }
+    }
+  }
 }
