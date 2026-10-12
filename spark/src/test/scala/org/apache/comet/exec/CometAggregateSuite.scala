@@ -3730,9 +3730,7 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
   }
 
   test("count distinct over a window-sorted input with one huge ordered key range") {
-    withSQLConf(
-      SQLConf.SHUFFLE_PARTITIONS.key -> "2",
-      CometConf.COMET_BATCH_SIZE.key -> "64") {
+    withSQLConf(SQLConf.SHUFFLE_PARTITIONS.key -> "2", CometConf.COMET_BATCH_SIZE.key -> "64") {
       withTempPath { path =>
         spark
           .range(0, 60000, 1, 4)
