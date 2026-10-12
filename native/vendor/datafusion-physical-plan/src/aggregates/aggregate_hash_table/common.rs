@@ -512,6 +512,17 @@ impl MaterializedAggregateOutput {
         self.offset >= self.batch.num_rows()
     }
 
+    pub(super) fn take_rest(&mut self) -> Option<RecordBatch> {
+        if self.is_exhausted() {
+            return None;
+        }
+        let rest = self
+            .batch
+            .slice(self.offset, self.batch.num_rows() - self.offset);
+        self.offset = self.batch.num_rows();
+        Some(rest)
+    }
+
     pub(super) fn memory_size(&self) -> usize {
         self.batch.get_array_memory_size()
     }

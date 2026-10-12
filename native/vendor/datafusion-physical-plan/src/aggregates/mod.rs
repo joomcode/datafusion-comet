@@ -218,6 +218,8 @@ mod single_stream;
 mod skip_partial;
 // COMET PATCH: tests for an aggregate whose first reservation fails and spills.
 #[cfg(test)]
+mod ordered_drain_tests;
+#[cfg(test)]
 mod starved_spill_tests;
 mod topk;
 
