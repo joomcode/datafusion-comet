@@ -185,7 +185,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
           val payload = (1 to 20).map(i => s"c$i")
           val schema = ("k INT" +: payload.map(c => s"$c INT")).mkString(", ")
           val query =
-            s"SELECT /*+ REPARTITION(37, k) */ * FROM (" +
+            "SELECT /*+ REPARTITION(37, k) */ * FROM (" +
               s"SELECT k, ${payload.map(c => s"$c + 1 AS $c").mkString(", ")} FROM w " +
               s"UNION ALL SELECT k, ${payload.mkString(", ")} FROM w) SORT BY k"
           val plan = insertPlan(schema, query)
