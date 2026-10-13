@@ -126,6 +126,10 @@ impl SpillWorkspace {
         })
     }
 
+    pub(super) fn bounded(self: &Arc<Self>) -> Arc<dyn MemoryPool> {
+        Arc::new(BoundedWorkspace(Arc::clone(self)))
+    }
+
     /// Lends up to `size` bytes of unused workspace.
     pub(super) fn borrow(self: &Arc<Self>, size: usize) -> WorkspaceLoan {
         let mut state = self.state.lock();
@@ -218,6 +222,45 @@ impl MemoryPool for SpillWorkspace {
     }
 }
 
+#[derive(Debug)]
+struct BoundedWorkspace(Arc<SpillWorkspace>);
+
+impl Display for BoundedWorkspace {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "BoundedWorkspace")
+    }
+}
+
+impl MemoryPool for BoundedWorkspace {
+    fn name(&self) -> &str {
+        "BoundedWorkspace"
+    }
+
+    fn grow(&self, reservation: &MemoryReservation, additional: usize) {
+        self.0.grow(reservation, additional);
+    }
+
+    fn shrink(&self, reservation: &MemoryReservation, shrink: usize) {
+        self.0.shrink(reservation, shrink);
+    }
+
+    fn try_grow(
+        &self,
+        _reservation: &MemoryReservation,
+        additional: usize,
+    ) -> Result<()> {
+        let mut state = self.0.state.lock();
+        let Some(used) = state.used.checked_add(additional) else {
+            return resources_err!("Sort spill workspace overflow");
+        };
+        state.cover(used, true)
+    }
+
+    fn reserved(&self) -> usize {
+        self.0.reserved()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,6 +347,34 @@ mod tests {
         workspace.close();
         drop(child);
         assert_eq!(parent.reserved(), 40);
+    }
+
+    #[test]
+    fn a_bounded_view_of_a_spill_workspace_refuses_growth_past_the_pool() {
+        let parent: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(100));
+        let sorter = MemoryConsumer::new("sorter").register(&parent);
+        sorter.try_grow(60).unwrap();
+        let contender = MemoryConsumer::new("contender").register(&parent);
+        contender.try_grow(30).unwrap();
+        let workspace = SpillWorkspace::for_spill(vec![sorter]);
+        let bounded = workspace.bounded();
+        let child = MemoryConsumer::new("child").register(&bounded);
+
+        child.grow(40);
+        child.try_grow(30).unwrap();
+        assert_eq!(parent.reserved(), 100);
+        assert!(child.try_grow(1).is_err());
+        assert_eq!(child.size(), 70);
+        child.grow(5);
+        assert_eq!(parent.reserved(), 105);
+
+        child.shrink(35);
+        child.try_grow(35).unwrap();
+        assert_eq!(parent.reserved(), 105);
+
+        workspace.close();
+        drop(child);
+        assert_eq!(parent.reserved(), 30);
     }
 
     #[test]

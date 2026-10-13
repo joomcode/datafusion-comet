@@ -732,7 +732,13 @@ impl ExternalSorter {
         is_output_stream: bool,
         coalesce_runs: bool,
     ) -> Result<SendableRecordBatchStream> {
-        let pool = Arc::clone(workspace) as Arc<dyn MemoryPool>;
+        let pool = if self.late_materialization.is_some()
+            && LateMaterialization::applies_to(&self.in_mem_batches)
+        {
+            workspace.bounded()
+        } else {
+            Arc::clone(workspace) as Arc<dyn MemoryPool>
+        };
         let runs =
             MemoryConsumer::new(self.reservation.consumer().name()).register(&pool);
         runs.grow(buffered);
