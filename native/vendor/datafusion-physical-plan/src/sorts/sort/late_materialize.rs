@@ -663,7 +663,12 @@ impl Gather {
         let arrays: Vec<&dyn Array> = arrays.iter().map(|array| array.as_ref()).collect();
         let merged = concat(&arrays)
             .ok()
-            .filter(|array| take(array, &UInt32Array::from(vec![0u32]), None).is_ok());
+            .filter(|array| take(array, &UInt32Array::from(vec![0u32]), None).is_ok())
+            .filter(|array| {
+                let needed = self.needed() + array.get_array_memory_size();
+                let size = self.reservation.size();
+                size >= needed || self.reservation.try_grow(needed - size).is_ok()
+            });
         if merged.is_none() {
             self.fit();
         }
@@ -1563,6 +1568,48 @@ mod tests {
             assert!(sort.metrics().unwrap().spill_count().unwrap() > 0);
             assert_matches_reference(&input, &output, &ordering);
             assert_eq!(pool.reserved(), 0);
+        }
+        Ok(())
+    }
+
+    fn sharing_one_allocation_per_batch(input: &[RecordBatch]) -> Vec<RecordBatch> {
+        let mut bytes = vec![];
+        let mut writer =
+            arrow::ipc::writer::StreamWriter::try_new(&mut bytes, &input[0].schema())
+                .unwrap();
+        for batch in input {
+            writer.write(batch).unwrap();
+        }
+        writer.finish().unwrap();
+        drop(writer);
+        arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(bytes), None)
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_spill_concatenates_only_what_the_pool_grants() -> Result<()> {
+        let separate = mixed_batches(64, 150, 42);
+        let bytes: usize = separate
+            .iter()
+            .map(RecordBatch::get_array_memory_size)
+            .sum();
+        let input = sharing_one_allocation_per_batch(&separate);
+        for ordering in mixed_orderings() {
+            for limit in [bytes / 2, bytes / 3, bytes / 5] {
+                let pool = PeakPool::new(limit);
+                let sort = mixed_sort_exec(&input, ordering.clone());
+                let output = collect(
+                    Arc::clone(&sort) as Arc<dyn ExecutionPlan>,
+                    context(Some(Arc::clone(&pool) as _), 1024, 256 << 10),
+                )
+                .await?;
+                assert!(sort.metrics().unwrap().spill_count().unwrap() > 0);
+                assert_matches_reference(&input, &output, &ordering);
+                assert!(pool.peak() <= limit, "peak {} of {limit}", pool.peak());
+                assert_eq!(pool.reserved(), 0);
+            }
         }
         Ok(())
     }
