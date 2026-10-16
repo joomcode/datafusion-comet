@@ -96,8 +96,9 @@ class CometExecIterator(
   private val memoryMXBean = ManagementFactory.getMemoryMXBean
   private val nativeLib = new Native()
   private val nativeUtil = new NativeUtil()
-  private val taskAttemptId = TaskContext.get().taskAttemptId()
-  private val taskCPUs = TaskContext.get().cpus()
+  private val taskContext = TaskContext.get()
+  private val taskAttemptId = taskContext.taskAttemptId()
+  private val taskCPUs = taskContext.cpus()
   private val cometTaskMemoryManager = new CometTaskMemoryManager(id, taskAttemptId)
 
   private val plan = {
@@ -143,7 +144,7 @@ class CometExecIterator(
       // TaskContext and context ClassLoader. Read here because this class is only ever
       // constructed on a Spark task thread (see `taskAttemptId` above); a JNI-attached Tokio
       // worker has neither. See CometUdfBridge.evaluate.
-      TaskContext.get(),
+      taskContext,
       Thread.currentThread().getContextClassLoader)
 
     // Bind task-owned callbacks separately to preserve the existing createPlan JNI signature.
@@ -220,7 +221,7 @@ class CometExecIterator(
 
   // Register a task completion listener to ensure native resources are released
   // when the task is done.
-  TaskContext.get().addTaskCompletionListener[Unit] { _ =>
+  taskContext.addTaskCompletionListener[Unit] { _ =>
     this.close()
   }
 
@@ -228,7 +229,7 @@ class CometExecIterator(
   private val planLock = new Object
   private var planReleased = false
 
-  private val killWatch = CometExecIterator.watchForKill(TaskContext.get(), () => cancelPlan())
+  private val killWatch = CometExecIterator.watchForKill(taskContext, () => cancelPlan())
 
   private def cancelPlan(): Unit = planLock.synchronized {
     if (!planReleased) {
@@ -241,7 +242,7 @@ class CometExecIterator(
   private def getNextBatch: Option[ColumnarBatch] = {
     assert(partitionIndex >= 0 && partitionIndex < numParts)
 
-    val ctx = TaskContext.get()
+    val ctx = taskContext
     CometTaskContextShim.killTaskIfInterrupted(ctx)
 
     try {
