@@ -155,9 +155,13 @@ class CometScalaUDFCodegen extends CometUDF with Logging {
           .getOrElse(classOf[Expression].getClassLoader)
         val boundExpr =
           try {
-            SparkEnv.get.closureSerializer
-              .newInstance()
-              .deserialize[Expression](ByteBuffer.wrap(bytes), loader)
+            if (CometUdfFunctionPool.isSharedExpression(bytes)) {
+              CometUdfFunctionPool.deserializeExpression(bytes, loader)
+            } else {
+              SparkEnv.get.closureSerializer
+                .newInstance()
+                .deserialize[Expression](ByteBuffer.wrap(bytes), loader)
+            }
           } catch {
             case NonFatal(t) =>
               logError(
