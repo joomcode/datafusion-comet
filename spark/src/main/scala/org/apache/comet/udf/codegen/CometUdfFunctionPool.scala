@@ -21,6 +21,7 @@ package org.apache.comet.udf.codegen
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream, DataOutputStream}
 import java.io.{ObjectOutputStream, OutputStream}
+import java.lang.ref.SoftReference
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
@@ -31,7 +32,6 @@ import scala.reflect.ClassTag
 import org.apache.spark.{SparkEnv, TaskContext}
 import org.apache.spark.sql.catalyst.expressions.{Expression, ScalaUDF}
 
-import com.google.common.cache.{Cache, CacheBuilder}
 import com.google.common.collect.MapMaker
 import com.google.protobuf.{ByteString, CodedInputStream, CodedOutputStream, Message, WireFormat}
 import com.google.protobuf.Descriptors.FieldDescriptor
@@ -53,8 +53,12 @@ object CometUdfFunctionPool {
     new MapMaker().weakValues().makeMap()
   private val serializable: java.util.concurrent.ConcurrentMap[AnyRef, java.lang.Boolean] =
     new MapMaker().weakKeys().makeMap()
-  private val pools: Cache[Vector[Long], Array[Byte]] =
-    CacheBuilder.newBuilder().softValues().maximumSize(64).build()
+  private val pools =
+    new java.util.LinkedHashMap[Vector[Long], SoftReference[Array[Byte]]](16, 0.75f, true) {
+      override def removeEldestEntry(
+          eldest: java.util.Map.Entry[Vector[Long], SoftReference[Array[Byte]]]): Boolean =
+        size() > 64
+    }
 
   private val poolBuilds = new AtomicLong(0)
   private val poolDeserializations = new AtomicLong(0)
@@ -117,12 +121,13 @@ object CometUdfFunctionPool {
     if (missing.isEmpty) return planBytes
     val functions = missing.map(id => Option(functionsById.get(id)))
     if (functions.exists(_.isEmpty)) return planBytes
-    val pool = pools.get(
-      missing,
-      () => {
+    val pool =
+      pools.synchronized(Option(pools.get(missing)).flatMap(r => Option(r.get))).getOrElse {
         poolBuilds.incrementAndGet()
-        withHeader(PoolMagic, missing, functions.map(_.get).toArray[AnyRef])
-      })
+        val built = withHeader(PoolMagic, missing, functions.map(_.get).toArray[AnyRef])
+        pools.synchronized(pools.put(missing, new SoftReference(built)))
+        built
+      }
     val size = planBytes.length + CodedOutputStream.computeByteArraySize(PoolFieldNumber, pool)
     val result = java.util.Arrays.copyOf(planBytes, size)
     val coded = CodedOutputStream.newInstance(result, planBytes.length, size - planBytes.length)
