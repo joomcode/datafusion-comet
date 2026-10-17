@@ -29,7 +29,7 @@ import org.apache.spark.sql.CometTestBase
 import org.apache.spark.sql.api.java.UDF1
 import org.apache.spark.sql.catalyst.expressions.{Add, Alias, AttributeReference, BoundReference, Cast, CreateArray, CreateMap, CreateNamedStruct, Expression, Hypot, Literal, MapConcat}
 import org.apache.spark.sql.catalyst.expressions.objects.Invoke
-import org.apache.spark.sql.comet.CometProjectExec
+import org.apache.spark.sql.comet.{CometNativeExec, CometProjectExec}
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
@@ -40,7 +40,7 @@ import org.apache.comet.codegen.CometBatchKernelCodegen
 import org.apache.comet.codegen.CometBatchKernelCodegen.ArrowColumnSpec
 import org.apache.comet.serde.{CometScalaUDF, QueryPlanSerde}
 import org.apache.comet.serde.ExprOuterClass.Expr.ExprStructCase
-import org.apache.comet.udf.codegen.CometScalaUDFCodegen
+import org.apache.comet.udf.codegen.{CometScalaUDFCodegen, CometUdfFunctionPool}
 import org.apache.comet.vector.CometVector
 
 /**
@@ -2346,6 +2346,35 @@ class CometCodegenSuite
     val folded =
       Invoke(target, "twice", StringType, Seq(Literal(UTF8String.fromString("ab"), StringType)))
     assert(runKernel(folded, 1)(_.getUTF8String(0).toString) === "abab")
+  }
+
+  test("UDFs that capture one large object ship it once per serialized plan") {
+    val captured = Array.tabulate(1 << 19)(_.toLong)
+    val capturedBytes = captured.length * 8
+    spark.udf.register("sharedA", (id: Long) => captured((id % captured.length).toInt) + 1)
+    spark.udf.register("sharedB", (id: Long) => captured((id % captured.length).toInt) * 2)
+    spark.udf.register("sharedC", (id: Long) => captured.length.toLong - id)
+    val query = "SELECT id, sharedA(id), sharedB(id), sharedC(id), sharedA(id + 1), " +
+      "sharedB(id + 2), sharedC(id + 3), sharedA(id + 4), sharedB(id + 5) FROM t"
+    withTable("t") {
+      spark.range(0, 2000, 1, 4).write.saveAsTable("t")
+      val builds = CometUdfFunctionPool.poolBuildCount
+      val deserializations = CometUdfFunctionPool.poolDeserializationCount
+      val df = sql(query)
+      checkSparkAnswerAndOperator(df)
+      val planBytes = collect(df.queryExecution.executedPlan) {
+        case op: CometNativeExec if op.serializedPlanOpt.isDefined =>
+          op.serializedPlanOpt.plan.get.length
+      }
+      assert(planBytes.nonEmpty)
+      assert(planBytes.max > capturedBytes, s"plan sizes $planBytes")
+      assert(planBytes.max < 2 * capturedBytes, s"plan sizes $planBytes")
+      assert(CometUdfFunctionPool.poolBuildCount == builds + 1)
+      assert(CometUdfFunctionPool.poolDeserializationCount > deserializations)
+
+      checkSparkAnswerAndOperator(sql(query))
+      assert(CometUdfFunctionPool.poolBuildCount == builds + 1)
+    }
   }
 }
 

@@ -44,6 +44,7 @@ import org.apache.comet.exceptions.CometQueryExecutionException
 import org.apache.comet.parquet.CometFileKeyUnwrapper
 import org.apache.comet.serde.Config.ConfigMap
 import org.apache.comet.shuffle.ShufflePartitionPusher
+import org.apache.comet.udf.codegen.CometUdfFunctionPool
 import org.apache.comet.vector.NativeUtil
 
 /**
@@ -122,6 +123,8 @@ class CometExecIterator(
     }
 
     val memoryConfig = CometExecIterator.getMemoryConfig(conf)
+
+    CometUdfFunctionPool.registerPlan(taskContext, protobufQueryPlan)
 
     val createdPlan = nativeLib.createPlan(
       id,

@@ -65,6 +65,7 @@ import org.apache.comet.serde.OperatorOuterClass.{AggregateMode => CometAggregat
 import org.apache.comet.serde.QueryPlanSerde
 import org.apache.comet.serde.QueryPlanSerde.{aggExprToProto, exprToProto, isStringCollationType, supportedSortType}
 import org.apache.comet.serde.operator.CometSink
+import org.apache.comet.udf.codegen.CometUdfFunctionPool
 
 /**
  * Trait for injecting per-partition planning data into operator nodes.
@@ -732,7 +733,7 @@ object CometExec {
     val codedOutput = CodedOutputStream.newInstance(bytes)
     nativePlan.writeTo(codedOutput)
     codedOutput.checkNoSpaceLeft()
-    bytes
+    CometUdfFunctionPool.attachPools(nativePlan, bytes)
   }
 
   def getCometIterator(

@@ -32,7 +32,7 @@ import org.apache.comet.CometSparkSessionExtensions.{withCodegenDispatchExpr, wi
 import org.apache.comet.codegen.CometBatchKernelCodegen
 import org.apache.comet.serde.ExprOuterClass.Expr
 import org.apache.comet.serde.QueryPlanSerde.{exprToProtoInternal, serializeDataType}
-import org.apache.comet.udf.codegen.CometScalaUDFCodegen
+import org.apache.comet.udf.codegen.{CometScalaUDFCodegen, CometUdfFunctionPool}
 
 /**
  * Routes scalar `ScalaUDF` (Scala and Java UDFs) through the codegen dispatcher.
@@ -124,13 +124,25 @@ object CometScalaUDF extends CometExpressionSerde[ScalaUDF] {
     // fails planning, which is a much worse outcome than falling the operator back to Spark.
     // `CometStaticInvoke` / `CometInvoke` route unrecognized nodes here as a catch-all, so the
     // trees reaching this point are arbitrary.
+    val functions = CometUdfFunctionPool.functionsOf(boundExpr)
+    functions.find(!CometUdfFunctionPool.isSerializable(_)).foreach { function =>
+      withFallbackReason(
+        expr,
+        s"$exprName: codegen dispatch: UDF function ${function.getClass.getName} could not " +
+          "be closure-serialized")
+      return None
+    }
     val bytes =
       try {
-        val serializer = SparkEnv.get.closureSerializer.newInstance()
-        val buffer = serializer.serialize(boundExpr)
-        val serialized = new Array[Byte](buffer.remaining())
-        buffer.get(serialized)
-        serialized
+        if (functions.nonEmpty) {
+          CometUdfFunctionPool.serializeExpression(boundExpr, functions)
+        } else {
+          val serializer = SparkEnv.get.closureSerializer.newInstance()
+          val buffer = serializer.serialize(boundExpr)
+          val serialized = new Array[Byte](buffer.remaining())
+          buffer.get(serialized)
+          serialized
+        }
       } catch {
         // `NonFatal` rather than `NotSerializableException`: Java serialization reports an
         // unserializable object graph as one of several exception types depending on where in
