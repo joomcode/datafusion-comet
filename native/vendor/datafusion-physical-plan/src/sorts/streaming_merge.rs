@@ -286,6 +286,24 @@ impl<'a> StreamingMergeBuilder<'a> {
     }
 }
 
+/// COMET PATCH
+pub(super) fn merge_uses_row_cursor(expr: &LexOrdering, schema: &SchemaRef) -> bool {
+    let [sort] = expr.as_ref() else {
+        return true;
+    };
+    !sort.expr.data_type(schema).is_ok_and(|data_type| {
+        data_type.is_primitive()
+            || matches!(
+                data_type,
+                DataType::Utf8
+                    | DataType::Utf8View
+                    | DataType::LargeUtf8
+                    | DataType::Binary
+                    | DataType::LargeBinary
+            )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{common::collect, stream::RecordBatchStreamAdapter};

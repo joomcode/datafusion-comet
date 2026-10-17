@@ -749,3 +749,124 @@ async fn spill_merge_of_key_dominated_rows_does_not_fail() -> Result<()> {
     }
     Ok(())
 }
+
+#[derive(Debug)]
+struct PeakPool {
+    inner: GreedyMemoryPool,
+    peak: AtomicUsize,
+}
+
+impl PeakPool {
+    fn new(size: usize) -> Arc<Self> {
+        Arc::new(Self {
+            inner: GreedyMemoryPool::new(size),
+            peak: AtomicUsize::new(0),
+        })
+    }
+
+    fn peak(&self) -> usize {
+        self.peak.load(Ordering::Relaxed)
+    }
+
+    fn record(&self) {
+        self.peak.fetch_max(self.inner.reserved(), Ordering::Relaxed);
+    }
+}
+
+impl fmt::Display for PeakPool {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "peak({})", self.inner)
+    }
+}
+
+impl MemoryPool for PeakPool {
+    fn name(&self) -> &str {
+        "peak"
+    }
+
+    fn grow(&self, reservation: &MemoryReservation, additional: usize) {
+        self.inner.grow(reservation, additional);
+        self.record();
+    }
+
+    fn shrink(&self, reservation: &MemoryReservation, shrink: usize) {
+        self.inner.shrink(reservation, shrink)
+    }
+
+    fn try_grow(&self, reservation: &MemoryReservation, additional: usize) -> Result<()> {
+        self.inner.try_grow(reservation, additional)?;
+        self.record();
+        Ok(())
+    }
+
+    fn reserved(&self) -> usize {
+        self.inner.reserved()
+    }
+
+    fn memory_limit(&self) -> MemoryLimit {
+        self.inner.memory_limit()
+    }
+}
+
+/// The output merge of batches that stayed in memory holds the sorted batches and the
+/// rows it encodes their sort keys into. With a key that is the whole row these rows
+/// outgrow what sorting frees, and the merge failed with "Additional allocation failed
+/// for ExternalSorterMerge[0]" in a pool the buffered batches filled. It now spills the
+/// batches in groups that fit and merges the spill files.
+#[tokio::test]
+async fn output_merge_that_does_not_fit_spills_instead_of_failing() -> Result<()> {
+    let (schema, ordering, input) = key_dominated_batches(300, 1024)?;
+    let mut ordering: Vec<PhysicalSortExpr> = ordering.iter().cloned().collect();
+    ordering.push(PhysicalSortExpr::new_default(crate::expressions::col(
+        "v", &schema,
+    )?));
+    let ordering = LexOrdering::new(ordering).unwrap();
+    let expected = sort_batch(&concat_batches(&schema, &input)?, &ordering, None)?;
+    let headroom = 64 * 1024;
+    let sort = |pool: Arc<dyn MemoryPool>| {
+        let runtime = RuntimeEnvBuilder::new().with_memory_pool(pool).build_arc();
+        let schema = Arc::clone(&schema);
+        let ordering = ordering.clone();
+        let input = input.clone();
+        async move {
+            let mut sorter = ExternalSorter::new(
+                0,
+                Arc::clone(&schema),
+                ordering,
+                8192,
+                headroom,
+                1024 * 1024,
+                SpillCompression::Uncompressed,
+                &ExecutionPlanMetricsSet::new(),
+                runtime?,
+            )?;
+            for batch in input {
+                sorter.insert_batch(batch).await?;
+            }
+            let buffered = sorter.reservation.size();
+            let spilled_before = sorter.spill_count();
+            let output: Vec<RecordBatch> = sorter.sort().await?.try_collect().await?;
+            Ok::<_, DataFusionError>((buffered, spilled_before, sorter.spill_count(), output))
+        }
+    };
+    let (buffered, _, spills, _) =
+        sort(Arc::new(GreedyMemoryPool::new(1 << 30)) as _).await?;
+    assert_eq!(spills, 0);
+    let data: usize = input.iter().map(get_record_batch_memory_size).sum();
+    for extra in [0, data / 100, data / 50, data / 25] {
+        let limit = buffered + headroom + extra;
+        let peak = PeakPool::new(limit);
+        let pool: Arc<dyn MemoryPool> = Arc::clone(&peak) as _;
+        let (_, spilled_before, spills, output) = sort(Arc::clone(&pool)).await?;
+        assert_eq!(spilled_before, 0, "the batches stay in memory until the output");
+        assert!(spills > 1, "the batches spill in groups");
+        assert!(peak.peak() <= limit, "peak {} of {limit}", peak.peak());
+        assert_eq!(pool.reserved(), 0);
+        let actual = concat_batches(&schema, &output)?;
+        assert_eq!(actual.num_rows(), expected.num_rows());
+        for column in 0..4 {
+            assert_eq!(actual.column(column), expected.column(column));
+        }
+    }
+    Ok(())
+}
