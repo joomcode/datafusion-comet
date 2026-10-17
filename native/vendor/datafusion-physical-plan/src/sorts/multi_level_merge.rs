@@ -26,14 +26,16 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use arrow::datatypes::{DataType, SchemaRef};
+use arrow::datatypes::SchemaRef;
 use datafusion_common::{Result, internal_err, resources_err};
 use datafusion_execution::memory_pool::{MemoryPool, MemoryReservation};
 
 use crate::sorts::builder::try_grow_reservation_to_at_least;
 use crate::sorts::sort::get_reserved_bytes_for_record_batch_size;
 use crate::sorts::spill_workspace::SpillWorkspace;
-use crate::sorts::streaming_merge::{SortedSpillFile, StreamingMergeBuilder};
+use crate::sorts::streaming_merge::{
+    SortedSpillFile, StreamingMergeBuilder, merge_uses_row_cursor,
+};
 use crate::stream::{ObservedStream, RecordBatchStreamAdapter};
 use datafusion_execution::{RecordBatchStream, SendableRecordBatchStream};
 use datafusion_physical_expr_common::sort_expr::LexOrdering;
@@ -713,23 +715,9 @@ impl MultiLevelMergeBuilder {
         }
     }
 
-    /// COMET PATCH: whether the merge compares rows, which `StreamingMergeBuilder` does
-    /// unless it sorts on one primitive or string/binary column.
+    /// COMET PATCH
     fn merge_uses_row_cursor(&self) -> bool {
-        let [sort] = self.expr.as_ref() else {
-            return true;
-        };
-        !sort.expr.data_type(&self.schema).is_ok_and(|data_type| {
-            data_type.is_primitive()
-                || matches!(
-                    data_type,
-                    DataType::Utf8
-                        | DataType::Utf8View
-                        | DataType::LargeUtf8
-                        | DataType::Binary
-                        | DataType::LargeBinary
-                )
-        })
+        merge_uses_row_cursor(&self.expr, &self.schema)
     }
 
     /// Re-spill the spill file at `index` with half its batch size, putting it back
