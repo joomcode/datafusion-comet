@@ -591,7 +591,11 @@ impl PartialHashAggregateStream {
                 match result {
                     Ok(None) => {}
                     Ok(Some(taken)) => {
-                        let _ = self.reservation.try_resize(hash_table.memory_size());
+                        // COMET PATCH: the taken batch is memory this stream holds until
+                        // it has emitted it.
+                        self.reservation.resize(
+                            hash_table.memory_size() + taken.get_array_memory_size(),
+                        );
                         return ControlFlow::Continue(
                             PartialHashAggregateState::EmittingOnMemoryPressure {
                                 hash_table,
@@ -660,8 +664,13 @@ impl PartialHashAggregateStream {
                 // -------------------------------------------------
                 // Step 4: Larger-than-memory execution (early emit)
                 // -------------------------------------------------
+                // COMET PATCH: reserve what materializing the table will take along with
+                // the table, so that the emit below, or the one at the end of the input,
+                // runs in memory the pool granted.
                 let timer = elapsed_compute.timer();
-                let resize_result = self.reservation.try_resize(hash_table.memory_size());
+                let resize_result = self
+                    .reservation
+                    .try_resize(hash_table.memory_size() + hash_table.emit_size());
                 timer.done();
                 match resize_result {
                     Ok(()) => {}
@@ -674,12 +683,15 @@ impl PartialHashAggregateStream {
 
                         // Emitting clears the aggregate table and releases its
                         // accumulated memory. Update the reservation accordingly.
-                        let resize_result =
-                            self.reservation.try_resize(hash_table.memory_size());
-
-                        if let Err(e) = resize_result {
-                            return Self::break_with_err(e);
-                        }
+                        // COMET PATCH: the materialized states stay reserved until they
+                        // are emitted. They are allocated already, so record them with the
+                        // infallible `resize`.
+                        let emitting = match &state_batch_result {
+                            Ok(Some(batch)) => batch.get_array_memory_size(),
+                            _ => 0,
+                        };
+                        self.reservation
+                            .resize(hash_table.memory_size() + emitting);
 
                         let materialized_group_states = match state_batch_result {
                             Ok(Some(batch)) => batch,
@@ -747,6 +759,8 @@ impl PartialHashAggregateStream {
 
         let (output_batch, next_state) = if batch.num_rows() <= self.batch_size {
             // Last batch to output, go back to `ReadingInput`
+            // COMET PATCH: the materialized states are handed over.
+            self.reservation.resize(hash_table.memory_size());
             (
                 batch,
                 PartialHashAggregateState::ReadingInput { hash_table },
@@ -800,7 +814,9 @@ impl PartialHashAggregateStream {
 
         match result {
             Ok(Some(batch)) => {
-                let _ = self.reservation.try_resize(hash_table.memory_size());
+                // COMET PATCH: record what the materialized output holds. It is allocated
+                // already, so a refusal would only leave it untracked.
+                self.reservation.resize(hash_table.memory_size());
                 self.reduction_factor.add_part(batch.num_rows());
                 debug_assert!(batch.num_rows() > 0);
                 let next_state = if hash_table.is_done() {
@@ -1125,7 +1141,8 @@ impl FinalHashAggregateStream {
         hash_table: &AggregateHashTable<FinalMarker>,
         spill_context: Option<&FinalSpillContext>,
     ) -> usize {
-        let table_size = hash_table.memory_size();
+        // COMET PATCH: with what materializing the table takes, see `emit_size`.
+        let table_size = hash_table.memory_size() + hash_table.emit_size();
         if spill_context.is_some() {
             // Count extra space needed for in-memory sorting and spilling. Only
             // count memory for indices, the payload will be materialize incrementally
@@ -1458,10 +1475,9 @@ impl FinalHashAggregateStream {
                     }
                     FinalHashAggregateState::Done
                 } else {
-                    if let Err(e) = self.reservation.try_resize(hash_table.memory_size())
-                    {
-                        return Self::break_with_err(e);
-                    }
+                    // COMET PATCH: the materialized output is allocated already. Record
+                    // it; refusing it cannot free anything.
+                    self.reservation.resize(hash_table.memory_size());
                     FinalHashAggregateState::ProducingOutput { hash_table }
                 };
 

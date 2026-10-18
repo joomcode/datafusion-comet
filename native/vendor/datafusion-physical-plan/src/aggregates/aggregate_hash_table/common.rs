@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use arrow::array::{ArrayRef, AsArray, new_null_array};
-use arrow::datatypes::SchemaRef;
+use arrow::datatypes::{DataType, SchemaRef};
 use arrow::record_batch::RecordBatch;
 use datafusion_common::{Result, internal_err};
 use datafusion_execution::memory_pool::proxy::VecAllocExt;
@@ -33,6 +33,33 @@ use crate::aggregates::order::GroupOrdering;
 use crate::aggregates::{
     AggregateExec, PhysicalGroupBy, aggregate_expressions, evaluate_group_by,
 };
+
+/// COMET PATCH: index vectors and offsets materializing a group allocates, see
+/// [`AggregateHashTable::emit_size`].
+const EMIT_BYTES_PER_GROUP: usize = 24;
+
+/// COMET PATCH: whether materializing a column of this type copies the values the
+/// accumulator holds, rather than handing over its buffers.
+fn emit_copies(data_type: &DataType) -> bool {
+    !(data_type.is_primitive() || matches!(data_type, DataType::Boolean | DataType::Null))
+}
+
+/// COMET PATCH: whether a group key of this type is stored in a column builder, which
+/// hands its buffers over on emit, rather than in rows that are converted back.
+fn column_group_key(data_type: &DataType) -> bool {
+    data_type.is_primitive()
+        || matches!(
+            data_type,
+            DataType::Boolean
+                | DataType::Null
+                | DataType::Utf8
+                | DataType::LargeUtf8
+                | DataType::Utf8View
+                | DataType::Binary
+                | DataType::LargeBinary
+                | DataType::BinaryView
+        )
+}
 
 /// Marker for raw rows -> partial state aggregation.
 pub(in crate::aggregates) struct PartialMarker;
@@ -303,6 +330,54 @@ impl<AggrMode> AggregateHashTable<AggrMode> {
         }
     }
 
+    /// COMET PATCH: what materializing every group allocates on top of
+    /// [`Self::memory_size`], which nothing reserves otherwise: output and state
+    /// columns that are built by copying the accumulated values (lists, structs, strings
+    /// and other variable-size values; `collect_list` copies everything it retained),
+    /// group keys converted from rows, and the index vectors such a copy gathers with.
+    /// Primitive state and the usual group key columns are handed over without a copy, so
+    /// a table of only those takes nothing more.
+    ///
+    /// Streams reserve it ahead, with the table, so that materializing never needs memory
+    /// the pool has not granted: a partial aggregate emits early and a final one spills
+    /// when the pool refuses it.
+    pub(in crate::aggregates) fn emit_size(&self) -> usize {
+        let (AggregateHashTableState::Building(state)
+        | AggregateHashTableState::Outputting(state)) = &self.state
+        else {
+            return 0;
+        };
+        let groups = state.group_values.len();
+        if groups == 0 {
+            return 0;
+        }
+        let accumulators = state
+            .accumulators
+            .iter()
+            .filter(|acc| acc.emit_copies)
+            .map(|acc| acc.accumulator.size())
+            .sum::<usize>();
+        let keys_from_rows = state
+            .group_by
+            .group_schema(&self.input_schema)
+            .map(|schema| {
+                schema
+                    .fields()
+                    .iter()
+                    .any(|field| !column_group_key(field.data_type()))
+            })
+            .unwrap_or(true);
+        let keys = if keys_from_rows {
+            state.group_values.size()
+        } else {
+            0
+        };
+        if accumulators + keys == 0 {
+            return 0;
+        }
+        accumulators + keys + groups * EMIT_BYTES_PER_GROUP
+    }
+
     pub(in crate::aggregates) fn group_by_metrics(&self) -> &GroupByMetrics {
         &self.group_by_metrics
     }
@@ -386,6 +461,10 @@ pub(super) struct HashAggregateAccumulator {
 
     /// Accumulator state for all groups for one aggregate expression.
     accumulator: Box<dyn GroupsAccumulator>,
+
+    /// COMET PATCH: whether materializing this accumulator's state or value copies what
+    /// it holds. See [`AggregateHashTable::emit_size`].
+    emit_copies: bool,
 }
 
 pub(super) type AggregateAccumulator = HashAggregateAccumulator;
@@ -535,11 +614,16 @@ impl HashAggregateAccumulator {
         filter: Option<Arc<dyn PhysicalExpr>>,
         accumulator: Box<dyn GroupsAccumulator>,
     ) -> Self {
+        let emit_copies = emit_copies(aggregate_expr.field().data_type())
+            || aggregate_expr.state_fields().map_or(true, |fields| {
+                fields.iter().any(|field| emit_copies(field.data_type()))
+            });
         Self {
             aggregate_expr,
             arguments,
             filter,
             accumulator,
+            emit_copies,
         }
     }
 
