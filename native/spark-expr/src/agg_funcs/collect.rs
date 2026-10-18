@@ -24,10 +24,12 @@
 //! high-cardinality key. See <https://github.com/apache/datafusion-comet/issues/5797>.
 
 use arrow::array::{
-    new_empty_array, Array, ArrayRef, AsArray, BooleanArray, ListArray, UInt32Array,
+    make_array, new_empty_array, Array, ArrayData, ArrayRef, AsArray, BooleanArray,
+    BooleanBufferBuilder, Capacities, ListArray, MutableArrayData, OffsetSizeTrait, StructArray,
+    UInt32Array,
 };
 use arrow::buffer::{NullBuffer, OffsetBuffer};
-use arrow::compute::{cast, concat, interleave, take};
+use arrow::compute::{cast, interleave, take};
 use arrow::datatypes::{DataType, Field, FieldRef};
 use arrow::row::{RowConverter, SortField};
 use datafusion::common::{
@@ -385,7 +387,10 @@ impl GroupsAccumulator for CollectListGroupsAccumulator {
             new_empty_array(&self.datatype)
         } else if num_rows >= num_ranges * CONCAT_MIN_RANGE_LEN {
             // Long runs: scatter the ranges themselves into group order, then copy each one
-            // whole. `concat` preallocates and does a single copy per run.
+            // whole into one preallocated array. Copying from the retained arrays' data
+            // directly, rather than concatenating a slice per run, keeps the per-run cost to
+            // the copy: a slice of a struct allocates every child again, a few KB per run for
+            // a wide struct, none of it visible to the memory pool.
             let mut cursors = prefix_sum(&range_counts);
             let mut ordered = vec![(0u32, RowRange::default()); num_ranges];
             for (batch_idx, ranges) in self.ranges.iter().enumerate() {
@@ -397,15 +402,7 @@ impl GroupsAccumulator for CollectListGroupsAccumulator {
                     }
                 }
             }
-            let slices: Vec<ArrayRef> = ordered
-                .iter()
-                .map(|(batch_idx, range)| {
-                    self.batches[*batch_idx as usize]
-                        .slice(range.start as usize, range.len as usize)
-                })
-                .collect();
-            let slices: Vec<&dyn Array> = slices.iter().map(|s| s.as_ref()).collect();
-            concat(&slices)?
+            copy_runs(&self.datatype, &self.batches, &ordered, num_rows)?
         } else {
             // Scattered rows: scatter straight into the gather indices and take them all in one
             // `interleave` call.
@@ -460,6 +457,81 @@ impl GroupsAccumulator for CollectListGroupsAccumulator {
             + self.ranges.capacity() * size_of::<Vec<RowRange>>()
             + self.datatype.size()
     }
+}
+
+/// Copies `runs` of `sources`, all of `data_type`, into one array of `rows` rows, without
+/// slicing every run first. A struct is copied field by field, and the value bytes of
+/// strings and binaries are counted up front, so their buffers are allocated once at the
+/// size they need instead of growing by doubling.
+fn copy_runs(
+    data_type: &DataType,
+    sources: &[ArrayRef],
+    runs: &[(u32, RowRange)],
+    rows: usize,
+) -> DFResult<ArrayRef> {
+    if let DataType::Struct(fields) = data_type {
+        let columns = (0..fields.len())
+            .map(|i| {
+                let children: Vec<ArrayRef> = sources
+                    .iter()
+                    .map(|source| Arc::clone(source.as_struct().column(i)))
+                    .collect();
+                copy_runs(fields[i].data_type(), &children, runs, rows)
+            })
+            .collect::<DFResult<Vec<_>>>()?;
+        let nulls = if sources.iter().any(|source| source.null_count() > 0) {
+            let mut valid = BooleanBufferBuilder::new(rows);
+            for (batch_idx, range) in runs {
+                match sources[*batch_idx as usize].nulls() {
+                    Some(nulls) => {
+                        let nulls = nulls.slice(range.start as usize, range.len as usize);
+                        valid.append_buffer(nulls.inner());
+                    }
+                    None => valid.append_n(range.len as usize, true),
+                }
+            }
+            Some(NullBuffer::new(valid.finish()))
+        } else {
+            None
+        };
+        return Ok(Arc::new(StructArray::try_new(
+            fields.clone(),
+            columns,
+            nulls,
+        )?));
+    }
+    let capacities = match data_type {
+        DataType::Utf8 | DataType::Binary => {
+            Capacities::Binary(rows, Some(run_bytes::<i32>(sources, runs)))
+        }
+        DataType::LargeUtf8 | DataType::LargeBinary => {
+            Capacities::Binary(rows, Some(run_bytes::<i64>(sources, runs)))
+        }
+        _ => Capacities::Array(rows),
+    };
+    let data: Vec<ArrayData> = sources.iter().map(|source| source.to_data()).collect();
+    let mut values = MutableArrayData::with_capacities(data.iter().collect(), false, capacities);
+    for (batch_idx, range) in runs {
+        values.try_extend(
+            *batch_idx as usize,
+            range.start as usize,
+            range.end() as usize,
+        )?;
+    }
+    Ok(make_array(values.freeze()))
+}
+
+fn run_bytes<O: OffsetSizeTrait>(sources: &[ArrayRef], runs: &[(u32, RowRange)]) -> usize {
+    let data: Vec<ArrayData> = sources.iter().map(|source| source.to_data()).collect();
+    runs.iter()
+        .map(|(batch_idx, range)| {
+            let data = &data[*batch_idx as usize];
+            let value_offsets = data.buffer::<O>(0);
+            let start = data.offset() + range.start as usize;
+            let end = data.offset() + range.end() as usize;
+            (value_offsets[end] - value_offsets[start]).as_usize()
+        })
+        .sum()
 }
 
 /// Exclusive prefix sum of `counts`, giving each group the position its first item is written to.
@@ -1003,6 +1075,59 @@ mod tests {
                 (1..64).step_by(2).map(Some).collect::<Vec<_>>(),
             ]
         );
+    }
+
+    /// Long runs of a struct with null fields, from sliced input that also holds null structs
+    /// (which collect_list drops), are copied field by field; the result matches gathering the
+    /// same rows with `take`.
+    #[test]
+    fn collect_list_copies_struct_runs_with_their_nulls() {
+        let fields = Fields::from(vec![
+            Field::new("s", DataType::Utf8, true),
+            Field::new("n", DataType::Int32, true),
+        ]);
+        let datatype = DataType::Struct(fields.clone());
+        let batch = |base: i32| -> ArrayRef {
+            let s: ArrayRef = Arc::new(StringArray::from_iter(
+                (0..24).map(|i| (i % 5 != 0).then(|| format!("v{}", base + i))),
+            ));
+            let n: ArrayRef = Arc::new(Int32Array::from_iter(
+                (0..24).map(|i| (i % 3 != 0).then_some(base + i)),
+            ));
+            let nulls = NullBuffer::from_iter((0..24).map(|i| i % 7 != 3));
+            Arc::new(StructArray::new(fields.clone(), vec![s, n], Some(nulls)).slice(2, 20))
+        };
+        let mut acc = CollectListGroupsAccumulator::new(datatype);
+        let mut sources = vec![];
+        for base in [0, 100] {
+            let input = batch(base);
+            // Runs of 5 rows per group: groups 0..4 for the first batch, 1..5 for the second.
+            let groups: Vec<usize> = (0..20).map(|i| i / 5 + (base as usize / 100)).collect();
+            acc.update_batch(&[Arc::clone(&input)], &groups, None, 5)
+                .unwrap();
+            sources.push((input, groups));
+        }
+        let result = acc.evaluate(EmitTo::All).unwrap();
+        let lists = result.as_list::<i32>();
+        assert_eq!(lists.len(), 5);
+        for group in 0..5 {
+            let expected: Vec<ArrayRef> = sources
+                .iter()
+                .map(|(input, groups)| {
+                    let rows: Vec<u32> = (0..20u32)
+                        .filter(|&r| groups[r as usize] == group && input.is_valid(r as usize))
+                        .collect();
+                    take(input.as_ref(), &UInt32Array::from(rows), None).unwrap()
+                })
+                .collect();
+            let expected: Vec<&dyn Array> = expected.iter().map(|a| a.as_ref()).collect();
+            let expected = arrow::compute::concat(&expected).unwrap();
+            assert_eq!(
+                lists.value(group).as_ref(),
+                expected.as_ref(),
+                "group {group}"
+            );
+        }
     }
 
     #[test]
