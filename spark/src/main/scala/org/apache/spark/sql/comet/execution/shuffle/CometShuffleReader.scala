@@ -34,4 +34,6 @@ private[shuffle] object CometShuffleReader {
   def coalesceRows: Int =
     if (CometConf.COMET_SHUFFLE_READ_COALESCE_ENABLED.get()) CometConf.COMET_BATCH_SIZE.get()
     else 0
+
+  def coalesceMaxBytes: Long = CometConf.COMET_SHUFFLE_READ_COALESCE_MAX_BYTES.get()
 }

@@ -43,7 +43,8 @@ case class NativeBatchDecoderIterator(
     nativeUtil: NativeUtil,
     tracingEnabled: Boolean,
     expectedSchema: Option[Array[Byte]] = None,
-    coalesceRows: Int = 0)
+    coalesceRows: Int = 0,
+    coalesceMaxBytes: Long = 0L)
     extends Iterator[ColumnarBatch] {
 
   // One consumer reads this iterator, while task completion may close it from another thread.
@@ -184,7 +185,7 @@ case class NativeBatchDecoderIterator(
         }
         val startTime = System.nanoTime()
         if (coalescerHandle == 0L) {
-          coalescerHandle = nativeLib.createShuffleReadCoalescer(coalesceRows)
+          coalescerHandle = nativeLib.createShuffleReadCoalescer(coalesceRows, coalesceMaxBytes)
         }
         val ready = block match {
           case Some((fieldCount, dataBuf, bytesToRead)) =>

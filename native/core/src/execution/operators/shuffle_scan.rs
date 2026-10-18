@@ -83,7 +83,7 @@ impl ShuffleScanExec {
         exec_context_id: i64,
         input_source: Option<Arc<Global<JObject<'static>>>>,
         data_types: Vec<DataType>,
-        coalesce_rows: Option<usize>,
+        coalesce: Option<(usize, usize)>,
     ) -> Result<Self, CometError> {
         let requires_validation = if exec_context_id == TEST_EXEC_CONTEXT_ID {
             false
@@ -120,8 +120,8 @@ impl ShuffleScanExec {
             schema,
             decode_time,
             requires_validation,
-            coalescer: coalesce_rows
-                .map(|rows| Arc::new(Mutex::new(ShuffleReadCoalescer::new(rows)))),
+            coalescer: coalesce
+                .map(|(rows, bytes)| Arc::new(Mutex::new(ShuffleReadCoalescer::new(rows, bytes)))),
         })
     }
 

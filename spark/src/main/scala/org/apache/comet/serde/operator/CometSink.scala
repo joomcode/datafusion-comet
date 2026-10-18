@@ -133,6 +133,7 @@ object CometExchangeSink extends CometSink[SparkPlan] {
 
     val scanBuilder = OperatorOuterClass.ShuffleScan.newBuilder()
     scanBuilder.setCoalesceBatches(CometConf.COMET_SHUFFLE_READ_COALESCE_ENABLED.get())
+    scanBuilder.setCoalesceMaxBytes(CometConf.COMET_SHUFFLE_READ_COALESCE_MAX_BYTES.get())
     val source = op.simpleStringWithNodeId()
     if (source.isEmpty) {
       scanBuilder.setSource(op.getClass.getSimpleName)

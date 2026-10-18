@@ -111,8 +111,8 @@ use crate::execution::operators::{
     PartitionAggregateWindowEnabled, ScanExec, ShuffleScanExec, SortedWindowEnabled,
 };
 use crate::execution::shuffle::{
-    decode_remote_shuffle_batch, read_ipc_compressed, CompressionCodec, ShuffleReadCoalescer,
-    ShuffleWriterExec,
+    coalesce_max_bytes, decode_remote_shuffle_batch, read_ipc_compressed, CompressionCodec,
+    ShuffleReadCoalescer, ShuffleWriterExec,
 };
 use crate::execution::spark_plan::SparkPlan;
 
@@ -1812,10 +1812,14 @@ pub extern "system" fn Java_org_apache_comet_Native_createShuffleReadCoalescer(
     e: EnvUnowned,
     _class: JClass,
     batch_size: jint,
+    max_bytes: jlong,
 ) -> jlong {
     try_unwrap_or_throw(&e, |_| {
         let state = ShuffleReadState {
-            coalescer: ShuffleReadCoalescer::new(batch_size.max(1) as usize),
+            coalescer: ShuffleReadCoalescer::new(
+                batch_size.max(1) as usize,
+                coalesce_max_bytes(max_bytes.max(0) as u64),
+            ),
             ready: None,
         };
         Ok(Box::into_raw(Box::new(state)) as jlong)

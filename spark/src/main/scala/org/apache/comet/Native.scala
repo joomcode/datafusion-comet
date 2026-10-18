@@ -245,7 +245,7 @@ class Native extends NativeBase {
       tracingEnabled: Boolean,
       decoderHandle: Long): Long
 
-  @native def createShuffleReadCoalescer(batchSize: Int): Long
+  @native def createShuffleReadCoalescer(batchSize: Int, maxBytes: Long): Long
 
   @native def releaseShuffleReadCoalescer(handle: Long): Unit
 
