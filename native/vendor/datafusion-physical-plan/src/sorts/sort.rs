@@ -106,6 +106,9 @@ impl ExternalSorterMetrics {
 const SMALL_BATCHES_TARGET_BYTES: usize = 4 << 20;
 const ROW_BYTES_SAMPLES: usize = 8;
 const ROW_BYTES_SAMPLE_ROWS: usize = 1024;
+/// COMET PATCH: the least overcommit an in-memory output merge may take when the pool
+/// refuses growth beyond its estimate. See `SpillWorkspace::allow_overcommit`.
+const OUTPUT_MERGE_OVERCOMMIT: usize = 16 << 20;
 
 /// COMET PATCH: a session config extension. A sort whose input stayed in memory but whose
 /// reservation exceeds this many bytes spills it before producing output. 0 disables.
@@ -493,13 +496,16 @@ impl ExternalSorter {
         if self.spills_before_output() {
             self.sort_and_spill(true).await?;
         }
+        let mut output_merge = None;
         if !self.spilled_before()
             && self.in_mem_batches.len() > 1
             && self.reservation.size() >= self.sort_in_place_threshold_bytes
             && self.runtime.disk_manager.tmp_files_enabled()
-            && !self.output_merge_fits()?
         {
-            self.spill_in_mem_batches_in_groups().await?;
+            output_merge = self.reserve_output_merge()?;
+            if output_merge.is_none() {
+                self.spill_in_mem_batches_in_groups().await?;
+            }
         }
         if self.spilled_before() {
             // Sort `in_mem_batches` and spill it first. If there are many
@@ -542,14 +548,29 @@ impl ExternalSorter {
             // headroom for the merge's cursors and buffers instead of returning it to the
             // pool and asking for it again. Released run memory beyond it goes back to the
             // pool, and growth is charged to the merge. See `SpillWorkspace`.
+            //
+            // What `reserve_output_merge` was granted toward the merge's estimate stays
+            // reserved too, so that the merge does not have to win back from Spark memory
+            // it just gave up: Spark hands it to a consumer that does not spill for others,
+            // such as the shuffle writer of a JVM sort in the same task. A small shortfall of
+            // the estimate is taken as bounded overcommit, because the merge cannot spill.
             let buffered = self.reservation.size();
             let headroom = self.merge_reservation.size();
+            let (needed, grant) = match output_merge {
+                Some(output_merge) => output_merge,
+                None => (0, self.merge_reservation.new_empty()),
+            };
             let workspace = SpillWorkspace::new(vec![
                 self.merge_reservation.take(),
                 self.reservation.take(),
+                grant,
             ]);
-            workspace.keep_at_most(headroom);
-            self.in_mem_sort_stream_in_workspace(&workspace, buffered, true, true)
+            let stream =
+                self.in_mem_sort_stream_in_workspace(&workspace, buffered, true, true);
+            let reserved = MemoryPool::reserved(workspace.as_ref());
+            workspace.keep_at_most(headroom.max(needed.saturating_sub(buffered)));
+            workspace.allow_overcommit(OUTPUT_MERGE_OVERCOMMIT.max(reserved / 10));
+            stream
         } else {
             // Release the memory reserved for merge back to the pool so
             // there is some left when `in_mem_sort_stream` requests an
@@ -560,12 +581,15 @@ impl ExternalSorter {
         }
     }
 
-    /// COMET PATCH
-    fn output_merge_fits(&self) -> Result<bool> {
+    /// COMET PATCH: the memory the output merge of the buffered batches is estimated to
+    /// need, and a reservation holding what that needs beyond the sorter's reservations.
+    /// `None` if the pool cannot grant it.
+    fn reserve_output_merge(&self) -> Result<Option<(usize, MemoryReservation)>> {
+        let grant = self.merge_reservation.new_empty();
         if self.late_materialization.is_some()
             && LateMaterialization::applies_to(&self.in_mem_batches)
         {
-            return Ok(true);
+            return Ok(Some((0, grant)));
         }
         let row_bytes = self.sampled_row_bytes(&self.in_mem_batches)?;
         let needed = self
@@ -574,7 +598,11 @@ impl ExternalSorter {
             .map(|batch| self.run_merge_memory(batch, row_bytes))
             .sum::<Result<usize>>()?;
         let held = self.reservation.size() + self.merge_reservation.size();
-        Ok(self.pool_can_grant(needed.saturating_sub(held)))
+        let missing = needed.saturating_sub(held);
+        if missing > 0 && grant.try_grow(missing).is_err() {
+            return Ok(None);
+        }
+        Ok(Some((needed, grant)))
     }
 
     /// COMET PATCH

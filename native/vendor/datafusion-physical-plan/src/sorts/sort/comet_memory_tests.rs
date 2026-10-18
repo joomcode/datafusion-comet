@@ -870,3 +870,57 @@ async fn output_merge_that_does_not_fit_spills_instead_of_failing() -> Result<()
     }
     Ok(())
 }
+
+/// The output merge's precheck asked the pool for what the merge needs beyond the sorter's
+/// reservations and gave it straight back. In a Spark task the JVM sort that spilled for
+/// that request let its memory go to the task's shuffle writer, which does not spill for
+/// other consumers, and the merge failed later with "Additional allocation failed for
+/// ExternalSorterMerge[0]". The merge now keeps what the precheck was granted.
+#[tokio::test]
+async fn output_merge_keeps_what_its_precheck_was_granted() -> Result<()> {
+    let (schema, ordering, input) = key_dominated_batches(300, 1024)?;
+    let mut ordering: Vec<PhysicalSortExpr> = ordering.iter().cloned().collect();
+    ordering.push(PhysicalSortExpr::new_default(crate::expressions::col(
+        "v", &schema,
+    )?));
+    let ordering = LexOrdering::new(ordering).unwrap();
+    let expected = sort_batch(&concat_batches(&schema, &input)?, &ordering, None)?;
+    let data: usize = input.iter().map(get_record_batch_memory_size).sum();
+    let headroom = 64 * 1024;
+    let pool_size = 2 * data + headroom;
+    let stealing = StealingPool::new(pool_size);
+    let pool: Arc<dyn MemoryPool> = Arc::clone(&stealing) as _;
+    let runtime = RuntimeEnvBuilder::new()
+        .with_memory_pool(Arc::clone(&pool))
+        .build_arc()?;
+    let mut sorter = ExternalSorter::new(
+        0,
+        Arc::clone(&schema),
+        ordering,
+        8192,
+        headroom,
+        1024 * 1024,
+        SpillCompression::Uncompressed,
+        &ExecutionPlanMetricsSet::new(),
+        runtime,
+    )?;
+    for batch in input {
+        sorter.insert_batch(batch).await?;
+    }
+    let merge_stream = sorter.sort().await?;
+    assert_eq!(sorter.spill_count(), 0, "the output merge fits");
+    drop(sorter);
+
+    let contender = MemoryConsumer::new("ShuffleExternalSorter").register(&pool);
+    contender.try_grow(pool_size - pool.reserved())?;
+    stealing.arm();
+
+    let output: Vec<RecordBatch> = merge_stream.try_collect().await?;
+    assert_eq!(pool.reserved(), contender.size() + stealing.stolen());
+    let actual = concat_batches(&schema, &output)?;
+    assert_eq!(actual.num_rows(), expected.num_rows());
+    for column in 0..4 {
+        assert_eq!(actual.column(column), expected.column(column));
+    }
+    Ok(())
+}
