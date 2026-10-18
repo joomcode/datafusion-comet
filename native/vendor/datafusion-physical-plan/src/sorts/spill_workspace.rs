@@ -59,6 +59,9 @@ struct State {
     used: usize,
     /// How many unused bytes stay reserved in the parents.
     keep: usize,
+    /// How many more bytes a fallible growth may still take with the infallible `grow`
+    /// when the execution pool refuses them. See [`SpillWorkspace::allow_overcommit`].
+    overcommit_left: usize,
 }
 
 impl State {
@@ -66,13 +69,18 @@ impl State {
         self.parents.iter().map(MemoryReservation::size).sum()
     }
 
-    fn cover(&mut self, used: usize, fallible: bool) -> Result<()> {
+    fn cover(&mut self, used: usize, fallible: bool, overcommit: bool) -> Result<()> {
         let reserved = self.reserved();
         if used > reserved {
-            if fallible {
-                self.parents[0].try_grow(used - reserved)?;
-            } else {
-                self.parents[0].grow(used - reserved);
+            let missing = used - reserved;
+            if !fallible {
+                self.parents[0].grow(missing);
+            } else if let Err(e) = self.parents[0].try_grow(missing) {
+                if !overcommit || missing > self.overcommit_left {
+                    return Err(e);
+                }
+                self.overcommit_left -= missing;
+                self.parents[0].grow(missing);
             }
         }
         self.used = used;
@@ -121,6 +129,7 @@ impl SpillWorkspace {
                 parents,
                 used: 0,
                 keep: usize::MAX,
+                overcommit_left: 0,
             }),
             fallible,
         })
@@ -172,6 +181,14 @@ impl SpillWorkspace {
         state.trim();
     }
 
+    /// Lets children take up to `bytes` in total beyond what the execution pool grants,
+    /// through the infallible `grow`, which the Comet pool records as overcommit and repays
+    /// from the next grant. For a merge that cannot spill, a small shortfall of its estimate
+    /// then costs a bounded overcommit rather than the task.
+    pub(super) fn allow_overcommit(&self, bytes: usize) {
+        self.state.lock().overcommit_left = bytes;
+    }
+
     fn release(&self, size: usize) {
         let mut state = self.state.lock();
         state.used = state
@@ -197,7 +214,7 @@ impl MemoryPool for SpillWorkspace {
         let mut state = self.state.lock();
         let used = state.used.saturating_add(additional);
         state
-            .cover(used, false)
+            .cover(used, false, false)
             .expect("an infallible grow cannot fail");
     }
 
@@ -214,7 +231,7 @@ impl MemoryPool for SpillWorkspace {
         let Some(used) = state.used.checked_add(additional) else {
             return resources_err!("Sort spill workspace overflow");
         };
-        state.cover(used, self.fallible)
+        state.cover(used, self.fallible, true)
     }
 
     fn reserved(&self) -> usize {
@@ -253,7 +270,7 @@ impl MemoryPool for BoundedWorkspace {
         let Some(used) = state.used.checked_add(additional) else {
             return resources_err!("Sort spill workspace overflow");
         };
-        state.cover(used, true)
+        state.cover(used, true, false)
     }
 
     fn reserved(&self) -> usize {
@@ -297,6 +314,27 @@ mod tests {
         drop(cursors);
         runs.free();
         assert_eq!(parent.reserved(), 100);
+        workspace.close();
+        assert_eq!(parent.reserved(), 20);
+    }
+
+    #[test]
+    fn refused_growth_overcommits_only_within_the_allowance() {
+        let (parent, workspace, child) = setup(100, 80);
+        child.try_grow(80).unwrap();
+        let contender = MemoryConsumer::new("contender").register(&parent);
+        contender.try_grow(20).unwrap();
+        assert!(child.try_grow(5).is_err());
+
+        workspace.allow_overcommit(8);
+        child.try_grow(5).unwrap();
+        assert!(child.try_grow(4).is_err());
+        child.try_grow(3).unwrap();
+        assert!(child.try_grow(1).is_err());
+        assert_eq!(parent.reserved(), 108);
+        assert_eq!(MemoryPool::reserved(workspace.as_ref()), 88);
+
+        drop(child);
         workspace.close();
         assert_eq!(parent.reserved(), 20);
     }
