@@ -111,7 +111,8 @@ class CometBlockStoreShuffleReader[K, C](
         nativeLib,
         nativeUtil,
         tracingEnabled,
-        coalesceRows = coalesceRows)
+        coalesceRows = coalesceRows,
+        coalesceMaxBytes = CometShuffleReader.coalesceMaxBytes)
       currentReadIterator
     } else {
       fetchIterator

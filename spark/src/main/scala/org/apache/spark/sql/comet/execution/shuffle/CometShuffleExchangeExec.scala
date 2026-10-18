@@ -335,6 +335,7 @@ object CometShuffleExchangeExec
               .newBuilder()
               .setSource(scan.getSource)
               .setCoalesceBatches(CometConf.COMET_SHUFFLE_READ_COALESCE_ENABLED.get(op.conf))
+              .setCoalesceMaxBytes(CometConf.COMET_SHUFFLE_READ_COALESCE_MAX_BYTES.get(op.conf))
               .addAllFields(scan.getFieldsList))
           .build()
       } else {

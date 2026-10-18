@@ -104,7 +104,9 @@ use datafusion_comet_spark_expr::{
 use iceberg::expr::Bind;
 
 use crate::execution::operators::ExecutionError::GeneralError;
-use crate::execution::shuffle::{CometPartitioning, CompressionCodec, RoundRobinStrategy};
+use crate::execution::shuffle::{
+    coalesce_max_bytes, CometPartitioning, CompressionCodec, RoundRobinStrategy,
+};
 use crate::execution::spark_plan::SparkPlan;
 use crate::parquet::objectstore::s3_blob_fs_support::normalize_object_store_url;
 use crate::parquet::parquet_support::{prepare_object_store_with_configs, ObjectStoreBackend};
@@ -2782,15 +2784,14 @@ impl PhysicalPlanner {
                         Some(inputs.remove(0))
                     };
 
-                let coalesce_rows = scan
-                    .coalesce_batches
-                    .then(|| self.session_ctx.copied_config().batch_size());
-                let shuffle_scan = ShuffleScanExec::new(
-                    self.exec_context_id,
-                    input_source,
-                    data_types,
-                    coalesce_rows,
-                )?;
+                let coalesce = scan.coalesce_batches.then(|| {
+                    (
+                        self.session_ctx.copied_config().batch_size(),
+                        coalesce_max_bytes(scan.coalesce_max_bytes),
+                    )
+                });
+                let shuffle_scan =
+                    ShuffleScanExec::new(self.exec_context_id, input_source, data_types, coalesce)?;
 
                 Ok((
                     vec![],

@@ -138,6 +138,8 @@ message ShuffleScan {
   // Informational label for debug output (e.g., "CometShuffleExchangeExec [id=5]")
   string source = 2;
   bool coalesce_batches = 3;
+  // Upper bound on the bytes of one coalesced batch; 0 means no byte bound.
+  uint64 coalesce_max_bytes = 4;
 }
 
 // Common data shared by all partitions in split mode (sent once at planning)
