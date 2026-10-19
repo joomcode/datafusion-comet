@@ -29,6 +29,7 @@ use crate::joins::Map;
 use crate::joins::MapOffset;
 use crate::joins::PartitionMode;
 use crate::joins::hash_join::exec::JoinLeftData;
+use crate::joins::hash_join::lazy_filter::LazyJoinFilter;
 use crate::joins::hash_join::shared_bounds::{
     PartitionBounds, PartitionBuildData, SharedBuildAccumulator,
 };
@@ -301,6 +302,8 @@ pub(super) struct HashJoinStream {
     on_right: Vec<PhysicalExprRef>,
     /// optional join filter
     filter: Option<JoinFilter>,
+    /// `filter` evaluated conjunct by conjunct, when it reads columns
+    lazy_filter: Option<LazyJoinFilter>,
     /// type of the join (left, right, semi, etc)
     join_type: JoinType,
     /// right (probe) input
@@ -487,16 +490,21 @@ impl HashJoinStream {
         mode: PartitionMode,
         null_aware: bool,
         fetch: Option<usize>,
-    ) -> Self {
+    ) -> Result<Self> {
         // Create output buffer with coalescing and optional fetch limit.
         let output_buffer =
             LimitedBatchCoalescer::new(Arc::clone(&schema), batch_size, fetch);
+        let lazy_filter = filter
+            .as_ref()
+            .and_then(|f| LazyJoinFilter::try_new(f, JoinSide::Left).transpose())
+            .transpose()?;
 
-        Self {
+        Ok(Self {
             partition,
             schema,
             on_right,
             filter,
+            lazy_filter,
             join_type,
             right,
             random_state,
@@ -514,7 +522,7 @@ impl HashJoinStream {
             mode,
             output_buffer,
             null_aware,
-        }
+        })
     }
 
     /// Returns the next state after the build side has been fully collected
@@ -848,7 +856,16 @@ impl HashJoinStream {
             .add_total(distinct_right_indices_count);
 
         // apply join filter if exists
-        let (left_indices, right_indices) = if let Some(filter) = &self.filter {
+        let (left_indices, right_indices) = if let Some(lazy_filter) =
+            self.lazy_filter.as_mut()
+        {
+            lazy_filter.apply(
+                build_side.left_data.batch(),
+                &state.batch,
+                left_indices,
+                right_indices,
+            )?
+        } else if let Some(filter) = &self.filter {
             apply_join_filter_to_indices(
                 build_side.left_data.batch(),
                 &state.batch,

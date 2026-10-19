@@ -448,5 +448,9 @@ name = "smj_interval_filter"
 harness = false
 
 [[bench]]
+name = "hash_join_array_filter"
+harness = false
+
+[[bench]]
 name = "smj_streamed_filter"
 harness = false
