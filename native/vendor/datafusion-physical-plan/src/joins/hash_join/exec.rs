@@ -1576,7 +1576,7 @@ impl ExecutionPlan for HashJoinExec {
             self.mode,
             self.null_aware,
             self.fetch,
-        )))
+        )?))
     }
 
     fn metrics(&self) -> Option<MetricsSet> {

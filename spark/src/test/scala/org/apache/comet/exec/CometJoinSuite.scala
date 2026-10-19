@@ -824,6 +824,73 @@ class CometJoinSuite extends CometTestBase {
     }
   }
 
+  test("Broadcast HashJoin with a join filter over array elements of both sides") {
+    withTempPath { dir =>
+      withSQLConf(
+        // `parts[i]` past the end is NULL, as in Spark 3.x defaults
+        SQLConf.ANSI_ENABLED.key -> "false",
+        CometConf.COMET_BATCH_SIZE.key -> "100",
+        SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+        SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+        // Table locations split into path parts, joined to object paths on the bucket and
+        // the first part with a prefix condition over the remaining parts; most locations
+        // share the first part "tables", so an object meets hundreds of candidates.
+        val objectsPath = s"${dir.getCanonicalPath}/objects"
+        spark
+          .range(0, 3000, 1, 2)
+          .selectExpr(
+            "id",
+            "concat('b', id % 2) AS bucket",
+            "CASE WHEN id % 31 = 0 THEN NULL " +
+              "WHEN id % 7 = 0 THEN concat('other/x', id % 5, '/f', id) " +
+              "ELSE concat('tables/db', id % 9, '/t', id % 13, '/date=', id % 3, " +
+              "CASE WHEN id % 4 = 0 THEN '' ELSE concat('/f', id) END) END AS key")
+          .selectExpr("*", "split(key, '/') AS parts")
+          .write
+          .parquet(objectsPath)
+        val locationsPath = s"${dir.getCanonicalPath}/locations"
+        spark
+          .range(0, 400, 1, 1)
+          .selectExpr(
+            "concat('db', id % 9, '_', id) AS table_name",
+            "concat('b', id % 2) AS bucket",
+            "CASE WHEN id % 53 = 0 THEN NULL WHEN id % 19 = 0 THEN 'other' " +
+              "WHEN id % 5 = 0 THEN concat('tables/db', id % 9) " +
+              "WHEN id % 5 = 1 THEN concat('tables/db', id % 9, '/t', id % 13, '/date=', id % 3) " +
+              "ELSE concat('tables/db', id % 9, '/t', id % 13) END AS prefix")
+          .selectExpr("*", "split(prefix, '/') AS parts")
+          .write
+          .parquet(locationsPath)
+
+        withParquetTable(objectsPath, "objects") {
+          withParquetTable(locationsPath, "locations") {
+            val condition = ("o.bucket = l.bucket AND l.parts[0] = o.parts[0]" +:
+              (1 until 8).map(i => s"(l.parts[$i] IS NULL OR l.parts[$i] = o.parts[$i])"))
+              .mkString(" AND ")
+            val ops =
+              Seq(classOf[CometBroadcastExchangeExec], classOf[CometBroadcastHashJoinExec])
+            for (joinType <- Seq("INNER", "LEFT")) {
+              checkSparkAnswerAndOperator(
+                sql("SELECT /*+ BROADCAST(l) */ o.id, o.key, l.table_name, size(l.parts) " +
+                  s"FROM objects o $joinType JOIN locations l ON $condition"),
+                ops)
+            }
+            for (joinType <- Seq("LEFT SEMI", "LEFT ANTI")) {
+              checkSparkAnswerAndOperator(
+                sql("SELECT /*+ BROADCAST(l) */ o.id, o.key " +
+                  s"FROM objects o $joinType JOIN locations l ON $condition"),
+                ops)
+            }
+            checkSparkAnswerAndOperator(
+              sql("SELECT /*+ BROADCAST(o) */ o.id, l.table_name " +
+                s"FROM objects o RIGHT JOIN locations l ON $condition"),
+              ops)
+          }
+        }
+      }
+    }
+  }
+
   test("HashJoin without join filter") {
     withSQLConf(
       "spark.sql.join.forceApplyShuffledHashJoin" -> "true",
