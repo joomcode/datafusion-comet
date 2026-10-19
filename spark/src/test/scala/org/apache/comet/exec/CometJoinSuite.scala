@@ -865,25 +865,23 @@ class CometJoinSuite extends CometTestBase {
             val condition = ("o.bucket = l.bucket AND l.parts[0] = o.parts[0]" +:
               (1 until 8).map(i => s"(l.parts[$i] IS NULL OR l.parts[$i] = o.parts[$i])"))
               .mkString(" AND ")
-            val ops = Seq(classOf[CometBroadcastExchangeExec], classOf[CometBroadcastHashJoinExec])
+            val ops =
+              Seq(classOf[CometBroadcastExchangeExec], classOf[CometBroadcastHashJoinExec])
             for (joinType <- Seq("INNER", "LEFT")) {
               checkSparkAnswerAndOperator(
-                sql(
-                  "SELECT /*+ BROADCAST(l) */ o.id, o.key, l.table_name, size(l.parts) " +
-                    s"FROM objects o $joinType JOIN locations l ON $condition"),
+                sql("SELECT /*+ BROADCAST(l) */ o.id, o.key, l.table_name, size(l.parts) " +
+                  s"FROM objects o $joinType JOIN locations l ON $condition"),
                 ops)
             }
             for (joinType <- Seq("LEFT SEMI", "LEFT ANTI")) {
               checkSparkAnswerAndOperator(
-                sql(
-                  "SELECT /*+ BROADCAST(l) */ o.id, o.key " +
-                    s"FROM objects o $joinType JOIN locations l ON $condition"),
+                sql("SELECT /*+ BROADCAST(l) */ o.id, o.key " +
+                  s"FROM objects o $joinType JOIN locations l ON $condition"),
                 ops)
             }
             checkSparkAnswerAndOperator(
-              sql(
-                "SELECT /*+ BROADCAST(o) */ o.id, l.table_name " +
-                  s"FROM objects o RIGHT JOIN locations l ON $condition"),
+              sql("SELECT /*+ BROADCAST(o) */ o.id, l.table_name " +
+                s"FROM objects o RIGHT JOIN locations l ON $condition"),
               ops)
           }
         }
