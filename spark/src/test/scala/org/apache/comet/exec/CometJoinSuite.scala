@@ -827,6 +827,8 @@ class CometJoinSuite extends CometTestBase {
   test("Broadcast HashJoin with a join filter over array elements of both sides") {
     withTempPath { dir =>
       withSQLConf(
+        // `parts[i]` past the end is NULL, as in Spark 3.x defaults
+        SQLConf.ANSI_ENABLED.key -> "false",
         CometConf.COMET_BATCH_SIZE.key -> "100",
         SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
         SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
