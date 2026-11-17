@@ -2178,7 +2178,9 @@ class DeltaScanContribSuite extends CometDeltaTestBase {
       val files = snapshot.allFiles.collect()
       assert(files.length == 1)
       val dv = DeletionVectorDescriptor
-        .onDiskWithAbsolutePath("s3a://context-dv-bucket/deletion_vector.bin", 40, 1)
+        // A real sidecar starts with a version byte. Older Delta serializers require
+        // the bitmap offset even though this plan-only test never opens the sidecar.
+        .onDiskWithAbsolutePath("s3a://context-dv-bucket/deletion_vector.bin", 40, 1, Some(1))
       val replaced = files.head.copy(deletionVector = dv).withoutTightBoundStats
       val commit = new File(dir, f"_delta_log/${snapshot.version + 1}%020d.json")
       Files.write(
