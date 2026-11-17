@@ -878,15 +878,25 @@ mod tests {
         // After appending each batch, spilled_rows and spilled_bytes should increase incrementally,
         // while spill_file_count remains 1 (since we're writing to the same file)
         in_progress_file.append_batch(&batch1)?;
-        verify_metrics(&in_progress_file, 1, 440, 3)?;
+        in_progress_file.flush()?;
+        // Arrow patch versions can change IPC sizes (for example, omitting
+        // all-valid bitmaps). Check accounting against physical bytes instead
+        // of assuming one particular Arrow serialization layout.
+        let path = in_progress_file.file().unwrap().path().unwrap().to_owned();
+        let bytes_after_first = std::fs::metadata(&path)?.len() as usize;
+        verify_metrics(&in_progress_file, 1, bytes_after_first, 3)?;
 
         in_progress_file.append_batch(&batch2)?;
-        verify_metrics(&in_progress_file, 1, 704, 6)?;
+        in_progress_file.flush()?;
+        let bytes_after_second = std::fs::metadata(&path)?.len() as usize;
+        assert!(bytes_after_second > bytes_after_first);
+        verify_metrics(&in_progress_file, 1, bytes_after_second, 6)?;
 
-        let completed_file = in_progress_file.finish()?;
-        assert!(completed_file.is_some());
-        assert!(completed_file.unwrap().path().unwrap().exists());
-        verify_metrics(&in_progress_file, 1, 712, 6)?;
+        let completed_file = in_progress_file.finish()?.unwrap();
+        assert!(completed_file.path().unwrap().exists());
+        let bytes_after_finish = std::fs::metadata(&path)?.len() as usize;
+        assert!(bytes_after_finish > bytes_after_second);
+        verify_metrics(&in_progress_file, 1, bytes_after_finish, 6)?;
         // Double finish produce error
         let result = in_progress_file.finish();
         assert!(result.is_err());
@@ -1018,10 +1028,14 @@ mod tests {
 
         // Append first batch
         in_progress_file.append_batch(&batch1)?;
+        in_progress_file.flush()?;
+        // Keep only the path: an extra SpillFile Arc would mask the lifetime
+        // cleanup assertions below by keeping the file active after drop.
+        let path = in_progress_file.file().unwrap().path().unwrap().to_owned();
 
         // Metrics should be updated immediately (at least schema and first batch)
         let bytes_after_batch1 = metrics.spilled_bytes.value();
-        assert_eq!(bytes_after_batch1, 440);
+        assert_eq!(bytes_after_batch1 as u64, std::fs::metadata(&path)?.len());
         assert_eq!(metrics.spill_file_count.value(), 1);
 
         // Check global progress
@@ -1031,7 +1045,9 @@ mod tests {
 
         // Append another batch
         in_progress_file.append_batch(&batch1)?;
+        in_progress_file.flush()?;
         let bytes_after_batch2 = metrics.spilled_bytes.value();
+        assert_eq!(bytes_after_batch2 as u64, std::fs::metadata(&path)?.len());
         assert!(bytes_after_batch2 > bytes_after_batch1);
 
         // Check global progress again
@@ -1041,6 +1057,7 @@ mod tests {
         // Finish the file
         let spilled_file = in_progress_file.finish()?;
         let final_bytes = metrics.spilled_bytes.value();
+        assert_eq!(final_bytes as u64, std::fs::metadata(&path)?.len());
         assert!(final_bytes > bytes_after_batch2);
 
         // Even after finish, file is still "active" until dropped

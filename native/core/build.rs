@@ -47,12 +47,14 @@ fn main() {
     // from OUT_DIR.
     if let Ok(out_dir) = std::env::var("OUT_DIR") {
         let out_path = std::path::PathBuf::from(out_dir);
-        // OUT_DIR is .../target/<profile>/build/<pkg-hash>/out
+        // Cargo 1.100 adds a package-name component below `build`. Locate the
+        // profile directory rather than assuming a fixed OUT_DIR depth; this
+        // also preserves target triples and custom profiles/target directories.
         let target_profile_dir = out_path
             .ancestors()
-            .nth(3)
-            .map(|p| p.to_path_buf())
-            .unwrap_or_default();
+            .find(|p| p.file_name().is_some_and(|name| name == "build"))
+            .and_then(Path::parent)
+            .expect("OUT_DIR must be inside a Cargo profile build directory");
         let dylib_ext = if cfg!(target_os = "macos") {
             "dylib"
         } else if cfg!(target_os = "windows") {

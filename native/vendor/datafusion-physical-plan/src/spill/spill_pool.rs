@@ -840,6 +840,30 @@ mod tests {
         (writer, reader, metrics)
     }
 
+    // Independent accounting oracle: push_batch flushes the IPC writer, so
+    // physical file sizes must match the metric regardless of Arrow's layout.
+    fn spill_paths(writer: &SpillPoolSink) -> Vec<std::path::PathBuf> {
+        let files: Vec<_> = writer.shared.lock().files.iter().cloned().collect();
+        files
+            .iter()
+            .map(|file| {
+                file.lock()
+                    .file
+                    .as_ref()
+                    .unwrap()
+                    .path()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    fn disk_bytes(paths: &[std::path::PathBuf]) -> Result<usize> {
+        paths.iter().try_fold(0, |total, path| {
+            Ok(total + std::fs::metadata(path)?.len() as usize)
+        })
+    }
+
     #[tokio::test]
     async fn test_basic_write_and_read() -> Result<()> {
         let (writer, mut reader) = create_spill_channel(1024 * 1024);
@@ -965,7 +989,7 @@ mod tests {
         );
         assert_eq!(
             metrics.spilled_bytes.value(),
-            320,
+            disk_bytes(&spill_paths(&writer))?,
             "Spilled bytes should reflect data written (header + 1 batch)"
         );
         assert_eq!(
@@ -1438,9 +1462,11 @@ mod tests {
         }
 
         // Check metrics before drop - spilled_bytes already reflects written data
+        let paths = spill_paths(&writer);
         let spilled_bytes_before = metrics.spilled_bytes.value();
         assert_eq!(
-            spilled_bytes_before, 1088,
+            spilled_bytes_before,
+            disk_bytes(&paths)?,
             "Spilled bytes should reflect data written (header + 5 batches)"
         );
 
@@ -1449,8 +1475,9 @@ mod tests {
 
         // Check metrics after drop - spilled_bytes should be > 0 now
         let spilled_bytes_after = metrics.spilled_bytes.value();
+        assert_eq!(spilled_bytes_after, disk_bytes(&paths)?);
         assert!(
-            spilled_bytes_after > 0,
+            spilled_bytes_after > spilled_bytes_before,
             "Spilled bytes should be > 0 after writer is dropped (got {spilled_bytes_after})"
         );
 

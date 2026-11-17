@@ -17,11 +17,16 @@
 
 [workspace]
 default-members = ["core", "spark-expr", "common", "proto", "jni-bridge", "shuffle", "operators", "comet-udf-sdk", "comet-test-udfs"]
-members = ["core", "spark-expr", "common", "proto", "jni-bridge", "shuffle", "operators", "comet-udf-sdk", "comet-test-udfs"]
+members = ["core", "spark-expr", "common", "proto", "jni-bridge", "shuffle", "operators", "comet-udf-sdk", "comet-test-udfs", "vendor/datafusion-physical-plan"]
 # Crates under ../contrib are intentionally NOT workspace members. Core pulls them in as
 # optional path dependencies when their corresponding contrib feature is enabled.
 exclude = ["../contrib"]
 resolver = "2"
+
+# Keep the published 55.2.0 crate in this workspace so its unit tests use the
+# same patch and lockfile as Comet. Joom algorithm patches are added separately.
+[patch.crates-io]
+datafusion-physical-plan = { path = "vendor/datafusion-physical-plan" }
 
 [workspace.package]
 version = "1.2.0"

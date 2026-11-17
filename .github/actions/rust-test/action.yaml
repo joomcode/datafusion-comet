@@ -37,13 +37,16 @@ runs:
       shell: bash
       run: |
         cd native
-        cargo clippy --color=never --all-targets --workspace -- -D warnings
+        # Published DataFusion 55.2 uses fetch_update, deprecated by Rust 1.100.
+        # Preserve its sources and lint every Comet member strictly; vendor unit
+        # tests below remain explicit and mandatory.
+        cargo clippy --locked --color=never --all-targets --workspace --exclude datafusion-physical-plan --no-deps -- -D warnings
 
     - name: Check native Python UDF feature
       shell: bash
       run: |
         cd native
-        cargo clippy --color=never -p datafusion-comet --all-targets --features python-udf -- -D warnings
+        cargo clippy --locked --color=never -p datafusion-comet --all-targets --features python-udf --no-deps -- -D warnings
 
     - name: Check compilation
       shell: bash
@@ -74,8 +77,7 @@ runs:
     - name: Build common module (pre-requisite for Rust tests)
       shell: bash
       run: |
-        cd common
-        ../mvnw -B clean compile -DskipTests
+        ./mvnw -B compile -DskipTests
 
     - name: Install nextest
       shell: bash
@@ -106,6 +108,16 @@ runs:
         export LD_LIBRARY_PATH=${JAVA_HOME}/lib/server:${LD_LIBRARY_PATH}
         RUST_BACKTRACE=1 cargo nextest run -p datafusion-comet --lib --features python-udf python_udf
 
+    - name: Test vendored DataFusion with the Comet workspace graph
+      shell: bash
+      run: |
+        cd native
+        export LD_LIBRARY_PATH=${JAVA_HOME}/lib/server:${LD_LIBRARY_PATH}
+        # Building both packages preserves Comet's feature unification; the filter
+        # runs the vendor tests explicitly instead of relying on default-members.
+        cargo nextest run --locked -p datafusion-comet -p datafusion-physical-plan --lib -E 'package(datafusion-physical-plan)'
+        cargo nextest run --locked -p datafusion-comet -p datafusion-physical-plan --lib --features datafusion-physical-plan/test_utils -E 'package(datafusion-physical-plan) & test(statistics::)'
+
     # The steps above lint and test the accounting allocator over the system allocator. Lint and
     # test it over jemalloc too, since that is a different allocator backend and nothing else in CI
     # builds it.
@@ -114,5 +126,5 @@ runs:
       run: |
         cd native
         export LD_LIBRARY_PATH=${JAVA_HOME}/lib/server:${LD_LIBRARY_PATH}
-        cargo clippy --color=never -p datafusion-comet --all-targets --features jemalloc -- -D warnings
+        cargo clippy --locked --color=never -p datafusion-comet --all-targets --features jemalloc --no-deps -- -D warnings
         RUST_BACKTRACE=1 cargo nextest run -p datafusion-comet --lib --features jemalloc alloc_accounting

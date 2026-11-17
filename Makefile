@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-.PHONY: all core jvm test clean rat release-linux release bench print-benchmark-args
+.PHONY: all core jvm test test-rust test-vendor clean rat release-linux release bench print-benchmark-args
 
 define spark_jvm_17_extra_args
 $(shell ./mvnw help:evaluate -q -DforceStdout -Dexpression=extraJavaTestArgs $(PROFILES))
@@ -44,6 +44,12 @@ test-rust:
 	./mvnw compile -DskipTests $(PROFILES)
 	cd native && cargo build $(FEATURES_ARG) && \
 	RUST_BACKTRACE=1 cargo test $(FEATURES_ARG)
+test-vendor:
+	./mvnw compile -DskipTests $(PROFILES)
+	cargo build --locked --manifest-path native/Cargo.toml -p comet-test-udfs
+	# Include Comet when resolving test features, not a standalone vendor graph.
+	cargo test --locked --manifest-path native/Cargo.toml -p datafusion-comet -p datafusion-physical-plan --lib $(FEATURES_ARG)
+	cargo test --locked --manifest-path native/Cargo.toml -p datafusion-comet -p datafusion-physical-plan --lib --features datafusion-physical-plan/test_utils statistics::
 jvm:
 	./mvnw clean package -DskipTests $(PROFILES)
 test-jvm: core
