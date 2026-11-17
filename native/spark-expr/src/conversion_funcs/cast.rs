@@ -172,6 +172,9 @@ pub struct SparkCastOptions {
     /// True when the running Spark casts a zero string with any exponent ("0e39") to decimal as
     /// 0 instead of applying the integral-digit limit to it (SPARK-60118).
     pub decimal_zero_any_exponent: bool,
+    /// SPARK-60119 rounds extremely small decimals to zero instead of overflowing
+    /// BigDecimal's scale adjustment. This is separate from the zero-input fix.
+    pub decimal_tiny_values_to_zero: bool,
     /// Support casting unsigned ints to signed ints (used by Parquet SchemaAdapter)
     pub allow_cast_unsigned_ints: bool,
     /// We also use the cast logic for adapting Parquet schemas, so this flag is used
@@ -191,6 +194,7 @@ impl SparkCastOptions {
             timezone: timezone.to_string(),
             is_spark4_plus: false,
             decimal_zero_any_exponent: false,
+            decimal_tiny_values_to_zero: false,
             allow_cast_unsigned_ints: false,
             is_adapting_schema: false,
             null_string: "null".to_string(),
@@ -204,6 +208,7 @@ impl SparkCastOptions {
             timezone: "".to_string(),
             is_spark4_plus: false,
             decimal_zero_any_exponent: false,
+            decimal_tiny_values_to_zero: false,
             allow_cast_unsigned_ints: false,
             is_adapting_schema: false,
             null_string: "null".to_string(),
@@ -316,6 +321,7 @@ pub(crate) fn cast_array(
             scale,
             eval_mode,
             cast_options.decimal_zero_any_exponent,
+            cast_options.decimal_tiny_values_to_zero,
         ),
         (Utf8 | LargeUtf8, Decimal256(precision, scale)) => cast_string_to_decimal(
             &array,
@@ -324,6 +330,7 @@ pub(crate) fn cast_array(
             scale,
             eval_mode,
             cast_options.decimal_zero_any_exponent,
+            cast_options.decimal_tiny_values_to_zero,
         ),
         (Decimal128(input_precision, input_scale), Decimal128(output_precision, output_scale))
             if eval_mode == EvalMode::Ansi =>

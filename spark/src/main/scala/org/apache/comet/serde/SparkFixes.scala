@@ -22,9 +22,9 @@ package org.apache.comet.serde
 import org.apache.spark.sql.comet.util.Utils
 
 /**
- * SPARK-58821 and SPARK-60118, which change results Comet reproduces natively, and the Spark
- * releases that carry them. The fixes leave nothing in the plan for Comet to detect, so the
- * checks go by the version. Other fixes Comet picks by version keep their own checks, such as
+ * SPARK-58821, SPARK-60118 and SPARK-60119, which change results Comet reproduces natively, and
+ * the Spark releases that carry them. The fixes leave nothing in the plan for Comet to detect, so
+ * the checks go by the version. Other fixes Comet picks by version keep their own checks, such as
  * `RegrSparkVersions` and `ArraySetSupport.normalizesFloats`.
  */
 private[comet] object SparkFixes {
@@ -44,7 +44,11 @@ private[comet] object SparkFixes {
   def castsZeroWithAnyExponentToDecimal(sparkVersion: String): Boolean =
     fixedIn(sparkVersion)
 
-  // Both fixes are on branch-4.0, branch-4.1, branch-4.2 and master, and in the 4.0.5-rc3,
+  /** SPARK-60119: rescaling extremely small decimals rounds to zero without scale overflow. */
+  def rescalesTinyDecimalsToZero(sparkVersion: String): Boolean =
+    fixedIn(sparkVersion)
+
+  // These fixes are on branch-4.0, branch-4.1, branch-4.2 and master, and in the 4.0.5-rc3,
   // 4.1.4-rc4 and 4.2.1-rc3 release candidates, so the first releases that carry them are 4.0.5,
   // 4.1.4 and 4.2.1.
   private def fixedIn(sparkVersion: String): Boolean =

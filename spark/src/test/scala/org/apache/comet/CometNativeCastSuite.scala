@@ -1446,6 +1446,9 @@ class CometNativeCastSuite
     assert(
       proto.map(_.getCast.getDecimalZeroAnyExponent) ==
         Some(SparkFixes.castsZeroWithAnyExponentToDecimal(org.apache.spark.SPARK_VERSION)))
+    assert(
+      proto.map(_.getCast.getDecimalTinyValuesToZero) ==
+        Some(SparkFixes.rescalesTinyDecimalsToZero(org.apache.spark.SPARK_VERSION)))
   }
 
   test("cast StringType to DecimalType(38,10) high precision") {
@@ -1629,7 +1632,7 @@ class CometNativeCastSuite
     }
   }
 
-  test("(ansi) failing cast of a literal raises Spark's own exception when reached") {
+  test("(ansi) extreme decimal literal follows the running Spark rescaling behavior") {
     withSQLConf(SQLConf.ANSI_ENABLED.key -> "true") {
       withTable("cast_literal_branch") {
         Seq(0L, 1L, 2L).toDF("id").write.format("parquet").saveAsTable("cast_literal_branch")
@@ -1643,20 +1646,34 @@ class CometNativeCastSuite
         val (sparkError, cometError) = checkSparkAnswerMaybeThrows(df)
         def rootCause(e: Throwable): Throwable =
           Iterator.iterate(e)(_.getCause).takeWhile(_ != null).toSeq.last
-        val expected = rootCause(sparkError.getOrElse(fail("Spark did not fail")))
-        val actual = rootCause(cometError.getOrElse(fail("Comet did not fail")))
-        assert(actual.getClass == expected.getClass, s"Spark: $expected, Comet: $actual")
-        assert(actual.getMessage == expected.getMessage)
+        if (SparkFixes.rescalesTinyDecimalsToZero(org.apache.spark.SPARK_VERSION)) {
+          assert(sparkError.isEmpty, s"Spark unexpectedly failed: $sparkError")
+          assert(cometError.isEmpty, s"Comet unexpectedly failed: $cometError")
+          checkSparkAnswerAndOperator(df)
+          assert(df.schema.fields.head.dataType == DecimalType(10, 2))
+          checkCometAnswer(df, Seq.fill(3)(Row(new java.math.BigDecimal("0.00"))))
+        } else {
+          val expected = rootCause(sparkError.getOrElse(fail("Spark did not fail")))
+          val actual = rootCause(cometError.getOrElse(fail("Comet did not fail")))
+          assert(actual.getClass == expected.getClass, s"Spark: $expected, Comet: $actual")
+          assert(actual.getMessage == expected.getMessage)
+        }
       }
     }
   }
 
-  test("(ansi) cast string to negative-scale decimal fails when rescaling overflows an int") {
+  test("(ansi) cast string to negative-scale decimal follows Spark rescaling behavior") {
     withSQLConf(
       SQLConf.ANSI_ENABLED.key -> "true",
       "spark.sql.legacy.allowNegativeScaleOfDecimal" -> "true") {
       withTable("cast_decimal_rescale") {
-        Seq("1e-2147483647").toDF("s").write.format("parquet").saveAsTable("cast_decimal_rescale")
+        val fixed = SparkFixes.rescalesTinyDecimalsToZero(org.apache.spark.SPARK_VERSION)
+        val inputs = if (fixed) {
+          Seq("1e-2147483647", "-1e-2147483647", null, "150", "-150", "49", "50")
+        } else {
+          Seq("1e-2147483647")
+        }
+        inputs.toDF("s").write.format("parquet").saveAsTable("cast_decimal_rescale")
         // The parsed scale fits in an int, but the difference to the target scale does not, so
         // Spark's `BigDecimal.setScale` fails. The native cast must not round it to zero. Spark
         // raises a raw `ArithmeticException`, so only failure is compared here; see
@@ -1664,8 +1681,21 @@ class CometNativeCastSuite
         val df = spark.table("cast_decimal_rescale").select(col("s").cast(DecimalType(10, -2)))
         checkCometOperators(stripAQEPlan(df.queryExecution.executedPlan))
         val (sparkError, cometError) = checkSparkAnswerMaybeThrows(df)
-        assert(sparkError.isDefined, "Spark did not fail")
-        assert(cometError.isDefined, "Comet did not fail")
+        if (fixed) {
+          assert(sparkError.isEmpty, s"Spark unexpectedly failed: $sparkError")
+          assert(cometError.isEmpty, s"Comet unexpectedly failed: $cometError")
+          checkSparkAnswerAndImpl(df, native = Seq("cast"))
+          assert(df.schema.fields.head.dataType == DecimalType(10, -2))
+          checkCometAnswer(
+            df,
+            Seq("0E+2", "0E+2", null, "2E+2", "-2E+2", "0E+2", "1E+2").map {
+              case null => Row(null)
+              case value => Row(new java.math.BigDecimal(value))
+            })
+        } else {
+          assert(sparkError.isDefined, "Spark did not fail")
+          assert(cometError.isDefined, "Comet did not fail")
+        }
       }
     }
   }

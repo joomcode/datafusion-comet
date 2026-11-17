@@ -197,6 +197,8 @@ object CometCast
         castBuilder.setIsSpark4Plus(isSpark40Plus)
         castBuilder.setDecimalZeroAnyExponent(
           SparkFixes.castsZeroWithAnyExponentToDecimal(SPARK_VERSION))
+        castBuilder.setDecimalTinyValuesToZero(
+          SparkFixes.rescalesTinyDecimalsToZero(SPARK_VERSION))
         Some(
           ExprOuterClass.Expr
             .newBuilder()
