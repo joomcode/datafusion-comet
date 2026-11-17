@@ -64,6 +64,19 @@ jobs:
           rust-version: ${{ env.RUST_VERSION }}
           jdk-version: 17
 
+      - name: Restore Maven dependencies
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.m2/repository
+            /root/.m2/repository
+          key: ${{ runner.os }}-java-maven-${{ hashFiles('**/pom.xml') }}-delta-build-gate
+          restore-keys: |
+            ${{ runner.os }}-java-maven-
+
+      - name: Resolve Maven model before build-gate checks
+        run: dev/ci/prepare-maven-model.sh
+
       - name: Run dev/verify-contrib-delta-gate.sh
         run: |
           dev/verify-contrib-delta-gate.sh

@@ -81,6 +81,10 @@ runs:
     # cache) by setup-builder / setup-macos-builder via maven-bootstrap, which
     # every caller of this action runs first.
 
+    - name: Resolve Maven model before tests
+      shell: bash
+      run: dev/ci/prepare-maven-model.sh ${{ inputs.maven_opts }}
+
     - name: Run all tests
       shell: bash
       if: ${{ inputs.suites == '' }}

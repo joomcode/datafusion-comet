@@ -199,6 +199,9 @@ jobs:
       - name: Check Iceberg write report summary
         run: python3 dev/ci/test-summarize-iceberg-writes.py
 
+      - name: Check model-only Maven retry
+        run: python3 dev/ci/test-maven-model.py
+
       - name: Check CI config invariants
         run: python3 dev/ci/check-ci-config.py
 

@@ -133,6 +133,10 @@ ROUTING_CASES = [
     ([".mvn/maven.config"], MVN_JOBS),
     ([".mvn/wrapper/maven-wrapper.properties"], MVN_JOBS),
     (["mvnw"], MVN_JOBS),
+    (["dev/ci/prepare-maven-model.sh"], {
+        "build_linux", "build_linux_full", "build_linux_all_profiles",
+        "build_macos", "build_macos_full", "delta_gate",
+    }),
     # The artifact wrappers are used by every producer and consumer of a
     # shared artifact. Without these, an edit confined to one of them routes
     # to nothing at all and merges having been exercised by no consumer.

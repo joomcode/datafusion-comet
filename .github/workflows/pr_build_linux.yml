@@ -310,6 +310,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-java-maven-
 
+      - name: Resolve Maven model before strict compilation
+        run: dev/ci/prepare-maven-model.sh -Pspark-3.5,delta -Pstrict-warnings
+
       - name: Compile with strict warnings
         run: ./mvnw -B test-compile -Pspark-3.5,delta -Pstrict-warnings -DskipTests
 

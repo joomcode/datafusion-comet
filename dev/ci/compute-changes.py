@@ -126,6 +126,7 @@ FILTERS = {
         "Makefile",
         "rust-toolchain.toml",
         "dev/verify-contrib-delta-gate.sh",
+        "dev/ci/prepare-maven-model.sh",
         ".github/workflows/ci.yml",
         ".github/workflows/delta_build_gate.yml",
         ".github/actions/setup-builder/**",
