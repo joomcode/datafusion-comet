@@ -90,6 +90,15 @@ run() {
     -w "$REPO" "$builder" "$@"
 }
 
+# Avoid empty arrays under nounset in macOS Bash 3.2.
+maven() {
+  if [ "${MVN_OFFLINE:-0}" = 1 ]; then
+    run arm64 ./mvnw -o "$@"
+  else
+    run arm64 ./mvnw "$@"
+  fi
+}
+
 build_native() {
   local arch=$1 libdir=$2 flags=$3
   run "$arch" env CARGO_TARGET_DIR=/target CARGO_PROFILE_RELEASE_DEBUG=false \
@@ -118,9 +127,7 @@ PYCODE
 build_native arm64 aarch64 ""
 build_native amd64 amd64 "-Ctarget-cpu=x86-64-v3"
 
-OFFLINE=()
-[ "${MVN_OFFLINE:-0}" != 1 ] || OFFLINE=(-o)
-run arm64 ./mvnw "${OFFLINE[@]}" -B -ntp -Pspark-4.2,delta help:effective-pom -Doutput=/out/effective-pom.xml
+maven -B -ntp -Pspark-4.2,delta help:effective-pom -Doutput=/out/effective-pom.xml
 python3 - "$OUT/effective-pom.xml" <<'PYCODE'
 import pathlib, shutil, sys, xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
@@ -151,7 +158,7 @@ PYCODE
 
 # Compile matching test JARs required by Delta, but do not run tests here.
 # Regenerate embedded Git metadata rather than reusing a host build's revision.
-run arm64 ./mvnw "${OFFLINE[@]}" -B -ntp package -Prelease,spark-4.2,delta \
+maven -B -ntp package -Prelease,spark-4.2,delta \
   -DskipTests -Djni.dir=/out/linux/aarch64
 cp "$REPO/spark/target/$JARNAME" "$REPO/contrib/delta-spark/target/$DELTANAME" "$OUT/"
 STAGE="$(mktemp -d "$WORK_DIR/stage.XXXXXXXX")"
