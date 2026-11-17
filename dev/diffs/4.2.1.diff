@@ -630,7 +630,7 @@ index 9733d51a91c..395a108abc8 100644
            spark.range(100).write.saveAsTable(s"$dbName.$table2Name")
  
 diff --git a/sql/core/src/test/scala/org/apache/spark/sql/DataFrameSetOperationsSuite.scala b/sql/core/src/test/scala/org/apache/spark/sql/DataFrameSetOperationsSuite.scala
-index c0cce9291dd..5b8460ba919 100644
+index c0cce9291dd..48bbe106ccf 100644
 --- a/sql/core/src/test/scala/org/apache/spark/sql/DataFrameSetOperationsSuite.scala
 +++ b/sql/core/src/test/scala/org/apache/spark/sql/DataFrameSetOperationsSuite.scala
 @@ -23,10 +23,11 @@ import java.util.Locale
@@ -642,7 +642,7 @@ index c0cce9291dd..5b8460ba919 100644
  import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
  import org.apache.spark.sql.execution.columnar.InMemoryTableScanExec
 -import org.apache.spark.sql.execution.exchange.{ReusedExchangeExec, ShuffleExchangeExec}
-+import org.apache.spark.sql.execution.exchange.{ReusedExchangeExec, ShuffleExchangeExec, ShuffleExchangeLike}
++import org.apache.spark.sql.execution.exchange.{ReusedExchangeExec, ShuffleExchangeLike}
  import org.apache.spark.sql.functions._
  import org.apache.spark.sql.internal.SQLConf
  import org.apache.spark.sql.test.{ExamplePoint, ExamplePointUDT, SharedSparkSession, SQLTestData}
@@ -712,6 +712,25 @@ index c0cce9291dd..5b8460ba919 100644
          }
          assert(unionExec.size == 1)
  
+@@ -1634,13 +1642,16 @@ class DataFrameSetOperationsSuite extends SharedSparkSession with AdaptiveSparkP
+         // default is its negation, so a bucketed batch-readable scan is columnar-only and so is
+         // this union. It therefore runs `doExecuteColumnar` under a `ColumnarToRowExec` while
+         // reporting the bucketed `HashPartitioning` that lets the aggregate drop its exchange.
+-        val unionExec = plan.collect { case u: UnionExec => u }
++        val unionExec = plan.collect {
++          case u: UnionExec => u
++          case u: CometUnionExec => u
++        }
+         assert(unionExec.size == 1)
+         assert(unionExec.head.supportsColumnar && !unionExec.head.supportsRowBased,
+           "this shape must take the columnar path, or the test exercises nothing")
+         assert(unionExec.head.outputPartitioning.isInstanceOf[HashPartitioning],
+           "this shape must report a co-locatable partitioning, or the test exercises nothing")
+-        assert(plan.collect { case s: ShuffleExchangeExec => s }.isEmpty,
++        assert(plan.collect { case s: ShuffleExchangeLike => s }.isEmpty,
+           "the aggregate's exchange must have been dropped, or the test exercises nothing")
+ 
+         // Interleaving puts a key's bucket from each table in one partition, so its eight rows
 diff --git a/sql/core/src/test/scala/org/apache/spark/sql/DataFrameSuite.scala b/sql/core/src/test/scala/org/apache/spark/sql/DataFrameSuite.scala
 index 577ae025f1d..a0c95263931 100644
 --- a/sql/core/src/test/scala/org/apache/spark/sql/DataFrameSuite.scala
@@ -1551,6 +1570,41 @@ index 6cd49948630..b6fcb716a2a 100644
  
    protected val baseResourcePath = {
      // use the same way as `SQLQueryTestSuite` to get the resource path
+diff --git a/sql/core/src/test/scala/org/apache/spark/sql/PushDownJoinThroughUnionSuite.scala b/sql/core/src/test/scala/org/apache/spark/sql/PushDownJoinThroughUnionSuite.scala
+index 3cd59f8738a..c947971b1ef 100644
+--- a/sql/core/src/test/scala/org/apache/spark/sql/PushDownJoinThroughUnionSuite.scala
++++ b/sql/core/src/test/scala/org/apache/spark/sql/PushDownJoinThroughUnionSuite.scala
+@@ -20,6 +20,7 @@ package org.apache.spark.sql
+ import org.apache.spark.SparkConf
+ import org.apache.spark.sql.catalyst.optimizer.BuildLeft
+ import org.apache.spark.sql.catalyst.plans.logical.Join
++import org.apache.spark.sql.comet.{CometBroadcastHashJoinExec, CometNativeScanExec}
+ import org.apache.spark.sql.execution.FileSourceScanExec
+ import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanHelper, BroadcastQueryStageExec}
+ import org.apache.spark.sql.execution.exchange.ReusedExchangeExec
+@@ -364,16 +365,18 @@ class PushDownJoinThroughUnionSuite
+    * broadcast hash join here, retune the table sizes and the threshold.
+    */
+   private def assertBuildsFromTheLeft(df: DataFrame): Unit = {
+-    val joins = collectWithSubqueries(df.queryExecution.executedPlan) {
+-      case j: BroadcastHashJoinExec => j
++    val buildSides = collectWithSubqueries(df.queryExecution.executedPlan) {
++      case j: BroadcastHashJoinExec => j.buildSide
++      case j: CometBroadcastHashJoinExec => j.buildSide
+     }
+-    assert(joins.nonEmpty && joins.forall(_.buildSide == BuildLeft),
+-      s"expected every broadcast hash join to build from the left, found ${joins.map(_.buildSide)}")
++    assert(buildSides.nonEmpty && buildSides.forall(_ == BuildLeft),
++      s"expected every broadcast hash join to build from the left, found $buildSides")
+   }
+ 
+   private def rightScansOf(df: DataFrame): Int = {
+     collectWithSubqueries(df.queryExecution.executedPlan) {
+       case s: FileSourceScanExec if s.tableIdentifier.exists(_.table == "dim") => s
++      case s: CometNativeScanExec if s.tableIdentifier.exists(_.table == "dim") => s
+     }.size
+   }
+ }
 diff --git a/sql/core/src/test/scala/org/apache/spark/sql/QueryTest.scala b/sql/core/src/test/scala/org/apache/spark/sql/QueryTest.scala
 index 291aa7cab72..7783c37683e 100644
 --- a/sql/core/src/test/scala/org/apache/spark/sql/QueryTest.scala
@@ -1597,7 +1651,7 @@ index 291aa7cab72..7783c37683e 100644
        super.test(testName, testTags: _*) {
          withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
 diff --git a/sql/core/src/test/scala/org/apache/spark/sql/SQLQuerySuite.scala b/sql/core/src/test/scala/org/apache/spark/sql/SQLQuerySuite.scala
-index ab50de1dfb0..ab180e9075c 100644
+index ab50de1dfb0..16374ec0a80 100644
 --- a/sql/core/src/test/scala/org/apache/spark/sql/SQLQuerySuite.scala
 +++ b/sql/core/src/test/scala/org/apache/spark/sql/SQLQuerySuite.scala
 @@ -40,6 +40,7 @@ import org.apache.spark.sql.catalyst.parser.ParseException
@@ -1608,7 +1662,17 @@ index ab50de1dfb0..ab180e9075c 100644
  import org.apache.spark.sql.execution.{CommandResultExec, OneRowRelationExec, UnionExec}
  import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
  import org.apache.spark.sql.execution.aggregate._
-@@ -1529,7 +1530,8 @@ class SQLQuerySuite extends SharedSparkSession with AdaptiveSparkPlanHelper
+@@ -59,7 +60,8 @@ import org.apache.spark.sql.test.SQLTestData._
+ import org.apache.spark.sql.types._
+ import org.apache.spark.tags.ExtendedSQLTest
+ import org.apache.spark.unsafe.types.{CalendarInterval, UTF8String}
+-import org.apache.spark.util.{ResetSystemProperties, SparkTestUtils, Utils}
++import org.apache.spark.util.{IvyTestUtils, ResetSystemProperties, SparkTestUtils, Utils}
++import org.apache.spark.util.MavenUtils.MavenCoordinate
+ 
+ @ExtendedSQLTest
+ class SQLQuerySuite extends SharedSparkSession with AdaptiveSparkPlanHelper
+@@ -1529,7 +1531,8 @@ class SQLQuerySuite extends SharedSparkSession with AdaptiveSparkPlanHelper
      checkAnswer(sql("select -0.001"), Row(BigDecimal("-0.001")))
    }
  
@@ -1618,7 +1682,7 @@ index ab50de1dfb0..ab180e9075c 100644
      AccumulatorSuite.verifyPeakExecutionMemorySet(sparkContext, "external sort") {
        sql("SELECT * FROM testData2 ORDER BY a ASC, b ASC").collect()
      }
-@@ -1990,8 +1992,15 @@ class SQLQuerySuite extends SharedSparkSession with AdaptiveSparkPlanHelper
+@@ -1990,8 +1993,15 @@ class SQLQuerySuite extends SharedSparkSession with AdaptiveSparkPlanHelper
          countAcc.add(1)
          x
        })
@@ -1635,7 +1699,7 @@ index ab50de1dfb0..ab180e9075c 100644
  
        verifyCallCount(
          df.selectExpr("testUdf(a + 1) + testUdf(1 + a)", "testUdf(a + 1)"), Row(4, 2), 1)
-@@ -3283,6 +3292,7 @@ class SQLQuerySuite extends SharedSparkSession with AdaptiveSparkPlanHelper
+@@ -3283,6 +3293,7 @@ class SQLQuerySuite extends SharedSparkSession with AdaptiveSparkPlanHelper
  
            val inMemoryTableScan = collect(queryDf.queryExecution.executedPlan) {
              case i: InMemoryTableScanExec => i
@@ -1643,7 +1707,106 @@ index ab50de1dfb0..ab180e9075c 100644
            }
            assert(inMemoryTableScan.size == 2)
            checkAnswer(queryDf, Row(0, 1) :: Row(1, 2) :: Row(2, 3) :: Row(3, 4) :: Row(4, 5) :: Nil)
-@@ -4755,7 +4765,8 @@ class SQLQuerySuite extends SharedSparkSession with AdaptiveSparkPlanHelper
+@@ -3746,21 +3757,84 @@ class SQLQuerySuite extends SharedSparkSession with AdaptiveSparkPlanHelper
+ 
+   test("SPARK-33084: Add jar support Ivy URI in SQL") {
+     val sc = spark.sparkContext
+-    // transitive=false, only download specified jar
+-    sql(s"ADD JAR ivy://org.springframework:spring-core:6.1.6?transitive=false")
+-    assert(sc.listJars().exists(_.contains("org.springframework_spring-core-6.1.6.jar")))
+-    assert(!sc.listJars().exists(_.contains("org.springframework_spring-jcl-6.1.6.jar")))
+-
+-    // default transitive=true, test download ivy URL jar return multiple jars
+-    sql("ADD JAR ivy://org.awaitility:awaitility:4.2.1")
+-    assert(sc.listJars().exists(_.contains("org.awaitility_awaitility-4.2.1.jar")))
+-    assert(sc.listJars().exists(_.contains("org.hamcrest_hamcrest-2.1.jar")))
++    withTempDir { dir =>
++      // Exercise the Ivy URI and its query flags using the same generated Maven
++      // fixtures as MavenUtilsSuite. Public repository availability must not decide
++      // whether ADD JAR's transitive/exclude and class-loading contracts are correct.
++      val repo = new File(dir, "repository")
++      def coordinate(name: String): MavenCoordinate =
++        MavenCoordinate(s"org.apache.spark.sql.ivyfixtures.$name", "artifact", "1.0")
++      val direct = coordinate("directmain")
++      val directDep = coordinate("directdep")
++      val transitive = coordinate("transitivemain")
++      val transitiveDep = coordinate("transitivedep")
++      val excluded = coordinate("excludedmain")
++      val includedApi = coordinate("includedapi")
++      val includedParams = coordinate("includedparams")
++      val excludedDep = coordinate("excludeddep")
++      Seq(
++        direct -> Seq(directDep),
++        transitive -> Seq(transitiveDep),
++        excluded -> Seq(includedApi, includedParams, excludedDep)
++      ).foreach { case (artifact, dependencies) =>
++        IvyTestUtils.createLocalRepositoryForTests(
++          artifact, Some(dependencies.mkString(",")), Some(repo))
++      }
++      val settingsFile = new File(dir, "ivysettings.xml")
++      val settings =
++        s"""<ivysettings>
++           |  <settings defaultResolver="test-maven-repository"/>
++           |  <resolvers>
++           |    <ibiblio name="test-maven-repository" m2compatible="true"
++           |              root="${repo.toURI}"/>
++           |  </resolvers>
++           |</ivysettings>
++           |""".stripMargin
++      Files.write(settingsFile.toPath, settings.getBytes(StandardCharsets.UTF_8))
++      val keys = Seq("spark.jars.ivy", "spark.jars.ivySettings", "spark.jars.repositories")
++      val original = keys.map(key => key -> Option(System.getProperty(key)))
++      try {
++        // SparkContext can redistribute added JARs in later tests. Keep the copied
++        // Ivy JARs until VM shutdown, as Utils.createTempDir guarantees, even after
++        // this temporary repository and its settings file have been deleted.
++        System.setProperty("spark.jars.ivy", Utils.createTempDir().getAbsolutePath)
++        System.setProperty("spark.jars.ivySettings", settingsFile.getAbsolutePath)
++        System.clearProperty("spark.jars.repositories")
++        def jarName(artifact: MavenCoordinate): String =
++          s"${artifact.groupId}_${artifact.artifactId}-${artifact.version}.jar"
++        def assertAdded(artifact: MavenCoordinate): Unit = {
++          assert(sc.listJars().exists(_.contains(jarName(artifact))))
++          assert(Utils.classForName(s"${artifact.groupId}.MyLib") != null)
++        }
++        def assertNotAdded(artifact: MavenCoordinate): Unit = {
++          assert(!sc.listJars().exists(_.contains(jarName(artifact))))
++          intercept[ClassNotFoundException] {
++            Utils.classForName(s"${artifact.groupId}.MyLib")
++          }
++        }
+ 
+-    sql("ADD JAR ivy://org.junit.jupiter:junit-jupiter:5.10.2" +
+-      "?exclude=org.junit.jupiter:junit-jupiter-engine&transitive=true")
+-    assert(sc.listJars().exists(_.contains("org.junit.jupiter_junit-jupiter-api-5.10.2.jar")))
+-    assert(sc.listJars().exists(_.contains("org.junit.jupiter_junit-jupiter-params-5.10.2.jar")))
+-    assert(!sc.listJars().exists(_.contains("org.junit.jupiter_junit-jupiter-engine-5.10.2.jar")))
++        // Explicit transitive=false must exclude an existing, declared dependency.
++        sql(s"ADD JAR ivy://$direct?transitive=false")
++        assertAdded(direct)
++        assertNotAdded(directDep)
++
++        // Omitting the flag must include both the main and transitive JAR/classes.
++        sql(s"ADD JAR ivy://$transitive")
++        assertAdded(transitive)
++        assertAdded(transitiveDep)
++
++        // Explicit transitive=true must retain the other dependencies while excluding one.
++        sql(s"ADD JAR ivy://$excluded?exclude=" +
++          s"${excludedDep.groupId}:${excludedDep.artifactId}&transitive=true")
++        Seq(excluded, includedApi, includedParams).foreach(assertAdded)
++        assertNotAdded(excludedDep)
++      } finally {
++        original.foreach {
++          case (key, Some(value)) => System.setProperty(key, value)
++          case (key, None) => System.clearProperty(key)
++        }
++      }
++    }
+   }
+ 
+   test("SPARK-33677: LikeSimplification should be skipped if pattern contains any escapeChar") {
+@@ -4755,7 +4829,8 @@ class SQLQuerySuite extends SharedSparkSession with AdaptiveSparkPlanHelper
      )
    }
  
@@ -1719,10 +1882,42 @@ index 395cb67f441..33ac6ed19af 100644
      }
    }
 diff --git a/sql/core/src/test/scala/org/apache/spark/sql/SparkSessionExtensionSuite.scala b/sql/core/src/test/scala/org/apache/spark/sql/SparkSessionExtensionSuite.scala
-index 0f9288b9725..66759449cae 100644
+index 0f9288b9725..b1f664161d8 100644
 --- a/sql/core/src/test/scala/org/apache/spark/sql/SparkSessionExtensionSuite.scala
 +++ b/sql/core/src/test/scala/org/apache/spark/sql/SparkSessionExtensionSuite.scala
-@@ -217,7 +217,15 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
+@@ -17,6 +17,7 @@
+ package org.apache.spark.sql
+ 
+ import java.util.{Locale, UUID}
++import java.util.concurrent.atomic.AtomicInteger
+ 
+ import scala.collection.mutable.ListBuffer
+ import scala.concurrent.Future
+@@ -40,6 +41,7 @@ import org.apache.spark.sql.catalyst.trees.TreeNodeTag
+ import org.apache.spark.sql.classic.ClassicConversions._
+ import org.apache.spark.sql.classic.Dataset
+ import org.apache.spark.sql.connector.catalog.CatalogManager
++import org.apache.spark.sql.comet.{CometExec, CometProjectExec, CometUnionExec}
+ import org.apache.spark.sql.connector.write.WriterCommitMessage
+ import org.apache.spark.sql.execution._
+ import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AdaptiveSparkPlanHelper, AQEShuffleReadExec, AQEShuffleReadRule, QueryStageExec, ShuffleQueryStageExec}
+@@ -69,8 +71,14 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
+   }
+ 
+   private def withSession(
+-      builders: Seq[SparkSessionExtensionsProvider])(f: SparkSession => Unit): Unit = {
++      builders: Seq[SparkSessionExtensionsProvider],
++      sparkUnionOnly: Boolean = false)(f: SparkSession => Unit): Unit = {
+     val builder = SparkSession.builder().master("local[1]")
++    if (sparkUnionOnly) {
++      // The corresponding native cases below keep data/layout/conf-flip coverage. These original
++      // cases inspect Spark's private UnionExec stamps and generated-code shells themselves.
++      builder.config("spark.comet.enabled", "false")
++    }
+     builders.foreach(builder.withExtensions)
+     val spark = builder.getOrCreate()
+     try f(spark) finally {
+@@ -217,7 +225,15 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
      }
    }
  
@@ -1738,7 +1933,7 @@ index 0f9288b9725..66759449cae 100644
      val extensions = create { extensions =>
        // inject rule that will run during AQE query stage preparation and will add custom tags
        // to the plan
-@@ -260,6 +268,7 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
+@@ -260,6 +276,7 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
        df.select("i").filter($"i" > 1).cache()
        assert(find(df.filter($"i" > 1).select("i").queryExecution.executedPlan) {
          case _: org.apache.spark.sql.execution.columnar.InMemoryTableScanExec => true
@@ -1746,7 +1941,7 @@ index 0f9288b9725..66759449cae 100644
          case _ => false
        }.isDefined)
      }
-@@ -311,6 +320,7 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
+@@ -311,6 +328,7 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
    }
  
    private def testInjectColumnar(enableAQE: Boolean): Unit = {
@@ -1754,7 +1949,7 @@ index 0f9288b9725..66759449cae 100644
      def collectPlanSteps(plan: SparkPlan): Seq[Int] = plan match {
        case a: AdaptiveSparkPlanExec =>
          assert(a.toString.startsWith("AdaptiveSparkPlan isFinalPlan=true"))
-@@ -366,6 +376,7 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
+@@ -366,6 +384,7 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
    }
  
    test("reset column vectors") {
@@ -1762,7 +1957,7 @@ index 0f9288b9725..66759449cae 100644
      val session = SparkSession.builder()
        .master("local[1]")
        .config(COLUMN_BATCH_SIZE.key, 2)
-@@ -553,6 +564,7 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
+@@ -553,6 +572,7 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
    }
  
    test("SPARK-38697: Extend SparkSessionExtensions to inject rules into AQE Optimizer") {
@@ -1770,6 +1965,292 @@ index 0f9288b9725..66759449cae 100644
      def executedPlan(df: Dataset[java.lang.Long]): SparkPlan = {
        assert(df.queryExecution.executedPlan.isInstanceOf[AdaptiveSparkPlanExec])
        stripAQEPlan(df.queryExecution.executedPlan)
+@@ -624,7 +644,7 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
+    */
+   private def checkInjectedUnionIsStamped(
+       extensions: Seq[SparkSessionExtensionsProvider], aqeEnabled: Boolean): Unit = {
+-    withSession(extensions) { session =>
++    withSession(extensions, sparkUnionOnly = true) { session =>
+       session.conf.set(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key, aqeEnabled)
+       // The union ends up over the projection above a repartition by `k`, so it has a concrete
+       // partitioning to pass through. A filter would not do: `PushPredicateThroughNonJoin` pushes
+@@ -724,7 +744,7 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
+     withSession(create { extensions =>
+       extensions.injectQueryStageOptimizerRule(_ => WrapRootInUnion)
+       extensions.injectQueryStageOptimizerRule(_ => ObserveUnionPartitioning(seen))
+-    }) { session =>
++    }, sparkUnionOnly = true) { session =>
+       session.conf.set(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key, true)
+       val df = session.range(0, 20, 1, 2).selectExpr("id % 5 AS k", "id AS v")
+         .repartition(4, col("k")).selectExpr("k", "v + 1 AS w")
+@@ -819,7 +839,8 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
+     // the rules listed per stage are the ones built anew each time; the lists that run per
+     // re-planning round are built once, with the snapshot, so a barrier in them cannot take a
+     // later value to begin with.
+-    withSession(create(_.injectColumnar(_ => WrapRootInUnionColumnarRule))) { session =>
++    withSession(create(_.injectColumnar(_ => WrapRootInUnionColumnarRule)),
++        sparkUnionOnly = true) { session =>
+       session.conf.set(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key, true)
+       session.conf.set(SQLConf.UNION_OUTPUT_PARTITIONING.key, true)
+       val df = session.range(0, 20, 1, 2).selectExpr("id % 5 AS k", "id AS v")
+@@ -845,7 +866,8 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
+     // when it runs would record fusion as out, so nothing would fuse and the copy of the union
+     // inside the shell would carry no `numOutputRows`. Round-robin children, so the union has
+     // nothing to pass through and stays plain, which is what leaves its gate on these two confs.
+-    withSession(create(_.injectColumnar(_ => RebuildRootUnionColumnarRule))) { session =>
++    withSession(create(_.injectColumnar(_ => RebuildRootUnionColumnarRule)),
++        sparkUnionOnly = true) { session =>
+       session.conf.set(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key, true)
+       Seq(
+         "enablement" -> (SQLConf.WHOLESTAGE_UNION_CODEGEN_ENABLED.key -> "false"),
+@@ -875,6 +897,181 @@ class SparkSessionExtensionSuite extends PlanTest with SQLHelper with AdaptiveSp
+     }
+   }
+ 
++  /** Execute a native counterpart of an extension query and validate its physical RDD contract. */
++  private def checkNativeUnionExtension(
++      builders: Seq[SparkSessionExtensionsProvider],
++      aqeEnabled: Boolean,
++      flipAfterPlanning: Boolean = false,
++      threeChildren: Boolean = false,
++      flipped: Option[(String, String)] = None,
++      requireKnownUnion: Boolean = false,
++      rewriteWitness: Option[TreeNodeTag[Boolean]] = None): Unit = {
++    withSession(builders) { session =>
++      session.conf.set("spark.comet.enabled", true)
++      session.conf.set(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key, aqeEnabled)
++      session.conf.set(SQLConf.UNION_OUTPUT_PARTITIONING.key, true)
++      session.conf.set(SQLConf.WHOLESTAGE_UNION_CODEGEN_ENABLED.key, true)
++      session.conf.set(SQLConf.WHOLESTAGE_UNION_MAX_CHILDREN.key, 3)
++      val df = if (threeChildren) {
++        session.range(0, 20, 1, 2).toDF("id").repartition(2)
++          .union(session.range(20, 40, 1, 2).toDF("id").repartition(2))
++          .union(session.range(40, 60, 1, 2).toDF("id").repartition(2))
++      } else {
++        session.range(0, 20, 1, 2).selectExpr("id % 5 AS k", "id AS v")
++          .repartition(4, col("k")).selectExpr("k", "v + 1 AS w")
++      }
++      // Materialize the preparation before changing the conf. Under AQE this constructs the
++      // wrapper's preparation snapshot; the injected post-stage rules still run during collect.
++      val prepared = df.queryExecution.executedPlan
++      if (aqeEnabled) {
++        assert(prepared.isInstanceOf[AdaptiveSparkPlanExec])
++      }
++      if (flipAfterPlanning) {
++        session.conf.set(SQLConf.UNION_OUTPUT_PARTITIONING.key, false)
++      }
++      flipped.foreach { case (key, value) => session.conf.set(key, value) }
++      val rows = df.collect().toSeq
++      if (threeChildren) {
++        assert(rows.map(_.getLong(0)).sorted == (0L until 60L).toSeq,
++          "the rebuilt native union must preserve every id exactly once")
++      } else {
++        assert(rows.map(r => (r.getLong(0), r.getLong(1))).sortBy(_._2) ==
++          (0L until 20L).map(id => (id % 5, id + 1)),
++          "the injected native union must preserve every key/value pair exactly once")
++      }
++      val executed = df.queryExecution.executedPlan
++      assert(collect(executed) { case c: CometExec => c }.nonEmpty,
++        s"the counterpart must actually exercise native execution:\n$executed")
++      val unions = collect(executed) {
++        case u: UnionExec => u
++        case u: CometUnionExec => u
++      }
++      assert(unions.nonEmpty, s"the injected/rebuilt union must execute:\n$executed")
++      if (requireKnownUnion) {
++        // An optimizer can also wrap a stage over Range, whose partitioning is legitimately
++        // unknown. Check the root projection's key/value union that this fixture targets.
++        val projected = unions.filter(_.output.map(_.name) == Seq("k", "w"))
++        assert(projected.nonEmpty &&
++          projected.forall(!_.outputPartitioning.isInstanceOf[UnknownPartitioning]),
++          s"the injected projection union must keep its prepared known layout:\n$executed")
++      }
++      rewriteWitness.foreach { witness =>
++        assert(unions.exists(_.getTagValue(witness).contains(true)),
++          s"the union produced by the native rewrite must be in the executed plan:\n$executed")
++      }
++      unions.foreach { u =>
++        val layout = u.outputPartitioning
++        if (!layout.isInstanceOf[UnknownPartitioning]) {
++          val rdd = if (u.supportsColumnar) u.executeColumnar() else u.execute()
++          assert(rdd.partitions.length == layout.numPartitions,
++            s"the RDD must implement the layout advertised to its parent: $layout")
++        }
++      }
++    }
++  }
++
++  if (org.apache.spark.sql.classic.SparkSession.isCometEnabled) {
++    test("Comet native extension counterpart: columnar rule adds a union") {
++      checkNativeUnionExtension(
++        create(_.injectColumnar(_ => WrapRootInUnionColumnarRule)),
++        aqeEnabled = false, requireKnownUnion = true)
++    }
++
++    test("Comet native extension counterpart: prep rule union is seen by stage optimizer") {
++      val seen = ListBuffer.empty[Partitioning]
++      checkNativeUnionExtension(create { extensions =>
++        extensions.injectQueryStagePrepRule(_ => WrapRootInUnion)
++        extensions.injectQueryStageOptimizerRule(_ => ObserveUnionPartitioning(seen))
++      }, aqeEnabled = true, requireKnownUnion = true)
++      assert(seen.nonEmpty, "the stage optimizer must observe the injected union")
++      assert(!seen.exists(_.isInstanceOf[UnknownPartitioning]),
++        s"the stage optimizer must observe its prepared known partitioning: $seen")
++    }
++
++    test("Comet native extension counterpart: AQE post-stage columnar rule adds a union") {
++      checkNativeUnionExtension(
++        create(_.injectColumnar(_ => WrapRootInUnionColumnarRule)),
++        aqeEnabled = true, requireKnownUnion = true)
++    }
++
++    test("Comet native extension counterpart: prep rules observe a preceding fresh union") {
++      val seen = ListBuffer.empty[Partitioning]
++      checkNativeUnionExtension(create { extensions =>
++        extensions.injectQueryStagePrepRule(_ => WrapRootInUnion)
++        extensions.injectQueryStagePrepRule(_ => ObserveUnionPartitioning(seen))
++      }, aqeEnabled = true, requireKnownUnion = true)
++      assert(seen.nonEmpty, "the second prep rule must observe the injected union")
++      assert(!seen.exists(_.isInstanceOf[UnknownPartitioning]),
++        s"the second prep rule must observe its prepared known partitioning: $seen")
++    }
++
++    test("Comet native extension counterpart: post-planner rules observe a fresh union") {
++      val seen = ListBuffer.empty[Partitioning]
++      checkNativeUnionExtension(create { extensions =>
++        extensions.injectQueryPostPlannerStrategyRule(_ => WrapRootInUnion)
++        extensions.injectQueryPostPlannerStrategyRule(_ => ObserveUnionPartitioning(seen))
++      }, aqeEnabled = true, requireKnownUnion = true)
++      assert(seen.nonEmpty, "the second post-planner rule must observe the injected union")
++      assert(!seen.exists(_.isInstanceOf[UnknownPartitioning]),
++        s"the second post-planner rule must observe its prepared known partitioning: $seen")
++    }
++
++    test("Comet native extension counterpart: stage optimizers observe a fresh union") {
++      val seen = ListBuffer.empty[Partitioning]
++      checkNativeUnionExtension(create { extensions =>
++        extensions.injectQueryStageOptimizerRule(_ => WrapRootInUnion)
++        extensions.injectQueryStageOptimizerRule(_ => ObserveUnionPartitioning(seen))
++      }, aqeEnabled = true, requireKnownUnion = true)
++      assert(seen.nonEmpty, "the second stage optimizer must observe an injected union")
++      assert(seen.exists(!_.isInstanceOf[UnknownPartitioning]),
++        s"the union over the shuffle read must keep its prepared known partitioning: $seen")
++    }
++
++    test("Comet native extension counterpart: columnar pre and post rules add a union") {
++      Seq(false, true).foreach { aqeEnabled =>
++        val post = ListBuffer.empty[Partitioning]
++        checkNativeUnionExtension(create { extensions =>
++          extensions.injectColumnar(_ => ObserveUnionPartitioningColumnarRule(post))
++          extensions.injectColumnar(_ => WrapRootInUnionColumnarRule)
++        }, aqeEnabled, requireKnownUnion = true)
++        assert(post.nonEmpty && !post.exists(_.isInstanceOf[UnknownPartitioning]),
++          s"the second post-columnar rule must observe the prepared union, aqe=$aqeEnabled: $post")
++        val pre = ListBuffer.empty[Partitioning]
++        checkNativeUnionExtension(create { extensions =>
++          extensions.injectColumnar(_ => WrapRootInUnionPreColumnarRule)
++          extensions.injectColumnar(_ => ObserveUnionPartitioningPreColumnarRule(pre))
++        }, aqeEnabled, requireKnownUnion = true)
++        assert(pre.nonEmpty && !pre.exists(_.isInstanceOf[UnknownPartitioning]),
++          s"the second pre-columnar rule must observe the prepared union, aqe=$aqeEnabled: $pre")
++      }
++    }
++
++    test("Comet native extension counterpart: late AQE union retains planning conf") {
++      checkNativeUnionExtension(
++        create(_.injectColumnar(_ => WrapRootInUnionColumnarRule)),
++        aqeEnabled = true,
++        flipAfterPlanning = true,
++        requireKnownUnion = true)
++    }
++
++    test("Comet native extension counterpart: rebuilt AQE union retains codegen confs") {
++      Seq(
++        SQLConf.WHOLESTAGE_UNION_CODEGEN_ENABLED.key -> "false",
++        SQLConf.WHOLESTAGE_UNION_MAX_CHILDREN.key -> "2").foreach { flipped =>
++        val witness = TreeNodeTag[Boolean]("nativeUnionRebuilt-" + flipped._1)
++        val replacements = new AtomicInteger()
++        checkNativeUnionExtension(
++          create(_.injectColumnar(_ => RebuildPreparedCometUnionColumnarRule(
++            witness, replacements))),
++          aqeEnabled = true,
++          threeChildren = true,
++          flipped = Some(flipped),
++          rewriteWitness = Some(witness))
++        assert(replacements.get() > 0, "the native prepared-union rewrite must actually run")
++      }
++    }
++  }
++
+   test("custom aggregate hint") {
+     // The custom hint allows us to replace the aggregate (without grouping keys) with just
+     // Literal.
+@@ -1650,6 +1847,14 @@ object MyQueryPostPlannerStrategyRule extends Rule[SparkPlan] {
+ object WrapRootInUnion extends Rule[SparkPlan] {
+   override def apply(plan: SparkPlan): SparkPlan = plan match {
+     case p: ProjectExec => UnionExec(Seq(p))
++    // A Comet projection is the same test premise after native conversion. Introduce a Spark
++    // UnionExec so Spark's real preparation barriers, not a test-provided stamp, must record the
++    // snapshot for this newly added control operator. Its child still executes natively.
++    case p: CometProjectExec => UnionExec(Seq(p))
++    // Comet's post-columnar rules have already installed the row transition before a later
++    // user post-rule runs. Put the union below it, preserving the native columnar boundary.
++    case c: ColumnarToRowTransition if c.child.isInstanceOf[CometProjectExec] =>
++      c.withNewChildren(Seq(UnionExec(Seq(c.child))))
+     case other => other
+   }
+ }
+@@ -1701,6 +1906,29 @@ object RebuildRootUnionColumnarRule extends ColumnarRule {
+   override def postColumnarTransitions: Rule[SparkPlan] = RebuildRootUnion
+ }
+ 
++/**
++ * Rebuild an actual prepared native union, keeping its Spark preparation record, rather than
++ * accidentally passing a native test because a Spark-only matcher never ran. The witness tag is
++ * checked on the final executed union; a natural three-child union alone cannot satisfy it.
++ * Reverse the three branches (UNION ALL has no ordering contract) so parent fastEquals checks
++ * cannot discard an equal copy carrying only a new tag. The test checks the entire row multiset.
++ */
++case class RebuildPreparedCometUnionColumnarRule(
++    witness: TreeNodeTag[Boolean], replacements: AtomicInteger) extends ColumnarRule {
++  override def postColumnarTransitions: Rule[SparkPlan] = new Rule[SparkPlan] {
++    override def apply(plan: SparkPlan): SparkPlan = plan.transformUp {
++      case u: CometUnionExec if u.children.size == 3 &&
++          !u.getTagValue(witness).contains(true) =>
++        val replacement = u.copy(children = u.children.reverse)
++        assert(replacement != u, "the test rewrite must replace the prepared union")
++        replacement.copyTagsFrom(u)
++        replacement.setTagValue(witness, true)
++        replacements.incrementAndGet()
++        replacement
++    }
++  }
++}
++
+ /**
+  * Records what each `UnionExec` reports, with `UNION_OUTPUT_PARTITIONING` turned off: a concrete
+  * answer can then only come from a decision stamped earlier, or from the conf a snapshot pass
+@@ -1710,12 +1938,15 @@ object RebuildRootUnionColumnarRule extends ColumnarRule {
+  */
+ case class ObserveUnionPartitioning(seen: ListBuffer[Partitioning]) extends Rule[SparkPlan] {
+   override def apply(plan: SparkPlan): SparkPlan = {
++    def observe(u: SparkPlan): Unit = {
++      val enabled = u.conf.getConf(SQLConf.UNION_OUTPUT_PARTITIONING)
++      u.conf.setConf(SQLConf.UNION_OUTPUT_PARTITIONING, false)
++      try seen += u.outputPartitioning
++      finally u.conf.setConf(SQLConf.UNION_OUTPUT_PARTITIONING, enabled)
++    }
+     plan.foreach {
+-      case u: UnionExec =>
+-        val enabled = u.conf.getConf(SQLConf.UNION_OUTPUT_PARTITIONING)
+-        u.conf.setConf(SQLConf.UNION_OUTPUT_PARTITIONING, false)
+-        try seen += u.outputPartitioning
+-        finally u.conf.setConf(SQLConf.UNION_OUTPUT_PARTITIONING, enabled)
++      case u: UnionExec => observe(u)
++      case u: CometUnionExec => observe(u)
+       case _ =>
+     }
+     plan
 diff --git a/sql/core/src/test/scala/org/apache/spark/sql/SparkSessionJobTaggingAndCancellationSuite.scala b/sql/core/src/test/scala/org/apache/spark/sql/SparkSessionJobTaggingAndCancellationSuite.scala
 index d7b2511eac2..d5f5b940b94 100644
 --- a/sql/core/src/test/scala/org/apache/spark/sql/SparkSessionJobTaggingAndCancellationSuite.scala
@@ -2621,10 +3102,10 @@ index c0f5ad61d72..4f7ce430fee 100644
            spark.range(1).foreach { _ =>
              columnarToRowExec.canonicalized
 diff --git a/sql/core/src/test/scala/org/apache/spark/sql/execution/UnionCodegenSuite.scala b/sql/core/src/test/scala/org/apache/spark/sql/execution/UnionCodegenSuite.scala
-index 62e90eda523..39329b65ea3 100644
+index 62e90eda523..b34d23eae69 100644
 --- a/sql/core/src/test/scala/org/apache/spark/sql/execution/UnionCodegenSuite.scala
 +++ b/sql/core/src/test/scala/org/apache/spark/sql/execution/UnionCodegenSuite.scala
-@@ -20,7 +20,7 @@ package org.apache.spark.sql.execution
+@@ -20,13 +20,14 @@ package org.apache.spark.sql.execution
  import java.util.concurrent.{CountDownLatch, Executors, TimeUnit}
  
  import org.apache.spark.SparkConf
@@ -2633,7 +3114,206 @@ index 62e90eda523..39329b65ea3 100644
  import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioningLike, UnknownPartitioning}
  import org.apache.spark.sql.catalyst.rules.Rule
  import org.apache.spark.sql.catalyst.trees.TreeNodeTag
-@@ -686,7 +686,10 @@ class UnionCodegenSuite extends QueryTest with SharedSparkSession with AdaptiveS
++import org.apache.spark.sql.comet.{CometSortMergeJoinExec, CometUnionExec}
+ import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AdaptiveSparkPlanHelper}
+ import org.apache.spark.sql.execution.columnar.InMemoryTableScanLike
+-import org.apache.spark.sql.execution.exchange.{EnsureRequirements, REPARTITION_BY_NUM, ShuffleExchangeExec}
++import org.apache.spark.sql.execution.exchange.{EnsureRequirements, REPARTITION_BY_NUM, ShuffleExchangeExec, ShuffleExchangeLike}
+ import org.apache.spark.sql.functions._
+ import org.apache.spark.sql.internal.SQLConf
+ import org.apache.spark.sql.test.SharedSparkSession
+@@ -47,6 +48,30 @@ class UnionCodegenSuite extends QueryTest with SharedSparkSession with AdaptiveS
+   // Helpers
+   // ---------------------------------------------------------------------------
+ 
++  // These cases inspect Spark's generated-code shell and private stamping tags. Preserve those
++  // assertions on Spark's own operators; the native counterparts below execute the same query
++  // shapes with Comet and check their data and partitioning contracts independently.
++  private def sparkUnionTest(name: String)(body: => Unit): Unit = test(name) {
++    withSQLConf("spark.comet.enabled" -> "false") { body }
++  }
++
++  private def nativeUnions(df: DataFrame): Seq[CometUnionExec] =
++    collect(df.queryExecution.executedPlan) { case u: CometUnionExec => u }
++
++  private def checkNativeUnion(df: DataFrame, expected: Seq[Row]): Seq[CometUnionExec] = {
++    checkAnswer(df, expected)
++    val unions = nativeUnions(df)
++    assert(unions.nonEmpty, s"the native union must execute:\n${df.queryExecution}")
++    unions.foreach { u =>
++      val layout = u.outputPartitioning
++      if (!layout.isInstanceOf[UnknownPartitioning]) {
++        assert(u.executeColumnar().partitions.length == layout.numPartitions,
++          s"the union RDD must implement its advertised partitioning: $layout")
++      }
++    }
++    unions
++  }
++
+   /** Convenience: spark.range returning a DataFrame (not Dataset[Long]). */
+   protected def rangeDF(end: Long): DataFrame = spark.range(end).toDF("id")
+   protected def rangeDF(start: Long, end: Long): DataFrame =
+@@ -143,6 +168,150 @@ class UnionCodegenSuite extends QueryTest with SharedSparkSession with AdaptiveS
+     }
+   }
+ 
++  if (org.apache.spark.sql.classic.SparkSession.isCometEnabled) {
++    test("Comet native counterpart: SPARK-56482 SMJ child union correctness") {
++      Seq("false", "true").foreach { convertRange =>
++        withSQLConf(
++            SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
++            "spark.comet.convert.range.enabled" -> convertRange) {
++          val (on, off) = assertFlagParity { () =>
++            val left = rangeDF(100).select(col("id").as("k"))
++            val right = rangeDF(100).select(col("id").as("k"))
++            left.join(right, "k").union(rangeDF(100).select(col("id").as("k")))
++          }
++          val expected = (0L until 100L).flatMap(k => Seq(Row(k), Row(k)))
++          Seq(on, off).foreach { df =>
++            if (convertRange.toBoolean) {
++              checkNativeUnion(df, expected)
++            } else {
++              // Keep the original default mixed path too: the bare Range stays row based,
++              // so Spark's union consumes rows from a Comet SMJ and from Spark's Range.
++              checkAnswer(df, expected)
++              assert(collect(df.queryExecution.executedPlan) {
++                case u: UnionExec => u
++              }.nonEmpty, df.queryExecution.executedPlan)
++            }
++            assert(collect(df.queryExecution.executedPlan) {
++              case j: CometSortMergeJoinExec => j
++            }.nonEmpty, df.queryExecution.executedPlan)
++          }
++        }
++      }
++    }
++
++    test("Comet native counterpart: SPARK-59122 cached aggregate union stays correct") {
++      withSQLConf(
++          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
++          SQLConf.WHOLESTAGE_UNION_CODEGEN_ENABLED.key -> "true",
++          SQLConf.UNION_OUTPUT_PARTITIONING.key -> "true") {
++        withTempView("comet_union_cache") {
++          cacheAggregateView("comet_union_cache")
++          val df = spark.sql("SELECT k, abs(s) AS s FROM comet_union_cache " +
++            "UNION ALL SELECT k, s FROM comet_union_cache")
++          val expected = (0L until 10L).flatMap(k =>
++            Seq(Row(k, 1900L + 20L * k), Row(k, 1900L + 20L * k)))
++          checkNativeUnion(df, expected)
++          checkAnswer(df.groupBy("k").agg(sum("s")),
++            (0L until 10L).map(k => Row(k, 3800L + 40L * k)))
++        }
++      }
++    }
++
++    test("Comet native counterpart: SPARK-59122 partition layout survives conf flip") {
++      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
++        val left = rangeDF(0, 20, 1, 2).selectExpr("id % 5 AS k")
++        val right = rangeDF(20, 40, 1, 2).selectExpr("id % 5 AS k")
++        val planned = withSQLConf(SQLConf.UNION_OUTPUT_PARTITIONING.key -> "true") {
++          val df = left.repartition(4, col("k"))
++            .union(right.repartition(4, col("k"))).groupBy("k").count()
++          val plan = df.queryExecution.executedPlan
++          val unions = nativeUnions(df)
++          assert(unions.size == 1, plan)
++          assert(unions.head.outputPartitioning.isInstanceOf[HashPartitioningLike], plan)
++          assert(collect(plan) { case s: ShuffleExchangeLike => s }.size == 2, plan)
++          df
++        }
++        withSQLConf(SQLConf.UNION_OUTPUT_PARTITIONING.key -> "false") {
++          checkNativeUnion(planned, (0L until 5L).map(k => Row(k, 8L)))
++        }
++      }
++    }
++
++    test("Comet native counterpart: SPARK-59122 codegen flag changes after planning") {
++      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
++        val planned = withSQLConf(SQLConf.WHOLESTAGE_UNION_CODEGEN_ENABLED.key -> "true") {
++          val df = rangeDF(100).repartition(2).union(rangeDF(100).repartition(2))
++          assert(nativeUnions(df).size == 1, df.queryExecution.executedPlan)
++          df
++        }
++        withSQLConf(SQLConf.WHOLESTAGE_UNION_CODEGEN_ENABLED.key -> "false") {
++          val unions = checkNativeUnion(planned,
++            (0L until 100L).flatMap(i => Seq(Row(i), Row(i))))
++          assert(unions.head.children.size == 2)
++        }
++      }
++    }
++
++    test("Comet native counterpart: SPARK-59122 child cap changes after planning") {
++      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
++        val planned = withSQLConf(
++            SQLConf.WHOLESTAGE_UNION_CODEGEN_ENABLED.key -> "true",
++            SQLConf.WHOLESTAGE_UNION_MAX_CHILDREN.key -> "3") {
++          val df = rangeDF(100).repartition(2).union(rangeDF(100).repartition(2))
++            .union(rangeDF(100).repartition(2))
++          assert(nativeUnions(df).size == 1, df.queryExecution.executedPlan)
++          df
++        }
++        withSQLConf(SQLConf.WHOLESTAGE_UNION_MAX_CHILDREN.key -> "2") {
++          val unions = checkNativeUnion(planned,
++            (0L until 100L).flatMap(i => Seq(Row(i), Row(i), Row(i))))
++          assert(unions.head.children.size == 3)
++        }
++      }
++    }
++
++    test("Comet native counterpart: SPARK-59122 copied union keeps prepared decisions") {
++      withSQLConf(
++          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
++          SQLConf.UNION_OUTPUT_PARTITIONING.key -> "true") {
++        val df = rangeDF(0, 20, 1, 2).selectExpr("id % 5 AS k").repartition(4, col("k"))
++          .union(rangeDF(20, 40, 1, 2).selectExpr("id % 5 AS k").repartition(4, col("k")))
++        val union = nativeUnions(df).head
++        val layout = union.outputPartitioning
++        assert(layout.isInstanceOf[HashPartitioningLike], layout)
++        val copied = union.copy()
++        withSQLConf(
++            SQLConf.UNION_OUTPUT_PARTITIONING.key -> "false",
++            SQLConf.WHOLESTAGE_UNION_CODEGEN_ENABLED.key -> "false") {
++          assert(copied.outputPartitioning == layout)
++          assert(copied.executeColumnar().partitions.length == layout.numPartitions)
++          val rows = copied.executeCollect().map(_.getLong(0)).sorted.toSeq
++          assert(rows == (0L until 5L).flatMap(k => Seq.fill(8)(k)))
++        }
++      }
++    }
++
++    test("Comet native counterpart: SPARK-59122 AQE retains prepared conf decisions") {
++      Seq(
++        SQLConf.WHOLESTAGE_UNION_CODEGEN_ENABLED.key -> "false",
++        SQLConf.WHOLESTAGE_UNION_MAX_CHILDREN.key -> "2").foreach { flipped =>
++        withSQLConf(
++            SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
++            SQLConf.WHOLESTAGE_UNION_CODEGEN_ENABLED.key -> "true",
++            SQLConf.WHOLESTAGE_UNION_MAX_CHILDREN.key -> "3") {
++          val df = rangeDF(100).repartition(2).union(rangeDF(100).repartition(2))
++            .union(rangeDF(100).repartition(2))
++          assert(df.queryExecution.executedPlan.isInstanceOf[AdaptiveSparkPlanExec])
++          withSQLConf(flipped) {
++            val unions = checkNativeUnion(df,
++              (0L until 100L).flatMap(i => Seq(Row(i), Row(i), Row(i))))
++            assert(unions.head.children.size == 3)
++          }
++        }
++      }
++    }
++  }
++
+   // ---------------------------------------------------------------------------
+   // Configuration smoke
+   // ---------------------------------------------------------------------------
+@@ -514,7 +683,7 @@ class UnionCodegenSuite extends QueryTest with SharedSparkSession with AdaptiveS
+   // Structural denylist: SortMergeJoin child
+   // ---------------------------------------------------------------------------
+ 
+-  test("SPARK-56482: SMJ child union correctness") {
++  sparkUnionTest("SPARK-56482: SMJ child union correctness") {
+     // SMJ is in the structural denylist (multi-RDD codegen), so
+     // UnionExec should fall back for that child. Verify correctness.
+     withSQLConf(
+@@ -686,7 +855,10 @@ class UnionCodegenSuite extends QueryTest with SharedSparkSession with AdaptiveS
      }
    }
  
@@ -2645,6 +3325,60 @@ index 62e90eda523..39329b65ea3 100644
      // After repartition, both children expose a `HashPartitioning` on the same key,
      // so `UnionExec.outputPartitioning` is non-Unknown and the codegen path is denied.
      // AQE is disabled here for the `collectFirst` below: `SparkPlan.collect` stops at
+@@ -708,7 +880,7 @@ class UnionCodegenSuite extends QueryTest with SharedSparkSession with AdaptiveS
+     }
+   }
+ 
+-  test("SPARK-59122: a fused union keeps numOutputRows and reports UnknownPartitioning") {
++  sparkUnionTest("SPARK-59122: a fused union keeps numOutputRows and reports UnknownPartitioning") {
+     // The children's partitioning is not stable while the plan is being prepared:
+     // `InMemoryTableScanExec.cachedPlan` unwraps the inner `AdaptiveSparkPlanExec` only once
+     // `isFinalPlan` is true, and reports `UnknownPartitioning(0)` until then, so the union looks
+@@ -759,7 +931,7 @@ class UnionCodegenSuite extends QueryTest with SharedSparkSession with AdaptiveS
+     }
+   }
+ 
+-  test("SPARK-59122: a partitioning-aware union keeps its layout when the conf changes between " +
++  sparkUnionTest("SPARK-59122: a partitioning-aware union keeps its layout when the conf changes between " +
+     "planning and execution") {
+     // `spark.sql.unionOutputPartitioning` is read once during preparation, ahead of
+     // `EnsureRequirements`, not on every `outputPartitioning` call, so a plan executes by the
+@@ -798,7 +970,7 @@ class UnionCodegenSuite extends QueryTest with SharedSparkSession with AdaptiveS
+     }
+   }
+ 
+-  test("SPARK-59122: a fused union keeps numOutputRows when the codegen conf changes between " +
++  sparkUnionTest("SPARK-59122: a fused union keeps numOutputRows when the codegen conf changes between " +
+     "planning and execution") {
+     // `supportCodegenFailureReason` used to read `WHOLESTAGE_UNION_CODEGEN_ENABLED` live, and the
+     // copy that `insertInputAdapter` puts inside the codegen shell evaluated it for the first time
+@@ -835,7 +1007,7 @@ class UnionCodegenSuite extends QueryTest with SharedSparkSession with AdaptiveS
+     }
+   }
+ 
+-  test("SPARK-59122: a fused union keeps numOutputRows when the child cap drops between " +
++  sparkUnionTest("SPARK-59122: a fused union keeps numOutputRows when the child cap drops between " +
+     "planning and execution") {
+     // `WHOLESTAGE_UNION_MAX_CHILDREN` is on the same snapshot as the enable flag, so the same shape
+     // has to hold for it: prepared under a cap this union meets, it stays fused even if the cap is
+@@ -982,7 +1154,7 @@ class UnionCodegenSuite extends QueryTest with SharedSparkSession with AdaptiveS
+     }
+   }
+ 
+-  test("SPARK-59122: a later stamping pass fills in a fresh union and keeps stamped ones") {
++  sparkUnionTest("SPARK-59122: a later stamping pass fills in a fresh union and keeps stamped ones") {
+     // `StampUnionDecisions` is listed again after the phases that can add a `UnionExec`, so one an
+     // injected columnar or query-stage rule created does not answer from whatever the conf says
+     // wherever it is first asked. A later pass must also not move a decision already taken, which
+@@ -1150,7 +1322,7 @@ class UnionCodegenSuite extends QueryTest with SharedSparkSession with AdaptiveS
+     }
+   }
+ 
+-  test("SPARK-59122: a union fused under AQE keeps both codegen decisions through execution") {
++  sparkUnionTest("SPARK-59122: a union fused under AQE keeps both codegen decisions through execution") {
+     // The AQE counterpart of the two "changes between planning and execution" cases above.
+     // `CollapseCodegenStages` runs after each stage is created, so the shell and the copy inside it
+     // are built while the query runs, with the flipped value below already in effect: a gate that
 diff --git a/sql/core/src/test/scala/org/apache/spark/sql/execution/WholeStageCodegenSuite.scala b/sql/core/src/test/scala/org/apache/spark/sql/execution/WholeStageCodegenSuite.scala
 index d71429399ec..a54a70b2591 100644
 --- a/sql/core/src/test/scala/org/apache/spark/sql/execution/WholeStageCodegenSuite.scala
@@ -3814,18 +4548,27 @@ index ae977e17755..1d29f424490 100644
          case _ => assert(false, "Can not match ParquetTable in the query.")
        }
 diff --git a/sql/core/src/test/scala/org/apache/spark/sql/execution/datasources/parquet/ParquetIOSuite.scala b/sql/core/src/test/scala/org/apache/spark/sql/execution/datasources/parquet/ParquetIOSuite.scala
-index fc4bc264075..e2cade89b43 100644
+index fc4bc264075..3574f31e4f9 100644
 --- a/sql/core/src/test/scala/org/apache/spark/sql/execution/datasources/parquet/ParquetIOSuite.scala
 +++ b/sql/core/src/test/scala/org/apache/spark/sql/execution/datasources/parquet/ParquetIOSuite.scala
-@@ -47,6 +47,7 @@ import org.scalatest.time.{Seconds, Span}
- import org.apache.spark.{SPARK_VERSION_SHORT, SparkException, TestUtils}
+@@ -44,13 +44,15 @@ import org.apache.parquet.schema.{MessageType, MessageTypeParser}
+ import org.scalatest.concurrent.{Signaler, ThreadSignaler}
+ import org.scalatest.time.{Seconds, Span}
+ 
+-import org.apache.spark.{SPARK_VERSION_SHORT, SparkException, TestUtils}
++import org.apache.spark.{SPARK_VERSION_SHORT, SparkException, SparkThrowable, TestUtils}
  import org.apache.spark.rdd.RDD
  import org.apache.spark.sql._
 +import org.apache.spark.sql.IgnoreComet
  import org.apache.spark.sql.catalyst.InternalRow
  import org.apache.spark.sql.catalyst.expressions.{Attribute, GenericInternalRow, UnsafeRow}
  import org.apache.spark.sql.catalyst.util.{DateTimeConstants, DateTimeUtils}
-@@ -978,7 +979,8 @@ class ParquetIOSuite extends ParquetTest with SharedSparkSession {
+ import org.apache.spark.sql.catalyst.util.DateTimeTestUtils.localTime
++import org.apache.spark.sql.comet.CometNativeScanExec
+ import org.apache.spark.sql.execution.{SparkPlan, UnaryExecNode}
+ import org.apache.spark.sql.execution.datasources.SQLHadoopMapReduceCommitProtocol
+ import org.apache.spark.sql.functions._
+@@ -978,7 +980,8 @@ class ParquetIOSuite extends ParquetTest with SharedSparkSession {
      }
    }
  
@@ -3835,6 +4578,120 @@ index fc4bc264075..e2cade89b43 100644
      val data = Seq(
        Tuple1((null, null)),
        Tuple1((null, null)),
+@@ -1943,7 +1946,8 @@ class ParquetIOSuite extends ParquetTest with SharedSparkSession {
+    */
+   private def readCorruptedRleSection(
+       column: String,
+-      writerVersion: String = "PARQUET_1_0")(
++      writerVersion: String = "PARQUET_1_0",
++      expectedNativeMessage: Option[String] = None)(
+       corrupt: (Array[Byte], Int) => Unit): Throwable = {
+     var error: Throwable = null
+     withTempPath { dir =>
+@@ -1967,8 +1971,27 @@ class ParquetIOSuite extends ParquetTest with SharedSparkSession {
+         // Before SPARK-59832 a truncated read never returned, so run it with a timeout. The test
+         // thread waits interruptibly for the job, so it can be signaled directly.
+         implicit val signaler: Signaler = ThreadSignaler
++        val read = spark.read.parquet(path)
++        val nativeScans = read.queryExecution.executedPlan.collect {
++          case scan: CometNativeScanExec => scan
++        }
++        assert(nativeScans.nonEmpty == expectedNativeMessage.isDefined,
++          s"Unexpected reader for corruption regression: ${read.queryExecution.executedPlan}")
+         error = intercept[SparkException] {
+-          failAfter(Span(60, Seconds))(spark.read.parquet(path).collect())
++          failAfter(Span(60, Seconds))(read.collect())
++        }
++        expectedNativeMessage.foreach { expected =>
++          val chain = causes(error)
++          assert(chain.exists {
++            case spark: SparkThrowable => spark.getCondition == "FAILED_READ_FILE.NO_HINT"
++            case _ => false
++          }, error)
++          assert(chain.exists(c => Option(c.getMessage).exists(_.contains(file.getName))), error)
++          // Arrow is the native decoder. Require its specific corruption cause,
++          // not an unrelated planning/I/O error or a fabricated parquet-mr cause.
++          assert(chain.exists(c => Option(c.getMessage).exists(message =>
++            message.startsWith("Arrow error: Parquet argument error:") &&
++              message.contains(expected))), error)
+         }
+       }
+     }
+@@ -1997,24 +2020,63 @@ class ParquetIOSuite extends ParquetTest with SharedSparkSession {
+   }
+ 
+   test("SPARK-59832: vectorized reader fails on truncated definition levels") {
+-    // Shorten the run to 64 values (header 64 << 1 = varint 0x80 0x01).
+-    val e = readCorruptedRleSection("if(id < 0, null, cast(id as int)) as a") {
+-      (bytes, offset) => bytes(offset + 4) = 0x80.toByte
++    withSQLConf("spark.comet.enabled" -> "false") {
++      // Shorten the run to 64 values (header 64 << 1 = varint 0x80 0x01).
++      val e = readCorruptedRleSection("if(id < 0, null, cast(id as int)) as a") {
++        (bytes, offset) => bytes(offset + 4) = 0x80.toByte
++      }
++      assert(causes(e).exists {
++        case c: ParquetDecodingException => c.getMessage.contains("Corrupted RLE data")
++        case _ => false
++      }, e)
+     }
+-    assert(causes(e).exists {
+-      case c: ParquetDecodingException => c.getMessage.contains("Corrupted RLE data")
+-      case _ => false
+-    }, e)
+   }
+ 
+   test("SPARK-59832: invalid definition level length reports the column") {
+-    val e = readCorruptedRleSection("if(id < 0, null, cast(id as int)) as a")(setMaxLength)
+-    assertInvalidLengthReportsColumn(e, "a")
++    withSQLConf("spark.comet.enabled" -> "false") {
++      val e = readCorruptedRleSection("if(id < 0, null, cast(id as int)) as a")(setMaxLength)
++      assertInvalidLengthReportsColumn(e, "a")
++    }
+   }
+ 
+   test("SPARK-59832: invalid length of RLE booleans in a V2 page reports the column") {
+-    val e = readCorruptedRleSection("id >= 0 as b", writerVersion = "PARQUET_2_0")(setMaxLength)
+-    assertInvalidLengthReportsColumn(e, "b")
++    withSQLConf("spark.comet.enabled" -> "false") {
++      val e = readCorruptedRleSection("id >= 0 as b", writerVersion = "PARQUET_2_0")(setMaxLength)
++      assertInvalidLengthReportsColumn(e, "b")
++    }
++  }
++
++  // Keep Spark's parquet-mr-specific diagnostics above, and independently
++  // verify Comet's native reader rejects the same files with bounded execution,
++  // FAILED_READ_FILE, the actual path and its genuine Arrow corruption cause.
++  if (isCometEnabled) {
++    test("SPARK-59832: Comet native reader rejects truncated definition levels") {
++      withSQLConf("spark.comet.enabled" -> "true", "spark.comet.exec.enabled" -> "true",
++          "spark.comet.scan.enabled" -> "true") {
++        readCorruptedRleSection(
++          "if(id < 0, null, cast(id as int)) as a",
++          expectedNativeMessage = Some("insufficient definition levels read from column")) {
++          (bytes, offset) => bytes(offset + 4) = 0x80.toByte
++        }
++      }
++    }
++
++    test("SPARK-59832: Comet native reader rejects invalid definition level length") {
++      withSQLConf("spark.comet.enabled" -> "true", "spark.comet.exec.enabled" -> "true",
++          "spark.comet.scan.enabled" -> "true") {
++        readCorruptedRleSection(
++          "if(id < 0, null, cast(id as int)) as a",
++          expectedNativeMessage = Some("not enough data to read levels"))(setMaxLength)
++      }
++    }
++
++    test("SPARK-59832: Comet native reader rejects invalid RLE boolean length in a V2 page") {
++      withSQLConf("spark.comet.enabled" -> "true", "spark.comet.exec.enabled" -> "true",
++          "spark.comet.scan.enabled" -> "true") {
++        readCorruptedRleSection("id >= 0 as b", writerVersion = "PARQUET_2_0",
++          expectedNativeMessage = Some("EOF: Not enough bytes to decode"))(setMaxLength)
++      }
++    }
+   }
+ }
+ 
 diff --git a/sql/core/src/test/scala/org/apache/spark/sql/execution/datasources/parquet/ParquetQuerySuite.scala b/sql/core/src/test/scala/org/apache/spark/sql/execution/datasources/parquet/ParquetQuerySuite.scala
 index 38582236c73..028ab7b7905 100644
 --- a/sql/core/src/test/scala/org/apache/spark/sql/execution/datasources/parquet/ParquetQuerySuite.scala
