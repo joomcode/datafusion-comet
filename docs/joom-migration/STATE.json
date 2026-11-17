@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-17",
-  "phase": "SETUP_NETWORK_APPROVED_PENDING_WORKER_HANDOFF",
+  "phase": "READ_ONLY_PREPARATION_USER_CODE_HOLD",
   "repository": "/Users/skotlov/d/projects/datafusion-comet",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -8,7 +8,7 @@
   "implementation_started": false,
   "active_writer": null,
   "worker_threads_created": [],
-  "local_comet_project_registered_in_app": false,
+  "local_comet_project_registered_in_app": true,
   "groups": [
     {
       "id": "G01",
@@ -217,26 +217,35 @@
   "build_tools": {
     "standalone_mvn_cargo_rustc_in_current_PATH": false,
     "maven_wrapper": "PRESENT; pins3.9.6; not executed",
-    "host_rust_installation": "USER_WILL_INSTALL",
-    "java_sdkman_installations": "USER_REPORTED_PRESENT; exact JDK for build not verified"
+    "host_rust_installation": "VERIFIED_USER_INSTALLED",
+    "java_sdkman_installations": "VERIFIED: Java/javac17.0.19-tem; global SDKMAN selection21.0.9-tem unchanged.",
+    "rustc_version": "1.100.0",
+    "cargo_version": "1.100.0",
+    "rustup_toolchain": "stable-aarch64-apple-darwin",
+    "rust_bin": "/opt/homebrew/opt/rustup/bin",
+    "cargo_rustc_in_current_PATH": false,
+    "java_17_verified": "/Users/skotlov/.sdkman/candidates/java/17.0.19-tem",
+    "java_17_version": "17.0.19",
+    "current_sdkman_java": "21.0.9-tem",
+    "selection_policy": "Explicit per-command JAVA_HOME/PATH; do not change global user settings."
   },
   "permissions": {
     "repository_operations_authorized": true,
-    "implementation_authorized": true,
+    "implementation_authorized": false,
     "git_mutation_authorized": true,
     "repository_scope": "/Users/skotlov/d/projects/datafusion-comet",
     "git_scope": "/Users/skotlov/d/projects/datafusion-comet/.git",
     "user_quote": "Отныне ты имеешь мое разрешение делать все необходимые манипуляции в /Users/skotlov/d/projects/datafusion-comet (в т.ч. в /Users/skotlov/d/projects/datafusion-comet/.git)",
     "interpretation": "Разрешение охватывает необходимые локальные изменения репозитория, ветки, коммиты, интеграцию и локальные теги. Подготовка передачи работы не означает, что реализация G01 уже начата.",
-    "implementation_status": "NOT_STARTED",
+    "implementation_status": "NOT_STARTED_USER_CODE_HOLD",
     "network_build_dependencies_authorized": true,
     "network_scope_status": "APPROVED_WITH_USER_SAFETY_CONDITION",
     "github_api_read_only_audit_authorized": true,
-    "automatic_worker_chat_creation_authorized": false,
-    "automatic_cross_chat_messaging_authorized": false,
+    "automatic_worker_chat_creation_authorized": true,
+    "automatic_cross_chat_messaging_authorized": true,
     "publishing_authorized": false,
     "remote_push_status": "USER_REPORTED_403; LOCAL_WORK_ONLY",
-    "note": "Необходимые локальные операции Comet/.git и сетевые операции исходного NETWORK.md разрешены. Сетевое разрешение условно: соблюдать прямое требование пользователя к безопасности известных широко используемых артефактов. Создание/управление рабочими чатами ещё не поручено; push, внешняя публикация и production-операции не входят.",
+    "note": "Git/документация и создание/ведение рабочих сессий разрешены; сеть разрешена с условием безопасности. Последнее прямое указание запрещает писать код до нового поручения. Push, публикация и production-операции исключены.",
     "recorded_on": "2026-11-17",
     "network_approval": {
       "recorded_on": "2026-11-17",
@@ -256,6 +265,18 @@
         "Остальные исключения исходного NETWORK.md"
       ],
       "network_operations_performed_during_recording": false
+    },
+    "implementation_hold": {
+      "active": true,
+      "user_quote": "Код не пиши до моего укзания.",
+      "recorded_on": "2026-11-17",
+      "allowed_now": "Документация и read-only подготовка; реализацию не начинать."
+    },
+    "session_orchestration_authorization": {
+      "recorded_on": "2026-11-17",
+      "user_quote": "Проект Comet добавлен (/Users/skotlov/d/projects/datafusion-comet). Создавай и веди рабочие сессии по утверждённому плану, передавай им задания и уточнения, проверяй результаты.",
+      "project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
+      "code_hold_preserved": true
     }
   },
   "delivery_scope": {
@@ -278,16 +299,20 @@
   "performance_policy": {
     "status": "APPROVED_EXPLICITLY",
     "user_quote": "ну по возможности ты ее конечно проверяй как сможешь во время реализации.",
-    "during_implementation": "По возможности выполнять доступные локальные benchmarks и comparisons, проверять native execution, память, spill и признаки регрессий. Сохранять параметры и результаты; не объявлять эквивалентность производительности без измерений.",
+    "during_implementation": "Существующие Scala microbenchmarks/Spark Benchmark, Rust Criterion и доступные TPC-H/DS runners в принятом стиле. При необходимости обычное расширение соответствующего benchmark; отдельную инфраструктуру ради миграции не создавать.",
     "production_benchmarks": "Полные замеры на реальных GCP jobs отложены на пользовательскую проверку и не являются текущим условием передачи локальных JAR.",
-    "correctness_unchanged": true
+    "correctness_unchanged": true,
+    "latest_user_quote": "Я хочу сказать, что с т.з. оценки производительности ты должен действовать точно так , как уже принято в этом проекте datafusion-comet. Не надо создавать специальных тестов, если там подобного никогда не было.",
+    "reference": "PERFORMANCE.md",
+    "correctness_tests_unchanged": true
   },
   "pending_setup": [
-    "User installs host Rust if desired; verify toolchain/JDK locally without accidental auto-download.",
-    "Register local Comet app project if separate user-visible worker chats are wanted.",
-    "User selects/authorizes working-session orchestration; no worker chat created yet.",
-    "Start G01 from actual current branch-1.2 after setup; preserve pinned upstream base."
+    "Wait for explicit user instruction before writing implementation code.",
+    "Prepare initial G01 worker read-only; no implementation, downloads, builds or Git mutations.",
+    "Report missing environment tools/access instead of long workarounds."
   ],
-  "next_step": "Проверить выбранный host toolchain/JDK и определить запуск G01; при выборе отдельных рабочих чатов добавить Comet-проект и получить поручение на их создание/управление. Сетевые загрузки утверждённого scope разрешены с пользовательским условием безопасности.",
-  "qualification": "Comet/Spark/Delta correctness, ANSI, packaging and vendor tests not run. Local performance measurements to be attempted during implementation; production GCP benchmarks deferred to user."
+  "next_step": "Подготовить и проверить G01 worker read-only; реализацию не начинать до прямого указания пользователя.",
+  "qualification": "Comet/Spark/Delta correctness, ANSI, packaging and vendor tests not run. Local performance measurements to be attempted during implementation; production GCP benchmarks deferred to user.",
+  "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
+  "cleanup_ledger": "cleanup-ledger.json"
 }

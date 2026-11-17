@@ -6087,21 +6087,21 @@
     "not_decided": [],
     "authorization_boundary": {
       "repository_operations_authorized": true,
-      "implementation_authorized": true,
+      "implementation_authorized": false,
       "git_mutation_authorized": true,
       "repository_scope": "/Users/skotlov/d/projects/datafusion-comet",
       "git_scope": "/Users/skotlov/d/projects/datafusion-comet/.git",
       "user_quote": "Отныне ты имеешь мое разрешение делать все необходимые манипуляции в /Users/skotlov/d/projects/datafusion-comet (в т.ч. в /Users/skotlov/d/projects/datafusion-comet/.git)",
       "interpretation": "Разрешение охватывает необходимые локальные изменения репозитория, ветки, коммиты, интеграцию и локальные теги. Подготовка передачи работы не означает, что реализация G01 уже начата.",
-      "implementation_status": "NOT_STARTED",
+      "implementation_status": "NOT_STARTED_USER_CODE_HOLD",
       "network_build_dependencies_authorized": true,
       "network_scope_status": "APPROVED_WITH_USER_SAFETY_CONDITION",
       "github_api_read_only_audit_authorized": true,
-      "automatic_worker_chat_creation_authorized": false,
-      "automatic_cross_chat_messaging_authorized": false,
+      "automatic_worker_chat_creation_authorized": true,
+      "automatic_cross_chat_messaging_authorized": true,
       "publishing_authorized": false,
       "remote_push_status": "USER_REPORTED_403; LOCAL_WORK_ONLY",
-      "note": "Необходимые локальные операции Comet/.git и сетевые операции исходного NETWORK.md разрешены. Сетевое разрешение условно: соблюдать прямое требование пользователя к безопасности известных широко используемых артефактов. Создание/управление рабочими чатами ещё не поручено; push, внешняя публикация и production-операции не входят.",
+      "note": "Git/документация и создание/ведение рабочих сессий разрешены; сеть разрешена с условием безопасности. Последнее прямое указание запрещает писать код до нового поручения. Push, публикация и production-операции исключены.",
       "recorded_on": "2026-11-17",
       "network_approval": {
         "recorded_on": "2026-11-17",
@@ -6121,6 +6121,18 @@
           "Остальные исключения исходного NETWORK.md"
         ],
         "network_operations_performed_during_recording": false
+      },
+      "implementation_hold": {
+        "active": true,
+        "user_quote": "Код не пиши до моего укзания.",
+        "recorded_on": "2026-11-17",
+        "allowed_now": "Документация и read-only подготовка; реализацию не начинать."
+      },
+      "session_orchestration_authorization": {
+        "recorded_on": "2026-11-17",
+        "user_quote": "Проект Comet добавлен (/Users/skotlov/d/projects/datafusion-comet). Создавай и веди рабочие сессии по утверждённому плану, передавай им задания и уточнения, проверяй результаты.",
+        "project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
+        "code_hold_preserved": true
       }
     },
     "ansi_policy": {
@@ -6351,7 +6363,7 @@
         ]
       },
       "quality_requirements_unchanged": true,
-      "no_implementation_authorization": false,
+      "no_implementation_authorization": true,
       "execution_not_started": true,
       "original_research_path": "/Users/skotlov/d/temp/20261116_comet12-consolidated-plan/consolidated-plan.json"
     },
@@ -6375,11 +6387,30 @@
     "performance_policy": {
       "status": "APPROVED_EXPLICITLY",
       "user_quote": "ну по возможности ты ее конечно проверяй как сможешь во время реализации.",
-      "during_implementation": "По возможности выполнять доступные локальные benchmarks и comparisons, проверять native execution, память, spill и признаки регрессий. Сохранять параметры и результаты; не объявлять эквивалентность производительности без измерений.",
+      "during_implementation": "Существующие Scala microbenchmarks/Spark Benchmark, Rust Criterion и доступные TPC-H/DS runners в принятом стиле. При необходимости обычное расширение соответствующего benchmark; отдельную инфраструктуру ради миграции не создавать.",
       "production_benchmarks": "Полные замеры на реальных GCP jobs отложены на пользовательскую проверку и не являются текущим условием передачи локальных JAR.",
-      "correctness_unchanged": true
+      "correctness_unchanged": true,
+      "latest_user_quote": "Я хочу сказать, что с т.з. оценки производительности ты должен действовать точно так , как уже принято в этом проекте datafusion-comet. Не надо создавать специальных тестов, если там подобного никогда не было.",
+      "reference": "PERFORMANCE.md",
+      "correctness_tests_unchanged": true
     },
-    "last_updated_on": "2026-11-17"
+    "last_updated_on": "2026-11-17",
+    "execution_documentation_policy": {
+      "user_quote": "вся подобная документация для целей выполнения миграции, будет только в /Users/skotlov/d/projects/datafusion-comet/docs/joom-migration",
+      "directory": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration",
+      "rule": "В репозитории миграционные инструкции/решения/handoffs/прогресс/cleanup только здесь. Корневой AGENTS.md восстановлен. Raw logs/tool outputs — в датированных temp по общим правилам и в cleanup ledger."
+    },
+    "environment_blocker_policy": {
+      "user_quote": "если ты видишь, что тебе что-то не хватает в окружении (тулов, прав,...), то ты не пытаешься это обойти трудными и долгими путями, а говоришь мне и мы решаем вопрос.",
+      "rule": "Сообщать конкретный blocker; не строить длительные обходы. Обычная per-command PATH/JAVA_HOME настройка и штатный Maven wrapper допустимы."
+    },
+    "cleanup_policy": {
+      "user_quote": "Хотелось бы в конце получить перечень, что и куда было сохранено и создано, чтобы я потом мог почистить. Т.е. мне нужна инструкция как мне чистить более ненужное после окончания твоей работы.",
+      "ledger": "cleanup-ledger.json",
+      "baseline": "resource-baseline.json",
+      "final_guide": "CLEANUP.md",
+      "rule": "Записывать точные paths/IDs, размеры, происхождение и shared/task-owned статус; в конце точечные cleanup-команды с сохранением final JAR/checksums/build manifests."
+    }
   },
   "plan_approved_entry_ids": [
     "D01",

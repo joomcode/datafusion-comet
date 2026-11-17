@@ -19,16 +19,6 @@ under the License.
 
 # Agent Guidelines for Apache DataFusion Comet
 
-## Joom Spark 4.2.1 migration
-
-For work on the approved Joom Comet 1.2 migration, first read
-[`docs/joom-migration/README.md`](docs/joom-migration/README.md), then its
-`decisions.json`, `STATE.json`, and `approved-plan.json`. They preserve the
-user-approved scope, pinned upstream base, feature register, permissions, and
-handoff protocol across chats. A proposed network scope is not an approval.
-Use one writing session per checkout; record progress and test evidence before
-handoff. This migration guidance supplements the contributor rules below.
-
 Read the [Contributor Guide](docs/source/contributor-guide/index.md) before making changes.
 Relevant entry points:
 

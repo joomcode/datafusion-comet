@@ -1,0 +1,68 @@
+{
+  "updated_on": "2026-11-17",
+  "stage": "PRE_IMPLEMENTATION",
+  "baseline": "resource-baseline.json",
+  "no_dependency_downloads_or_release_outputs_yet": true,
+  "entries": [
+    {
+      "type": "migration_documentation",
+      "path": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration",
+      "ownership": "TASK_DOCUMENTATION",
+      "preserve_until": "User decides after migration"
+    },
+    {
+      "type": "raw_setup_logs",
+      "path": "/Users/skotlov/d/temp/20261117_comet12-session-setup",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "created_files": [
+        "resource-baseline-command-results.json"
+      ]
+    }
+  ],
+  "preexisting_or_shared": {
+    "reference": "resource-baseline.json",
+    "policy": "Do not count all cache size or pre-existing Docker resources as migration-created."
+  },
+  "user_provided_sources_preserve": [
+    "/Users/skotlov/d/temp/src/datafusion-comet",
+    "/Users/skotlov/d/temp/src/datafusion",
+    "/Users/skotlov/d/temp/src/spark",
+    "/Users/skotlov/d/projects/spark"
+  ],
+  "user_installed_tools_preserve": [
+    "Rust/Rustup via Homebrew",
+    "SDKMAN JDKs"
+  ],
+  "historical_auxiliary_directories_review_before_cleanup": [
+    "/Users/skotlov/d/temp/20261115_comet-upstream-audit",
+    "/Users/skotlov/d/temp/20261115_comet-upstream-branches-pr-audit",
+    "/Users/skotlov/d/temp/20261115_datasci-spark4-audit",
+    "/Users/skotlov/d/temp/20261115_spark4-code-audit",
+    "/Users/skotlov/d/temp/20261115_spark4-comet-migration",
+    "/Users/skotlov/d/temp/20261116_comet-ansi-pr5889-followup",
+    "/Users/skotlov/d/temp/20261116_comet-build-ancestry-support",
+    "/Users/skotlov/d/temp/20261116_comet-fork-ancestry",
+    "/Users/skotlov/d/temp/20261116_comet-release-build",
+    "/Users/skotlov/d/temp/20261116_comet12-branch-release-plan",
+    "/Users/skotlov/d/temp/20261116_comet12-consolidated-plan",
+    "/Users/skotlov/d/temp/20261116_comet12-execution-setup",
+    "/Users/skotlov/d/temp/20261116_comet12-migration-register",
+    "/Users/skotlov/d/temp/20261116_datasci-comet-selection-audit",
+    "/Users/skotlov/d/temp/20261117_comet12-network-approval",
+    "/Users/skotlov/d/temp/20261117_comet12-session-setup"
+  ],
+  "future_entry_fields": [
+    "type",
+    "exact_path_or_docker_id",
+    "stage",
+    "creation_command",
+    "existed_at_baseline",
+    "task_exclusive_or_shared",
+    "size_before_after",
+    "preserve",
+    "targeted_cleanup_command",
+    "cleanup_conditions"
+  ],
+  "final_guide": "CLEANUP.md"
+}

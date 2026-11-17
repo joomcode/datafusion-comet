@@ -3,28 +3,44 @@
   "purpose": "Durable approved migration package; update checksums when documents intentionally change.",
   "files": [
     {
+      "path": "AGENTS.md",
+      "sha256": "779198b7a352e4659e0a41e9cb15dba4314d14c4f0035d0164f761992b4fef9f"
+    },
+    {
+      "path": "CLEANUP.md",
+      "sha256": "500d782de7be2e3aafb2a670e8d010ac8f1ead449a369592eacdfdbc4b79d98f"
+    },
+    {
       "path": "HANDOFF.md",
-      "sha256": "1e84356bb8d8824428ed51c26f46d8eaecc531ae2246a02549270806fdc1d330"
+      "sha256": "95404f0ace457aab265366b3a60dbd5a6d62f4a7d2ab7b79e7ae4e796c4b0f79"
     },
     {
       "path": "NETWORK.md",
       "sha256": "4c8d3b084363eb8e49b51eac6c620e9977ea3a2994824e0566e3ac0a149d46b3"
     },
     {
+      "path": "PERFORMANCE.md",
+      "sha256": "f01d946951bb4c1e54ea608518d6379f0d38f4e7c9990d6593bba0e2aad96344"
+    },
+    {
       "path": "README.md",
-      "sha256": "55e40ead437e478e531f54100c70fc028aacda08608a075aa7eabb5f7ef9dcd2"
+      "sha256": "342edd9f1434b2778727996191784b1e60fd2f229f642aa8eeebb7845893e8f9"
     },
     {
       "path": "STATE.json",
-      "sha256": "54508c2318d9367a47cd1ee0a349eebae9bb16fdb1803372dc7227913876782d"
+      "sha256": "b60c1667e26570eb80a1a43aa3d2b2cb7c7791308f741660798e8658f8c0ef8d"
     },
     {
       "path": "approved-plan-ru.txt",
-      "sha256": "c9cf9d64daaf30c1ba26c6bd00e60c8b880fa8c747b22e434d8d2ce281987bc5"
+      "sha256": "8da8494f2bb7df176e9f39377d6e00de7053f3d9cbfa0b2e3411588a427b69bc"
     },
     {
       "path": "approved-plan.json",
-      "sha256": "a3c6e92de665858404e87cbe17d5f865c397db801312cdc53befd777b30ca6ee"
+      "sha256": "1fe3f807c7f6ef35d1dc362035cfcc545a7edafd6bb04c65e2af0bc0409147f7"
+    },
+    {
+      "path": "cleanup-ledger.json",
+      "sha256": "0424b314f95bf6b6b8a07c31b493341984615e65f7c94154e5c559deac7c2491"
     },
     {
       "path": "correctness-test-plan-ru.txt",
@@ -32,11 +48,15 @@
     },
     {
       "path": "decisions.json",
-      "sha256": "a0d87ee9140f0a46bbf79700599e64e7ca066b726502d1486e42f7bbeca77d9d"
+      "sha256": "ae65a64d1a9ec5e5454b06ac7153066103485192de419d5f621bbc2d27dee648"
     },
     {
       "path": "feature-register.json",
-      "sha256": "7cf89ffa22987b0bc3ee71d535f58a229134b8b06f57e86298de56c36b8ed477"
+      "sha256": "32539aecd4ffa188b9e27a306801a214b40395c24076fde62a079561ad3db121"
+    },
+    {
+      "path": "resource-baseline.json",
+      "sha256": "107defecf4a734ac5a4d52d237fa2b1ebd3945aea7da5c724dc56cb5e15cd0e9"
     },
     {
       "path": "target-native-dependencies.json",
