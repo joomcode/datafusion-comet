@@ -248,6 +248,15 @@ pub enum SparkError {
         matched_fields: String,
     },
 
+    /// SPARK-60262: two requested fields select the same physical Parquet column.
+    /// Carries raw names so the JVM's own factory quotes identifiers and supplies
+    /// the version's exact error parameters.
+    #[error("[PARQUET_FIELD_REQUESTED_MORE_THAN_ONCE] Requested fields {requested_fields:?} select Parquet field {parquet_field} more than once")]
+    ParquetFieldRequestedMoreThanOnce {
+        requested_fields: Vec<String>,
+        parquet_field: String,
+    },
+
     /// The read schema carries Parquet field ids but the file carries none. Mirrors the runtime
     /// error raised in Spark's `ParquetReadSupport` when
     /// `spark.sql.parquet.fieldId.read.ignoreMissing` is false. Spark's message names no file,
@@ -389,6 +398,9 @@ impl SparkError {
             SparkError::FileNotFound { .. } => "FileNotFound",
             SparkError::DuplicateFieldCaseInsensitive { .. } => "DuplicateFieldCaseInsensitive",
             SparkError::DuplicateFieldByFieldId { .. } => "DuplicateFieldByFieldId",
+            SparkError::ParquetFieldRequestedMoreThanOnce { .. } => {
+                "ParquetFieldRequestedMoreThanOnce"
+            }
             SparkError::ParquetMissingFieldIds { .. } => "ParquetMissingFieldIds",
             SparkError::ParquetSchemaConvert { .. } => "ParquetSchemaConvert",
             SparkError::CannotReadFile { .. } => "CannotReadFile",
@@ -650,6 +662,13 @@ impl SparkError {
                     "matchedFields": matched_fields,
                 })
             }
+            SparkError::ParquetFieldRequestedMoreThanOnce {
+                requested_fields,
+                parquet_field,
+            } => serde_json::json!({
+                "requestedFields": requested_fields,
+                "parquetField": parquet_field,
+            }),
             SparkError::ParquetMissingFieldIds { file_path } => {
                 serde_json::json!({
                     "filePath": file_path,
@@ -768,7 +787,10 @@ impl SparkError {
 
             // DuplicateFieldByFieldId - converted to SparkRuntimeException by the shim
             // (Spark's `foundDuplicateFieldInFieldIdLookupModeError` returns SparkRuntimeException)
-            SparkError::DuplicateFieldByFieldId { .. } => "org/apache/spark/SparkRuntimeException",
+            SparkError::DuplicateFieldByFieldId { .. }
+            | SparkError::ParquetFieldRequestedMoreThanOnce { .. } => {
+                "org/apache/spark/SparkRuntimeException"
+            }
 
             // ParquetMissingFieldIds - converted to the plain RuntimeException Spark's
             // ParquetReadSupport throws when the file lacks field ids and
@@ -883,6 +905,9 @@ impl SparkError {
 
             // Duplicate field id in id-lookup mode
             SparkError::DuplicateFieldByFieldId { .. } => Some("_LEGACY_ERROR_TEMP_2094"),
+            SparkError::ParquetFieldRequestedMoreThanOnce { .. } => {
+                Some("PARQUET_FIELD_REQUESTED_MORE_THAN_ONCE")
+            }
 
             // ParquetMissingFieldIds is a plain RuntimeException with no error class. The 4.x
             // shim supplies FAILED_READ_FILE itself, so none is exposed here.
@@ -1019,6 +1044,25 @@ impl From<SparkError> for DataFusionError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_parquet_field_error_preserves_raw_identifiers() {
+        let error = SparkError::ParquetFieldRequestedMoreThanOnce {
+            requested_fields: vec!["x`y".into(), "a".into()],
+            parquet_field: "A`B".into(),
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&error.to_json()).unwrap();
+        assert_eq!(parsed["errorType"], "ParquetFieldRequestedMoreThanOnce");
+        assert_eq!(
+            parsed["errorClass"],
+            "PARQUET_FIELD_REQUESTED_MORE_THAN_ONCE"
+        );
+        assert_eq!(
+            parsed["params"]["requestedFields"],
+            serde_json::json!(["x`y", "a"])
+        );
+        assert_eq!(parsed["params"]["parquetField"], "A`B");
+    }
 
     #[test]
     fn test_divide_by_zero_json() {

@@ -53,6 +53,18 @@ object CometNativeScan extends CometOperatorSerde[CometScanExec] with CometTypeS
   // like "file_size" could collide with a real column of the same name. Prefix to avoid it.
   private[comet] val constantMetadataFieldPrefix = "_comet_metadata_"
 
+  // Detect the actual Spark contract, including backports, instead of assuming a
+  // minor version carries it. False on the older Spark profiles we still build.
+  private[comet] lazy val rejectsRepeatedParquetFields: Boolean =
+    Class
+      .forName(
+        "org.apache.spark.sql.errors.QueryExecutionErrors$",
+        false,
+        getClass.getClassLoader)
+      .getMethods
+      .exists(m =>
+        m.getName == "parquetFieldRequestedMoreThanOnceError" && m.getParameterCount == 2)
+
   private val unsupportedDefaultReason =
     "Full native scan disabled because one or more column default values are not supported"
 
@@ -460,6 +472,7 @@ object CometNativeScan extends CometOperatorSerde[CometScanExec] with CometTypeS
     val hasFieldIds = ParquetUtils.hasFieldIds(requiredSchema)
     val useFieldId = conf.getConf(SQLConf.PARQUET_FIELD_ID_READ_ENABLED) && hasFieldIds
     commonBuilder.setUseFieldId(useFieldId)
+    commonBuilder.setRejectDuplicateFieldSelection(rejectsRepeatedParquetFields)
     // Spark's ParquetReadSupport refuses a file without field ids whenever the requested
     // schema carries one, whatever the read flag says, unless ignoreMissing is set.
     commonBuilder.setRequireFieldIds(

@@ -21,9 +21,61 @@ package org.apache.comet
 
 import org.scalatest.funsuite.AnyFunSuite
 
-import org.apache.spark.SparkThrowable
+import org.apache.spark.{SparkException, SparkThrowable}
 
 class SparkErrorConverterSuite extends AnyFunSuite {
+
+  private def expectedFileReadErrorClass: String =
+    if (CometSparkSessionExtensions.isSpark40Plus) "FAILED_READ_FILE.NO_HINT"
+    else "_LEGACY_ERROR_TEMP_2064"
+
+  test("repeated Parquet field selection uses the running Spark factory and raw identifiers") {
+    val factory = Class
+      .forName(
+        "org.apache.spark.sql.errors.QueryExecutionErrors$",
+        false,
+        getClass.getClassLoader)
+      .getMethods
+      .find(m =>
+        m.getName == "parquetFieldRequestedMoreThanOnceError" && m.getParameterCount == 2)
+    assert(
+      org.apache.comet.serde.operator.CometNativeScan.rejectsRepeatedParquetFields ==
+        factory.isDefined)
+    factory.foreach { _ =>
+      val json =
+        """{"errorType":"ParquetFieldRequestedMoreThanOnce",""" +
+          """"errorClass":"PARQUET_FIELD_REQUESTED_MORE_THAN_ONCE",""" +
+          """"params":{"requestedFields":["x`y","a"],"parquetField":"A`B"}}"""
+      val error = SparkErrorConverter.convertToSparkException(
+        new org.apache.comet.exceptions.CometQueryExecutionException(json),
+        taskFilePaths = Seq("file:/test/ambiguous-fields.parquet"))
+      assert(error.isInstanceOf[SparkException])
+      val outer = error.asInstanceOf[SparkThrowable]
+      assert(outer.getErrorClass == expectedFileReadErrorClass)
+      assert(error.getMessage.contains("ambiguous-fields.parquet"))
+      // Keep the exact Spark error class and all identifier/config parameters
+      // on the cause, as ParquetFieldIdIOSuite requires at the read boundary.
+      val spark = error.getCause.asInstanceOf[SparkThrowable]
+      assert(spark.getErrorClass == "PARQUET_FIELD_REQUESTED_MORE_THAN_ONCE")
+      assert(spark.getMessageParameters.get("requestedFields") == "`x``y`, `a`")
+      assert(spark.getMessageParameters.get("parquetField") == "`A``B`")
+      assert(
+        spark.getMessageParameters.get("fieldIdReadConf") ==
+          "\"spark.sql.parquet.fieldId.read.enabled\"")
+
+      val nativePathJson = json.replace(
+        "\"params\":{",
+        "\"params\":{\"filePath\":\"file:/test/native-fields.parquet\",")
+      val nativePathError = SparkErrorConverter.convertToSparkException(
+        new org.apache.comet.exceptions.CometQueryExecutionException(nativePathJson),
+        taskFilePaths = Seq("file:/test/fallback.parquet"))
+      assert(nativePathError.getMessage.contains("native-fields.parquet"))
+      assert(!nativePathError.getMessage.contains("fallback.parquet"))
+      assert(
+        nativePathError.getCause.asInstanceOf[SparkThrowable].getErrorClass ==
+          "PARQUET_FIELD_REQUESTED_MORE_THAN_ONCE")
+    }
+  }
 
   test("ArithmeticOverflow preserves the suggested function") {
     for (function <- Seq("try_add", "try_subtract", "try_multiply")) {
@@ -71,6 +123,8 @@ class SparkErrorConverterSuite extends AnyFunSuite {
     // `cannotReadFilesError` IS the FAILED_READ_FILE path. Assert on the version-stable message
     // ("Encountered error while reading file ...") rather than the `FAILED_READ_FILE` literal,
     // which only Spark 4.x prepends to getMessage as the error-class tag (3.4/3.5 do not).
+    assert(ex.isInstanceOf[SparkException])
+    assert(ex.asInstanceOf[SparkThrowable].getErrorClass == expectedFileReadErrorClass)
     assert(ex.getMessage.contains("Encountered error while reading file"))
     assert(ex.getMessage.contains("part-0.parquet"))
   }

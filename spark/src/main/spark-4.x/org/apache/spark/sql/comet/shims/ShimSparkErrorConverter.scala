@@ -365,6 +365,26 @@ trait ShimSparkErrorConverter {
         val filePath = params.get("filePath").map(_.toString).getOrElse("")
         Some(QueryExecutionErrors.cannotReadFilesError(dupCause, filePath))
 
+      case "ParquetFieldRequestedMoreThanOnce" =>
+        // This payload is emitted only if this actual Spark exposes the guard.
+        // Invoke its factory so backports retain their own class/quoting/params.
+        val factory = QueryExecutionErrors.getClass.getMethods
+          .find(m =>
+            m.getName == "parquetFieldRequestedMoreThanOnceError" && m.getParameterCount == 2)
+          .getOrElse(
+            throw new IllegalStateException("Missing repeated Parquet field error factory"))
+        val repeatedCause = factory
+          .invoke(
+            QueryExecutionErrors,
+            params("requestedFields").asInstanceOf[Seq[String]],
+            params("parquetField").toString)
+          .asInstanceOf[Throwable]
+        // FileScanRDD/FileDataSourceV2.attachFilePath wraps this RuntimeException
+        // at the read boundary. Comet bypasses that boundary, so reproduce its
+        // FAILED_READ_FILE envelope without changing the structured cause.
+        val filePath = params.get("filePath").map(_.toString).getOrElse("")
+        Some(QueryExecutionErrors.cannotReadFilesError(repeatedCause, filePath))
+
       case "ParquetMissingFieldIds" =>
         // Mirror Spark's `ParquetReadSupport.inferSchema`. Same wrapping rationale as
         // `DuplicateFieldByFieldId`: wrap the RuntimeException in FAILED_READ_FILE.NO_HINT

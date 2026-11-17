@@ -185,6 +185,9 @@ message NativeScanCommon {
   // True when Spark supplied a Parquet data filter, including when Comet could
   // not serialize any of those filters into data_filters.
   bool has_data_filters = 19;
+  // SPARK-60262: reject multiple requested fields selecting the same physical
+  // Parquet column. Enabled only when the running Spark has this read contract.
+  bool reject_duplicate_field_selection = 20;
 }
 
 message NativeScan {

@@ -72,6 +72,8 @@ class CometNativeScanSuite extends AnyFunSuite {
         .get
         .build()
 
+      assert(
+        common.getRejectDuplicateFieldSelection == CometNativeScan.rejectsRepeatedParquetFields)
       val serializedRoot = common.getDataSchema(1)
       val fieldIdKey = CometParquetUtils.PARQUET_FIELD_ID_META_KEY
       assert(serializedRoot.getMetadataMap.containsKey(fieldIdKey) == hasRequiredId)

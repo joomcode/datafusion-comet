@@ -86,11 +86,12 @@ object SparkErrorConverter extends ShimSparkErrorConverter {
     val json = parse(e.getMessage)
     val errorJson = json.extract[ErrorJson]
     val rawParams = errorJson.params.getOrElse(Map.empty)
-    // CannotReadFile carries the offending file path natively only for the object_store NotFound
-    // case; for corrupt/truncated parquet the native error has no path, so fall back to the
-    // per-task file list threaded in from CometExecIterator.
+    // CannotReadFile and the footer's repeated-field error may have no native file path.
+    // Fall back to the per-task file list threaded in from CometExecIterator so their
+    // FAILED_READ_FILE envelope still identifies the files being read.
     val params =
-      if (errorJson.errorType == "CannotReadFile"
+      if ((errorJson.errorType == "CannotReadFile" ||
+          errorJson.errorType == "ParquetFieldRequestedMoreThanOnce")
         && rawParams.get("filePath").forall(p => p == null || p.toString.isEmpty)
         && taskFilePaths.nonEmpty) {
         rawParams + ("filePath" -> taskFilePaths.mkString(","))

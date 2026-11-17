@@ -2570,6 +2570,47 @@ abstract class ParquetReadSuite extends CometTestBase {
     }
   }
 
+  test("native field selection validates the requested projection and the Spark error contract") {
+    withSQLConf(SQLConf.PARQUET_FIELD_ID_READ_ENABLED.key -> "true") {
+      withTempPath { dir =>
+        val writeSchema = new StructType().add("A", IntegerType, true, withId(1))
+        spark
+          .createDataFrame(
+            spark.sparkContext.parallelize(Seq(Row(1), Row(2), Row(3))),
+            writeSchema)
+          .write
+          .parquet(dir.getCanonicalPath)
+        val readSchema = new StructType()
+          .add("x", IntegerType, true, withId(1))
+          .add("a", IntegerType, true)
+        val projected = spark.read.schema(readSchema).parquet(dir.getCanonicalPath).select("x")
+        checkSparkAnswerAndOperator(projected)
+        checkAnswer(projected, Seq(Row(1), Row(2), Row(3)))
+
+        if (org.apache.comet.serde.operator.CometNativeScan.rejectsRepeatedParquetFields) {
+          val full = spark.read.schema(readSchema).parquet(dir.getCanonicalPath)
+          assert(
+            stripAQEPlan(full.queryExecution.executedPlan).collect {
+              case scan: CometNativeScanExec => scan
+            }.nonEmpty,
+            "expected native scan for the collision regression")
+          val (sparkError, cometError) = checkSparkAnswerMaybeThrows(full)
+          Seq(sparkError, cometError).foreach { error =>
+            val causes = Iterator
+              .iterate(error.getOrElse(fail("ambiguous read succeeded")))(_.getCause)
+              .takeWhile(_ != null)
+              .toSeq
+            assert(causes.exists {
+              case e: org.apache.spark.SparkThrowable =>
+                e.getErrorClass == "PARQUET_FIELD_REQUESTED_MORE_THAN_ONCE"
+              case _ => false
+            })
+          }
+        }
+      }
+    }
+  }
+
   test("duplicate field id inside a struct is rejected when a requested id matches two fields") {
     // The requested struct names one id that two file fields carry. A requested schema that
     // repeats an id itself is declined at planning time, so this is the shape the native scan

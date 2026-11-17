@@ -29,8 +29,9 @@
 //! [`FieldResolver`], so a change to the precedence rules reaches the root and nested fields
 //! together.
 
+use crate::parquet::name_fold::fold_names;
 use crate::parquet::parquet_support::{duplicate_parquet_field_error, field_id};
-use arrow::datatypes::FieldRef;
+use arrow::datatypes::{DataType, FieldRef};
 use datafusion::common::{DataFusionError, Result as DataFusionResult};
 use datafusion_comet_common::SparkError;
 use std::collections::HashMap;
@@ -206,6 +207,121 @@ impl<'a> FieldResolver<'a> {
     }
 }
 
+/// Validate the fields a scan actually requests, before any pages are decoded.
+/// Spark's SPARK-60262 clipping guard rejects one physical field selected twice,
+/// including an id match beside a name match. Validate the projected schema,
+/// not the table's full schema: an unreferenced alias does not read the column.
+pub(crate) fn validate_field_selection(
+    file: &[FieldRef],
+    requested: &[FieldRef],
+    case_sensitive: bool,
+    use_field_id: bool,
+) -> DataFusionResult<()> {
+    let names: Vec<&str> = file
+        .iter()
+        .chain(requested)
+        .map(|field| field.name().as_str())
+        .collect();
+    let folded = fold_names(&names, case_sensitive)?;
+    let (file_folded, requested_folded) = folded.split_at(file.len());
+    let resolver = FieldResolver::new(
+        requested,
+        requested_folded,
+        file,
+        file_folded,
+        case_sensitive,
+        use_field_id,
+    );
+    // Spark clips each field recursively in request order, then checks this
+    // group's repetitions. Preserve that order: a nested failure must not be
+    // hidden by a root repetition or a later sibling's failed lookup.
+    let mut selected = Vec::with_capacity(requested.len());
+    for (index, field) in requested.iter().enumerate() {
+        let physical = resolver.resolve(index)?;
+        if let Some(physical) = physical {
+            validate_nested_selection(
+                file[physical].data_type(),
+                field.data_type(),
+                case_sensitive,
+                use_field_id,
+            )?;
+        }
+        selected.push(physical);
+    }
+    let mut seen = std::collections::HashSet::new();
+    for &physical in selected.iter().flatten() {
+        // Spark checks the exact clipped Parquet name, not the ordinal or
+        // folded name. Distinct-id fields named A/A repeat, while A/a do not.
+        let physical_name = file[physical].name();
+        if !seen.insert(physical_name.as_str()) {
+            return Err(SparkError::ParquetFieldRequestedMoreThanOnce {
+                requested_fields: requested
+                    .iter()
+                    .zip(&selected)
+                    .filter(|(_, selection)| {
+                        selection.is_some_and(|index| file[index].name() == physical_name)
+                    })
+                    .map(|(field, _)| field.name().clone())
+                    .collect(),
+                parquet_field: file[physical].name().clone(),
+            }
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_nested_selection(
+    file: &DataType,
+    requested: &DataType,
+    case_sensitive: bool,
+    use_field_id: bool,
+) -> DataFusionResult<()> {
+    match (file, requested) {
+        (DataType::Dictionary(_, value), _) => {
+            validate_nested_selection(value, requested, case_sensitive, use_field_id)
+        }
+        (DataType::Struct(file), DataType::Struct(requested)) => {
+            validate_field_selection(file, requested, case_sensitive, use_field_id)
+        }
+        (
+            DataType::List(file)
+            | DataType::LargeList(file)
+            | DataType::FixedSizeList(file, _)
+            | DataType::ListView(file)
+            | DataType::LargeListView(file),
+            DataType::List(requested)
+            | DataType::LargeList(requested)
+            | DataType::FixedSizeList(requested, _)
+            | DataType::ListView(requested)
+            | DataType::LargeListView(requested),
+        ) => validate_nested_selection(
+            file.data_type(),
+            requested.data_type(),
+            case_sensitive,
+            use_field_id,
+        ),
+        (DataType::Map(file, _), DataType::Map(requested, _)) => {
+            // Map key/value wrappers pair positionally, as Spark clips them;
+            // only structs inside a key or value resolve fields by name/id.
+            if let (DataType::Struct(file), DataType::Struct(requested)) =
+                (file.data_type(), requested.data_type())
+            {
+                for (file, requested) in file.iter().zip(requested) {
+                    validate_nested_selection(
+                        file.data_type(),
+                        requested.data_type(),
+                        case_sensitive,
+                        use_field_id,
+                    )?;
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()), // Existing conversion validation handles differing shapes.
+    }
+}
+
 /// The error for requested field `name` when the file fields at `matches` all share its folded
 /// name: Spark's `foundDuplicateFieldInCaseInsensitiveModeError` when the read is
 /// case-insensitive, and Comet's duplicate field name error for a repeated exact name, where Spark
@@ -260,9 +376,11 @@ impl Indices {
 
 #[cfg(test)]
 mod test {
-    use super::{FieldResolver, Selection};
+    use super::{validate_field_selection, FieldResolver, Selection};
     use crate::parquet::name_fold::fold_names;
     use arrow::datatypes::{DataType, Field, FieldRef};
+    use datafusion::common::DataFusionError;
+    use datafusion_comet_common::SparkError;
     use parquet::arrow::PARQUET_FIELD_ID_META_KEY;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -348,5 +466,181 @@ mod test {
         with_resolver(&requested, &file, false, false, |resolver| {
             assert_eq!(resolver.select(0).unwrap(), Selection::ByName(&[1]));
         });
+    }
+
+    fn repeated_selection(error: DataFusionError) -> (Vec<String>, String) {
+        let DataFusionError::External(source) = error else {
+            panic!("expected structured repeated-field error, got {error}");
+        };
+        let Some(SparkError::ParquetFieldRequestedMoreThanOnce {
+            requested_fields,
+            parquet_field,
+        }) = source.downcast_ref::<SparkError>()
+        else {
+            panic!("unexpected error: {source}");
+        };
+        (requested_fields.clone(), parquet_field.clone())
+    }
+
+    #[test]
+    fn repeated_field_id_and_name_selection_is_rejected_in_both_orders_and_case_modes() {
+        let file = [field("A", Some(1))];
+        for (case_sensitive, by_name) in [(true, "A"), (false, "a")] {
+            for reverse in [false, true] {
+                let mut requested = vec![field("x", Some(1)), field(by_name, None)];
+                if reverse {
+                    requested.reverse();
+                }
+                let error =
+                    validate_field_selection(&file, &requested, case_sensitive, true).unwrap_err();
+                assert_eq!(
+                    repeated_selection(error),
+                    (
+                        requested.iter().map(|field| field.name().clone()).collect(),
+                        "A".into()
+                    )
+                );
+                // An unreferenced alias must not reject a projected read.
+                for projected in requested.chunks(1) {
+                    validate_field_selection(&file, projected, case_sensitive, true).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn repeated_field_id_selection_is_rejected_but_missing_and_distinct_fields_are_valid() {
+        let file = [field("A", Some(1)), field("B", Some(2))];
+        let repeated = [field("x", Some(1)), field("y", Some(1))];
+        assert_eq!(
+            repeated_selection(
+                validate_field_selection(&file, &repeated, false, true).unwrap_err()
+            ),
+            (vec!["x".into(), "y".into()], "A".into())
+        );
+        let distinct = [
+            field("x", Some(1)),
+            field("b", None),
+            field("missing", Some(9)),
+        ];
+        validate_field_selection(&file, &distinct, false, true).unwrap();
+        // With id reads off, x is missing and a reads the file by name once.
+        let name_only = [field("x", Some(1)), field("a", None)];
+        validate_field_selection(&file, &name_only, false, false).unwrap();
+    }
+
+    #[test]
+    fn repeated_case_folded_name_selection_matches_the_running_spark_contract() {
+        let file = [field("A", None)];
+        let requested = [field("a", None), field("A", None)];
+        assert_eq!(
+            repeated_selection(
+                validate_field_selection(&file, &requested, false, false).unwrap_err()
+            ),
+            (vec!["a".into(), "A".into()], "A".into())
+        );
+        validate_field_selection(&file, &requested, true, false).unwrap();
+    }
+
+    #[test]
+    fn repeated_selection_is_checked_below_struct_list_and_map_without_rejecting_pruning() {
+        let physical = DataType::Struct(vec![field("A", Some(1))].into());
+        let repeated = DataType::Struct(vec![field("x", Some(1)), field("a", None)].into());
+        let pruned = DataType::Struct(vec![field("x", Some(1))].into());
+        let wrappers: Vec<Box<dyn Fn(DataType) -> DataType>> = vec![
+            Box::new(|value| value),
+            Box::new(|value| DataType::List(Arc::new(Field::new("element", value, true)))),
+            Box::new(|value| DataType::LargeList(Arc::new(Field::new("element", value, true)))),
+            Box::new(|value| {
+                DataType::Map(
+                    Arc::new(Field::new(
+                        "entries",
+                        DataType::Struct(
+                            vec![
+                                Arc::new(Field::new("key", DataType::Utf8, false)),
+                                Arc::new(Field::new("value", value, true)),
+                            ]
+                            .into(),
+                        ),
+                        false,
+                    )),
+                    false,
+                )
+            }),
+        ];
+        for wrap in wrappers {
+            let file = [Arc::new(Field::new("s", wrap(physical.clone()), true))];
+            let requested = [Arc::new(Field::new("s", wrap(repeated.clone()), true))];
+            assert_eq!(
+                repeated_selection(
+                    validate_field_selection(&file, &requested, false, true).unwrap_err()
+                ),
+                (vec!["x".into(), "a".into()], "A".into())
+            );
+            let requested = [Arc::new(Field::new("s", wrap(pruned.clone()), true))];
+            validate_field_selection(&file, &requested, false, true).unwrap();
+        }
+    }
+
+    #[test]
+    fn nested_selection_errors_precede_group_repetitions_and_later_lookup_errors() {
+        let physical_struct = Arc::new(
+            Field::new(
+                "s",
+                DataType::Struct(vec![field("A", Some(1))].into()),
+                true,
+            )
+            .with_metadata(field("s", Some(10)).metadata().clone()),
+        );
+        let requested_struct = Arc::new(
+            Field::new(
+                "s",
+                DataType::Struct(vec![field("nested_x", Some(1)), field("a", None)].into()),
+                true,
+            )
+            .with_metadata(field("s", Some(10)).metadata().clone()),
+        );
+        // The current group repeats B before visiting the struct. Spark still
+        // reports the struct's A collision, since clipping recurses before the
+        // current group's repeated-column check.
+        let file = [field("B", Some(20)), Arc::clone(&physical_struct)];
+        let requested = [
+            field("root_x", Some(20)),
+            field("b", None),
+            Arc::clone(&requested_struct),
+        ];
+        assert_eq!(
+            repeated_selection(
+                validate_field_selection(&file, &requested, false, true).unwrap_err()
+            ),
+            (vec!["nested_x".into(), "a".into()], "A".into())
+        );
+        // A later sibling has an ambiguous field-id lookup, which must not
+        // hide the earlier struct's collision either.
+        let file = [physical_struct, field("B", Some(20)), field("C", Some(20))];
+        let requested = [requested_struct, field("root_x", Some(20))];
+        assert_eq!(
+            repeated_selection(
+                validate_field_selection(&file, &requested, false, true).unwrap_err()
+            ),
+            (vec!["nested_x".into(), "a".into()], "A".into())
+        );
+    }
+
+    #[test]
+    fn repeated_selection_uses_exact_physical_names_not_ordinals_or_folded_names() {
+        let requested = [field("x", Some(1)), field("y", Some(2))];
+        let repeated_names = [field("A", Some(1)), field("A", Some(2))];
+        assert_eq!(
+            repeated_selection(
+                validate_field_selection(&repeated_names, &requested, false, true).unwrap_err()
+            ),
+            (vec!["x".into(), "y".into()], "A".into())
+        );
+        // ID matches are unambiguous despite the case-insensitive name index.
+        // Spark's clipped-name repetition check is case-sensitive.
+        let distinct_names = [field("A", Some(1)), field("a", Some(2))];
+        validate_field_selection(&distinct_names, &requested, false, true).unwrap();
+        validate_field_selection(&distinct_names, &requested, true, true).unwrap();
     }
 }

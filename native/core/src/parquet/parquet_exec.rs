@@ -105,6 +105,7 @@ pub(crate) fn init_datasource_exec(
     rebase_from_file_metadata: bool,
     datetime_rebase_mode_in_read: &str,
     int96_rebase_mode_in_read: &str,
+    reject_duplicate_field_selection: bool,
 ) -> Result<Arc<DataSourceExec>, ExecutionError> {
     // Computed once and reused below for `try_pushdown_filters`. `copied_config()` clones only
     // `SessionConfig` (an `Arc<ConfigOptions>` plus a small extensions map); `SessionContext::
@@ -264,6 +265,7 @@ pub(crate) fn init_datasource_exec(
             scan_io_source,
             parquet_source.metrics(),
         )
+        .with_reject_duplicate_field_selection(reject_duplicate_field_selection)
         .with_spark_variant_schema(projects_variant)
         .with_require_field_ids(require_field_ids)
         .with_int96_leaf_stamp(rebase_from_file_metadata)
@@ -572,6 +574,7 @@ mod tests {
             false,
             "",
             "",
+            false,
         )
         .unwrap()
     }
@@ -709,6 +712,7 @@ mod tests {
             rebase_from_file_metadata,
             "",
             "",
+            false,
         )
         .unwrap();
 
@@ -785,6 +789,7 @@ mod tests {
             true,
             datetime_rebase_mode,
             datetime_rebase_mode,
+            false,
         )
         .unwrap();
 
@@ -894,6 +899,7 @@ mod tests {
                 true,
                 "CORRECTED",
                 "CORRECTED",
+                false,
             )
             .unwrap();
 
@@ -990,6 +996,7 @@ mod tests {
             true,
             datetime_rebase_mode,
             int96_rebase_mode,
+            false,
         )
         .unwrap();
 
@@ -1137,6 +1144,7 @@ mod tests {
             true,
             datetime_rebase_mode,
             int96_rebase_mode,
+            false,
         )
         .unwrap();
 
@@ -1406,6 +1414,7 @@ mod tests {
             false,
             "",
             "",
+            false,
         )
         .unwrap();
 

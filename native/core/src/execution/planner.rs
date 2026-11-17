@@ -485,6 +485,7 @@ impl PhysicalPlanner {
             rebase_from_file_metadata,
             datetime_rebase_mode_in_read,
             int96_rebase_mode_in_read,
+            common.reject_duplicate_field_selection,
         )?;
         Ok(Arc::new(SparkPlan::new(plan_id, scan, vec![])))
     }

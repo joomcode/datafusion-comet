@@ -337,6 +337,25 @@ trait ShimSparkErrorConverter {
             params("requiredId").toString.toInt,
             params("matchedFields").toString))
 
+      case "ParquetFieldRequestedMoreThanOnce" =>
+        // This payload is emitted only if this actual Spark exposes the guard.
+        // Invoke its factory so backports retain their own class/quoting/params.
+        val factory = QueryExecutionErrors.getClass.getMethods
+          .find(m =>
+            m.getName == "parquetFieldRequestedMoreThanOnceError" && m.getParameterCount == 2)
+          .getOrElse(
+            throw new IllegalStateException("Missing repeated Parquet field error factory"))
+        val repeatedCause = factory
+          .invoke(
+            QueryExecutionErrors,
+            params("requestedFields").asInstanceOf[Seq[String]],
+            params("parquetField").toString)
+          .asInstanceOf[Throwable]
+        // A backported field-selection guard still crosses FileScanRDD's read
+        // boundary, which wraps NonFatal errors through this version's factory.
+        val filePath = params.get("filePath").map(_.toString).getOrElse("")
+        Some(QueryExecutionErrors.cannotReadFilesError(repeatedCause, filePath))
+
       case "ParquetMissingFieldIds" =>
         // Mirror Spark's `ParquetReadSupport.inferSchema`, which throws a plain
         // `RuntimeException` (not a SparkException) when the read schema requests field

@@ -93,6 +93,7 @@
 //! bring it back.
 
 use crate::parquet::datetime_rebase::stamp_int96_leaves;
+use crate::parquet::field_resolver::validate_field_selection;
 use crate::parquet::parquet_support::SparkParquetOptions;
 use crate::parquet::schema_adapter::{
     check_file_conversions, RejectOnNonEmpty, REPEATED_PRIMITIVE_KEY,
@@ -233,6 +234,7 @@ pub struct EagerPageIndexReaderFactory {
     require_field_ids: bool,
     stamp_int96_leaves: bool,
     conversion_check: Option<(SchemaRef, SparkParquetOptions, bool)>,
+    reject_duplicate_field_selection: bool,
     deferred_rejections: Arc<Mutex<HashMap<Path, (ObjectMeta, RejectOnNonEmpty)>>>,
     next_file_prefetch: Option<Arc<NextFileMetadataPrefetch>>,
 }
@@ -266,6 +268,7 @@ impl EagerPageIndexReaderFactory {
             require_field_ids: false,
             stamp_int96_leaves: false,
             conversion_check: None,
+            reject_duplicate_field_selection: false,
             deferred_rejections: Arc::new(Mutex::new(HashMap::new())),
             next_file_prefetch: None,
         }
@@ -280,6 +283,13 @@ impl EagerPageIndexReaderFactory {
         row_filters: bool,
     ) -> Self {
         self.conversion_check = Some((required, options, row_filters));
+        self
+    }
+
+    /// Apply the actual Spark version's repeated-field contract to the required
+    /// projection. Older producers/versions keep the previous behavior.
+    pub(crate) fn with_reject_duplicate_field_selection(mut self, enabled: bool) -> Self {
+        self.reject_duplicate_field_selection = enabled;
         self
     }
 
@@ -371,6 +381,7 @@ impl ParquetFileReaderFactory for EagerPageIndexReaderFactory {
             require_field_ids: self.require_field_ids,
             stamp_int96_leaves: self.stamp_int96_leaves,
             conversion_check: self.conversion_check.clone(),
+            reject_duplicate_field_selection: self.reject_duplicate_field_selection,
             deferred_rejections: Arc::clone(&self.deferred_rejections),
             deferred_rejection,
             next_file_prefetch: self.next_file_prefetch.clone(),
@@ -392,6 +403,7 @@ struct EagerPageIndexReader {
     require_field_ids: bool,
     stamp_int96_leaves: bool,
     conversion_check: Option<(SchemaRef, SparkParquetOptions, bool)>,
+    reject_duplicate_field_selection: bool,
     deferred_rejections: Arc<Mutex<HashMap<Path, (ObjectMeta, RejectOnNonEmpty)>>>,
     deferred_rejection: Option<RejectOnNonEmpty>,
     next_file_prefetch: Option<Arc<NextFileMetadataPrefetch>>,
@@ -750,6 +762,20 @@ impl AsyncFileReader for EagerPageIndexReader {
                 self.conversion_check.as_ref()
             {
                 let file = metadata.file_metadata();
+                if self.reject_duplicate_field_selection {
+                    let schema =
+                        parquet_to_arrow_schema(file.schema_descr(), file.key_value_metadata())?;
+                    validate_field_selection(
+                        schema.fields(),
+                        required.fields(),
+                        conversion_options.case_sensitive,
+                        conversion_options.use_field_id,
+                    )
+                    .map_err(|error| match error {
+                        DataFusionError::External(source) => ParquetError::External(source),
+                        other => ParquetError::External(Box::new(other)),
+                    })?;
+                }
                 let needs_check = *row_filters
                     || file.schema_descr().columns().iter().any(|column| {
                         column.self_type().get_basic_info().repetition()
@@ -1647,6 +1673,57 @@ mod tests {
         }
         assert!(metadata_for(true, with_ids).await.is_ok());
         assert!(metadata_for(false, without_ids).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn required_field_selection_is_checked_before_data_only_for_the_new_contract() {
+        let store = Arc::new(InMemory::new());
+        let file = put_int_file(&store, "alias.parquet", Some("1")).await;
+        let runtime = datafusion::execution::runtime_env::RuntimeEnv::default();
+        let metrics = ExecutionPlanMetricsSet::new();
+        let by_id = arrow::datatypes::Field::new("x", DataType::Int32, true)
+            .with_metadata([(PARQUET_FIELD_ID_META_KEY.to_string(), "1".to_string())].into());
+        let by_name = arrow::datatypes::Field::new("a", DataType::Int32, true);
+        for enabled in [false, true] {
+            for pruned in [false, true] {
+                let required = Arc::new(Schema::new(if pruned {
+                    vec![by_id.clone()]
+                } else {
+                    vec![by_id.clone(), by_name.clone()]
+                }));
+                let mut options =
+                    SparkParquetOptions::new(datafusion_comet_spark_expr::EvalMode::Legacy, "UTC");
+                options.use_field_id = true;
+                let factory = EagerPageIndexReaderFactory::new(
+                    Arc::clone(&store) as Arc<dyn ObjectStore>,
+                    runtime.cache_manager.get_file_metadata_cache(),
+                    ScanIoSource::Local,
+                    &metrics,
+                )
+                .with_conversion_check(required, options, false)
+                .with_reject_duplicate_field_selection(enabled);
+                let mut reader = factory
+                    .create_reader(0, file.clone(), None, &metrics)
+                    .unwrap();
+                let result = reader.get_metadata(None).await;
+                if enabled && !pruned {
+                    let ParquetError::External(source) = result.unwrap_err() else {
+                        panic!("expected the structured repeated-field error");
+                    };
+                    assert!(matches!(
+                        source.downcast_ref::<SparkError>(),
+                        Some(SparkError::ParquetFieldRequestedMoreThanOnce {
+                            requested_fields, parquet_field,
+                        }) if requested_fields == &["x", "a"] && parquet_field == "a"
+                    ));
+                } else {
+                    assert!(
+                        result.is_ok(),
+                        "legacy or projected single-field read was rejected: {result:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[tokio::test]
