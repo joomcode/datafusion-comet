@@ -29,6 +29,7 @@ import org.apache.parquet.hadoop.api.WriteSupport
 import org.apache.parquet.hadoop.api.WriteSupport.WriteContext
 import org.apache.parquet.io.api.RecordConsumer
 import org.apache.parquet.schema.MessageTypeParser
+import org.apache.spark.SparkException
 import org.apache.spark.sql.{CometTestBase, DataFrame, Row}
 import org.apache.spark.sql.comet.CometNativeScanExec
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
@@ -37,7 +38,8 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 
 import org.apache.comet.{CometConf, CometNativeException, ExtendedExplainInfo}
-import org.apache.comet.CometSparkSessionExtensions.isSpark41Plus
+import org.apache.comet.CometSparkSessionExtensions.{isSpark40Plus, isSpark41Plus}
+import org.apache.comet.serde.operator.CometNativeScan
 
 class CometNativeReaderSuite extends CometTestBase with AdaptiveSparkPlanHelper {
 
@@ -117,10 +119,36 @@ class CometNativeReaderSuite extends CometTestBase with AdaptiveSparkPlanHelper 
             val messages = causeMessages(error)
             assert(messages.contains("duplicate Parquet field name 'dup'"), messages)
             assert(!messages.toLowerCase.contains("case-insensitive"), messages)
-            // The refusal is Comet's own execution error, the class the root duplicate check
-            // raises too, and never Spark's INTERNAL_ERROR, which is reserved for engine bugs.
             val chain = causeChain(error)
-            assert(chain.exists(_.isInstanceOf[CometNativeException]), messages)
+            if (CometNativeScan.rejectsRepeatedParquetFields) {
+              // The Spark-compatible projection guard validates the footer before reading rows.
+              // The same native duplicate-name error is now a typed per-file read failure, so
+              // require its structured envelope, real file path and original native diagnostic.
+              val errorClass =
+                if (isSpark40Plus) "FAILED_READ_FILE.NO_HINT" else "_LEGACY_ERROR_TEMP_2064"
+              val readError = chain
+                .collectFirst {
+                  case e: SparkException if e.getErrorClass == errorClass => e
+                }
+                .getOrElse(fail(s"Missing $errorClass in $messages"))
+              val inputFiles = df.inputFiles
+              assert(inputFiles.length == 1)
+              val errorPath = Option(readError.getMessageParameters.get("path"))
+                .getOrElse(fail(s"Missing file path in $messages"))
+              assert(
+                new Path(errorPath).toUri.normalize() ==
+                  new Path(inputFiles.head).toUri.normalize(),
+                messages)
+              assert(readError.getCause.isInstanceOf[SparkException], messages)
+              assert(
+                readError.getCause.getMessage ==
+                  "Parquet error: External: Execution error: Found duplicate Parquet field name 'dup'",
+                messages)
+            } else {
+              // Older Spark profiles do not enable footer prevalidation. Their unchanged schema
+              // adapter rejects the file as Comet's own execution error.
+              assert(chain.exists(_.isInstanceOf[CometNativeException]), messages)
+            }
             assert(!messages.contains("INTERNAL_ERROR"), messages)
           }
         }
