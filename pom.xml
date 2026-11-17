@@ -852,12 +852,12 @@ under the License.
     </profile>
 
     <profile>
-      <!-- Experimental Spark 4.2 support, targeting the 4.2.0 release. -->
+      <!-- Spark 4.2 maintenance profile; keep the exact patch version aligned with CI. -->
       <id>spark-4.2</id>
       <properties>
         <scala.version>2.13.18</scala.version>
         <scala.binary.version>2.13</scala.binary.version>
-        <spark.version>4.2.0</spark.version>
+        <spark.version>4.2.1</spark.version>
         <spark.version.short>4.2</spark.version.short>
         <hadoop-azure.version>3.5.0</hadoop-azure.version>
         <parquet.version>1.17.0</parquet.version>
@@ -866,10 +866,10 @@ under the License.
         <shims.majorVerSrc>spark-4.x</shims.majorVerSrc>
         <shims.minorPlusVerSrc>spark-4.1+</shims.minorPlusVerSrc>
         <shims.minorVerSrc>spark-4.2</shims.minorVerSrc>
-        <!-- No Delta release targets Spark 4.2 yet (Delta 4.3.x still builds against
-             Spark 4.1). The contrib compiles against 4.3.1 here but is unsupported on
-             this profile until Delta ships Spark 4.2 support. -->
-        <delta.spark.version>4.3.1</delta.spark.version>
+        <!-- Delta publishes its Spark-minor-specific artifact separately. Using the
+             4.1 build here can compile but fails against Spark's internal APIs. -->
+        <delta.artifact>delta-spark_4.2</delta.artifact>
+        <delta.spark.version>4.4.1</delta.spark.version>
         <!-- Use jdk17 by default -->
         <java.version>17</java.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>

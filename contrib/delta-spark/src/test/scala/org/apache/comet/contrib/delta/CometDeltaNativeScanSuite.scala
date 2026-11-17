@@ -24,10 +24,10 @@ import java.io.File
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
-import org.apache.spark.CometListenerBusUtils
+import org.apache.spark.{CometListenerBusUtils, SparkEnv}
 import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
 import org.apache.spark.sql.{DataFrame, Row}
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, DynamicPruningExpression, DynamicPruningSubquery, Expression, NamedExpression, StructsToJson}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, DynamicPruningExpression, DynamicPruningSubquery, Expression, GreaterThan, NamedExpression, StructsToJson}
 import org.apache.spark.sql.comet.{CometDeltaNativeScanExec, CometSubqueryBroadcastExec}
 import org.apache.spark.sql.execution.{FileSourceScanExec, InSubqueryExec, QueryExecution, ReusedSubqueryExec, ScalarSubquery, SparkPlan, SubqueryBroadcastExec, SubqueryExec}
 import org.apache.spark.sql.execution.datasources.v2.V2TableWriteExec
@@ -819,7 +819,8 @@ class CometDeltaNativeScanSuite extends CometDeltaTestBase {
         assert(scans.size == 1)
         val numFiles = scans.head.metrics.get("numFiles").map(_.value).getOrElse(0L)
         assert(numFiles == 1, s"expected a single data file, got $numFiles")
-        val numPartitions = scans.head.outputPartitioning.numPartitions
+        val numPartitions =
+          scans.head.asInstanceOf[CometDeltaNativeScanExec].perPartitionData.length
         assert(
           numPartitions > 1,
           "expected the single file to be split into more than one native partition, " +
@@ -2129,9 +2130,8 @@ class CometDeltaNativeScanSuite extends CometDeltaTestBase {
       "parent") {
     // Crash shape: a scalar subquery used as a partition filter (`p = (SELECT max(p) ...)`)
     // lands in runtimeFilters. Once execution resolves it, a native aggregate sitting
-    // directly on top of the scan (no intervening exchange) reads the scan's
-    // outputPartitioning to size its own execution context; that getter must report the
-    // real post-pruning partition count, not a value stuck from before resolution.
+    // directly on top of the scan (no intervening exchange) must size its execution context
+    // from the real post-pruning perPartitionData, independently of planning partitioning.
     withTempPath { factDir =>
       withTempPath { thresholdsDir =>
         val factPath = factDir.getAbsolutePath
@@ -2185,6 +2185,60 @@ class CometDeltaNativeScanSuite extends CometDeltaTestBase {
     }
   }
 
+  test("planning partitioning does not execute a scalar subquery harvested into data filters") {
+    withTempPath { dir =>
+      val path = dir.getAbsolutePath
+      spark.range(0, 50).write.format("delta").save(path)
+      val scan = deltaNativeScans(spark.read.format("delta").load(path)).collect {
+        case s: CometDeltaNativeScanExec => s
+      }.head
+      val innerPlan = spark.range(1).selectExpr("id AS c").queryExecution.executedPlan
+      val scalar = ScalarSubquery(
+        SubqueryExec("planning-data-filter-subquery", innerPlan),
+        NamedExpression.newExprId)
+      // No runtime partition filter: the old runtimeFilters-only guard missed this shape
+      // and started the data-filter subquery while AQE was only inspecting plan metadata.
+      val filtered = scan.copy(
+        runtimeFilters = Seq.empty,
+        dataFilters = Seq(GreaterThan(scan.output.head, scalar)))
+      intercept[IllegalArgumentException](scalar.eval())
+      assert(filtered.outputPartitioning.numPartitions == 0)
+      assert(filtered.metrics.nonEmpty)
+      intercept[IllegalArgumentException](scalar.eval())
+    }
+  }
+
+  test(
+    "Delta scan copies keep the native plan and Java serialization drops driver-only payloads") {
+    withTempPath { dir =>
+      val path = dir.getAbsolutePath
+      spark.range(0, 50).write.format("delta").save(path)
+      val df = spark.read.format("delta").load(path)
+      checkDeltaNativeScanAnswer(df)
+      val scan = deltaNativeScans(df).collect { case s: CometDeltaNativeScanExec => s }.head
+      assert(scan.nativeOp != null)
+      assert(scan.serializedPlanOpt != null)
+      val copies =
+        Seq(scan.clone(), scan.makeCopy(scan.productIterator.map(_.asInstanceOf[AnyRef]).toArray))
+      copies.foreach { plan =>
+        val copied = plan.asInstanceOf[CometDeltaNativeScanExec]
+        assert(copied.nativeOp == scan.nativeOp)
+        assert(
+          copied.serializedPlanOpt.plan.map(_.toSeq) ==
+            scan.serializedPlanOpt.plan.map(_.toSeq))
+        assert(copied.sameResult(scan))
+      }
+      // Spark serializes task closures with Java serialization even when its row/shuffle
+      // serializer is Kryo. Driver-only protobufs must not inflate those task binaries.
+      val serializer = SparkEnv.get.closureSerializer.newInstance()
+      val restored =
+        serializer.deserialize[CometDeltaNativeScanExec](serializer.serialize(scan))
+      assert(restored.output == scan.output)
+      assert(restored.nativeOp == null)
+      assert(restored.serializedPlanOpt == null)
+    }
+  }
+
   test(
     "metrics evaluates without throwing when runtimeFilters holds a ScalarSubquery " +
       "placeholder (pins the invariant documented on CometDeltaNativeScanExec.scanHelper: " +
@@ -2199,7 +2253,7 @@ class CometDeltaNativeScanSuite extends CometDeltaTestBase {
       }.head
 
       // A real execution.ScalarSubquery instance (the exec-time class CometDeltaNativeScanExec
-      // itself matches against in hasUnevaluableSubqueryFilter), wrapping a never-executed
+      // carries in its filters), wrapping a never-executed
       // SubqueryExec -- deliberately never run, so this is unresolved exactly as it would be
       // when AQE's mid-planning walk reaches this node ahead of subquery execution.
       val innerPlan = spark.range(1).selectExpr("id AS c").queryExecution.executedPlan

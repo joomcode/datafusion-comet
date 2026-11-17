@@ -51,7 +51,7 @@ jobs:
             native_python_udf: true
           - name: Spark 4.2
             maven_profiles: "-Pspark-4.2"
-            pyspark: "4.2.0"
+            pyspark: "4.2.1"
             native_python_udf: true
     container:
       # Pinned to the Debian 12 (bookworm) base so the system `python3` is 3.11. The default

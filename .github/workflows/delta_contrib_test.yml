@@ -113,11 +113,11 @@ jobs:
       - name: Install Comet core jars
         run: |
           # The delta profile is what produces the spark test-jar the contrib suites depend on.
-          ./mvnw -B -q -Prelease -Pspark-${{ inputs.spark }},delta install -pl common,spark -DskipTests -Dspotless.check.skip=true
+          ./mvnw -B -q -Prelease -Pspark-${{ inputs.spark }},delta install -DskipTests -Dspotless.check.skip=true
 
       - name: Run Delta contrib test suites
         run: |
-          SPARK_HOME=$(pwd) COMET_CONF_DIR=$(pwd)/conf ./mvnw -B -Prelease -Pspark-${{ inputs.spark }},delta test -pl contrib/delta-spark
+          SPARK_HOME=$(pwd) COMET_CONF_DIR=$(pwd)/conf ./mvnw -B -Prelease -Pspark-${{ inputs.spark }},delta verify -Dtest=none -DwildcardSuites=org.apache.comet.contrib.delta,org.apache.spark.sql.comet.DeltaPlanDataInjectorSuite
 
       # Saved only on main: an entry written from a pull request or a
       # `gh-readonly-queue/*` branch cannot be restored by any later run, and

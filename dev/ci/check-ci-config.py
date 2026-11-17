@@ -178,6 +178,7 @@ ROUTING_CASES = [
             "delta_3_5",
             "delta_4_0",
             "delta_4_1",
+            "delta_4_2",
         },
     ),
     (["contrib/delta-spark/README.md"], set()),
@@ -227,6 +228,7 @@ NIGHTLY_TIER = {
     "delta_3_5",
     "delta_4_0",
     "delta_4_1",
+    "delta_4_2",
     "build_linux_all_profiles",
 }
 # Spark 3.4 is deprecated and sits outside the queue and nightly tiers
@@ -239,7 +241,7 @@ SPARK_DEPRECATED = {"spark_3_4"}
 # each sits in.
 ICEBERG_OPT_IN = {"iceberg_1_8", "iceberg_1_9", "iceberg_1_10", "iceberg_1_11"}
 # Likewise one label for every Delta profile.
-DELTA_OPT_IN = {"delta_3_5", "delta_4_0", "delta_4_1"}
+DELTA_OPT_IN = {"delta_3_5", "delta_4_0", "delta_4_1", "delta_4_2"}
 ALL_JOBS = QUEUE_TIER | NIGHTLY_TIER | SPARK_DEPRECATED | {"docs"}
 assert not QUEUE_TIER & NIGHTLY_TIER, "a job is queue or nightly, never both"
 

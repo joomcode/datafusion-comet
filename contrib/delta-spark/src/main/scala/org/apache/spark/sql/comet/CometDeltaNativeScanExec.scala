@@ -23,7 +23,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.QueryPlan
 import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, UnknownPartitioning}
-import org.apache.spark.sql.execution.{FileSourceScanExec, InSubqueryExec, ReusedSubqueryExec, ScalarSubquery, SparkPlan, SubqueryAdaptiveBroadcastExec}
+import org.apache.spark.sql.execution.{FileSourceScanExec, InSubqueryExec, SparkPlan}
 import org.apache.spark.sql.execution.datasources.HadoopFsRelation
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.types.StructType
@@ -45,14 +45,14 @@ import org.apache.comet.serde.OperatorOuterClass.Operator
  * `TreeNode.makeCopy` on MERGE re-planning (the CometIcebergNativeScanExec lesson).
  */
 case class CometDeltaNativeScanExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val output: Seq[Attribute],
     requiredSchema: StructType,
     runtimeFilters: Seq[Expression],
     dataFilters: Seq[Expression],
     @transient relation: HadoopFsRelation,
     originalPlan: FileSourceScanExec,
-    override val serializedPlanOpt: SerializedPlan,
+    @transient override val serializedPlanOpt: SerializedPlan,
     sourceKey: String)
     extends CometLeafExec
     with CometScanWithPlanData {
@@ -75,8 +75,8 @@ case class CometDeltaNativeScanExec(
   //
   // Forcing invariant: this lazy val is forced by the `metrics` override below, and AQE's UI
   // plan-walk calls `.metrics` on every node MID-PLANNING, including while a DPP subquery is
-  // still an adaptive placeholder or a partition filter holds an unresolved ScalarSubquery (see
-  // `hasUnevaluableSubqueryFilter` below). That's safe ONLY because constructing `scanHelper` is a
+  // still an adaptive placeholder or a filter holds an unresolved ScalarSubquery. That's safe
+  // ONLY because constructing `scanHelper` is a
   // cheap case-class build with no file listing, and core's `CometScanExec.metrics` touches only
   // `wrapped.driverMetrics` (populated by Spark's own planning) plus a static metric-node
   // constructor -- neither file listing nor subquery resolution. If core's `metrics` ever touches
@@ -85,54 +85,11 @@ case class CometDeltaNativeScanExec(
   @transient private lazy val scanHelper: CometScanExec =
     CometDeltaNativeScanExec.planningHelper(originalPlan, runtimeFilters)
 
-  // NOT lazy val: while a DPP subquery is still an adaptive placeholder, or a partition filter
-  // holds an unresolved scalar subquery, this returns a temporary value that must not be
-  // memoized -- after CometPlanAdaptiveDynamicPruningFilters rewrites the filters (DPP case) or
-  // AQE resolves the subquery (scalar case), later reads must see the real post-pruning
-  // partition count.
-  override def outputPartitioning: Partitioning =
-    if (hasUnevaluableSubqueryFilter) UnknownPartitioning(0)
-    else UnknownPartitioning(perPartitionData.length)
-
-  // runtimeFilters IS scanHelper.partitionFilters element-for-element, so checking runtimeFilters
-  // here avoids constructing/forcing the derived scanHelper just to read partitioning. The
-  // InSubqueryExec placeholder shapes mirror
-  // CometPlanAdaptiveDynamicPruningFilters.extractSABData + hasWrappedSAB -- keep in sync. The
-  // ScalarSubquery case is probed rather than treated as permanently unevaluable: Spark exposes no
-  // public finished/updated flag on ExecSubqueryExpression, but `eval()` doubles as one -- it only
-  // reads the cached `result` behind a `require(updated, ...)` guard, while the subquery is
-  // actually run by `updateResult()` (invoked separately during prepare/AQE), never by `eval()`.
-  // Once resolved, outputPartitioning below reports the real perPartitionData.length instead of
-  // staying at zero -- a fused native parent's buildNativeContext requires that count to match.
-  private def hasUnevaluableSubqueryFilter: Boolean =
-    runtimeFilters.exists(_.exists {
-      // Match `e: InSubqueryExec` and dispatch on e.plan rather than unapplying InSubqueryExec
-      // directly: its unapply arity differs across Spark versions and this module ships no
-      // version shim.
-      case e: InSubqueryExec => isAdaptivePlaceholder(e.plan)
-      case s: ScalarSubquery => !isScalarSubqueryResolved(s)
-      case _ => false
-    })
-
-  // `eval()` never triggers the subquery's execution: on a resolved subquery it is a pure cached
-  // read of `result` (verified against bytecode: `Predef.require(updated(), ...)` then a plain
-  // field read), so this probe is safe to call repeatedly, including from AQE's mid-planning plan
-  // walks. Pre-resolution, the ONLY throw is `require`'s `IllegalArgumentException`; catch exactly
-  // that, since anything else escaping is a genuine bug we must not mask as unpartitioned.
-  private def isScalarSubqueryResolved(s: ScalarSubquery): Boolean =
-    try {
-      s.eval()
-      true
-    } catch {
-      case _: IllegalArgumentException => false
-    }
-
-  private def isAdaptivePlaceholder(p: SparkPlan): Boolean = p match {
-    case ReusedSubqueryExec(inner) => isAdaptivePlaceholder(inner)
-    case _: CometSubqueryAdaptiveBroadcastExec => true
-    case _: SubqueryAdaptiveBroadcastExec => true
-    case _ => false
-  }
+  // Planning metadata must not list files or execute subqueries. Checking runtimeFilters alone
+  // misses scalar subqueries harvested into dataFilters and can deadlock in AQE planning.
+  // CometScanWithPlanData's execution path sizes fused parents from perPartitionData directly,
+  // so it does not depend on this planning-time placeholder for the actual partition count.
+  override lazy val outputPartitioning: Partitioning = UnknownPartitioning(0)
 
   override lazy val outputOrdering: Seq[SortOrder] = originalPlan.outputOrdering
 
