@@ -1,0 +1,352 @@
+{
+  "date": "2026-11-16",
+  "source": "Явные решения пользователя в текущем диалоге; пакет актуализирован2026-11-17. Историческое утверждение плана2026-11-16 сохранено.",
+  "general_policy": {
+    "status": "APPROVED",
+    "user_quote": "По максимому используем upstream реализацию и добавляем наши исправления , где имеет смысл.",
+    "rule": "Максимально использовать upstream в качестве основы; сохранять все недостающие Joom-возможности, исправления и оптимизации. При потере поведения или оптимизации сохранять/адаптировать нашу часть.",
+    "conditions": [
+      "Функциональную эквивалентность подтвердить Joom regressions и проверкой native execution/планов.",
+      "Для оптимизаций проверить memory/spill lifecycle и по возможности выполнить доступные локальные performance measurements; непроверенную производительность явно отметить. Полные GCP benchmarks отложены на пользовательскую проверку.",
+      "Частичный аналог не означает полноценную замену Joom-возможности.",
+      "Не исключать Joom-поведение только потому, что в upstream существует похожий механизм."
+    ]
+  },
+  "explicitly_approved": {
+    "I01": {
+      "status": "APPROVED_EXPLICITLY",
+      "decision": "Использовать native Delta scanner Comet1.2; сохранить GCP ADC, сериализацию и защиту от planning deadlock, адаптируя недостающие Joom-особенности."
+    },
+    "D10": {
+      "status": "APPROVED_EXPLICITLY",
+      "decision": "Использовать upstream Single/Final+MergeAsPartial и новые Spark aggregate-state codecs; сохранить устойчивость к spill и перенести Joom memory/offset guards, ordered drain и low-copy collect_list. Не переносить старую Joom-маршрутизацию PartialReduce без необходимости."
+    },
+    "N08": {
+      "status": "APPROVED_EXPLICITLY",
+      "decision": "Сохранить upstream SortAggregate architecture и добавить недостающие Joom-оптимизации порядка/streaming и необходимые correctness guards."
+    },
+    "I06": {
+      "status": "APPROVED_EXPLICITLY",
+      "decision": "Использовать upstream timestamp producer/CASE fixes и Spark4.2 semantics; переносить нашу дополнительную нормализацию сравнений там, где она ещё необходима."
+    },
+    "I07": {
+      "status": "APPROVED_EXPLICITLY",
+      "decision": "Использовать upstream native wide-decimal hashing вместо возвращения старого precision>18 запрета; проверить совместимость со Spark, включая mixed boundaries."
+    },
+    "N06": {
+      "status": "APPROVED_EXPLICITLY",
+      "decision": "Использовать upstream native string MIN/MAX; сохранить Joom cases, native coverage и недостающие guards."
+    },
+    "I04": {
+      "status": "APPROVED_EXPLICITLY",
+      "decision": "Использовать upstream DPP/empty-scan lifecycle; сохранить соответствующие Joom регрессии и недостающие исправления."
+    },
+    "I05": {
+      "status": "APPROVED_EXPLICITLY",
+      "decision": "Использовать upstream recursive boolean FFI repair; сохранить дополнительные Joom nested/sliced regressions."
+    },
+    "J18": {
+      "status": "APPROVED_EXPLICITLY",
+      "decision": "Использовать upstream однократную загрузку bundled native library; проверить исходный Joom reload-сценарий."
+    },
+    "J21": {
+      "status": "APPROVED_EXPLICITLY",
+      "decision": "Использовать upstream нормализацию sliced broadcast offsets; сохранить Joom регрессии и добавить недостающие исправления при обнаружении потери поведения."
+    },
+    "J24": {
+      "status": "APPROVED_EXPLICITLY",
+      "decision": "Использовать upstream small-batch/effective JVM shuffle batch cap; сохранить наши проверки."
+    },
+    "P03": {
+      "status": "APPROVED_EXPLICITLY",
+      "decision": "Сохранить ANSI=true. Приоритет — отсутствие успешных jobs с некорректными результатами. Сравнить Spark4.2.1 Comet-off/on на одинаковых входах/ANSI; проверить результаты и обязательные ошибки; сохранить SUM/AVG overflow guards, исправлять несовместимости или заранее ограничивать native-путь. По возможности добавить автоматические regression/differential tests при реализации. PR#5889 в текущую миграцию не включать."
+    }
+  },
+  "covered_by_general_policy": {
+    "I03": {
+      "status": "RESOLVED_BY_APPROVED_POLICY",
+      "decision": "Сохранить защиту от planning deadlock через актуальный upstream lifecycle с корректным execution partition count; старое безусловное UnknownPartitioning(0) не копировать. Проверить исходные Joom reproductions."
+    },
+    "J09": {
+      "status": "RESOLVED_BY_APPROVED_POLICY",
+      "decision": "Сохранить Joom projection-instance pool поверх upstream generated-class cache, соблюдая lifetime/bounds guards. Частичный class cache сам по себе не заменяет pool; упрощение возможно только при подтверждённой эквивалентности по утверждённому правилу."
+    }
+  },
+  "not_decided": [],
+  "authorization_boundary": {
+    "repository_operations_authorized": true,
+    "implementation_authorized": true,
+    "git_mutation_authorized": true,
+    "repository_scope": "/Users/skotlov/d/projects/datafusion-comet",
+    "git_scope": "/Users/skotlov/d/projects/datafusion-comet/.git",
+    "user_quote": "Отныне ты имеешь мое разрешение делать все необходимые манипуляции в /Users/skotlov/d/projects/datafusion-comet (в т.ч. в /Users/skotlov/d/projects/datafusion-comet/.git)",
+    "interpretation": "Разрешение охватывает необходимые локальные изменения репозитория, ветки, коммиты, интеграцию и локальные теги. Подготовка передачи работы не означает, что реализация G01 уже начата.",
+    "implementation_status": "NOT_STARTED",
+    "network_build_dependencies_authorized": false,
+    "network_scope_status": "PROPOSED_AWAITING_USER_APPROVAL",
+    "github_api_read_only_audit_authorized": true,
+    "automatic_worker_chat_creation_authorized": false,
+    "automatic_cross_chat_messaging_authorized": false,
+    "publishing_authorized": false,
+    "remote_push_status": "USER_REPORTED_403; LOCAL_WORK_ONLY",
+    "note": "Это обновление заменяет прежний запрет локальных Git-изменений для указанного Comet checkout. Сетевые загрузки и создание/управление рабочими чатами ещё согласуются; push/JFrog publish/production rollout не выполняются.",
+    "recorded_on": "2026-11-17"
+  },
+  "ansi_policy": {
+    "status": "APPROVED_EXPLICITLY",
+    "spark_sql_ansi_enabled": true,
+    "user_quote": "Давай сохраним `ansi=true`.",
+    "rule": "Целевой режим Spark4.2.1 — ANSI=true. Подтверждённые несовместимости исправлять либо заранее ограничивать соответствующий native-путь; не отключать ANSI глобально для обхода расхождений."
+  },
+  "correctness_policy": {
+    "status": "APPROVED_EXPLICITLY",
+    "priority": "Исключить ситуацию, когда job завершается без ошибки и публикует некорректный результат.",
+    "user_quote": "Самое главное, мы тут должны сделать все, чтобы исключить ситуацию, когда джоба завершается без ошибки, но создает некорректный результат.",
+    "release_criteria": [
+      "Известные небезопасные native-пути исправлены либо исключены плановым fallback до исполнения; зелёный статус job/CI сам по себе недостаточен.",
+      "Сравнивать Spark4.2.1 безComet и сComet на одном snapshot входов, одинаковом ANSI=true и остальных значимых настройках.",
+      "Сравнивать сами результаты, типы, NULL, duplicate rows и гарантированный SQL порядок; не ограничиваться count или отдельными суммами.",
+      "Проверять обе стороны контракта: обязан завершиться/обязан упасть. Comet-success при обязательной Spark ANSI-ошибке считается нарушением корректности.",
+      "Сохранять overflow detection и guards mixedSpark/native partial-final SUM/AVG, включая новый state codec.",
+      "Для подтверждённой несовместимости fallback определяется до исполнения/публикации; не полагаться на retry вSpark после записи или ошибки.",
+      "Проверять actual native execution/планы, чтобы fallback не маскировал отсутствие тестирования custom-пути.",
+      "Не скрывать расхождения общей нормализацией, потерей duplicates или произвольными float tolerances; учитывать определённую Spark семантику и разрешённую недетерминированность."
+    ],
+    "automated_regressions": "По возможности добавить автоматизированные regression/differential tests при реализации; сейчас фиксируется план без написания кода.",
+    "priority_cases": [
+      "Mixed Spark/native decimal SUM/AVG и промежуточное переполнение, forced spill и новый PartialMerge codec.",
+      "Отдельно runtime codegen fallback decimal SUM; статических NO_CODEGEN guards недостаточно.",
+      "GroupeddecimalAVG + LIMIT, malformedcasts, arithmeticoverflow, divisionbyzero и lazy AND/OR/CASE/JVM dispatch.",
+      "SMJ hoisting: canthrow expressions/условные ветки/outer join, ANSI=true.",
+      "Custom RANGE windows на DATE/DECIMAL границах и существующие fallback guards.",
+      "Результаты с activeJoom cost/boundary flags, mixedshuffle, AQEon/off; проверки native-планов.",
+      "Известные silent-result edgecases независимоANSI, включая BINARY→STRING/invalidUTF8, где применимо."
+    ],
+    "limits": "Набор тестов не является математическим доказательством отсутствия всех ошибок. Непокрытые риски явно фиксировать; не объявлять совместимость доказанной без проверки."
+  },
+  "excluded_upstream_changes": {
+    "PR5889": {
+      "status": "EXCLUDED_FROM_CURRENT_MIGRATION",
+      "user_quote": "Этот PR #5889 пока не трогаем и не включаем.",
+      "rule": "Не переносить, не включать и не продолжать отдельную работу над PR#5889 без нового указания пользователя. Сохранять штатный безопасный fallback выбранной базы для неподдержанных struct scalar subqueries."
+    }
+  },
+  "implementation_plan": {
+    "status": "APPROVED_EXPLICITLY",
+    "date": "2026-11-16",
+    "user_quote": "Согласен, зафиксируй план из 9 PR с резервом десятого.",
+    "main_pr_count": 9,
+    "reserve_pr_count": 1,
+    "maximum_planned_pr_count": 10,
+    "path": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/approved-plan.json",
+    "readable_path": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/approved-plan-ru.txt",
+    "step2_owner": "G01 joom/1.2-dev",
+    "step2_order": "Spark4.2.1/Delta4.4.1 на registryDF55.2 → pristinevendor55.2 отдельнымкоммитом → rootpatch/sharedlock/explicitvendorunitCI → повторныепроверки и release tooling.",
+    "step2_separate_prs_superseded": true,
+    "card_groups": {
+      "P01": [
+        "G01"
+      ],
+      "I10": [
+        "G01"
+      ],
+      "P03": [
+        "G01"
+      ],
+      "D01": [
+        "G01"
+      ],
+      "P02": [
+        "G01"
+      ],
+      "I01": [
+        "G01"
+      ],
+      "I02": [
+        "G01"
+      ],
+      "I03": [
+        "G01"
+      ],
+      "I04": [
+        "G01"
+      ],
+      "I08": [
+        "G01"
+      ],
+      "J18": [
+        "G01"
+      ],
+      "I09": [
+        "G01"
+      ],
+      "J14": [
+        "G02"
+      ],
+      "I05": [
+        "G02"
+      ],
+      "J16": [
+        "G02"
+      ],
+      "J22": [
+        "G02"
+      ],
+      "J15": [
+        "G02"
+      ],
+      "D10": [
+        "G04"
+      ],
+      "N06": [
+        "G04"
+      ],
+      "D11": [
+        "G03"
+      ],
+      "D02": [
+        "G03"
+      ],
+      "D04": [
+        "G03"
+      ],
+      "D03": [
+        "G03"
+      ],
+      "D05": [
+        "G05"
+      ],
+      "D06": [
+        "G04"
+      ],
+      "D07": [
+        "G04"
+      ],
+      "D08": [
+        "G04"
+      ],
+      "N09": [
+        "G04"
+      ],
+      "D09": [
+        "G04"
+      ],
+      "N04": [
+        "G04"
+      ],
+      "N05": [
+        "G04"
+      ],
+      "N08": [
+        "G04"
+      ],
+      "N07": [
+        "G04"
+      ],
+      "N01": [
+        "G06"
+      ],
+      "N02": [
+        "G06"
+      ],
+      "N03": [
+        "G06"
+      ],
+      "I06": [
+        "G02"
+      ],
+      "J08": [
+        "G07"
+      ],
+      "J09": [
+        "G07"
+      ],
+      "J21": [
+        "G07"
+      ],
+      "J25": [
+        "G07"
+      ],
+      "J27": [
+        "G07"
+      ],
+      "J10": [
+        "G07"
+      ],
+      "J13": [
+        "G07"
+      ],
+      "J11": [
+        "G07"
+      ],
+      "J23": [
+        "G07"
+      ],
+      "J12": [
+        "G07"
+      ],
+      "J24": [
+        "G07"
+      ],
+      "J26": [
+        "G07"
+      ],
+      "J05": [
+        "G08"
+      ],
+      "J06": [
+        "G08"
+      ],
+      "J07": [
+        "G08"
+      ],
+      "J17": [
+        "G08"
+      ],
+      "J02": [
+        "G09"
+      ],
+      "I07": [
+        "G09"
+      ],
+      "J03": [
+        "G09"
+      ],
+      "J04": [
+        "G09"
+      ],
+      "J01": [
+        "G09"
+      ]
+    },
+    "quality_requirements_unchanged": true,
+    "no_implementation_authorization": false,
+    "execution_not_started": true,
+    "original_research_path": "/Users/skotlov/d/temp/20261116_comet12-consolidated-plan/consolidated-plan.json"
+  },
+  "delivery_scope": {
+    "status": "APPROVED_EXPLICITLY",
+    "goal": "Реализовать согласованный перенос и получить локальные JAR-артефакты Comet и Delta integration для включения пользователем в Spark4.2 image.",
+    "targets": [
+      "Spark4.2.1",
+      "Scala2.13.18",
+      "DataFusion55.2.0",
+      "Delta4.4.1",
+      "GCP"
+    ],
+    "linux_release_architectures": [
+      "amd64",
+      "arm64"
+    ],
+    "checks": "Обязательные correctness/ANSI/regression/integration и packaging проверки сохраняются. Финальные JAR должны иметь SHA256, Git SHA и сведения о сборке. Полную проверку на production GCP jobs пользователь проведёт отдельно.",
+    "user_quote": "Нам сейчас нужно сделать все задуманное, чтобы я получил jar артефакты для включения в наш spark 4.2 image. Проверять производительность я буду позже."
+  },
+  "performance_policy": {
+    "status": "APPROVED_EXPLICITLY",
+    "user_quote": "ну по возможности ты ее конечно проверяй как сможешь во время реализации.",
+    "during_implementation": "По возможности выполнять доступные локальные benchmarks и comparisons, проверять native execution, память, spill и признаки регрессий. Сохранять параметры и результаты; не объявлять эквивалентность производительности без измерений.",
+    "production_benchmarks": "Полные замеры на реальных GCP jobs отложены на пользовательскую проверку и не являются текущим условием передачи локальных JAR.",
+    "correctness_unchanged": true
+  },
+  "last_updated_on": "2026-11-17"
+}

@@ -1,0 +1,275 @@
+{
+  "updated_on": "2026-11-17",
+  "phase": "SETUP_PENDING_NETWORK_APPROVAL",
+  "repository": "/Users/skotlov/d/projects/datafusion-comet",
+  "integration_branch": "branch-1.2",
+  "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
+  "observed_code_head_before_documentation_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
+  "implementation_started": false,
+  "active_writer": null,
+  "worker_threads_created": [],
+  "local_comet_project_registered_in_app": false,
+  "groups": [
+    {
+      "id": "G01",
+      "branch": "joom/1.2-dev",
+      "cards": [
+        "D01",
+        "I01",
+        "I02",
+        "I03",
+        "I04",
+        "I08",
+        "I09",
+        "I10",
+        "J18",
+        "P01",
+        "P02",
+        "P03"
+      ],
+      "depends_on": [],
+      "status": "NOT_STARTED",
+      "head_commit": null,
+      "tests": "NOT_RUN",
+      "handoff_report": null
+    },
+    {
+      "id": "G02",
+      "branch": "joom/1.2-native-runtime",
+      "cards": [
+        "I05",
+        "I06",
+        "J14",
+        "J15",
+        "J16",
+        "J22"
+      ],
+      "depends_on": [
+        "G01"
+      ],
+      "status": "NOT_STARTED",
+      "head_commit": null,
+      "tests": "NOT_RUN",
+      "handoff_report": null
+    },
+    {
+      "id": "G03",
+      "branch": "joom/1.2-sort-spill-budget",
+      "cards": [
+        "D02",
+        "D03",
+        "D04",
+        "D11"
+      ],
+      "depends_on": [
+        "G01"
+      ],
+      "status": "NOT_STARTED",
+      "head_commit": null,
+      "tests": "NOT_RUN",
+      "handoff_report": null
+    },
+    {
+      "id": "G04",
+      "branch": "joom/1.2-native-aggregates",
+      "cards": [
+        "D06",
+        "D07",
+        "D08",
+        "D09",
+        "D10",
+        "N04",
+        "N05",
+        "N06",
+        "N07",
+        "N08",
+        "N09"
+      ],
+      "depends_on": [
+        "G01"
+      ],
+      "status": "NOT_STARTED",
+      "head_commit": null,
+      "tests": "NOT_RUN",
+      "handoff_report": null
+    },
+    {
+      "id": "G05",
+      "branch": "joom/1.2-smj-filter",
+      "cards": [
+        "D05"
+      ],
+      "depends_on": [
+        "G01"
+      ],
+      "status": "NOT_STARTED",
+      "head_commit": null,
+      "tests": "NOT_RUN",
+      "handoff_report": null
+    },
+    {
+      "id": "G06",
+      "branch": "joom/1.2-native-windows",
+      "cards": [
+        "N01",
+        "N02",
+        "N03"
+      ],
+      "depends_on": [
+        "G01",
+        "G02"
+      ],
+      "status": "NOT_STARTED",
+      "head_commit": null,
+      "tests": "NOT_RUN",
+      "handoff_report": null
+    },
+    {
+      "id": "G07",
+      "branch": "joom/1.2-shuffle-and-c2r",
+      "cards": [
+        "J08",
+        "J09",
+        "J10",
+        "J11",
+        "J12",
+        "J13",
+        "J21",
+        "J23",
+        "J24",
+        "J25",
+        "J26",
+        "J27"
+      ],
+      "depends_on": [
+        "G01",
+        "G02"
+      ],
+      "status": "NOT_STARTED",
+      "head_commit": null,
+      "tests": "NOT_RUN",
+      "handoff_report": null
+    },
+    {
+      "id": "G08",
+      "branch": "joom/1.2-jvm-codegen",
+      "cards": [
+        "J05",
+        "J06",
+        "J07",
+        "J17"
+      ],
+      "depends_on": [
+        "G01",
+        "G02"
+      ],
+      "status": "NOT_STARTED",
+      "head_commit": null,
+      "tests": "NOT_RUN",
+      "handoff_report": null
+    },
+    {
+      "id": "G09",
+      "branch": "joom/1.2-cost-based-engines",
+      "cards": [
+        "I07",
+        "J01",
+        "J02",
+        "J03",
+        "J04"
+      ],
+      "depends_on": [
+        "G03",
+        "G04",
+        "G05",
+        "G06",
+        "G07",
+        "G08"
+      ],
+      "status": "NOT_STARTED",
+      "head_commit": null,
+      "tests": "NOT_RUN",
+      "handoff_report": null
+    }
+  ],
+  "reserve": {
+    "id": "G10",
+    "branch": "joom/1.2-release-qualification",
+    "status": "APPROVED_RESERVE_ONLY_IF_NEEDED",
+    "scope": "Межфункциональные тесты и необходимые ограниченные интеграционные исправления с отдельнымикоммитами. Есликонтрольдиффаобъективнотребуетразделитьодиниз9блоков, резервможетбытьпереназначеннаэтотsplitпослеобсужденияконкретнойграницы. НеобязательныйпустойPRнесоздаётся."
+  },
+  "docker_checks": {
+    "context": "desktop-linux",
+    "endpoint": "unix:///Users/skotlov/.docker/run/docker.sock",
+    "engine": "27.4.0",
+    "host": "linux/arm64",
+    "cpus": 14,
+    "memory_bytes": 8217407488,
+    "arm64_container_execution": "PASSED",
+    "amd64_emulated_container_execution": "PASSED",
+    "checkout_read_mount": "PASSED",
+    "output_write_mount": "PASSED",
+    "network": "none; pull=never; cached images only",
+    "release_builder_compilation": "NOT_RUN",
+    "evidence": "/Users/skotlov/d/temp/20261116_comet12-execution-setup/docker-probes.json",
+    "note": "Один неиспользуемый default builder указывает на недоступный /var/run/docker.sock. Рабочие desktop-linux/spark-builder доступны; переподключать или чинить default не требуется."
+  },
+  "build_tools": {
+    "standalone_mvn_cargo_rustc_in_current_PATH": false,
+    "maven_wrapper": "PRESENT; pins3.9.6; not executed",
+    "host_rust_installation": "USER_WILL_INSTALL",
+    "java_sdkman_installations": "USER_REPORTED_PRESENT; exact JDK for build not verified"
+  },
+  "permissions": {
+    "repository_operations_authorized": true,
+    "implementation_authorized": true,
+    "git_mutation_authorized": true,
+    "repository_scope": "/Users/skotlov/d/projects/datafusion-comet",
+    "git_scope": "/Users/skotlov/d/projects/datafusion-comet/.git",
+    "user_quote": "Отныне ты имеешь мое разрешение делать все необходимые манипуляции в /Users/skotlov/d/projects/datafusion-comet (в т.ч. в /Users/skotlov/d/projects/datafusion-comet/.git)",
+    "interpretation": "Разрешение охватывает необходимые локальные изменения репозитория, ветки, коммиты, интеграцию и локальные теги. Подготовка передачи работы не означает, что реализация G01 уже начата.",
+    "implementation_status": "NOT_STARTED",
+    "network_build_dependencies_authorized": false,
+    "network_scope_status": "PROPOSED_AWAITING_USER_APPROVAL",
+    "github_api_read_only_audit_authorized": true,
+    "automatic_worker_chat_creation_authorized": false,
+    "automatic_cross_chat_messaging_authorized": false,
+    "publishing_authorized": false,
+    "remote_push_status": "USER_REPORTED_403; LOCAL_WORK_ONLY",
+    "note": "Это обновление заменяет прежний запрет локальных Git-изменений для указанного Comet checkout. Сетевые загрузки и создание/управление рабочими чатами ещё согласуются; push/JFrog publish/production rollout не выполняются.",
+    "recorded_on": "2026-11-17"
+  },
+  "delivery_scope": {
+    "status": "APPROVED_EXPLICITLY",
+    "goal": "Реализовать согласованный перенос и получить локальные JAR-артефакты Comet и Delta integration для включения пользователем в Spark4.2 image.",
+    "targets": [
+      "Spark4.2.1",
+      "Scala2.13.18",
+      "DataFusion55.2.0",
+      "Delta4.4.1",
+      "GCP"
+    ],
+    "linux_release_architectures": [
+      "amd64",
+      "arm64"
+    ],
+    "checks": "Обязательные correctness/ANSI/regression/integration и packaging проверки сохраняются. Финальные JAR должны иметь SHA256, Git SHA и сведения о сборке. Полную проверку на production GCP jobs пользователь проведёт отдельно.",
+    "user_quote": "Нам сейчас нужно сделать все задуманное, чтобы я получил jar артефакты для включения в наш spark 4.2 image. Проверять производительность я буду позже."
+  },
+  "performance_policy": {
+    "status": "APPROVED_EXPLICITLY",
+    "user_quote": "ну по возможности ты ее конечно проверяй как сможешь во время реализации.",
+    "during_implementation": "По возможности выполнять доступные локальные benchmarks и comparisons, проверять native execution, память, spill и признаки регрессий. Сохранять параметры и результаты; не объявлять эквивалентность производительности без измерений.",
+    "production_benchmarks": "Полные замеры на реальных GCP jobs отложены на пользовательскую проверку и не являются текущим условием передачи локальных JAR.",
+    "correctness_unchanged": true
+  },
+  "pending_setup": [
+    "User approves/revises NETWORK.md scope; no dependency-download permission yet.",
+    "User installs host Rust if desired; verify toolchain/JDK locally without accidental auto-download.",
+    "Register local Comet app project if separate user-visible worker chats are wanted.",
+    "User selects/authorizes working-session orchestration; no worker chat created yet.",
+    "Start G01 from actual current branch-1.2 after setup; preserve pinned upstream base."
+  ],
+  "next_step": "Согласовать сетевой scope и запуск первой рабочей сессии G01; не объявлять реализацию начатой по одному факту сохранения документов.",
+  "qualification": "Comet/Spark/Delta correctness, ANSI, packaging and vendor tests not run. Local performance measurements to be attempted during implementation; production GCP benchmarks deferred to user."
+}

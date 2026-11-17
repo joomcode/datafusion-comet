@@ -1,0 +1,56 @@
+{
+  "created_on": "2026-11-17",
+  "purpose": "Durable approved migration package; update checksums when documents intentionally change.",
+  "files": [
+    {
+      "path": "HANDOFF.md",
+      "sha256": "1e84356bb8d8824428ed51c26f46d8eaecc531ae2246a02549270806fdc1d330"
+    },
+    {
+      "path": "NETWORK.md",
+      "sha256": "3bedf4a5dc5d14b1793d25c4ae9073b697a1691a614aa69494c37486bc8dac02"
+    },
+    {
+      "path": "README.md",
+      "sha256": "269b3325abc3dce00abe39a51cd4c9870c82111a0dc7f6c25fed0687310520ca"
+    },
+    {
+      "path": "STATE.json",
+      "sha256": "3b6b79277dc902ae9b05ad409df141afb008a3768c8e0e355cbf1673af23448a"
+    },
+    {
+      "path": "approved-plan-ru.txt",
+      "sha256": "52228dc39bd86e499226cffc63a2350e806dd3a7e27ae27e8a1d4d72309c0c68"
+    },
+    {
+      "path": "approved-plan.json",
+      "sha256": "838c7a72084025ae9784c4ac97625e2c881174c3007916780d57eeba21bbbd73"
+    },
+    {
+      "path": "correctness-test-plan-ru.txt",
+      "sha256": "6efd6d143ef8e0e5cebc22cb79b779c08de6ea8920ead49c448313129590cc9c"
+    },
+    {
+      "path": "decisions.json",
+      "sha256": "531fa45712b78d5109c2f7e1326c143b45d3db82a716c89939fd73af6a16993a"
+    },
+    {
+      "path": "feature-register.json",
+      "sha256": "a318df4e5e2b6fb9a7349055c0c36b78255fcd735c67b2d5336f85de61f9eb7d"
+    },
+    {
+      "path": "target-native-dependencies.json",
+      "sha256": "d4d0fc916e083af2e114f21f7e410da14f4debfe7b7937758b74d148c1b27200"
+    },
+    {
+      "path": "vendor-provenance.json",
+      "sha256": "c6496befb4c54ba281a977d28a573f60e0bb44615d72f34be96d1a1f5cd4f45a"
+    }
+  ],
+  "original_research_directories": [
+    "/Users/skotlov/d/temp/20261116_comet12-migration-register",
+    "/Users/skotlov/d/temp/20261116_comet12-consolidated-plan"
+  ],
+  "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
+  "source_commit": "981e26dff6b64110a8b3949a0ed065523d9012e4"
+}

@@ -1,0 +1,739 @@
+{
+  "source_vendor_import_commit": "6eaf12e80b5fbaa551f6838910da5da598b2ea2d",
+  "declared_origin": "crates.io datafusion-physical-plan55.1.0 (commit body + normalizedCargo.toml)",
+  "source_datafusion_tag": "55.1.0",
+  "source_datafusion_commit": "7d3835c71f30cbd3c3ae4041732267f1f453097a",
+  "rust_file_count_compared": 144,
+  "rust_files_identical_to_source_tag": 144,
+  "rust_source_comparison": [
+    {
+      "path": "benches/aggregate_vectorized.rs",
+      "identical": true,
+      "pristine_sha256": "8f5a3c759488d54b1801ff3c86cc9edbc14de990e7d0edf8bc78f7bdbaf9eccd"
+    },
+    {
+      "path": "benches/bounded_window.rs",
+      "identical": true,
+      "pristine_sha256": "dce6cc83a6a201d313e838b89aa1ed8b2cff7025f4f11f1de6830e46e57fc60d"
+    },
+    {
+      "path": "benches/compute_statistics.rs",
+      "identical": true,
+      "pristine_sha256": "d7d59565ea535b07fa72c860fd4996ad459ce5b0ee7e5d10e32d08454801a460"
+    },
+    {
+      "path": "benches/dictionary_group_values.rs",
+      "identical": true,
+      "pristine_sha256": "9465e3f0f8e326c0241f08a963661770c935963e9211d4dbe6952467b95a6636"
+    },
+    {
+      "path": "benches/hash_join_semi_anti.rs",
+      "identical": true,
+      "pristine_sha256": "dda236cd91746d236edd58784f01f89513ec479fa5f9c45b0e057ee9217459d2"
+    },
+    {
+      "path": "benches/multi_group_by.rs",
+      "identical": true,
+      "pristine_sha256": "9d2a031273a2f8a4d97459a646e231f758ca20ef1b6fb5bdd3e03edbdcb190ba"
+    },
+    {
+      "path": "benches/partial_ordering.rs",
+      "identical": true,
+      "pristine_sha256": "664029dff72dc72700bb3dbca35c8f6ccae15f68461be1eade034a3cb18d37f7"
+    },
+    {
+      "path": "benches/sort_merge_join.rs",
+      "identical": true,
+      "pristine_sha256": "9bc4f6b869653d3e2849d6615734e5f7c93326ec08482bac95b506d4c6a62deb"
+    },
+    {
+      "path": "benches/sort_preserving_merge.rs",
+      "identical": true,
+      "pristine_sha256": "24ef48deaa8555384d56ac893ba801c83880a68ebf572c8be521d3ff6ed8755a"
+    },
+    {
+      "path": "benches/spill_io.rs",
+      "identical": true,
+      "pristine_sha256": "8761ee0cd19911caef74ce7c2ce72e0191a7d3a4b2b92a4a02d2d2677413164b"
+    },
+    {
+      "path": "src/aggregates/aggregate_hash_table/common.rs",
+      "identical": true,
+      "pristine_sha256": "29fefe07a74f37906a2834d0f99d4bffd42aa509ff6834cc51e0bcb9092c2481"
+    },
+    {
+      "path": "src/aggregates/aggregate_hash_table/common_ordered.rs",
+      "identical": true,
+      "pristine_sha256": "2f9910722766fb9a12c4c0dede565074aef133195bef0d10e3f1b7f0bd5a54c2"
+    },
+    {
+      "path": "src/aggregates/aggregate_hash_table/final_table.rs",
+      "identical": true,
+      "pristine_sha256": "05135c5c6560267235ab72c0328582e11c8857dd121c9b1d414162ad09ac3305"
+    },
+    {
+      "path": "src/aggregates/aggregate_hash_table/mod.rs",
+      "identical": true,
+      "pristine_sha256": "628bc7c0ecbb54cf30486b68a4f25eaa63f4f1bedf41865d1d7658529768a6f7"
+    },
+    {
+      "path": "src/aggregates/aggregate_hash_table/ordered_final_table.rs",
+      "identical": true,
+      "pristine_sha256": "181b552143e82b93e303998185cab7a7f3317496ce262266630e4f261ad64136"
+    },
+    {
+      "path": "src/aggregates/aggregate_hash_table/ordered_partial_table.rs",
+      "identical": true,
+      "pristine_sha256": "57ea60331f80aa82d04b683c7383b829ffa50b61748305a4abc9b713a0e353cc"
+    },
+    {
+      "path": "src/aggregates/aggregate_hash_table/partial_reduce_table.rs",
+      "identical": true,
+      "pristine_sha256": "bdb4bbdc6adb90b4e03a649f39d00b1253232a59c1fe9612cd35a74b1e7fdb48"
+    },
+    {
+      "path": "src/aggregates/aggregate_hash_table/partial_table.rs",
+      "identical": true,
+      "pristine_sha256": "d7715b6dc8418b7afa81949dad7c181e62b6093237467d7d55011e219ab9b4bf"
+    },
+    {
+      "path": "src/aggregates/aggregate_hash_table/single_table.rs",
+      "identical": true,
+      "pristine_sha256": "7c8054a971ebf261f5bda983d89077cc63ad742f74d1015faccae04f79ce511c"
+    },
+    {
+      "path": "src/aggregates/aggregate_stream.rs",
+      "identical": true,
+      "pristine_sha256": "aae4ffa2d396a2a488ac11abefb6505ae7ddcdf6439fb58c878bd0ba9f3116b4"
+    },
+    {
+      "path": "src/aggregates/group_values/metrics.rs",
+      "identical": true,
+      "pristine_sha256": "cf5f0887199ab654c0145473b7c566d1aeebfdd551b2b4d83c26b4619ad70af3"
+    },
+    {
+      "path": "src/aggregates/group_values/mod.rs",
+      "identical": true,
+      "pristine_sha256": "f15016411205f4f3af23b2c85a42c584c2cee34757d25460c0ed0929edc620e1"
+    },
+    {
+      "path": "src/aggregates/group_values/multi_group_by/boolean.rs",
+      "identical": true,
+      "pristine_sha256": "b812abdc498de1aa0233419ae40c344f978eb6f2ef343ac05277ac2bd85f2866"
+    },
+    {
+      "path": "src/aggregates/group_values/multi_group_by/bytes.rs",
+      "identical": true,
+      "pristine_sha256": "6301d6b3b62b61875b0a08261c989919b74f1dd1e55567adc788e13c074bb298"
+    },
+    {
+      "path": "src/aggregates/group_values/multi_group_by/bytes_view.rs",
+      "identical": true,
+      "pristine_sha256": "2c46e428f2aff0956f66f92ebc958e017607c46181b8a4cac97056e002eb3c5d"
+    },
+    {
+      "path": "src/aggregates/group_values/multi_group_by/fixed_size_binary.rs",
+      "identical": true,
+      "pristine_sha256": "e8d315ef9493671a194fb28f43f2359b675d192b7796d886a8f4defc10b55fa9"
+    },
+    {
+      "path": "src/aggregates/group_values/multi_group_by/mod.rs",
+      "identical": true,
+      "pristine_sha256": "254716cd418957eb3d346dcea62cba9ac71c579d6ccd3a3ce48f33cac31a8ad1"
+    },
+    {
+      "path": "src/aggregates/group_values/multi_group_by/primitive.rs",
+      "identical": true,
+      "pristine_sha256": "7d651659c3d68febb636c1f2e8b3b5535813202fc59dfc5232702334450da709"
+    },
+    {
+      "path": "src/aggregates/group_values/multi_group_by/row_backed.rs",
+      "identical": true,
+      "pristine_sha256": "5e1327363af2a8e5150d91d4902a8e2164f865c3aadd4b9c68b0bc22439b440d"
+    },
+    {
+      "path": "src/aggregates/group_values/null_builder.rs",
+      "identical": true,
+      "pristine_sha256": "e97fdf213e920627dc9523ddf74081eb85ab5c86c5bd1600def1fc6a99c1b21f"
+    },
+    {
+      "path": "src/aggregates/group_values/row.rs",
+      "identical": true,
+      "pristine_sha256": "68b6d9c5940763d951899ba3e11eaa29de8b8d1cf30039cd581635e46faad6ec"
+    },
+    {
+      "path": "src/aggregates/group_values/single_group_by/boolean.rs",
+      "identical": true,
+      "pristine_sha256": "acb92fa2a462fa3b87f2c672fec38a3c7fcb400f6f6da5f988c060b75290b6fe"
+    },
+    {
+      "path": "src/aggregates/group_values/single_group_by/bytes.rs",
+      "identical": true,
+      "pristine_sha256": "eb7b25ecbaf81eaf05cd5ca23ff5f3d9a86bff8d89ef6b97543354b1c4471d07"
+    },
+    {
+      "path": "src/aggregates/group_values/single_group_by/bytes_view.rs",
+      "identical": true,
+      "pristine_sha256": "aafb7377cc19a9dd52644ac6daeb46382700aa40fa411074c995cb12728d8509"
+    },
+    {
+      "path": "src/aggregates/group_values/single_group_by/mod.rs",
+      "identical": true,
+      "pristine_sha256": "d52f33d8a93c0dbbf77b3e7b4b13a976d85d0a37a3f4262cee6cc9608d917ceb"
+    },
+    {
+      "path": "src/aggregates/group_values/single_group_by/primitive.rs",
+      "identical": true,
+      "pristine_sha256": "b044e17caf68a004ce60dabdb5100dfb68179e94b71b6823a20066acc949cabf"
+    },
+    {
+      "path": "src/aggregates/grouped_hash_stream.rs",
+      "identical": true,
+      "pristine_sha256": "705c13c94165897565eb7f81460de8082dd1fbd2a9f8d87a18316619366e486b"
+    },
+    {
+      "path": "src/aggregates/grouped_topk_stream.rs",
+      "identical": true,
+      "pristine_sha256": "d4be14362d51697172e74d1b8fbaa16bf39db25610f9f427e0828db7a5caebff"
+    },
+    {
+      "path": "src/aggregates/hash_stream.rs",
+      "identical": true,
+      "pristine_sha256": "f3de61e29312169fc2a44f23e63a4a227c329654d2a8c029824a7153cc3ff3f2"
+    },
+    {
+      "path": "src/aggregates/mod.rs",
+      "identical": true,
+      "pristine_sha256": "f185a2534b227ba461b60d6368ca3546e091bd30dd9147d69250cd84c2925633"
+    },
+    {
+      "path": "src/aggregates/order/full.rs",
+      "identical": true,
+      "pristine_sha256": "cdc2826ec8528fcafa845860f3ddb10d4440814c9db78e0e20e7ed2fe2f91638"
+    },
+    {
+      "path": "src/aggregates/order/mod.rs",
+      "identical": true,
+      "pristine_sha256": "be84bf2867569fe27fc30bdb32e6fdd9b884d612a35f1b4fc6e06c042eb275d5"
+    },
+    {
+      "path": "src/aggregates/order/partial.rs",
+      "identical": true,
+      "pristine_sha256": "8fe2a7b6a81addbe72c1ce328d0631abaf9187b6ff3a76fead99bce80c8cc4bb"
+    },
+    {
+      "path": "src/aggregates/ordered_final_stream.rs",
+      "identical": true,
+      "pristine_sha256": "075ee5c31fd5b2d0ffd7f702751a75b8070e09f6104328cf809e80c730fcccbb"
+    },
+    {
+      "path": "src/aggregates/ordered_partial_stream.rs",
+      "identical": true,
+      "pristine_sha256": "a94174f58aa07caac48b76fbd6fa718bb72afaff1d02e41ae831671f22eda5f6"
+    },
+    {
+      "path": "src/aggregates/partial_reduce_stream.rs",
+      "identical": true,
+      "pristine_sha256": "491d925c05d18b3e90c3376912836a53db8f0f045d8aaea0559802f642aa95d8"
+    },
+    {
+      "path": "src/aggregates/single_stream.rs",
+      "identical": true,
+      "pristine_sha256": "fc6c5cdd10cc740f9e92a4d36aa1ab274b21cd789537a7dbd8bd81a6901cfb0d"
+    },
+    {
+      "path": "src/aggregates/skip_partial.rs",
+      "identical": true,
+      "pristine_sha256": "59094dd64694d22e000f426f172cbbbf49c06e44fc1fc8e7cbcd1f0723916ac0"
+    },
+    {
+      "path": "src/aggregates/topk/hash_table.rs",
+      "identical": true,
+      "pristine_sha256": "11d6082bbab3d4fa4f902832ecf2bc071c5e2f3c180b17afa1b9bc8f0f717b52"
+    },
+    {
+      "path": "src/aggregates/topk/heap.rs",
+      "identical": true,
+      "pristine_sha256": "1e8460e71f2f70385af8fd577eb55661419f6dadb9a799b97f836318d4084689"
+    },
+    {
+      "path": "src/aggregates/topk/mod.rs",
+      "identical": true,
+      "pristine_sha256": "b763b250f243428f1c15d6961a34e7294a0bf27aa18876092300a16f7dee87a7"
+    },
+    {
+      "path": "src/aggregates/topk/priority_map.rs",
+      "identical": true,
+      "pristine_sha256": "34911bd7b73893e177308c7e9d95c1ba2ee915597ae70c5d3ffe44a8937e81e3"
+    },
+    {
+      "path": "src/analyze.rs",
+      "identical": true,
+      "pristine_sha256": "1c3ff10132f1af9b1c164ad27fd51bdf8e696fd55ca0cf302476c21731befc69"
+    },
+    {
+      "path": "src/async_func.rs",
+      "identical": true,
+      "pristine_sha256": "d9db723989a19c0b25c2e33b77323d15ce005d30468106ac3f6bdb549b5fcf29"
+    },
+    {
+      "path": "src/buffer.rs",
+      "identical": true,
+      "pristine_sha256": "d6ae782f96612329febd9b064f3df3d4effb900adadd93f14b41d258f286bcb5"
+    },
+    {
+      "path": "src/coalesce/mod.rs",
+      "identical": true,
+      "pristine_sha256": "7e586576d8c50ede85432bfe5ca3e448de0bf9f34c00f20a7f1a37d404d340bd"
+    },
+    {
+      "path": "src/coalesce_batches.rs",
+      "identical": true,
+      "pristine_sha256": "c37cf9b3efd52692c6f05b99d1cd3a1cc5f6de4a7ddb4dd44685fb7d4d6356fd"
+    },
+    {
+      "path": "src/coalesce_partitions.rs",
+      "identical": true,
+      "pristine_sha256": "f8b2aec263dd8d9bef0d4ab300344c6f4cef114b2a57d991fd80d7ca816c0a95"
+    },
+    {
+      "path": "src/column_rewriter.rs",
+      "identical": true,
+      "pristine_sha256": "9cade8a8fa54bc74d85046594c2d7d8b0fd9c5ab947441feff2855e2f1924517"
+    },
+    {
+      "path": "src/common.rs",
+      "identical": true,
+      "pristine_sha256": "dff53164c25589d1e24da70955c3d2ec8ebf384f993ccfa1e413fed708045d3c"
+    },
+    {
+      "path": "src/coop.rs",
+      "identical": true,
+      "pristine_sha256": "3bd554818d4915ce2bfb34a39850e28c020f1fb5624775dacb75ae7b112cf5e3"
+    },
+    {
+      "path": "src/display.rs",
+      "identical": true,
+      "pristine_sha256": "60f81de4e9b47cbf312d070d7cd480d0cf37337b953c9092a26b005736c9fd82"
+    },
+    {
+      "path": "src/distribution_requirements.rs",
+      "identical": true,
+      "pristine_sha256": "55220b0af787aafb907880fd20161e23569a6d530d0aa5f24d47cbb47bd8e8fc"
+    },
+    {
+      "path": "src/empty.rs",
+      "identical": true,
+      "pristine_sha256": "32d93f08ff9a777973005deacd5134cb2901904592e77696c3105ed72fc5efe1"
+    },
+    {
+      "path": "src/execution_plan.rs",
+      "identical": true,
+      "pristine_sha256": "fccb634c7bee4456fd5cd6dd3f7614bfe91eeb6963d509fda94675ea41bd9e12"
+    },
+    {
+      "path": "src/explain.rs",
+      "identical": true,
+      "pristine_sha256": "f038db525a992550c7c40d77e483e7adcc31933718e2a83690d044c28899ca21"
+    },
+    {
+      "path": "src/filter.rs",
+      "identical": true,
+      "pristine_sha256": "17ea47712265b2c25d33328a00aaae7b0a3b24a1d994c0f24905296f14342c0b"
+    },
+    {
+      "path": "src/filter_pushdown.rs",
+      "identical": true,
+      "pristine_sha256": "0358df7b0c45c9e2cdf655f9e7cd5608f3449fbfd6b0899e89cb29147d626354"
+    },
+    {
+      "path": "src/joins/array_map.rs",
+      "identical": true,
+      "pristine_sha256": "ced7ba5ff7c44834def155a19c08700f721734f34c6167b3877469ffb5793966"
+    },
+    {
+      "path": "src/joins/chain.rs",
+      "identical": true,
+      "pristine_sha256": "93c4dc20ba5013011b446164fc1de98cf46fe93b5f6e635decf12d6d6e019700"
+    },
+    {
+      "path": "src/joins/cross_join.rs",
+      "identical": true,
+      "pristine_sha256": "91cfbed2d7a509c532bf00887dd52c1dc8730c6223199e9adfccc307a54a23c5"
+    },
+    {
+      "path": "src/joins/hash_join/exec.rs",
+      "identical": true,
+      "pristine_sha256": "27b1f0d3b29fc3b90d44cc1f730939baf94368ef07c7de6761a24990b900e35c"
+    },
+    {
+      "path": "src/joins/hash_join/inlist_builder.rs",
+      "identical": true,
+      "pristine_sha256": "c4e0f10ed2e68cc2b91c7d83a6cb356d9f7b35ef2244668bc34b4c06955f9456"
+    },
+    {
+      "path": "src/joins/hash_join/mod.rs",
+      "identical": true,
+      "pristine_sha256": "84a65cfc2d49515543dd6c35d9b0ec0c232a4884973a3741b9612f2cbfeb53ca"
+    },
+    {
+      "path": "src/joins/hash_join/partitioned_hash_eval.rs",
+      "identical": true,
+      "pristine_sha256": "743d3c8a78e82d84255d1af752a7e58f9e68c02f9bb9600d5fd3a8771fa4a85e"
+    },
+    {
+      "path": "src/joins/hash_join/shared_bounds.rs",
+      "identical": true,
+      "pristine_sha256": "8a0ca093fddaa7af6d68a08749ac36ac644845ce8df2cf4811601a3b9cb61e4b"
+    },
+    {
+      "path": "src/joins/hash_join/stream.rs",
+      "identical": true,
+      "pristine_sha256": "df118bb8760231711eb190a2a946945f335fd942a042eb90f682437009a23e2f"
+    },
+    {
+      "path": "src/joins/join_filter.rs",
+      "identical": true,
+      "pristine_sha256": "fe67d90111848beaa2a8a04bf142192f2d9fd2e9d6c87afee876c2cff56f11a2"
+    },
+    {
+      "path": "src/joins/join_hash_map.rs",
+      "identical": true,
+      "pristine_sha256": "022856d7bfbc1bc5510308e02fbc0cf75dbb80eb1dc205252002d6af652571ea"
+    },
+    {
+      "path": "src/joins/mod.rs",
+      "identical": true,
+      "pristine_sha256": "64400ff4fe2b1cd55c8c657a1c6b4a38a631e2c856503d45c4b04ea943aadcdd"
+    },
+    {
+      "path": "src/joins/nested_loop_join.rs",
+      "identical": true,
+      "pristine_sha256": "77d7f9a98a0534d97b05872cb5b9f52a5450b0b618f17ac6ca4184a11c655451"
+    },
+    {
+      "path": "src/joins/piecewise_merge_join/classic_join.rs",
+      "identical": true,
+      "pristine_sha256": "242282c476e84f2d615d6437647d364ec164a8d86f02acd16e16507e269fcf2e"
+    },
+    {
+      "path": "src/joins/piecewise_merge_join/exec.rs",
+      "identical": true,
+      "pristine_sha256": "9185c723d91b3bf8797898a3e964903648e2bc8a2f2d8c9e2d990f564fe75dbc"
+    },
+    {
+      "path": "src/joins/piecewise_merge_join/mod.rs",
+      "identical": true,
+      "pristine_sha256": "a9735d8a72aea328b9a38355b025326f1bafaa0bc62cb0f2ea8cee09fa3f7f45"
+    },
+    {
+      "path": "src/joins/piecewise_merge_join/utils.rs",
+      "identical": true,
+      "pristine_sha256": "0221d05e55fd2efe1372749d550a1d728f50b0d872081e8e06adb0ea83081e2b"
+    },
+    {
+      "path": "src/joins/proto.rs",
+      "identical": true,
+      "pristine_sha256": "93674bd9d405dce352d11a493d7f9a068a237bff926c7ff1a1d32b011bf4e460"
+    },
+    {
+      "path": "src/joins/sort_merge_join/bitwise_stream.rs",
+      "identical": true,
+      "pristine_sha256": "715be99bdf5a63a2366e0f1f8c5509b70c52448de9b9e463fb7530a7043b2108"
+    },
+    {
+      "path": "src/joins/sort_merge_join/exec.rs",
+      "identical": true,
+      "pristine_sha256": "b436130b4f66c1576791061f8722061dfa7073b5ee8529915b66817fb5db5388"
+    },
+    {
+      "path": "src/joins/sort_merge_join/filter.rs",
+      "identical": true,
+      "pristine_sha256": "09b6068c845841fc1b6c54ac4d8b55be085f8f36e3c05e4496d5cb0fee090f27"
+    },
+    {
+      "path": "src/joins/sort_merge_join/materializing_stream.rs",
+      "identical": true,
+      "pristine_sha256": "7c79accbbb2579e252cc9a460d97037e82db505497a5ebc384c6f1a21ced15d7"
+    },
+    {
+      "path": "src/joins/sort_merge_join/metrics.rs",
+      "identical": true,
+      "pristine_sha256": "c25452499caeb91f7795dd439a90a2158b8cec3f5a3586e866f782db27b4d629"
+    },
+    {
+      "path": "src/joins/sort_merge_join/mod.rs",
+      "identical": true,
+      "pristine_sha256": "373649e39a85eb9af52f38eef8018e84af89edeba94a7b5abc937593c59ab4d2"
+    },
+    {
+      "path": "src/joins/sort_merge_join/tests.rs",
+      "identical": true,
+      "pristine_sha256": "079470183513e3bee5903ce5a4aa4087b0b0e3f0ce693af468f41b695b80b09c"
+    },
+    {
+      "path": "src/joins/stream_join_utils.rs",
+      "identical": true,
+      "pristine_sha256": "357b53b627f00ea170b50ba3147fb003cceaef622c3d486f68a36a135a433bc7"
+    },
+    {
+      "path": "src/joins/symmetric_hash_join.rs",
+      "identical": true,
+      "pristine_sha256": "1d0500a89d8d030b443afe3fe18e2dbec6f9d0613a748e27b90e7ae189bd4a8f"
+    },
+    {
+      "path": "src/joins/test_utils.rs",
+      "identical": true,
+      "pristine_sha256": "dfc43b9a65aed72676eb5165b0149664daf1dd139eba28079136d54a8753803d"
+    },
+    {
+      "path": "src/joins/utils.rs",
+      "identical": true,
+      "pristine_sha256": "4681828088f25347da1c93ce6f43ace482846a612a3a2e939bc981d48911ebcd"
+    },
+    {
+      "path": "src/lib.rs",
+      "identical": true,
+      "pristine_sha256": "0834a785b648e907c48b5d7c6333f6ab0e31a2995413b968ea5ba9707055d3e9"
+    },
+    {
+      "path": "src/limit.rs",
+      "identical": true,
+      "pristine_sha256": "53708e476863315e77de8a80b0b1d50b5b3d67c3c08f888d4f1dd7b53c38840e"
+    },
+    {
+      "path": "src/memory.rs",
+      "identical": true,
+      "pristine_sha256": "e5784b19478663ea0d7f7cd9f5f85a963e6e5b1589d46f71b48068c7c941e3ba"
+    },
+    {
+      "path": "src/metrics.rs",
+      "identical": true,
+      "pristine_sha256": "47b3c587bd9992bfade61664f84f1d9ccc221fd43e02d2451876511e425ad311"
+    },
+    {
+      "path": "src/operator_statistics/mod.rs",
+      "identical": true,
+      "pristine_sha256": "41c4018e584937b87b293405c0188a144006e552ad4a54a4242dd5ed6144480b"
+    },
+    {
+      "path": "src/ordering.rs",
+      "identical": true,
+      "pristine_sha256": "5894507511c6e888e9c0aacf68fdc8c47e76a9d2efcc278bf6b937c5ad61d83c"
+    },
+    {
+      "path": "src/placeholder_row.rs",
+      "identical": true,
+      "pristine_sha256": "8e7f2f22f9174e844a72071fea203784457928ab03038a0191ee00129390244d"
+    },
+    {
+      "path": "src/projection.rs",
+      "identical": true,
+      "pristine_sha256": "3981b3811ac5a8ad4e352c8ae6c2640602a9a9fa3e1617ca36479bc651c128b4"
+    },
+    {
+      "path": "src/proto.rs",
+      "identical": true,
+      "pristine_sha256": "1531c8d63e66bf800e5123a7b673e2cf332bdd416cafb54b0fda315f90cad974"
+    },
+    {
+      "path": "src/recursive_query.rs",
+      "identical": true,
+      "pristine_sha256": "41315bad718d89653a495b0d6abf4a78caa155d87a4250a7052d6e1c574baec5"
+    },
+    {
+      "path": "src/render_tree.rs",
+      "identical": true,
+      "pristine_sha256": "ca1874062c07af970c4071b97a6b147140da649f012701f2a574bd72abc01afb"
+    },
+    {
+      "path": "src/repartition/distributor_channels.rs",
+      "identical": true,
+      "pristine_sha256": "965e402c2ffda2594b1ad63fc6caa204e76aa9ba27d7402d45ed1fed75caaf78"
+    },
+    {
+      "path": "src/repartition/mod.rs",
+      "identical": true,
+      "pristine_sha256": "dd40d7cb4970465bc8848a940d1b99af66a8649ef2459c70b4358280131c745c"
+    },
+    {
+      "path": "src/scalar_subquery.rs",
+      "identical": true,
+      "pristine_sha256": "188aeb6f16a60b88d4d924d2ee018d32520a7d5c9b20135eadf3f46fad2a7d76"
+    },
+    {
+      "path": "src/sort_pushdown.rs",
+      "identical": true,
+      "pristine_sha256": "a2ae408da10df5057021d9e2ae846bdef5bc7a43ea095313894698119d389bee"
+    },
+    {
+      "path": "src/sorts/builder.rs",
+      "identical": true,
+      "pristine_sha256": "dc28ee2f23f542e5a7cd9fa0409a421bf67963b3abcfadcf0fa0685816480913"
+    },
+    {
+      "path": "src/sorts/cursor.rs",
+      "identical": true,
+      "pristine_sha256": "02915caee7d139b57e39dda9dc4ff196a116418e18732401e302e4c44d87ce77"
+    },
+    {
+      "path": "src/sorts/merge.rs",
+      "identical": true,
+      "pristine_sha256": "980c996cfa91c44cd4fcd6ea64039ebdb35557351b169a1ed3d7fcfc32e67090"
+    },
+    {
+      "path": "src/sorts/mod.rs",
+      "identical": true,
+      "pristine_sha256": "b7043a4e2f0f185517d5245951f50684d508c368f5dddca4e313b712f0d94d91"
+    },
+    {
+      "path": "src/sorts/multi_level_merge.rs",
+      "identical": true,
+      "pristine_sha256": "ac61c9cec55c91a7b0da6c1e9e686a41c516005682f4281e6066f7d40afafcf9"
+    },
+    {
+      "path": "src/sorts/partial_sort.rs",
+      "identical": true,
+      "pristine_sha256": "02c1a25791095df2e0db5628927615dddc0f3695714a5a3a4aaeae2d05bfbf3b"
+    },
+    {
+      "path": "src/sorts/partitioned_topk.rs",
+      "identical": true,
+      "pristine_sha256": "a96b20f691169607be99f3280b9c8a9b57c2e3b6e7b4920e6693a156a3801ce3"
+    },
+    {
+      "path": "src/sorts/sort.rs",
+      "identical": true,
+      "pristine_sha256": "e731d6fa1e5d68a36154ba0fd497042af19d010f922c6277c3c5492be70a7cfc"
+    },
+    {
+      "path": "src/sorts/sort_preserving_merge.rs",
+      "identical": true,
+      "pristine_sha256": "978059035066b4c6d0bb7cce11f79c217f3c070593328e78b7a756715831a7bf"
+    },
+    {
+      "path": "src/sorts/stream.rs",
+      "identical": true,
+      "pristine_sha256": "590018b090da4e236b70b485bc56f64f0ed1157aa472ef33d13baac7920ea036"
+    },
+    {
+      "path": "src/sorts/streaming_merge.rs",
+      "identical": true,
+      "pristine_sha256": "3f7ff9d0daeb74a472f47db6ed56dd19334eae52139419c8e1f550f6861952d2"
+    },
+    {
+      "path": "src/spill/in_progress_spill_file.rs",
+      "identical": true,
+      "pristine_sha256": "e1c82330ccf4f3956012cb48b7e8cd7121d8fa3167ed2083826712efdf3a5d40"
+    },
+    {
+      "path": "src/spill/mod.rs",
+      "identical": true,
+      "pristine_sha256": "388b4ce1c9de6589acb0cd62c4228bd714298df9e4b1091aec3a9c963b2dd252"
+    },
+    {
+      "path": "src/spill/replayable_spill_input.rs",
+      "identical": true,
+      "pristine_sha256": "121bbe2197ce6d0b4b92a64d692255b71c77de904ccbb32da21afa228c7e86c6"
+    },
+    {
+      "path": "src/spill/spill_manager.rs",
+      "identical": true,
+      "pristine_sha256": "fecd5227f60f55e2b83e7e9f0d21c625ab73717295dfac3570ff38760678a526"
+    },
+    {
+      "path": "src/spill/spill_pool.rs",
+      "identical": true,
+      "pristine_sha256": "9e0911719d89fc602111149441df8d1899259bbc229a0b8f1dda25552a47852c"
+    },
+    {
+      "path": "src/statistics.rs",
+      "identical": true,
+      "pristine_sha256": "ffecacebbb5d9b6583276abd1a7094381f2ba8d9660dec34f8f7e673789e096e"
+    },
+    {
+      "path": "src/stream.rs",
+      "identical": true,
+      "pristine_sha256": "0ae6c6020a40b649ee250c42ff0c8eaffd3f2fe0b7662e9fe915f78d7375591e"
+    },
+    {
+      "path": "src/streaming.rs",
+      "identical": true,
+      "pristine_sha256": "f3386991bd83fd7dc70461e757ca55e42c1b9891d0cbf5279eaf9a6d767b9b48"
+    },
+    {
+      "path": "src/test.rs",
+      "identical": true,
+      "pristine_sha256": "c7b23d8bf02bb17c36acc8c9a1cdc375909212ab7b32ade9bf9bf176a7a155aa"
+    },
+    {
+      "path": "src/test/exec.rs",
+      "identical": true,
+      "pristine_sha256": "05e30bd3287a0582477007d3280d418770fbc387f78c8d2ec7de6af23bacb4e6"
+    },
+    {
+      "path": "src/topk/mod.rs",
+      "identical": true,
+      "pristine_sha256": "43d5b840b43862575b43f1a826773a377fe67c76c6ead96c9445b0dcbf2cc163"
+    },
+    {
+      "path": "src/tree_node.rs",
+      "identical": true,
+      "pristine_sha256": "dc90d4cb35654375721a85e9cc6a083463875676c287eeb60907c090bd9c0d42"
+    },
+    {
+      "path": "src/union.rs",
+      "identical": true,
+      "pristine_sha256": "88c9002dc6a2153fc6f268b4f5518b7970ec9c0c316f87255381baf1ecc4b4e2"
+    },
+    {
+      "path": "src/unnest.rs",
+      "identical": true,
+      "pristine_sha256": "d99e22e41ca289286b59529d429742e69e9ab92e5c3d23f64fa8d408f1e71906"
+    },
+    {
+      "path": "src/visitor.rs",
+      "identical": true,
+      "pristine_sha256": "11ceff0dc2cf4c6dad9070a4ff135c32e5df0479be4392bd807dfc3aa54dd5f9"
+    },
+    {
+      "path": "src/windows/bounded_window_agg_exec.rs",
+      "identical": true,
+      "pristine_sha256": "25c4b7001c0a88d106afffe0088debfbd44e4b9d8c4269cd22cf53107a4050d2"
+    },
+    {
+      "path": "src/windows/mod.rs",
+      "identical": true,
+      "pristine_sha256": "2babd4f68b4785f5982e5df0c84b3569e295fdae304cf2c9e4eed19f3cbffb86"
+    },
+    {
+      "path": "src/windows/proto.rs",
+      "identical": true,
+      "pristine_sha256": "0f1f70364f43192186e1d021955805ba8c441416fa9ab49c75728dabed727bba"
+    },
+    {
+      "path": "src/windows/utils.rs",
+      "identical": true,
+      "pristine_sha256": "72a808e5de0255a00c3fbff31a796522d05573862bd5a54d39aa285c9df59aae"
+    },
+    {
+      "path": "src/windows/window_agg_exec.rs",
+      "identical": true,
+      "pristine_sha256": "fe1de51b88327c4c94bff4e4a0b31fa618e02b467906487dd0c4e470e6967904"
+    },
+    {
+      "path": "src/work_table.rs",
+      "identical": true,
+      "pristine_sha256": "efedf7c9fe34f8eb63b194f3e199f028b4d5e80de716287d775928cba2fcb562"
+    }
+  ],
+  "target_datafusion_tag": "55.2.0",
+  "target_datafusion_commit": "500744d5c25499055e3b2ca46b022bc425989203",
+  "target_published_crate": {
+    "name": "datafusion-physical-plan",
+    "version": "55.2.0",
+    "source": "registry+https://github.com/rust-lang/crates.io-index",
+    "checksum": "b1451d6817e5ac0dd21819b19949d1c420ab51d748f55dd9a96ecb5418a24c97"
+  },
+  "target_manifest_requirement": "Use standalone normalizedpublishedcrate manifest; preserve display.rs/serde55.2.0, license/notice; do not inherit Cometworkspace version1.2.0."
+}
