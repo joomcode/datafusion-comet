@@ -13,9 +13,10 @@
       "thread_id": "01a1e716-379a-7d92-b6bd-cbd9c8500afc",
       "host_id": "local",
       "title_requested": "Comet G01: подготовка без кода",
-      "status": "IDLE_PREPARATION_COMPLETED_WAITING_USER_CODE_PERMISSION",
+      "status": "IDLE_PREPARATION_COMPLETE_NO_IMPLEMENTATION_ASSIGNED",
       "report": "G01-preparation.json",
-      "last_verified_head": "5e2f39b8a581d2bb055a4981cbf649c4bf059222"
+      "last_verified_head": "5e2f39b8a581d2bb055a4981cbf649c4bf059222",
+      "intended_role": "OPTIONAL_REVIEW_OR_SEPARATE_TASK_IF_NEEDED"
     }
   ],
   "local_comet_project_registered_in_app": true,
@@ -47,9 +48,10 @@
         "thread_id": "01a1e716-379a-7d92-b6bd-cbd9c8500afc",
         "host_id": "local",
         "title_requested": "Comet G01: подготовка без кода",
-        "status": "IDLE_PREPARATION_COMPLETED_WAITING_USER_CODE_PERMISSION",
+        "status": "IDLE_PREPARATION_COMPLETE_NO_IMPLEMENTATION_ASSIGNED",
         "report": "G01-preparation.json",
-        "last_verified_head": "5e2f39b8a581d2bb055a4981cbf649c4bf059222"
+        "last_verified_head": "5e2f39b8a581d2bb055a4981cbf649c4bf059222",
+        "intended_role": "OPTIONAL_REVIEW_OR_SEPARATE_TASK_IF_NEEDED"
       }
     },
     {
@@ -329,8 +331,28 @@
     "Wait for explicit user instruction before writing implementation code.",
     "If actual tool/access gaps arise during authorized work, report them instead of long workarounds."
   ],
-  "next_step": "G01 worker подготовлен и остановлен. После прямого разрешения пользователя координатор передаст актуальный HEAD/правила и запустит реализацию G01; до этого код не писать.",
+  "next_step": "Ожидать прямого разрешения писать код. Затем основной чат начинает G01, самостоятельно делегируя исследования/review помощникам; отдельный G01 prep-чат не является назначенным исполнителем реализации.",
   "qualification": "Comet/Spark/Delta correctness, ANSI, packaging and vendor tests not run. Local performance measurements to be attempted during implementation; production GCP benchmarks deferred to user.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
-  "cleanup_ledger": "cleanup-ledger.json"
+  "cleanup_ledger": "cleanup-ledger.json",
+  "execution_model": {
+    "selected_on": "2026-11-17",
+    "status": "SELECTED_BY_COORDINATOR_WITHIN_USER_AUTHORIZED_ORCHESTRATION",
+    "primary": "ONE_MAIN_CHAT_EXECUTES_AND_COORDINATES",
+    "main_chat_responsibility": "Последовательная реализация G01–G09 в утверждённых feature branches, интеграция, запуск необходимых проверок, состояние/решения/cleanup учёт; единственный пишущий исполнитель checkout.",
+    "internal_helpers": "Ограниченные исследования, сверка совместимости, независимый review diff/тестового покрытия. По умолчанию read-only; не запускать параллельную запись в общий checkout или все тяжёлые builds одновременно.",
+    "delegation_owner": "Координатор самостоятельно выбирает задачи, границы и время делегирования, передаёт контекст и проверяет результат. Пользователь не должен управлять помощниками вручную.",
+    "delegation_checkpoints": {
+      "G01": "Dependency graph/vendor provenance, Spark/Delta compatibility и Linux JAR packaging.",
+      "G02_G07": "JNI/FFI, ownership/cancellation и buffer lifetime.",
+      "G03_G06": "Sort/aggregate/SMJ/window memory/spill, outer-join/window correctness и ANSI semantics.",
+      "G08": "Expression evaluation order, UDF/serialization.",
+      "G09_FINAL": "Полнота 58 карточек, engine boundaries/AQE, совместные regressions и артефакты."
+    },
+    "new_user_visible_chat_policy": "Создавать по решению координатора при конкретной пользе от длительной изолированной задачи/отдельного ограниченного контекста или технической необходимости передачи продолжения. Новый PR/большой diff/compaction сами по себе не требуют нового чата. Сначала сообщить причину, сохранить checkpoint (actual HEAD, tree, tests, next step), передать контекст и проверить результат; повторное разрешение на каждую сессию не требуется в существующем scope.",
+    "existing_g01_preparation_chat": "Оставить idle; подготовка завершена. Реализацию в нём автоматически не начинать; использовать при реальной необходимости отдельной проверки.",
+    "user_involvement": "Явное начало кода, новые решения о поведении/объёме/разрешениях и реальные environment blockers. Не повседневное распределение задач.",
+    "implementation_hold_preserved": true,
+    "approved_feature_groups_and_release_milestones_unchanged": true
+  }
 }

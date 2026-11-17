@@ -6410,6 +6410,26 @@
       "baseline": "resource-baseline.json",
       "final_guide": "CLEANUP.md",
       "rule": "Записывать точные paths/IDs, размеры, происхождение и shared/task-owned статус; в конце точечные cleanup-команды с сохранением final JAR/checksums/build manifests."
+    },
+    "execution_model": {
+      "selected_on": "2026-11-17",
+      "status": "SELECTED_BY_COORDINATOR_WITHIN_USER_AUTHORIZED_ORCHESTRATION",
+      "primary": "ONE_MAIN_CHAT_EXECUTES_AND_COORDINATES",
+      "main_chat_responsibility": "Последовательная реализация G01–G09 в утверждённых feature branches, интеграция, запуск необходимых проверок, состояние/решения/cleanup учёт; единственный пишущий исполнитель checkout.",
+      "internal_helpers": "Ограниченные исследования, сверка совместимости, независимый review diff/тестового покрытия. По умолчанию read-only; не запускать параллельную запись в общий checkout или все тяжёлые builds одновременно.",
+      "delegation_owner": "Координатор самостоятельно выбирает задачи, границы и время делегирования, передаёт контекст и проверяет результат. Пользователь не должен управлять помощниками вручную.",
+      "delegation_checkpoints": {
+        "G01": "Dependency graph/vendor provenance, Spark/Delta compatibility и Linux JAR packaging.",
+        "G02_G07": "JNI/FFI, ownership/cancellation и buffer lifetime.",
+        "G03_G06": "Sort/aggregate/SMJ/window memory/spill, outer-join/window correctness и ANSI semantics.",
+        "G08": "Expression evaluation order, UDF/serialization.",
+        "G09_FINAL": "Полнота 58 карточек, engine boundaries/AQE, совместные regressions и артефакты."
+      },
+      "new_user_visible_chat_policy": "Создавать по решению координатора при конкретной пользе от длительной изолированной задачи/отдельного ограниченного контекста или технической необходимости передачи продолжения. Новый PR/большой diff/compaction сами по себе не требуют нового чата. Сначала сообщить причину, сохранить checkpoint (actual HEAD, tree, tests, next step), передать контекст и проверить результат; повторное разрешение на каждую сессию не требуется в существующем scope.",
+      "existing_g01_preparation_chat": "Оставить idle; подготовка завершена. Реализацию в нём автоматически не начинать; использовать при реальной необходимости отдельной проверки.",
+      "user_involvement": "Явное начало кода, новые решения о поведении/объёме/разрешениях и реальные environment blockers. Не повседневное распределение задач.",
+      "implementation_hold_preserved": true,
+      "approved_feature_groups_and_release_milestones_unchanged": true
     }
   },
   "plan_approved_entry_ids": [

@@ -25,3 +25,9 @@ resources, never automatically disposable migration outputs. Do not delete them.
 Use HANDOFF.md for cross-chat transfer. Each real worker prompt must explicitly
 point here because there is deliberately no migration pointer in root AGENTS.md.
 Record progress and evidence without silently changing the approved 58-card scope.
+
+The main chat is the default implementation/integration owner; internal helpers
+perform bounded research and independent review. The coordinator chooses delegation
+and occasional user-visible sessions autonomously within the authorized scope.
+Nine feature branches do not require nine separate chats. See HANDOFF.md and
+decisions.json#execution_model. The current code hold remains active.

@@ -584,5 +584,6 @@
     "reference": "PERFORMANCE.md",
     "correctness_tests_unchanged": true
   },
-  "last_updated_on": "2026-11-17"
+  "last_updated_on": "2026-11-17",
+  "execution_model_ref": "decisions.json#execution_model"
 }

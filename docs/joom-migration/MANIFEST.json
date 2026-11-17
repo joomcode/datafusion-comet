@@ -4,7 +4,7 @@
   "files": [
     {
       "path": "AGENTS.md",
-      "sha256": "779198b7a352e4659e0a41e9cb15dba4314d14c4f0035d0164f761992b4fef9f"
+      "sha256": "1ca923cbe1a2fef82674d2177b18c151a5722939ddb906a08a010de581d173c9"
     },
     {
       "path": "CLEANUP.md",
@@ -16,7 +16,7 @@
     },
     {
       "path": "HANDOFF.md",
-      "sha256": "95404f0ace457aab265366b3a60dbd5a6d62f4a7d2ab7b79e7ae4e796c4b0f79"
+      "sha256": "010ee6afa1d06b3b5c1abf803d5ebe39bf46cb0e2b56707a4f560e7f15935367"
     },
     {
       "path": "NETWORK.md",
@@ -28,11 +28,11 @@
     },
     {
       "path": "README.md",
-      "sha256": "342edd9f1434b2778727996191784b1e60fd2f229f642aa8eeebb7845893e8f9"
+      "sha256": "afe578ef3523bc3c467b9883a69721f0b2a124c2236cf4245d4dc484c4c5f5af"
     },
     {
       "path": "STATE.json",
-      "sha256": "735899576cd0009acc0325f182b59bf124dfcd824daa4e517ae1b9529d706945"
+      "sha256": "cae42887ddf9e5604b0f42c3e9f3bb81cf649d718f52fee547f8e142f63be1b9"
     },
     {
       "path": "approved-plan-ru.txt",
@@ -40,7 +40,7 @@
     },
     {
       "path": "approved-plan.json",
-      "sha256": "1fe3f807c7f6ef35d1dc362035cfcc545a7edafd6bb04c65e2af0bc0409147f7"
+      "sha256": "f994753b5a9378b9e9783ab4eba748cd4f6423e4591cdb5f1f9079b096531a8d"
     },
     {
       "path": "cleanup-ledger.json",
@@ -56,11 +56,11 @@
     },
     {
       "path": "decisions.json",
-      "sha256": "ae65a64d1a9ec5e5454b06ac7153066103485192de419d5f621bbc2d27dee648"
+      "sha256": "fe5f801e3e0cddab42ff3ea798b31f198f8475bb21394b32187aa0fbf37c9517"
     },
     {
       "path": "feature-register.json",
-      "sha256": "32539aecd4ffa188b9e27a306801a214b40395c24076fde62a079561ad3db121"
+      "sha256": "a0059e076e32aceaa68112140bc1c7a9dba27cb977d391b168e45b4e2a84b393"
     },
     {
       "path": "resource-baseline.json",
