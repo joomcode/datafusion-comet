@@ -52,6 +52,10 @@ if __name__ == "__main__":
 
         root = Path(".")
         for path in root.rglob("*Suite.scala"):
+            # Build outputs may contain a patched Spark test checkout. Match the
+            # forward declaration check below: inventory project sources only.
+            if "target" in path.parts:
+                continue
             # contrib suites run via their own module-level workflows
             # (e.g. delta_contrib_test.yml), not the main PR build matrix
             if path.parts[0] == "contrib":
