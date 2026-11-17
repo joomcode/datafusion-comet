@@ -7,7 +7,17 @@
   "observed_code_head_before_documentation_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
   "implementation_started": false,
   "active_writer": null,
-  "worker_threads_created": [],
+  "worker_threads_created": [
+    {
+      "group": "G01",
+      "thread_id": "01a1e716-379a-7d92-b6bd-cbd9c8500afc",
+      "host_id": "local",
+      "title_requested": "Comet G01: подготовка без кода",
+      "status": "IDLE_PREPARATION_COMPLETED_WAITING_USER_CODE_PERMISSION",
+      "report": "G01-preparation.json",
+      "last_verified_head": "5e2f39b8a581d2bb055a4981cbf649c4bf059222"
+    }
+  ],
   "local_comet_project_registered_in_app": true,
   "groups": [
     {
@@ -31,7 +41,16 @@
       "status": "NOT_STARTED",
       "head_commit": null,
       "tests": "NOT_RUN",
-      "handoff_report": null
+      "handoff_report": null,
+      "preparation": {
+        "group": "G01",
+        "thread_id": "01a1e716-379a-7d92-b6bd-cbd9c8500afc",
+        "host_id": "local",
+        "title_requested": "Comet G01: подготовка без кода",
+        "status": "IDLE_PREPARATION_COMPLETED_WAITING_USER_CODE_PERMISSION",
+        "report": "G01-preparation.json",
+        "last_verified_head": "5e2f39b8a581d2bb055a4981cbf649c4bf059222"
+      }
     },
     {
       "id": "G02",
@@ -308,10 +327,9 @@
   },
   "pending_setup": [
     "Wait for explicit user instruction before writing implementation code.",
-    "Prepare initial G01 worker read-only; no implementation, downloads, builds or Git mutations.",
-    "Report missing environment tools/access instead of long workarounds."
+    "If actual tool/access gaps arise during authorized work, report them instead of long workarounds."
   ],
-  "next_step": "Подготовить и проверить G01 worker read-only; реализацию не начинать до прямого указания пользователя.",
+  "next_step": "G01 worker подготовлен и остановлен. После прямого разрешения пользователя координатор передаст актуальный HEAD/правила и запустит реализацию G01; до этого код не писать.",
   "qualification": "Comet/Spark/Delta correctness, ANSI, packaging and vendor tests not run. Local performance measurements to be attempted during implementation; production GCP benchmarks deferred to user.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json"

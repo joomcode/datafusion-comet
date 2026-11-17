@@ -11,6 +11,10 @@
       "sha256": "500d782de7be2e3aafb2a670e8d010ac8f1ead449a369592eacdfdbc4b79d98f"
     },
     {
+      "path": "G01-preparation.json",
+      "sha256": "349f0178f81805e018b5ed9343564eb8dec9e2f5d01ed724dfc32394091a5804"
+    },
+    {
       "path": "HANDOFF.md",
       "sha256": "95404f0ace457aab265366b3a60dbd5a6d62f4a7d2ab7b79e7ae4e796c4b0f79"
     },
@@ -28,7 +32,7 @@
     },
     {
       "path": "STATE.json",
-      "sha256": "b60c1667e26570eb80a1a43aa3d2b2cb7c7791308f741660798e8658f8c0ef8d"
+      "sha256": "735899576cd0009acc0325f182b59bf124dfcd824daa4e517ae1b9529d706945"
     },
     {
       "path": "approved-plan-ru.txt",
@@ -40,11 +44,15 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "0424b314f95bf6b6b8a07c31b493341984615e65f7c94154e5c559deac7c2491"
+      "sha256": "9c175326f11c48e2cb4ef8b22f6ff1c7451dc723d6aaf22e0740f8fc313732b5"
     },
     {
       "path": "correctness-test-plan-ru.txt",
       "sha256": "6efd6d143ef8e0e5cebc22cb79b779c08de6ea8920ead49c448313129590cc9c"
+    },
+    {
+      "path": "created-files.txt",
+      "sha256": "c73c53dd3527acb3182c36169bf818572ff6746c87fe413aece5988820c07a5a"
     },
     {
       "path": "decisions.json",

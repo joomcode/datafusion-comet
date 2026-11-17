@@ -8,7 +8,16 @@
       "type": "migration_documentation",
       "path": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration",
       "ownership": "TASK_DOCUMENTATION",
-      "preserve_until": "User decides after migration"
+      "preserve_until": "User decides after migration",
+      "new_files_in_this_setup": [
+        "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/AGENTS.md",
+        "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/CLEANUP.md",
+        "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/G01-preparation.json",
+        "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/PERFORMANCE.md",
+        "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/cleanup-ledger.json",
+        "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/created-files.txt",
+        "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/resource-baseline.json"
+      ]
     },
     {
       "type": "raw_setup_logs",
