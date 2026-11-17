@@ -35,8 +35,10 @@ import org.apache.spark.sql.catalyst.catalog.{BucketSpec, CatalogStatistics, Cat
 import org.apache.spark.sql.catalyst.expressions.{DynamicPruningExpression, Expression, ExpressionInfo, Hex, Literal}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateMode, BloomFilterAggregate, Final}
 import org.apache.spark.sql.catalyst.plans.logical.Expand
+import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, HashPartitioningLike, SinglePartition, UnknownPartitioning}
 import org.apache.spark.sql.comet._
 import org.apache.spark.sql.comet.execution.shuffle.{CometColumnarShuffle, CometNativeShuffle, CometShuffleExchangeExec}
+import org.apache.spark.sql.comet.shims.ShimCometUnionExec
 import org.apache.spark.sql.connector.catalog.InMemoryTableCatalog
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AQEShuffleReadExec, BroadcastQueryStageExec, LogicalQueryStage}
@@ -4044,6 +4046,107 @@ class CometExecSuite extends CometTestBase {
               "spark.sql.join.forceApplyShuffledHashJoin" -> "true") {
               checkNotSplit(join, classOf[CometHashJoinExec])
             }
+          }
+        }
+      }
+    }
+  }
+
+  if (isSpark41Plus) {
+    test("Comet union rejects a child RDD that violates its known partitioning") {
+      val left = spark.sparkContext.parallelize(Seq(0L, 0L), 2)
+      val right = spark.sparkContext.parallelize(Seq(0L, 0L), 2)
+      val inputs = Seq(left, right)
+      // Negative control: the old concat fallback puts the same key in four partitions. A parent
+      // aggregate that trusted a known layout would emit four counts of one instead of one four.
+      val concatenated = spark.sparkContext.union(inputs)
+      assert(concatenated.partitions.length == 4)
+      assert(
+        concatenated.mapPartitions(rows => Iterator(rows.size)).collect().toSeq == Seq(
+          1,
+          1,
+          1,
+          1))
+      Seq(SinglePartition, HashPartitioning(Seq(Literal(0L)), 3)).foreach { claimed =>
+        val error = intercept[IllegalStateException] {
+          ShimCometUnionExec.unionRDDs(spark.sparkContext, inputs, claimed)
+        }
+        assert(error.getMessage.contains("child partition counts (2, 2)"))
+        assert(error.getMessage.contains(s"numPartitions=${claimed.numPartitions}"))
+      }
+    }
+
+    test("Comet union preserves empty known layouts and unknown concatenation") {
+      Seq(SinglePartition, HashPartitioning(Seq(Literal(0L)), 3)).foreach { claimed =>
+        val empty = ShimCometUnionExec.unionRDDs(
+          spark.sparkContext,
+          Seq(spark.sparkContext.emptyRDD[Long]),
+          claimed)
+        assert(empty.partitions.length == claimed.numPartitions)
+        assert(empty.collect().isEmpty)
+        if (claimed == SinglePartition) {
+          // A parent final COUNT(*) trusts SinglePartition and must emit one zero row,
+          // rather than lose its task altogether when every input RDD has no partitions.
+          val counts = empty.mapPartitions(rows => Iterator(rows.size.toLong)).collect()
+          assert(counts.toSeq == Seq(0L))
+        }
+      }
+      val inputs = Seq(
+        spark.sparkContext.parallelize(Seq(1L, 2L), 2),
+        spark.sparkContext.parallelize(Seq(3L), 1))
+      val unknown =
+        ShimCometUnionExec.unionRDDs(spark.sparkContext, inputs, UnknownPartitioning(3))
+      assert(unknown.partitions.length == 3)
+      assert(unknown.collect().sorted.toSeq == Seq(1L, 2L, 3L))
+      val single = ShimCometUnionExec.unionRDDs(
+        spark.sparkContext,
+        inputs.map(_.coalesce(1)),
+        SinglePartition)
+      assert(single.partitions.length == 1)
+      assert(single.collect().sorted.toSeq == Seq(1L, 2L, 3L))
+    }
+
+    test("Comet union preserves native grouping across planning and execution conf flips") {
+      Seq(false, true).foreach { aqe =>
+        withSQLConf(
+          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe.toString,
+          "spark.sql.unionOutputPartitioning" -> "true",
+          "spark.sql.codegen.wholeStage.union.enabled" -> "true",
+          "spark.sql.codegen.wholeStage.union.maxChildren" -> "3",
+          SQLConf.SHUFFLE_PARTITIONS.key -> "4") {
+          val left = spark.range(0, 20, 1, 2).selectExpr("id % 5 AS k")
+          val right = spark.range(20, 40, 1, 2).selectExpr("id % 5 AS k")
+          val df = left
+            .repartition(4, $"k")
+            .union(right.repartition(4, $"k"))
+            .groupBy("k")
+            .count()
+          val prepared = df.queryExecution.executedPlan
+          val unions = collect(prepared) { case u: CometUnionExec => u }
+          val layouts = unions.map(u => u -> u.outputPartitioning)
+          if (!aqe) {
+            assert(unions.size == 1, prepared)
+            assert(layouts.head._2.isInstanceOf[HashPartitioningLike], layouts.head._2)
+            assert(collect(prepared) { case s: ShuffleExchangeLike => s }.size == 2, prepared)
+          } else {
+            // Comet can be installed only in AQE's post-stage rules. Constructing the wrapper
+            // still records Spark's preparation snapshot before the conf changes below.
+            assert(prepared.isInstanceOf[AdaptiveSparkPlanExec])
+          }
+          withSQLConf(
+            "spark.sql.unionOutputPartitioning" -> "false",
+            "spark.sql.codegen.wholeStage.union.enabled" -> "false",
+            "spark.sql.codegen.wholeStage.union.maxChildren" -> "2") {
+            checkAnswer(df, (0L until 5L).map(k => Row(k, 8L)))
+            val executed = collect(df.queryExecution.executedPlan) { case u: CometUnionExec => u }
+            assert(executed.size == 1, df.queryExecution.executedPlan)
+            executed.foreach { u =>
+              val layout = u.outputPartitioning
+              if (!layout.isInstanceOf[UnknownPartitioning]) {
+                assert(u.executeColumnar().partitions.length == layout.numPartitions)
+              }
+            }
+            layouts.foreach { case (u, layout) => assert(u.outputPartitioning == layout) }
           }
         }
       }

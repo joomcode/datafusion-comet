@@ -45,18 +45,20 @@ object ShimCometUnionExec extends Logging {
       case SinglePartition | _: HashPartitioningLike =>
         val numPartitions = outputPartitioning.numPartitions
         val nonEmpty = rdds.filter(_.partitions.nonEmpty)
-        // SQLPartitioningAwareUnionRDD indexes every child at every output partition, so any
-        // child whose partition count diverges from the declared numPartitions would raise
-        // ArrayIndexOutOfBoundsException. That would only happen if the declared partitioning
-        // is stale relative to the RDDs (e.g. children were coalesced by AQE but the reported
-        // partitioning was not). Fall back to plain concat in that case.
-        if (nonEmpty.isEmpty || nonEmpty.exists(_.partitions.length != numPartitions)) {
+        // The parent may already have elided its exchange based on this known partitioning.
+        // Concatenating on a stale child count would split a key between output partitions while
+        // still advertising the old layout, and can silently produce duplicate aggregate groups.
+        // Fail before executing that layout rather than change the RDD contract behind the parent.
+        if (numPartitions <= 0 || nonEmpty.exists(_.partitions.length != numPartitions)) {
           val childCounts = rdds.map(_.partitions.length).mkString(", ")
-          logWarning(
+          throw new IllegalStateException(
             s"CometUnionExec: child partition counts ($childCounts) do not match " +
-              s"declared output partitioning numPartitions=$numPartitions; " +
-              "falling back to SparkContext.union concat.")
-          sc.union(rdds)
+              s"declared output partitioning numPartitions=$numPartitions")
+        }
+        if (nonEmpty.isEmpty) {
+          // SQLPartitioningAwareUnionRDD requires a parent. Preserve the declared number of empty
+          // partitions so a parent global aggregate still receives a task on empty input.
+          sc.parallelize(Seq.empty[T], numPartitions)
         } else {
           new SQLPartitioningAwareUnionRDD(sc, nonEmpty, numPartitions)
         }
