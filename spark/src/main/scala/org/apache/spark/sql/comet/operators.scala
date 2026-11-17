@@ -2049,6 +2049,16 @@ case class CometExplodeExec(
 
 object CometUnionExec extends CometSink[UnionExec] {
 
+  def apply(
+      originalPlan: SparkPlan,
+      output: Seq[Attribute],
+      children: Seq[SparkPlan]): CometUnionExec =
+    new CometUnionExec(
+      originalPlan,
+      output,
+      children,
+      shims.ShimCometUnionExec.captureLegacyPartitioningPolicy(originalPlan))
+
   override def enabledConfig: Option[ConfigEntry[Boolean]] = Some(
     CometConf.COMET_EXEC_UNION_ENABLED)
 
@@ -2062,24 +2072,22 @@ object CometUnionExec extends CometSink[UnionExec] {
 case class CometUnionExec(
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
-    children: Seq[SparkPlan])
+    children: Seq[SparkPlan],
+    legacyPartitioningEnabled: Option[Boolean])
     extends CometExec {
 
-  // CometExec's default outputPartitioning delegates to `originalPlan`, which captures the
-  // children that were live at CometExecRule conversion time. AQE post-stage rewrites
-  // (coalesce, skew join, etc.) later re-parent our `children` field but do not update
-  // `originalPlan`, so the partitioning read from the frozen snapshot can describe a
-  // pre-coalesce layout with more partitions than the RDDs will actually produce. Recompute
-  // from current children so SPARK-52921's union-output-partitioning inference is based on
-  // the live plan. Safe on older Spark too: UnionExec.outputPartitioning returns
-  // UnknownPartitioning when UNION_OUTPUT_PARTITIONING is off (the pre-4.1 default).
-  //
-  // Only advertise SinglePartition or HashPartitioningLike — the same whitelist that Spark's
-  // UnionExec.comparePartitioning uses and that ShimCometUnionExec.unionRDDs honors via
-  // SQLPartitioningAwareUnionRDD. For anything else, report UnknownPartitioning so that the
-  // declared partitioning and the RDD layer always agree.
+  // Spark 4.1 reads the live session conf in UnionExec.outputPartitioning. AQE copies a union
+  // after its parent has already planned against that answer, so sampling the conf again can
+  // concatenate partitions after the parent elided its exchange. Keep the 4.1 policy in an
+  // immutable constructor field: case-class copy/withNewChildren must carry it forward.
+  // Each copy infers the layout from its live children, not from a frozen Partitioning, because
+  // AQE can change their partition counts. Spark 4.2.1 carries its own preparation/decision
+  // snapshot; the shim delegates to that original Spark union, preserving even decisions made
+  // before late conversion. Keep the same per-instance lazy layout and supported partitioning
+  // whitelist on every Spark version.
   override lazy val outputPartitioning: Partitioning = {
-    originalPlan.withNewChildren(children).outputPartitioning match {
+    shims.ShimCometUnionExec
+      .outputPartitioning(originalPlan, output, children, legacyPartitioningEnabled) match {
       case p @ (SinglePartition | _: HashPartitioningLike) => p
       case p => UnknownPartitioning(p.numPartitions)
     }
@@ -2092,10 +2100,13 @@ case class CometUnionExec(
     // (so partition i of the result holds only one child's partition i), which violates that
     // partitioning claim and silently corrupts aggregates layered above the union. The shim
     // routes through SQLPartitioningAwareUnionRDD on 4.1+ when a known partitioning is declared.
+    // Choose the advertised layout before child execution can materialize an adaptive/cached
+    // child and sharpen its metadata. The shim validates actual RDD counts against this layout.
+    val partitioning = outputPartitioning
     shims.ShimCometUnionExec.unionRDDs(
       sparkContext,
       children.map(_.executeColumnar()),
-      outputPartitioning)
+      partitioning)
   }
 
   override protected def withNewChildrenInternal(newChildren: IndexedSeq[SparkPlan]): SparkPlan =
@@ -2117,12 +2128,13 @@ case class CometUnionExec(
     obj match {
       case other: CometUnionExec =>
         this.output == other.output &&
-        this.children == other.children
+        this.children == other.children &&
+        this.legacyPartitioningEnabled == other.legacyPartitioningEnabled
       case _ => false
     }
   }
 
-  override def hashCode(): Int = Objects.hashCode(output, children)
+  override def hashCode(): Int = Objects.hashCode(output, children, legacyPartitioningEnabled)
 }
 
 /**

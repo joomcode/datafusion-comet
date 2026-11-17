@@ -4107,10 +4107,10 @@ class CometExecSuite extends CometTestBase {
     }
 
     test("Comet union preserves native grouping across planning and execution conf flips") {
-      Seq(false, true).foreach { aqe =>
+      for (aqe <- Seq(false, true); plannedEnabled <- Seq(false, true)) {
         withSQLConf(
           SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe.toString,
-          "spark.sql.unionOutputPartitioning" -> "true",
+          "spark.sql.unionOutputPartitioning" -> plannedEnabled.toString,
           "spark.sql.codegen.wholeStage.union.enabled" -> "true",
           "spark.sql.codegen.wholeStage.union.maxChildren" -> "3",
           SQLConf.SHUFFLE_PARTITIONS.key -> "4") {
@@ -4126,15 +4126,18 @@ class CometExecSuite extends CometTestBase {
           val layouts = unions.map(u => u -> u.outputPartitioning)
           if (!aqe) {
             assert(unions.size == 1, prepared)
-            assert(layouts.head._2.isInstanceOf[HashPartitioningLike], layouts.head._2)
-            assert(collect(prepared) { case s: ShuffleExchangeLike => s }.size == 2, prepared)
+            assert(
+              layouts.head._2.isInstanceOf[HashPartitioningLike] == plannedEnabled,
+              layouts.head._2)
+            val expectedShuffles = if (plannedEnabled) 2 else 3
+            assert(
+              collect(prepared) { case s: ShuffleExchangeLike => s }.size == expectedShuffles,
+              prepared)
           } else {
-            // Comet can be installed only in AQE's post-stage rules. Constructing the wrapper
-            // still records Spark's preparation snapshot before the conf changes below.
             assert(prepared.isInstanceOf[AdaptiveSparkPlanExec])
           }
           withSQLConf(
-            "spark.sql.unionOutputPartitioning" -> "false",
+            "spark.sql.unionOutputPartitioning" -> (!plannedEnabled).toString,
             "spark.sql.codegen.wholeStage.union.enabled" -> "false",
             "spark.sql.codegen.wholeStage.union.maxChildren" -> "2") {
             checkAnswer(df, (0L until 5L).map(k => Row(k, 8L)))
@@ -4147,6 +4150,80 @@ class CometExecSuite extends CometTestBase {
               }
             }
             layouts.foreach { case (u, layout) => assert(u.outputPartitioning == layout) }
+          }
+        }
+      }
+    }
+
+    test("Comet union copies retain the policy and infer live Hash and Single layouts") {
+      for (plannedEnabled <- Seq(false, true); single <- Seq(false, true)) {
+        withSQLConf(
+          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+          "spark.sql.unionOutputPartitioning" -> plannedEnabled.toString) {
+          val left = spark.range(0, 20, 1, 2).selectExpr("id % 5 AS k")
+          val right = spark.range(20, 40, 1, 2).selectExpr("id % 5 AS k")
+          def nativeUnion(singlePartition: Boolean): CometUnionExec = {
+            val df = if (singlePartition) {
+              left.coalesce(1).union(right.coalesce(1))
+            } else {
+              left.repartition(4, $"k").union(right.repartition(4, $"k"))
+            }
+            val plan = df.queryExecution.executedPlan
+            val unions = collect(plan) { case u: CometUnionExec => u }
+            assert(unions.size == 1, plan)
+            unions.head
+          }
+          val original = nativeUnion(single)
+          // Do not read the wrapper's outputPartitioning before flipping the conf. Capturing a
+          // lazy value on its first read (or in the body of every new copy) is not a policy snapshot.
+          withSQLConf("spark.sql.unionOutputPartitioning" -> (!plannedEnabled).toString) {
+            // Also exercise the legacy inference on Spark 4.2.1, whose natural path delegates to
+            // its stamped Spark UnionExec. This tests the compatibility path without a 4.2.0 build.
+            val implementations = if (original.legacyPartitioningEnabled.isEmpty) {
+              Seq(original, original.copy(legacyPartitioningEnabled = Some(plannedEnabled)))
+            } else {
+              assert(original.legacyPartitioningEnabled.contains(plannedEnabled))
+              Seq(original)
+            }
+            def verify(union: CometUnionExec, isSingle: Boolean): Unit = {
+              val layout = union.outputPartitioning
+              if (plannedEnabled) {
+                if (isSingle) assert(layout == SinglePartition, layout)
+                else {
+                  assert(layout.isInstanceOf[HashPartitioningLike], layout)
+                  assert(layout.numPartitions == 4, layout)
+                  val attributes = layout.asInstanceOf[Expression].references
+                  assert(attributes.subsetOf(union.outputSet), layout)
+                }
+              } else {
+                assert(layout.isInstanceOf[UnknownPartitioning], layout)
+              }
+              val expectedPartitions =
+                if (plannedEnabled) { if (isSingle) 1 else 4 }
+                else { if (isSingle) 2 else 8 }
+              assert(union.executeColumnar().partitions.length == expectedPartitions)
+              val keys = union.executeCollect().map(_.getLong(0)).sorted.toSeq
+              assert(keys == (0L until 5L).flatMap(k => Seq.fill(8)(k)))
+            }
+            implementations.foreach { union =>
+              verify(union, single)
+              verify(union.copy(), single)
+              verify(
+                union.withNewChildren(union.children.reverse).asInstanceOf[CometUnionExec],
+                single)
+              // A fixed HashPartitioning value would pass the conf-flip checks but describe the
+              // wrong layout after AQE changes the children. Rebind real native children of the
+              // opposite layout and require the advertised partitioning AND execution to follow.
+              val rebound = union.copy(children = nativeUnion(!single).children)
+              verify(rebound, !single)
+            }
+            if (original.legacyPartitioningEnabled.isEmpty) {
+              // A late Spark 4.2.1 conversion must use its original preparation/decision tags,
+              // including disabled -> enabled, rather than capture the now-current conf.
+              verify(
+                CometUnionExec(original.originalPlan, original.output, original.children),
+                single)
+            }
           }
         }
       }

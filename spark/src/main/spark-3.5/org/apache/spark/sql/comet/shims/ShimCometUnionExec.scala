@@ -23,9 +23,21 @@ import scala.reflect.ClassTag
 
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
+import org.apache.spark.sql.execution.SparkPlan
 
 object ShimCometUnionExec {
+
+  def captureLegacyPartitioningPolicy(
+      @annotation.nowarn("cat=unused") originalPlan: SparkPlan): Option[Boolean] = None
+
+  def outputPartitioning(
+      originalPlan: SparkPlan,
+      @annotation.nowarn("cat=unused") output: Seq[Attribute],
+      children: Seq[SparkPlan],
+      @annotation.nowarn("cat=unused") legacyPartitioningEnabled: Option[Boolean]): Partitioning =
+    originalPlan.withNewChildren(children).outputPartitioning
 
   /**
    * Unions a sequence of RDDs while preserving the declared output partitioning. Before Spark
