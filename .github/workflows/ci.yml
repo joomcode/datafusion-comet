@@ -124,14 +124,14 @@ jobs:
   # required-status-check evaluation read. Guarding this job on the label name
   # therefore let any non-gating label overwrite the commit run's real
   # `Preflight` verdict with `skipped` (issue #5007). Running it unconditionally
-  # costs about a minute of ubuntu-slim time per label event and keeps the
+  # costs about a minute of runner time per label event and keeps the
   # reported verdict truthful. Skipping the redundant work is the heavy jobs'
   # job; POLICY in dev/ci/compute-changes.py drops every job a `labeled` event
   # does not gate.
   # ---------------------------------------------------------------------------
   preflight:
     name: Preflight
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -164,10 +164,9 @@ jobs:
       - name: Install mermaid-cli
         run: |
           set -eux
-          # ubuntu-slim carries none of Chrome's shared libraries, so the browser downloads
-          # fine and then dies with `libatk-1.0.so.0: cannot open shared object file`. These
-          # are what chrome-headless-shell actually links against; libgtk-3 pulls in most of
-          # the rest (atk, cairo, pango, gdk-pixbuf) as dependencies.
+          # Install Chrome's runtime libraries explicitly so the browser setup does not
+          # depend on which packages happen to be preinstalled on the runner.
+          # libgtk-3 pulls in atk, cairo, pango and gdk-pixbuf as dependencies.
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
             libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libatk-bridge2.0-0t64 \
@@ -237,7 +236,7 @@ jobs:
   changes:
     name: Detect changes
     needs: preflight
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04
     # `actions: read` is for dev/ci/nightly-base.py, which lists previous
     # scheduled runs to pick the nightly's diff base.
     permissions:
@@ -679,7 +678,7 @@ jobs:
       - iceberg_1_9
       - iceberg_1_10
       - iceberg_1_11
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04
     steps:
       - name: Summarize upstream results
         env:
@@ -716,7 +715,7 @@ jobs:
     permissions:
       actions: read
       issues: write
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/github-script@v9
         with:

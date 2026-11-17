@@ -184,7 +184,7 @@ jobs:
     needs: iceberg-spark
     if: ${{ !cancelled() }}
     name: iceberg-spark-shard-coverage/iceberg-${{ inputs.iceberg-full }}/spark-${{ inputs.spark-full }}/scala-${{ inputs.scala }}/java-${{ inputs.java }}
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - name: Download Iceberg shard inventories

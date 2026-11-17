@@ -91,7 +91,7 @@ tiers partition the list and that the `pr` tier is exactly the default profile.
                                             |
                                             v
                                 +-----------------------+
-                                |       preflight       |  ubuntu-slim
+                                |       preflight       |  ubuntu-24.04
                                 |  (RAT, prettier,      |
                                 |   missing-suites,     |
                                 |   actionlint)         |
@@ -99,7 +99,7 @@ tiers partition the list and that the `pr` tier is exactly the default profile.
                                             |  on success
                                             v
                                 +-----------------------+
-                                |        changes        |  ubuntu-slim
+                                |        changes        |  ubuntu-24.04
                                 | (compute-changes.py:  |
                                 |  one boolean per      |
                                 |  heavy job)           |
@@ -137,14 +137,14 @@ tiers partition the list and that the `pr` tier is exactly the default profile.
         +-----------------------------------+-----------------------------------+
                                             v
                                 +-----------------------+
-                                |    required_checks    |  ubuntu-slim
+                                |    required_checks    |  ubuntu-24.04
                                 |  one flat name that   |
                                 |  is safe to require   |
                                 +-----------+-----------+
                                             |  schedule only, when red
                                             v
                                 +-----------------------+
-                                |    nightly_report     |  ubuntu-slim
+                                |    nightly_report     |  ubuntu-24.04
                                 |  opens or comments on |
                                 |  a ci-nightly-failure |
                                 |  issue                |

@@ -27,7 +27,7 @@ on:
 
 jobs:
   check-pr-title:
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - name: Check PR title
