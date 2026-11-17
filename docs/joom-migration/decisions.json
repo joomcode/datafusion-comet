@@ -82,15 +82,34 @@
     "user_quote": "Отныне ты имеешь мое разрешение делать все необходимые манипуляции в /Users/skotlov/d/projects/datafusion-comet (в т.ч. в /Users/skotlov/d/projects/datafusion-comet/.git)",
     "interpretation": "Разрешение охватывает необходимые локальные изменения репозитория, ветки, коммиты, интеграцию и локальные теги. Подготовка передачи работы не означает, что реализация G01 уже начата.",
     "implementation_status": "NOT_STARTED",
-    "network_build_dependencies_authorized": false,
-    "network_scope_status": "PROPOSED_AWAITING_USER_APPROVAL",
+    "network_build_dependencies_authorized": true,
+    "network_scope_status": "APPROVED_WITH_USER_SAFETY_CONDITION",
     "github_api_read_only_audit_authorized": true,
     "automatic_worker_chat_creation_authorized": false,
     "automatic_cross_chat_messaging_authorized": false,
     "publishing_authorized": false,
     "remote_push_status": "USER_REPORTED_403; LOCAL_WORK_ONLY",
-    "note": "Это обновление заменяет прежний запрет локальных Git-изменений для указанного Comet checkout. Сетевые загрузки и создание/управление рабочими чатами ещё согласуются; push/JFrog publish/production rollout не выполняются.",
-    "recorded_on": "2026-11-17"
+    "note": "Необходимые локальные операции Comet/.git и сетевые операции исходного NETWORK.md разрешены. Сетевое разрешение условно: соблюдать прямое требование пользователя к безопасности известных широко используемых артефактов. Создание/управление рабочими чатами ещё не поручено; push, внешняя публикация и production-операции не входят.",
+    "recorded_on": "2026-11-17",
+    "network_approval": {
+      "recorded_on": "2026-11-17",
+      "status": "APPROVED_WITH_USER_SAFETY_CONDITION",
+      "source": "Прямой ответ пользователя на request_user_input_async в координаторском чате.",
+      "user_quote": "Разрешаю на всю миграцию Comet1.2/Spark4.2.1 сетевые операции, перечисленные в docs/joom-migration/NETWORK.md: Maven/SBT, Rustup/Cargo, закреплённые git-зависимости и build tools с GitHub, Docker Hub и Ubuntu packages, включая дочерние процессы внутри контейнеров. При условии, что все скачиваемое на мой ноут из сети и запускаемое - является известными и широкоиспользуемыми артефактами, в безопасности которых для моей машины не приходится сомневаться. Без push, внешней публикации и production операций.",
+      "scope_document": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/NETWORK.md",
+      "approved_proposal_commit": "fbc250a9867515958c6a33920c1ac15b5d2d62b1",
+      "approved_proposal_sha256": "3bedf4a5dc5d14b1793d25c4ae9073b697a1691a614aa69494c37486bc8dac02",
+      "scope": "На всю утверждённую миграцию: Maven/SBT, Rustup/Cargo, закреплённые git-зависимости и build tools с GitHub, Docker Hub и Ubuntu packages, включая дочерние процессы внутри контейнеров.",
+      "user_safety_condition": "Все скачиваемые на ноутбук и запускаемые артефакты должны быть известными и широко используемыми, без обоснованных сомнений в их безопасности для машины пользователя.",
+      "execution_rule": "Использовать известные зависимости выбранного upstream-проекта и официальные источники/реестры, закреплённые версии/commit и доступные publisher checksums. Перед запуском внешнего installer/build script проверить его происхождение и содержание. Наличие пакета в registry или lockfile само по себе не отменяет условие пользователя. Не добавлять и не запускать нестандартный, непроверенный или сомнительный инструмент/источник на основании одного этого разрешения; при такой необходимости согласовать отдельно.",
+      "excluded": [
+        "Git push",
+        "Внешняя публикация артефактов/PR/images",
+        "Production-операции",
+        "Остальные исключения исходного NETWORK.md"
+      ],
+      "network_operations_performed_during_recording": false
+    }
   },
   "ansi_policy": {
     "status": "APPROVED_EXPLICITLY",

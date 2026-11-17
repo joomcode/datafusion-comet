@@ -541,7 +541,7 @@
     "RCтегинеизменяемы;при дополнительныхпопыткахследующийномеррасходуется,поздниеплановыеномерасдвигаются.",
     "Тег/build/JFrogpublish/productionrollout—разныедействия."
   ],
-  "authorization": "2026-11-16 пользователь разрешил все необходимые локальные операции в Joom Comet checkout и .git. Реализация G01–G09 ещё не начата; сетевой scope предложен и ожидает утверждения. Публикация и production rollout не выполняются.",
+  "authorization": "Необходимые локальные операции в Joom Comet checkout и .git разрешены. Сетевой scope NETWORK.md разрешён на всю миграцию с прямым пользовательским условием безопасности известных широко используемых артефактов; см.decisions.json. Реализация групп ещё не начата. Push, внешняя публикация и production-операции не входят.",
   "approved_on": "2026-11-16",
   "approval_quote": "Согласен, зафиксируй план из 9 PR с резервом десятого.",
   "supersedes_implementation_plan": "/Users/skotlov/d/temp/20261116_comet12-branch-release-plan/implementation-plan.json",

@@ -8,23 +8,23 @@
     },
     {
       "path": "NETWORK.md",
-      "sha256": "3bedf4a5dc5d14b1793d25c4ae9073b697a1691a614aa69494c37486bc8dac02"
+      "sha256": "4c8d3b084363eb8e49b51eac6c620e9977ea3a2994824e0566e3ac0a149d46b3"
     },
     {
       "path": "README.md",
-      "sha256": "269b3325abc3dce00abe39a51cd4c9870c82111a0dc7f6c25fed0687310520ca"
+      "sha256": "55e40ead437e478e531f54100c70fc028aacda08608a075aa7eabb5f7ef9dcd2"
     },
     {
       "path": "STATE.json",
-      "sha256": "3b6b79277dc902ae9b05ad409df141afb008a3768c8e0e355cbf1673af23448a"
+      "sha256": "54508c2318d9367a47cd1ee0a349eebae9bb16fdb1803372dc7227913876782d"
     },
     {
       "path": "approved-plan-ru.txt",
-      "sha256": "52228dc39bd86e499226cffc63a2350e806dd3a7e27ae27e8a1d4d72309c0c68"
+      "sha256": "c9cf9d64daaf30c1ba26c6bd00e60c8b880fa8c747b22e434d8d2ce281987bc5"
     },
     {
       "path": "approved-plan.json",
-      "sha256": "838c7a72084025ae9784c4ac97625e2c881174c3007916780d57eeba21bbbd73"
+      "sha256": "a3c6e92de665858404e87cbe17d5f865c397db801312cdc53befd777b30ca6ee"
     },
     {
       "path": "correctness-test-plan-ru.txt",
@@ -32,11 +32,11 @@
     },
     {
       "path": "decisions.json",
-      "sha256": "531fa45712b78d5109c2f7e1326c143b45d3db82a716c89939fd73af6a16993a"
+      "sha256": "a0d87ee9140f0a46bbf79700599e64e7ca066b726502d1486e42f7bbeca77d9d"
     },
     {
       "path": "feature-register.json",
-      "sha256": "a318df4e5e2b6fb9a7349055c0c36b78255fcd735c67b2d5336f85de61f9eb7d"
+      "sha256": "7cf89ffa22987b0bc3ee71d535f58a229134b8b06f57e86298de56c36b8ed477"
     },
     {
       "path": "target-native-dependencies.json",
@@ -52,5 +52,6 @@
     "/Users/skotlov/d/temp/20261116_comet12-consolidated-plan"
   ],
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
-  "source_commit": "981e26dff6b64110a8b3949a0ed065523d9012e4"
+  "source_commit": "981e26dff6b64110a8b3949a0ed065523d9012e4",
+  "updated_on": "2026-11-17"
 }
