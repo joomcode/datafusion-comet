@@ -1,0 +1,250 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: RC Build & Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: Full source SHA; must match the selected workflow branch or tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc-build-smoke-${{ inputs.expected_commit }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    name: Pin source and release inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+      lock: ${{ steps.source.outputs.lock }}
+    steps:
+      - name: Validate requested source SHA
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          WORKFLOW_COMMIT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          expected = os.environ['EXPECTED_COMMIT']
+          if not re.fullmatch('[0-9a-f]{40}', expected):
+              raise SystemExit('expected_commit must be a full lowercase Git SHA')
+          if expected != os.environ['WORKFLOW_COMMIT']:
+              raise SystemExit('Selected workflow ref does not match expected_commit')
+          PY
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.expected_commit }}
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Check release-stage boundaries before starting builds
+        run: |
+          export RC_TEST_TMPDIR="$GITHUB_WORKSPACE/target/rc-unit-tests"
+          mkdir -p "$RC_TEST_TMPDIR"
+          export PYTHONDONTWRITEBYTECODE=1
+          python3 dev/release/joom/test-native-build-provenance.py --work-dir "$RC_TEST_TMPDIR"
+          python3 dev/release/joom/test-packaged-runtime.py
+          python3 dev/release/joom/test-rc-result.py
+      - name: Record source and lockfile
+        id: source
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          echo "commit=$EXPECTED_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "lock=$(sha256sum native/Cargo.lock | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+  native:
+    name: Release native (${{ matrix.arch }})
+    needs: source
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      CARGO_JOBS: 4
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+      - name: Check native architecture and disk
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          test "$(uname -m)" = "$(case "$ARCH" in amd64) echo x86_64 ;; arm64) echo aarch64 ;; esac)"
+          df -h "$GITHUB_WORKSPACE"
+          mkdir -p "$HOME/.cargo/rc-registry-$ARCH" "$HOME/.cargo/rc-git"
+      - name: Restore release source dependencies
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/rc-registry-${{ matrix.arch }}
+            ~/.cargo/rc-git
+          key: rc-cargo-${{ matrix.arch }}-${{ hashFiles('native/Cargo.lock', 'dev/release/joom/Dockerfile') }}
+      - name: Build release native library and provenance
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          export CARGO_REGISTRY="$HOME/.cargo/rc-registry-"
+          export CARGO_GIT="$HOME/.cargo/rc-git"
+          dev/release/joom/build-release.sh --native "$ARCH" "$GITHUB_WORKSPACE/target/rc-build"
+      - name: Upload native stage
+        uses: ./.github/actions/upload-artifact-retry
+        with:
+          name: rc-native-${{ matrix.arch }}-${{ needs.source.outputs.commit }}
+          path: target/rc-build/linux/
+          if-no-files-found: error
+          retention-days: 3
+
+  package:
+    name: Package final dualarch JARs
+    needs: [source, native]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+      - name: Restore Maven dependencies
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.m2/repository
+          key: rc-maven-${{ hashFiles('**/pom.xml') }}
+      - name: Download native stages
+        uses: ./.github/actions/download-artifact-retry
+        with:
+          pattern: rc-native-*-${{ needs.source.outputs.commit }}
+          path: target/rc-build/linux
+          merge-multiple: "true"
+      - name: Package once and prepare portable smoke dependencies
+        env:
+          PREPARE_SMOKE: "1"
+        run: |
+          df -h "$GITHUB_WORKSPACE"
+          dev/release/joom/build-release.sh --package amd64 "$GITHUB_WORKSPACE/target/rc-build"
+      - name: Upload immutable candidate
+        uses: ./.github/actions/upload-artifact-retry
+        with:
+          name: rc-candidate-${{ needs.source.outputs.commit }}
+          path: |
+            target/rc-build/*.jar
+            target/rc-build/*.json
+            target/rc-build/*.txt
+            target/rc-build/effective-pom.xml
+            target/rc-build/linux/
+            target/rc-build/test-support/
+          if-no-files-found: error
+          retention-days: 7
+
+  smoke:
+    name: Packaged smoke (${{ matrix.arch }})
+    needs: [source, package]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Download final candidate without rebuilding
+        uses: ./.github/actions/download-artifact-retry
+        with:
+          name: rc-candidate-${{ needs.source.outputs.commit }}
+          path: target/rc-build
+      - name: Run existing tests from final JARs
+        env:
+          ARCH: ${{ matrix.arch }}
+          SOURCE_COMMIT: ${{ needs.source.outputs.commit }}
+          LOCK_SHA: ${{ needs.source.outputs.lock }}
+        run: |
+          python3 dev/release/joom/verify-packaged-runtime.py run \
+            --repo "$GITHUB_WORKSPACE" --release "$GITHUB_WORKSPACE/target/rc-build" \
+            --architecture "$ARCH" --commit "$SOURCE_COMMIT" --lock-sha256 "$LOCK_SHA" \
+            --timeout-seconds 180
+      - name: Upload smoke evidence
+        if: ${{ always() }}
+        uses: ./.github/actions/upload-artifact-retry
+        with:
+          name: rc-smoke-${{ matrix.arch }}-${{ needs.source.outputs.commit }}
+          path: target/rc-build/smoke/${{ matrix.arch }}/
+          if-no-files-found: error
+          retention-days: 14
+
+  qualified:
+    name: Verify both receipts and export release artifacts
+    needs: [source, package, smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+      - name: Download final candidate
+        uses: ./.github/actions/download-artifact-retry
+        with:
+          name: rc-candidate-${{ needs.source.outputs.commit }}
+          path: target/rc-build
+      - name: Download both smoke receipts
+        uses: ./.github/actions/download-artifact-retry
+        with:
+          pattern: rc-smoke-*-${{ needs.source.outputs.commit }}
+          path: target/rc-smoke-reports
+      - name: Verify the same final bytes passed on both architectures
+        env:
+          SOURCE_COMMIT: ${{ needs.source.outputs.commit }}
+          LOCK_SHA: ${{ needs.source.outputs.lock }}
+        run: |
+          python3 dev/release/joom/verify-rc-result.py \
+            --release "$GITHUB_WORKSPACE/target/rc-build" \
+            --smoke-reports "$GITHUB_WORKSPACE/target/rc-smoke-reports" \
+            --commit "$SOURCE_COMMIT" --lock-sha256 "$LOCK_SHA" \
+            --output "$GITHUB_WORKSPACE/target/rc-qualified"
+      - name: Upload verified release artifacts
+        uses: ./.github/actions/upload-artifact-retry
+        with:
+          name: rc-build-smoke-${{ needs.source.outputs.commit }}
+          path: target/rc-qualified/
+          if-no-files-found: error
+          retention-days: 14
