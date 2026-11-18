@@ -1,0 +1,379 @@
+#!/usr/bin/env python3
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied. See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+"""Bundle matching test support, then smoke the final release JAR bytes offline."""
+
+import argparse
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+import zipfile
+
+
+# Importing the release validator must not add __pycache__ to the clean checkout.
+sys.dont_write_bytecode = True
+
+
+CORE = "comet-spark-spark4.2_2.13-1.2.0.jar"
+DELTA = "comet-contrib-delta-spark4.2_2.13-1.2.0.jar"
+FORBIDDEN_CLASSES = {
+    "org/apache/comet/NativeBase.class",
+    "org/apache/spark/sql/comet/CometDeltaNativeScanExec.class",
+}
+CASES = [
+    ("delta", "org.apache.comet.contrib.delta.CometDeltaNativeScanSuite", [
+        "-t", "plain delta table reads natively with identical results",
+        "-t", "deletion vectors: DELETE-produced DVs read natively with correct results",
+        "-t", "planning partitioning does not execute a scalar subquery harvested into data filters",
+        "-t", "Delta scan copies keep the native plan and Java serialization drops driver-only payloads",
+    ], 4),
+    ("dpp", "org.apache.spark.sql.comet.CometDppFallbackRepro3949Suite", [
+        "-t", "native context preserves zero partitions after file pruning",
+    ], 1),
+    ("reload", "org.apache.comet.CometSparkSessionExtensionsSuite", [
+        "-t", "reloading NativeBase does not load a second copy of the native library",
+    ], 1),
+    ("ansi", "org.apache.comet.CometExpressionSuite", [
+        "-z", "ANSI integral overflow fidelity",
+    ], 6),
+]
+
+# Reflection keeps this helper independent of the Scala/ScalaTest ABI at compile time.
+# Runner.run returns instead of calling System.exit, so the loaded library can be
+# checked while it still exists, before NativeBase's delete-on-exit cleanup runs.
+PROBE = r'''
+import java.io.File;
+import java.lang.reflect.Field;
+import java.nio.file.*;
+import java.security.MessageDigest;
+import java.util.*;
+
+public final class RcPackagedSmoke {
+  private static void require(boolean ok, String message) {
+    if (!ok) throw new IllegalStateException(message);
+  }
+  private static String hash(Path path) throws Exception {
+    return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+        .digest(Files.readAllBytes(path)));
+  }
+  private static Path origin(Class<?> cls) throws Exception {
+    return Paths.get(cls.getProtectionDomain().getCodeSource().getLocation().toURI());
+  }
+  private static String quote(String value) {
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"")
+        .replace("\n", "\\n").replace("\r", "\\r") + "\"";
+  }
+  public static void main(String[] args) throws Exception {
+    require(Runtime.version().feature() == 17, "Packaged smoke requires Java 17");
+    Class<?> sparkPackage = Class.forName("org.apache.spark.package$");
+    Object sparkModule = sparkPackage.getField("MODULE$").get(null);
+    String sparkVersion = (String) sparkPackage.getMethod("SPARK_VERSION").invoke(sparkModule);
+    require(sparkVersion.equals("4.2.1"), "Packaged smoke loaded the wrong Spark version");
+    String arch = System.getProperty("rc.arch");
+    String jvmArch = System.getProperty("os.arch");
+    require(arch.equals("amd64") ? Set.of("amd64", "x86_64").contains(jvmArch)
+        : Set.of("aarch64", "arm64").contains(jvmArch), "JVM architecture mismatch");
+    Class<?> runner = Class.forName("org.scalatest.tools.Runner");
+    boolean passed = (Boolean) runner.getMethod("run", String[].class)
+        .invoke(null, (Object) args);
+    require(passed, "ScalaTest reported failure");
+    Class<?> base = Class.forName("org.apache.comet.NativeBase");
+    Path core = Paths.get(System.getProperty("rc.core"));
+    require(Files.isSameFile(origin(base), core), "NativeBase did not load from final core JAR");
+    Enumeration<java.net.URL> resources = ClassLoader.getSystemClassLoader()
+        .getResources("org/apache/comet/NativeBase.class");
+    require(Collections.list(resources).size() == 1, "Duplicate NativeBase on test classpath");
+    Field loaded = base.getDeclaredField("loaded");
+    loaded.setAccessible(true);
+    require(loaded.getBoolean(null), "NativeBase reports native library not loaded");
+    Field library = base.getDeclaredField("bundledLibrary");
+    library.setAccessible(true);
+    File extracted = (File) library.get(null);
+    require(extracted != null, "NativeBase used a library outside the final JAR");
+    String nativeHash = hash(extracted.toPath());
+    require(nativeHash.equals(System.getProperty("rc.native.sha256")),
+        "Loaded native library differs from the final JAR entry");
+    if (Boolean.getBoolean("rc.require.delta")) {
+      Class<?> delta = Class.forName("org.apache.spark.sql.comet.CometDeltaNativeScanExec");
+      require(Files.isSameFile(origin(delta), Paths.get(System.getProperty("rc.delta"))),
+          "Delta scan did not load from final Delta JAR");
+    }
+    Files.writeString(Paths.get(System.getProperty("rc.proof")),
+        "{\"architecture\":" + quote(arch) + ",\"core_jar_sha256\":" + quote(hash(core))
+        + ",\"loaded_native_sha256\":" + quote(nativeHash)
+        + ",\"loaded_native_path\":" + quote(extracted.toString())
+        + ",\"spark_version\":" + quote(sparkVersion)
+        + ",\"java_version\":" + quote(System.getProperty("java.version")) + "}\n");
+  }
+}
+'''
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def digest(path):
+    value = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            value.update(block)
+    return value.hexdigest()
+
+
+def beneath(path, root):
+    # The release builder deliberately uses Ubuntu 20.04 / Python 3.8.
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def safe_file(root, name):
+    path = Path(name)
+    require(not path.is_absolute() and ".." not in path.parts, "unsafe support path")
+    resolved = (root / path).resolve()
+    require(beneath(resolved, root.resolve()) and resolved.is_file(),
+            "missing or escaping support file: " + name)
+    return resolved
+
+
+def release_validator(repo, out, commit, lock):
+    path = repo / "dev/release/joom/verify-release.py"
+    spec = importlib.util.spec_from_file_location("rc_release_validator", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.validate(out, commit, lock)
+
+
+def check_test_jar(path):
+    with zipfile.ZipFile(path) as archive:
+        names = archive.namelist()
+        require(not FORBIDDEN_CLASSES.intersection(names),
+                "test support contains production classes: " + str(path))
+        require(not any(name.endswith(("libcomet.so", "libcomet.dylib", "comet.dll"))
+                        for name in names), "test support contains a native library")
+
+
+def zip_directory(source, target):
+    files = sorted(path for path in source.rglob("*") if path.is_file())
+    require(files, "empty Delta test output")
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in files:
+            archive.write(path, path.relative_to(source).as_posix())
+
+
+def prepare(args):
+    repo, out = args.repo.resolve(), args.release.resolve()
+    release_validator(repo, out, args.commit, args.lock_sha256)
+    require(subprocess.check_output(["git", "-c", "safe.directory=" + str(repo), "rev-parse", "HEAD"], cwd=repo,
+                                    text=True).strip() == args.commit, "test-support HEAD mismatch")
+    support = out / "test-support"
+    require(not support.exists(), "test support already exists; choose a fresh release directory")
+    support.mkdir()
+    (support / "lib").mkdir()
+    (support / "probe").mkdir()
+    core_tests = repo / "spark/target" / CORE.replace(".jar", "-tests.jar")
+    require(core_tests.is_file(), "matching core tests JAR missing")
+    shutil.copyfile(core_tests, support / "core-tests.jar")
+    zip_directory(repo / "contrib/delta-spark/target/test-classes", support / "delta-tests.jar")
+    classpath = ["core-tests.jar", "delta-tests.jar"]
+    copied = set()
+    for module in ["spark", "contrib/delta-spark"]:
+        entries = (repo / module / "target/rc-smoke-classpath.txt").read_text().strip().split(os.pathsep)
+        for entry in entries:
+            path = Path(entry).resolve()
+            # The final shaded core JAR supplies project production classes. The
+            # matching test JARs above are the only project test outputs admitted.
+            if beneath(path, repo) or path.name.startswith(("comet-", "original-comet-")):
+                continue
+            require(path.is_file() and path.suffix == ".jar", "non-JAR test dependency: " + entry)
+            name = "lib/" + digest(path) + "-" + path.name
+            if name not in copied:
+                shutil.copyfile(path, support / name)
+                copied.add(name)
+                classpath.append(name)
+    require(copied, "no external test dependencies bundled")
+    source = support / "probe/RcPackagedSmoke.java"
+    source.write_text(PROBE)
+    subprocess.run([str(Path(os.environ["JAVA_HOME"]) / "bin/javac"), "--release", "17",
+                    "-d", str(support / "probe"), str(source)], check=True)
+    classpath.append("probe")
+    for name in classpath:
+        if name.endswith(".jar"):
+            check_test_jar(support / name)
+    files = {path.relative_to(support).as_posix(): digest(path)
+             for path in sorted(support.rglob("*")) if path.is_file()}
+    manifest = {"format": 1, "commit": args.commit, "cargo_lock_sha256": args.lock_sha256,
+                "release_jar_sha256": {name: digest(out / name) for name in [CORE, DELTA]},
+                "effective_pom_sha256": digest(out / "effective-pom.xml"),
+                "classpath": classpath, "files": files}
+    (support / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    print("Prepared portable packaged-smoke support for " + args.commit)
+
+
+def validate_support(out, commit, lock):
+    support = out / "test-support"
+    manifest = json.loads((support / "manifest.json").read_text())
+    require(manifest["format"] == 1 and manifest["commit"] == commit
+            and manifest["cargo_lock_sha256"] == lock, "test support provenance mismatch")
+    require(manifest["release_jar_sha256"] == {name: digest(out / name) for name in [CORE, DELTA]},
+            "test support belongs to different release JARs")
+    require(manifest["effective_pom_sha256"] == digest(out / "effective-pom.xml"),
+            "test-support POM mismatch")
+    for name, sha in manifest["files"].items():
+        require(digest(safe_file(support, name)) == sha, "test support checksum mismatch: " + name)
+    actual = {p.relative_to(support).as_posix() for p in support.rglob("*")
+              if p.is_file() and p.name != "manifest.json"}
+    require(actual == set(manifest["files"]), "unexpected or missing test-support files")
+    require(manifest["classpath"][:2] == ["core-tests.jar", "delta-tests.jar"]
+            and manifest["classpath"][-1] == "probe", "unexpected test classpath")
+    classpath = [str(out / CORE), str(out / DELTA)]
+    for name in manifest["classpath"]:
+        if name == "probe":
+            require((support / "probe/RcPackagedSmoke.class").is_file(), "missing Java smoke probe")
+            classpath.append(str(support / "probe"))
+        else:
+            path = safe_file(support, name)
+            check_test_jar(path)
+            classpath.append(str(path))
+    return manifest, classpath
+
+
+def assert_test_summary(text, expected):
+    summaries = re.findall(
+        r"Tests: succeeded (\d+), failed (\d+), canceled (\d+), ignored (\d+), pending (\d+)", text)
+    require(len(summaries) == 1 and tuple(map(int, summaries[0])) == (expected, 0, 0, 0, 0),
+            "packaged smoke failed, skipped tests, or ran the wrong number of tests")
+    require(re.search(r"Suites: completed \d+, aborted 0", text) is not None,
+            "packaged smoke suite aborted or did not report")
+
+
+def run(args):
+    repo, out = args.repo.resolve(), args.release.resolve()
+    machine = {"amd64": {"x86_64", "amd64"}, "aarch64": {"aarch64", "arm64"}}[args.architecture]
+    require(platform.system() == "Linux" and platform.machine().lower() in machine,
+            "packaged smoke must execute on the requested native Linux architecture")
+    release_validator(repo, out, args.commit, args.lock_sha256)
+    manifest, classpath = validate_support(out, args.commit, args.lock_sha256)
+    ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+    pom = ET.parse(out / "effective-pom.xml").getroot()
+    project = pom if pom.tag.endswith("}project") else pom.find("m:project", ns)
+    flags = shlex.split(project.find("m:properties/m:argLine", ns).text)
+    require(not any(flag in ["-cp", "-classpath", "--class-path"] for flag in flags),
+            "unexpected classpath override in release POM")
+    java_home = Path(os.environ["JAVA_HOME"])
+    root = out / "smoke" / args.architecture
+    require(not root.exists(), "smoke output already exists; preserve the prior result")
+    root.mkdir(parents=True)
+    (root / "empty-native").mkdir()
+    env = dict(os.environ)
+    for key in ["JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "CLASSPATH", "LD_PRELOAD"]:
+        env.pop(key, None)
+    env.update({"SPARK_LOCAL_IP": "127.0.0.1", "SPARK_LOCAL_HOSTNAME": "localhost",
+                "COMET_CONF_DIR": str(repo / "conf"), "SPARK_HOME": str(repo),
+                "RUST_BACKTRACE": "1", "LD_LIBRARY_PATH": str(java_home / "lib/server")})
+    native_sha = digest(out / "linux" / args.architecture / "libcomet.so")
+    results = []
+    for label, suite, selectors, expected in CASES:
+        case_dir = root / label
+        case_dir.mkdir()
+        tmp = case_dir / "tmp"
+        tmp.mkdir()
+        proof = case_dir / "loaded-native.json"
+        case_flags = flags + [
+            "-Djava.awt.headless=true", "-Djava.io.tmpdir=" + str(tmp),
+            "-Djava.library.path=" + str(root / "empty-native"),
+            "-Dlog4j.configurationFile=file:" + str(repo / "spark/src/test/resources/log4j2.properties"),
+            "-Dspark.test.home=" + str(repo), "-Dspark.testing=true",
+            "-Dspark.sql.warehouse.dir=" + str(case_dir / "warehouse"),
+            "-Dspark.hadoop.fs.s3a.committer.magic.enabled=false",
+            "-Drc.arch=" + args.architecture, "-Drc.core=" + str(out / CORE),
+            "-Drc.delta=" + str(out / DELTA), "-Drc.native.sha256=" + native_sha,
+            "-Drc.proof=" + str(proof), "-Drc.require.delta=" + str(label == "delta").lower(),
+            "-Xlog:class+load=info:file=" + str(case_dir / "classes.log"),
+        ]
+        command = [str(java_home / "bin/java")] + case_flags + [
+            "-cp", os.pathsep.join(classpath), "RcPackagedSmoke", "-oD", "-s", suite] + selectors
+        log = case_dir / "tests.log"
+        with log.open("w") as stream:
+            try:
+                proc = subprocess.run(command, env=env, cwd=repo, stdout=stream,
+                                      stderr=subprocess.STDOUT, timeout=args.timeout_seconds)
+            except subprocess.TimeoutExpired as error:
+                raise ValueError(label + " packaged smoke exceeded its timeout") from error
+        text = log.read_text(errors="replace")
+        require(proc.returncode == 0, label + " packaged smoke JVM failed; inspect " + str(log))
+        assert_test_summary(text, expected)
+        loaded = json.loads(proof.read_text())
+        require(loaded["architecture"] == args.architecture
+                and loaded["core_jar_sha256"] == manifest["release_jar_sha256"][CORE]
+                and loaded["loaded_native_sha256"] == native_sha, "loaded library proof mismatch")
+        results.append({"group": label, "passed": expected, "failed": 0, "canceled": 0,
+                        "ignored": 0, "bundled_native_and_class_origins": "VERIFIED",
+                        "loaded_native_proof": loaded})
+        print(args.architecture, label, expected, "packaged tests passed", flush=True)
+    # Checking again makes the result identify the exact bytes before AND after execution.
+    release_validator(repo, out, args.commit, args.lock_sha256)
+    validate_support(out, args.commit, args.lock_sha256)
+    result = {"commit": args.commit, "architecture": args.architecture,
+              "cargo_lock_sha256": args.lock_sha256,
+              "release_jar_sha256": manifest["release_jar_sha256"], "native_sha256": native_sha,
+              "checksum_manifest_sha256": digest(out / "sha256.txt"),
+              "test_support_manifest_sha256": digest(out / "test-support/manifest.json"),
+              "cases": results, "total_passed": sum(case["passed"] for case in results)}
+    (root / "results.json").write_text(json.dumps(result, indent=2) + "\n")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    for name in ["prepare", "run"]:
+        sub = subparsers.add_parser(name)
+        sub.add_argument("--repo", type=Path, required=True)
+        sub.add_argument("--release", type=Path, required=True)
+        sub.add_argument("--commit", required=True)
+        sub.add_argument("--lock-sha256", required=True)
+        if name == "run":
+            sub.add_argument("--architecture", choices=["amd64", "aarch64"], required=True)
+            sub.add_argument("--timeout-seconds", type=int, default=180)
+    args = parser.parse_args()
+    try:
+        if args.command == "prepare":
+            prepare(args)
+        else:
+            require(args.timeout_seconds > 0, "timeout must be positive")
+            run(args)
+    except (ValueError, OSError, KeyError, AttributeError, ET.ParseError,
+            zipfile.BadZipFile, subprocess.CalledProcessError) as error:
+        parser.exit(1, "Packaged runtime verification failed: " + str(error) + "\n")
+
+
+if __name__ == "__main__":
+    main()
