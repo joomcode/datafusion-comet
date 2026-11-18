@@ -1,0 +1,779 @@
+{
+  "status": "G01_IMPLEMENTATION_COMPLETE_FINAL_RC1_GATE",
+  "checked_at": "2026-11-18T22:39:06.361313+00:00",
+  "source_commit": "b93d553856a0339af7468bcff2070e735a1a3c71",
+  "source_branch": "joom/1.2-dev",
+  "integration_branch": "branch-1.2",
+  "integration_branch_unchanged": "9691385f35e4c5bd29514dca78d2044dd20e4bed",
+  "integration_gate": "User authorized G01 finalization, conditional integration and RC1 tagging on 2026-11-18; no G02 authorization.",
+  "candidate_tag": "joom-1.2-1-rc1",
+  "versions": {
+    "comet": "1.2.0",
+    "spark": "4.2.1",
+    "scala": "2.13.18",
+    "delta": "4.4.1",
+    "datafusion": "55.2.0",
+    "arrow_parquet": "59.3.2",
+    "rust": "1.100.0",
+    "java": "17"
+  },
+  "release_directory": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/gha-44388252264",
+  "jar_sha256": {
+    "comet-spark-spark4.2_2.13-1.2.0.jar": "9f7d57bfb88efceeecce15d96ca320a2d38f81aacc95f4bbf67d46915bfc0686",
+    "comet-contrib-delta-spark4.2_2.13-1.2.0.jar": "5581281ff5bf826f04a038318d802be13d9f66cb8084e3d8a40846b5175bd632"
+  },
+  "validation": {
+    "native_workspace_passed": 4326,
+    "native_ignored": 5,
+    "vendor_included_in_native_passed": 1695,
+    "additional_vendor_statistics_passed": 42,
+    "delta_passed": 291,
+    "ansi_runtime_passed": 75,
+    "ansi_upstream_canceled": 3,
+    "spark_sql_passed": 65,
+    "packaged_smoke": [
+      {
+        "architecture": "aarch64",
+        "cases": [
+          {
+            "case": "delta",
+            "suite": "org.apache.comet.contrib.delta.CometDeltaNativeScanSuite",
+            "passed": 4,
+            "classpath_and_bundled_native_selection": "VERIFIED"
+          },
+          {
+            "case": "dpp",
+            "suite": "org.apache.spark.sql.comet.CometDppFallbackRepro3949Suite",
+            "passed": 1,
+            "classpath_and_bundled_native_selection": "VERIFIED"
+          },
+          {
+            "case": "reload",
+            "suite": "org.apache.comet.CometSparkSessionExtensionsSuite",
+            "passed": 1,
+            "classpath_and_bundled_native_selection": "VERIFIED"
+          },
+          {
+            "case": "ansi",
+            "suite": "org.apache.comet.CometExpressionSuite",
+            "passed": 6,
+            "classpath_and_bundled_native_selection": "VERIFIED"
+          }
+        ],
+        "network": "none; loopback only"
+      }
+    ],
+    "synthetic_validator_publisher_negative_passed": 19,
+    "bash32_online_offline_passed": 2,
+    "elf_glibc_spi_git_sha_and_archive_validator": "PASSED"
+  },
+  "limitations": [
+    "G01 baseline only: remaining agreed Joom-specific groups G02-G09 are not ported.",
+    "Real GCS/GKE ADC reads and production performance are not qualified here.",
+    "Java 17 qualification only; Java 21 work is explicitly deferred.",
+    "No external artifact publication or production rollout is authorized.",
+    "Full runtime CI is retained by exact runtime/test/lockfile equality; the final rewritten SHA requires its own release build and packaged smoke.",
+    "Earlier validation counters below are historical local runs; use final_full_gha and the RC receipt for the latest qualification."
+  ],
+  "raw_evidence_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-final-qualification",
+  "history_cleanup": {
+    "old_head": "3cae82c3f75a7c3aa85356515e85d0f6d984da24",
+    "backup_ref": "refs/joom-migration/checkpoints/20261117-before-service-cleanup",
+    "new_head": "13cfe918cf22c72b2034fa73761ba481a583d0f3",
+    "substantive_commits": [
+      {
+        "old": "71435d6f1add745cb3fa4b2072977ec301e52ad1",
+        "new": "ea4b3228ec5346181f74d8632d6af13b4441a359",
+        "message": "spark: establish Joom Spark 4.2.1 and Delta baseline"
+      },
+      {
+        "old": "98c9f2f195c52d1b291e933be0c91624afece67a",
+        "new": "0a76d68a33f6b4bcbce9fbb412b90350c5fed80b",
+        "message": "native: vendor pristine datafusion-physical-plan 55.2.0"
+      },
+      {
+        "old": "5640cc13cbebaba78056d0b3a83cb8a745e8cc8b",
+        "new": "15a466a09abf6106bbd80402e1967ba96076fbcc",
+        "message": "native: test vendored DataFusion in the Comet workspace"
+      },
+      {
+        "old": "f8a00fd4b357ac92bdc588d8a93bb4bc624fd55d",
+        "new": "857d2de1fa021969f6b2efd7d47c5b680daa578b",
+        "message": "ci: exclude generated Spark trees from suite inventory"
+      },
+      {
+        "old": "b94c150bbe32e8a6ccb420ebe72607d087f9b4ea",
+        "new": "73efe84b4e21f53a4da054504e0dbd2a6d693bea",
+        "message": "release: build and validate Joom Comet for Spark 4.2.1"
+      }
+    ],
+    "final_documentation_commit": "13cfe918cf22c72b2034fa73761ba481a583d0f3",
+    "non_documentation_tree_unchanged": true,
+    "before_release_build": true
+  },
+  "independent_reviews": {
+    "scope_review": {
+      "reviewer": "g01_scope_final_review",
+      "status": "NO_CONFIRMED_IMPLEMENTATION_BLOCKER",
+      "g01_cards": 12,
+      "pending_acceptance": [
+        "Spark SQL with fork classpath",
+        "Real final JAR execution on both Linux architectures"
+      ],
+      "scope_boundaries": [
+        "RC1 is G01 only; P03/I10 full Joom qualification continues across later groups",
+        "BoundaryFormats deadlock reproduction remains G09",
+        "Real GCS/GKE ADC read not qualified"
+      ]
+    },
+    "packaged_smoke_review": {
+      "reviewer": "g01_final_smoke_review",
+      "status": "NO_CONFIRMED_STATIC_BLOCKER",
+      "expected_cases_per_arch": 12,
+      "checks": [
+        "Final JAR first; remove all other Comet/main project classes",
+        "Empty native search path forces bundled library",
+        "NativeBase/Delta scanner class origin verified",
+        "Native plans and Spark result/error parity in selected tests",
+        "Network none; local fixtures only"
+      ]
+    },
+    "cargo_cache_investigation": {
+      "status": "BOUNDED_REVIEW_NO_ROOT_CAUSE_ESTABLISHED",
+      "facts": [
+        "Same builder images/compiler/config/flags",
+        "Part of Cargo cache reused",
+        "Serde build-script fingerprint rerun propagated downstream"
+      ],
+      "action": "Do not clear caches or change environment. On any future independently necessary rerun, fingerprint diagnostic logging may identify precise dirty reason."
+    }
+  },
+  "amd64_qualification_gap": {
+    "status": "CLOSED_FOR_CURRENT_RELEASE_ON_NATIVE_AMD64",
+    "run_id": 44388252264,
+    "actual_packaged_cases_passed": 12
+  },
+  "candidate_tag_status": "NOT_CREATED_USER_HOLD",
+  "pr_preparation": {
+    "status": "PENDING_NATIVE_AMD64_GHA",
+    "preparation_report": "G01-PR-preparation.json",
+    "body": "G01-PR.md",
+    "historical_local_results_not_current_pr_gha": true,
+    "three_ansi_cases_now_enabled_but_pending": true
+  },
+  "github_qualification": {
+    "run_id": 44205897075,
+    "url": "https://github.com/joomcode/datafusion-comet/actions/runs/44205897075",
+    "attempt": 3,
+    "head_sha": "26590264b878fb8eae2ca439a8bcc0dfb513cb36",
+    "checked_at": "2026-11-18T03:16:00.841276+00:00",
+    "conclusion": "SUCCESS",
+    "job_counts": {
+      "success": 127,
+      "failure": 0,
+      "skipped": 17
+    },
+    "required_checks": "PASSED",
+    "retry_history": [
+      {
+        "attempt": 1,
+        "success": 116,
+        "failure": 11,
+        "skipped": 17,
+        "causes": "8parentPOM429+2dependentcoverage+aggregate"
+      },
+      {
+        "attempt": 2,
+        "success": 125,
+        "failure": 2,
+        "skipped": 17,
+        "causes": "Spark34parentPOM429+aggregate"
+      },
+      {
+        "attempt": 3,
+        "success": 127,
+        "failure": 0,
+        "skipped": 17
+      }
+    ],
+    "successful_jobs_preserved": true,
+    "source_unchanged_during_retries": true,
+    "target_spark42": {
+      "sql_shards": "9/9 PASSED",
+      "native": "2649passed/5existingignored",
+      "vendor": "1695passed/0ignored;statistics42passed",
+      "delta": "294passed/0failed/0canceled/0ignored",
+      "expressions": "2287passed/0failed/2existingcanceled/12ignored",
+      "ansi_three_arithmetic_cases": "ACTUALLY_EXECUTED_AND_PASSED",
+      "two_decimal_cast_cases": "ACTUALLY_EXECUTED_AND_PASSED",
+      "duplicate_reader_cases": "10ACTUALLY_EXECUTED_AND_PASSED",
+      "union_regressions": "Both conf-flip/native-grouping and live-copy/layout-binding tests passed on Spark4.1 and4.2"
+    },
+    "artifact_verification_receipts": [
+      "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386009386-verification.json",
+      "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386336295-verification.json",
+      "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386457154-verification.json",
+      "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386965743-verification.json"
+    ],
+    "raw_evidence_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
+    "qualification": "SOURCE_CI_PASSED; final exact-byte release JAR build/smoke remains RC gate; production/GCP validation not claimed",
+    "final_receipt": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/final-qualification-run-44205897075-head-26590264b.json",
+    "spark34_expressions": "2230passed/0failed/37canceled/12ignored"
+  },
+  "ci_corrections": {
+    "status": "PUSHED_NATIVE_GHA_PENDING",
+    "source_commit": "6ae961dcbae949db09e349b05c91fc1cd6464d87",
+    "previous_pr_head": "db2bd16584c1381853cc170abab7cd87f289c85c",
+    "base_unchanged": "9691385f35e4c5bd29514dca78d2044dd20e4bed",
+    "fixes": [
+      "Spark SPARK-60119 tiny string-to-decimal rounding: version-contract flag, both Decimal128/256 paths, result/error and serde regressions",
+      "SPARK-60262: projected-field duplicate guard before data pages, exact physical names, nested error priority, structured factory cause and version-correct file-read envelope",
+      "Known-layout UNION: reject mismatched partition counts before unsafe concat; preserve declared partitions for all-empty inputs",
+      "Spark test fixtures retain original Spark contracts and add real native data/error/partition/observer checks; no new ignore/cancel",
+      "Delta synthetic DV fixture carries explicit bitmap offset compatible with older serializers",
+      "Maven model-only bounded transient parent-POM retry; actual compile/tests still run once; isolated Ivy local-repository fixture keeps transitive/exclude/class-loading checks"
+    ],
+    "checks": {
+      "rust": {
+        "parser": 5,
+        "tiny_decimal": 2,
+        "parquet_resolver": 10,
+        "structured_error": 1,
+        "failed": 0
+      },
+      "jvm_initial": {
+        "passed": 30,
+        "failed": 0,
+        "canceled": 0,
+        "ignored": 0,
+        "log": "jvm-regressions-concrete.log"
+      },
+      "jvm_converter_after_envelope_fix": {
+        "passed": 19,
+        "failed": 0,
+        "canceled": 0,
+        "ignored": 0,
+        "log": "jvm-error-envelope-final.log",
+        "note": "Rerun of converter tests after envelope correction; do not add to initial count as unique tests"
+      },
+      "spark_sql": {
+        "passed": 223,
+        "failed": 0,
+        "ignored": 3,
+        "canceled": 0,
+        "parts": {
+          "union": 189,
+          "extensions": 20,
+          "pushdown": 2,
+          "set_operations": 1,
+          "ivy": 2,
+          "field_selection": 3,
+          "corrupt_parquet": 6
+        },
+        "note": "Latest successful result per scenario, across targeted2/3/4/final logs. Three ignored Union tests are unchanged upstream ignores."
+      },
+      "delta_fixture": {
+        "passed": 1,
+        "failed": 0,
+        "log": "delta-fixture-final.log"
+      },
+      "ci_model_fault_injection": {
+        "passed": 4,
+        "failed": 0
+      },
+      "native_build": "PASSED",
+      "maven_install_spark42_delta": "PASSED",
+      "cargo_fmt": "PASSED",
+      "ci_config": "PASSED",
+      "spotless": "PASSED",
+      "spark_patch": "121 files; forward/reverse apply and exact patched-file equality passed",
+      "whitespace": "Actual Spark sources pass git diff --check v4.2.1; Comet sources excluding generated patch pass git diff --check. Generated patch preserves required single-space context lines."
+    },
+    "raw_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes",
+    "independent_review": "Runtime and CI reviews: no outstanding substantive finding after followups",
+    "push_strategy": "Single batched feature-branch push after local checks",
+    "gha_interval_seconds": 300,
+    "release_artifacts": "Previously built 2b8f80b3f JARs are historical; current corrections not release-packaged or RC tagged",
+    "scope": "G01 only; merge/base/RC1/G02 held",
+    "pr_head_commit": "ac3694504de3d5e3b93d19d8be87e48d6346b804",
+    "run_id": 44180095887,
+    "run_url": "https://github.com/joomcode/datafusion-comet/actions/runs/44180095887",
+    "github_observed_successes": {
+      "native": {
+        "passed": 2649,
+        "skipped": 5
+      },
+      "vendor": {
+        "passed": 1695,
+        "skipped": 0
+      },
+      "vendor_statistics": {
+        "passed": 42
+      },
+      "delta40": {
+        "passed": 293,
+        "failed": 0,
+        "canceled": 0,
+        "ignored": 0,
+        "changed_fixture_actually_executed": true
+      },
+      "strict_scala35": "PASSED",
+      "delta_build_gate": "PASSED"
+    },
+    "github_final": {
+      "run_id": 44180095887,
+      "head_sha": "ac3694504de3d5e3b93d19d8be87e48d6346b804",
+      "html_url": "https://github.com/joomcode/datafusion-comet/actions/runs/44180095887",
+      "status": "completed",
+      "conclusion": "failure",
+      "updated_at": "2026-11-17T23:26:56Z",
+      "job_counts": {
+        "success": 124,
+        "skipped": 17,
+        "failure": 3
+      },
+      "failed_jobs": [
+        {
+          "id": 134397478464,
+          "name": "PR Build (Linux) / Spark 4.1, JDK 17 [exec]",
+          "conclusion": "failure",
+          "html_url": "https://github.com/joomcode/datafusion-comet/actions/runs/44180095887/job/134397478464"
+        },
+        {
+          "id": 134397478471,
+          "name": "PR Build (Linux) / Spark 4.2, JDK 17 [scans]",
+          "conclusion": "failure",
+          "html_url": "https://github.com/joomcode/datafusion-comet/actions/runs/44180095887/job/134397478471"
+        },
+        {
+          "id": 134449352914,
+          "name": "Required Checks",
+          "conclusion": "failure",
+          "html_url": "https://github.com/joomcode/datafusion-comet/actions/runs/44180095887/job/134449352914"
+        }
+      ],
+      "all_nine_previous_failed_jobs_passed": [
+        {
+          "id": 134382784825,
+          "name": "Delta Contrib Build Gate / Build-gate verification (default builds exclude Delta)",
+          "conclusion": "success"
+        },
+        {
+          "id": 134382785209,
+          "name": "Delta Contrib Tests (Spark 4.0) / Delta contrib (Spark 4.0)",
+          "conclusion": "success"
+        },
+        {
+          "id": 134382785727,
+          "name": "Delta Contrib Tests (Spark 3.5) / Delta contrib (Spark 3.5)",
+          "conclusion": "success"
+        },
+        {
+          "id": 134383206040,
+          "name": "PR Build (Linux) / Strict Scala warnings (Spark 3.5, JDK 17)",
+          "conclusion": "success"
+        },
+        {
+          "id": 134397478372,
+          "name": "PR Build (Linux) / Spark 4.0, JDK 21 [exec]",
+          "conclusion": "success"
+        },
+        {
+          "id": 134397478694,
+          "name": "PR Build (Linux) / Spark 4.2, JDK 17 [expressions]",
+          "conclusion": "success"
+        },
+        {
+          "id": 134403256068,
+          "name": "Spark SQL Tests (Spark 4.2) / spark-sql-sql_core-4/spark-4.2.1-jdk17",
+          "conclusion": "success"
+        },
+        {
+          "id": 134403256288,
+          "name": "Spark SQL Tests (Spark 4.2) / spark-sql-sql_core-1/spark-4.2.1-jdk17",
+          "conclusion": "success"
+        },
+        {
+          "id": 134403256457,
+          "name": "Spark SQL Tests (Spark 4.2) / spark-sql-sql_core-2/spark-4.2.1-jdk17",
+          "conclusion": "success"
+        }
+      ],
+      "tests_evidence": {
+        "native": {
+          "passed": 2649,
+          "skipped": 5,
+          "log": "job-134383205998-tail.log"
+        },
+        "vendor": {
+          "passed": 1695,
+          "skipped": 0,
+          "statistics_passed": 42,
+          "log": "job-134383205998-tail.log"
+        },
+        "delta42": {
+          "passed": 294,
+          "failed": 0,
+          "canceled": 0,
+          "ignored": 0,
+          "log": "job-134382785838-tail.log"
+        },
+        "delta40": {
+          "passed": 293,
+          "failed": 0,
+          "canceled": 0,
+          "ignored": 0,
+          "previous_case_verified": true,
+          "log": "job-134382785209-tail.log"
+        },
+        "delta35": {
+          "passed": 292,
+          "failed": 0,
+          "canceled": 1,
+          "ignored": 0,
+          "previous_case_verified": true,
+          "canceled_case_name_not_in_tail": true,
+          "log": "job-134382785727-tail.log"
+        },
+        "expressions42": {
+          "passed": 2287,
+          "failed": 0,
+          "canceled": 2,
+          "ignored": 12,
+          "three_ansi_and_two_cast_cases_executed_passed": true,
+          "receipt": "spark42-expressions-artifact-verification.json"
+        },
+        "sql42": {
+          "shards_passed": 9,
+          "shards_failed": 0,
+          "core1_counts": {
+            "passed": 10481,
+            "failed": 0,
+            "canceled": 64,
+            "ignored": 1155
+          },
+          "core2_counts": {
+            "passed": 1809,
+            "failed": 0,
+            "canceled": 1,
+            "ignored": 3440
+          },
+          "core4_counts": {
+            "passed": 7542,
+            "failed": 0,
+            "canceled": 0,
+            "ignored": 356
+          },
+          "previous_individual_cases_evidence": "Collected separately by coordinator helper under20261117_ci-reliability; see parent report"
+        }
+      },
+      "remaining_failures_classification": {
+        "134397478464": "Spark4.1 AQE union conf-flip query returns10rows(k,4) rather than5rows(k,8); actual result mismatch, CometExecSuite.scala4140",
+        "134397478471": "Ten duplicate-Parquet rejection tests reach expected read error, fail only cause-chain CometNativeException class assertion at CometNativeReaderSuite.scala123",
+        "134449352914": "Aggregate Required Checks reports the two failed jobs"
+      },
+      "monitor_actions": "Read-only API/logs/reports; no source/docs/Git changes, no rerun/push/cancel. Auxiliary JSON/log files only.",
+      "qualification_limit": "This verdict applies only to ac3694504. Later local uncommitted follow-up fixes are not covered by this run."
+    }
+  },
+  "g01_ci_followup": {
+    "job_id": 134397478471,
+    "profile": "Spark4.2 scans",
+    "cases": 10,
+    "kind": "asserted legacy CometNativeException envelope after new footer prevalidation",
+    "data_contract": "Native scan still rejects file; no successful wrong data observed; ignoreCorruptFiles routes away from full native",
+    "fix": "Strict test-only assertion of actual structured Spark file-read envelope, exact path and native cause; old-profile assertion retained",
+    "patch": "20261117_parquet/native-reader-duplicate-envelope.patch",
+    "local_result": "PASSED; see native-reader-duplicate-envelope.log",
+    "source_changes": "NONE; test source only; not committed/pushed until current full CI results collected",
+    "independent_review": "No weakening found"
+  },
+  "g01_union_followup": {
+    "status": "PASSED_LOCAL_AND_FINAL_GHA",
+    "current_code_location": "Committed and pushed on joom/1.2-dev; PR28 HEAD 26590264b878fb8eae2ca439a8bcc0dfb513cb36",
+    "production_changes": [
+      "Immutable legacy Union partitioning policy survives AQE/case-class copies; Spark4.2.1 delegates to authoritative snapshot",
+      "Preserve per-instance lazy layout, infer from live children of each copy; capture layout before executing children",
+      "Rebind snapshot-derived partitioning attributes to fixed Comet output after child reorder/replacement"
+    ],
+    "reader_test_change": "Strict typed file-read envelope/path/direct-cause; legacy CometNativeException assertion retained when guard absent",
+    "checks": {
+      "spark41_before_fix": "Reproduced wrong results:10rows(k,4) instead5rows(k,8); expected negative-control failure",
+      "spark41_after_fix": {
+        "passed": 12,
+        "failed": 0,
+        "canceled": 0,
+        "ignored": 0
+      },
+      "spark42_union_after_fix": {
+        "passed": 12,
+        "failed": 0,
+        "canceled": 0,
+        "ignored": 0
+      },
+      "spark42_reader_after_assertion_fix": {
+        "passed": 27,
+        "failed": 0,
+        "canceled": 0,
+        "ignored": 0
+      },
+      "spark42_converter": {
+        "passed": 19,
+        "failed": 0
+      },
+      "spark42_native_spark_fixtures": {
+        "union": 21,
+        "extensions": 9,
+        "field_selection": 3,
+        "failed": 0,
+        "canceled": 0,
+        "ignored": 0,
+        "log": "spark-union-policy-followup.log"
+      },
+      "fresh_installed_test_jar_sha256": "4d448f7d253483dc92043d05564127544066290d21a72ad0d4fa704bce618f1b",
+      "maven42_install": "PASSED",
+      "format": "PASSED",
+      "spark35_scala212_legacy": {
+        "passed": 35,
+        "failed": 0,
+        "canceled": 0,
+        "ignored": 0,
+        "log": "union-reader-spark35-legacy.log",
+        "purpose": "Cross-compile changed shared API and preserve old raw duplicate-error contract"
+      }
+    },
+    "independent_review": "No outstanding finding; namespace followup matches recommended remap; tests not weakened",
+    "no_rust_or_vendor_change": true,
+    "raw_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes",
+    "source_patch_sha256": "403deeae1ebde3e20511e54c593beeae682f230c14677b034f471eaf98c1c8b1",
+    "pending": "Only user review/integration and final release-JAR acceptance; no unresolved GHA failures",
+    "active_local_builds": [],
+    "source_commit": "30b6c4d7f531fad7b6550c5d3f1c92cefd096e58",
+    "new_ci_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
+    "pr_head_commit": "26590264b878fb8eae2ca439a8bcc0dfb513cb36",
+    "run_id": 44205897075,
+    "run_url": "https://github.com/joomcode/datafusion-comet/actions/runs/44205897075"
+  },
+  "source_commit_scope": "Current downloaded RC Build & Smoke artifact; original2b8f80b3frelease preserved under historical_release_artifacts",
+  "qualified_pr_head_commit": "26590264b878fb8eae2ca439a8bcc0dfb513cb36",
+  "github_qualification_history": [
+    {
+      "run_id": 44137489889,
+      "url": "https://github.com/joomcode/datafusion-comet/actions/runs/44137489889",
+      "attempt": 2,
+      "head_sha": "db2bd16584c1381853cc170abab7cd87f289c85c",
+      "completed_at_utc": "2026-11-17T19:26:09Z",
+      "conclusion": "FAILURE",
+      "job_counts": {
+        "success": 117,
+        "failure": 10,
+        "skipped": 17
+      },
+      "independent_failed_jobs": 9,
+      "aggregate_failure": "Required Checks134305657089 follows the nine failedjobs",
+      "target_spark42": {
+        "native_vendor": "PASSED;2639Comet+1695vendor+42targetedstatistics;5existingnative skips",
+        "comet_suites": {
+          "scans": "PASSED",
+          "shuffle": "PASSED",
+          "exec": "PASSED",
+          "expressions": "2284passed/2failed/2canceled/12ignored"
+        },
+        "delta": "294passed/0failed/0canceled/0ignored",
+        "sql_shards": "6passed/3failed(core-1,core-2,core-4)",
+        "ansi_add_subtract_multiply": "ACTUALLY_PASSED_NATIVE_AMD64"
+      },
+      "macos": "Both scans andexpressionsPASSED",
+      "qualification": "G01_NOT_QUALIFIED; mandatoryerror/castcompatibility/testcontract issues unresolved",
+      "highest_priority": "MissingSPARK-60262 PARQUET_FIELD_REQUESTED_MORE_THAN_ONCE guard forflat/nested fieldID/namecollisions. Actualreturnedrows were notasserted; do not claimabsenceofsilentresult risk.",
+      "failure_groups": {
+        "dependency_resolution": "4jobs:3MavenHTTP429 +SQLcore2Ivydependency org.springframework:spring-core:6.1.6; IvyHTTPstatusnotreported",
+        "delta_fixture": "2oldprofilejobs Spark3.5/4.0, syntheticDVdescriptor serializerassertion; target4.2passes",
+        "ansi_casts": "2cases:obsolete literalexceptionexpectation andnative negative-scale errorwhereSpark4.2.1returnszero",
+        "sql_core1": "33operator/fusion/partitioningcontractassertions; some laterdata checksunreached; cannotblanketskip",
+        "sql_core4": "2missingmandatorymappingerrors +3corruptedParquetexceptiondiagnosticmismatches"
+      },
+      "raw_evidence_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-runner-fix",
+      "diagnosis_files": [
+        "first-test-job-failures.json",
+        "sql42-failure-diagnosis.json",
+        "parquet-core4-failures.json",
+        "sql42-core1-diagnosis.json",
+        "sql42-core1-failure-cases.json",
+        "union-core1-failures.json"
+      ],
+      "operations": "Monitoring/read-only diagnosis only; no sourceedits/commits/push/reruns duringmonitoring. Localmigrationdocumentsupdated; branch-1.2/RC1/G02unchanged."
+    }
+  ],
+  "historical_release_artifacts": {
+    "source_commit": "2b8f80b3f253559bc999f73769b05c88ebcd5fc2",
+    "source_commit_scope": "Historical release JARs only; source_commit and jar_sha256 below refer to2b8f80b3f, not the qualified PR",
+    "release_directory": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1",
+    "jar_sha256": {
+      "comet-spark-spark4.2_2.13-1.2.0.jar": "40182026a96ccbf4958d2f741d19268e518173ff2960f937f1d3b700172defff",
+      "comet-contrib-delta-spark4.2_2.13-1.2.0.jar": "0c50187c4624b46b31a47326b7b281d6cde96d1b458697845d74debc0b07ae8c"
+    },
+    "amd64_qualification_gap": {
+      "status": "DEFAULT_AMD64_SMOKE_INCOMPLETE_STALLED",
+      "stage": "After2 Delta cases passed; remaining group did not complete",
+      "runtime": "Rosetta /run/rosetta/rosetta",
+      "observed_by_independent_reviewer": {
+        "java_threads": 351,
+        "threads_blocked_in_rosetta_rt_mutex_schedule": 349,
+        "cpu_ticks_no_progress": true,
+        "direct_java_child": "PID727 jspawnhelper awaiting4-byte parent handshake on fd438",
+        "jcmd_attach": "No response in10.5s",
+        "sigquit": "No Java dump emitted"
+      },
+      "interpretation": "Strong evidence of process-spawn/emulation suspension; does not independently prove absence of Comet bug. Native AMD64 default-mode execution is the most reliable follow-up.",
+      "java_only_probe": {
+        "spark_or_comet_loaded": false,
+        "background_threads": 32,
+        "process_spawns": 100,
+        "status": "PASSED; simple probe does not reproduce Spark JVM stall"
+      },
+      "environment_variation": {
+        "jdk.lang.Process.launchMechanism": "FORK",
+        "status": "ALSO_INCOMPLETE; Delta group timed out at300s after same2 cases; no further tests started"
+      },
+      "official_jdk_mode_reference": "https://bugs.java.com/bugdatabase/view_bug?bug_id=8357180",
+      "source_and_jars_unchanged": true,
+      "native_runner_question": "Requested asynchronously; awaiting user information",
+      "user_response": "Only Mac available; show result with this limitation",
+      "next_action": "No further Mac experiments; report qualification gap. Native AMD64 follow-up needed to complete default runtime verification."
+    },
+    "candidate_tag_status": "NOT_CREATED; full AMD64 runtime qualification incomplete",
+    "validation": {
+      "native_workspace_passed": 4326,
+      "native_ignored": 5,
+      "vendor_included_in_native_passed": 1695,
+      "additional_vendor_statistics_passed": 42,
+      "delta_passed": 291,
+      "ansi_runtime_passed": 75,
+      "ansi_upstream_canceled": 3,
+      "spark_sql_passed": 65,
+      "packaged_smoke": [
+        {
+          "architecture": "aarch64",
+          "cases": [
+            {
+              "case": "delta",
+              "suite": "org.apache.comet.contrib.delta.CometDeltaNativeScanSuite",
+              "passed": 4,
+              "classpath_and_bundled_native_selection": "VERIFIED"
+            },
+            {
+              "case": "dpp",
+              "suite": "org.apache.spark.sql.comet.CometDppFallbackRepro3949Suite",
+              "passed": 1,
+              "classpath_and_bundled_native_selection": "VERIFIED"
+            },
+            {
+              "case": "reload",
+              "suite": "org.apache.comet.CometSparkSessionExtensionsSuite",
+              "passed": 1,
+              "classpath_and_bundled_native_selection": "VERIFIED"
+            },
+            {
+              "case": "ansi",
+              "suite": "org.apache.comet.CometExpressionSuite",
+              "passed": 6,
+              "classpath_and_bundled_native_selection": "VERIFIED"
+            }
+          ],
+          "network": "none; loopback only"
+        }
+      ],
+      "synthetic_validator_publisher_negative_passed": 19,
+      "bash32_online_offline_passed": 2,
+      "elf_glibc_spi_git_sha_and_archive_validator": "PASSED"
+    },
+    "limitations": [
+      "Full AMD64 packaged runtime smoke did not complete in either default Rosetta launch or bounded FORK variation. Two Delta cases passed in each attempt. Remaining AMD64 cases unexecuted. No RC1 tag created.",
+      "RC1 covers G01 only; full Joom migration and ANSI qualification continue in G02-G09",
+      "Three existing upstream generic ANSI cancellations (#4967); targeted mandatory-overflow error parity passes",
+      "Real GCS/GKE ADC read and production performance not qualified",
+      "Possible daemon thread leak warnings in Spark suite teardown; no failed tests; lifecycle qualification continues in later groups",
+      "Isolated network-none containers logged caught hostname-resolution diagnostics; selected tests completed successfully"
+    ]
+  },
+  "rc_build_smoke": {
+    "run_id": 44388252264,
+    "run_url": "https://github.com/joomcode/datafusion-comet/actions/runs/44388252264",
+    "head_sha": "b93d553856a0339af7468bcff2070e735a1a3c71",
+    "conclusion": "SUCCESS",
+    "success_jobs": 7,
+    "failed_jobs": 0,
+    "skipped_jobs": 0,
+    "source_gate_fault_tests": 22,
+    "actual_packaged_cases": {
+      "amd64": 12,
+      "aarch64": 12
+    },
+    "groups_per_arch": {
+      "delta": 4,
+      "dpp": 1,
+      "reload": 1,
+      "ansi": 6
+    },
+    "download": {
+      "run_id": 44388252264,
+      "source_commit": "b93d553856a0339af7468bcff2070e735a1a3c71",
+      "artifact_id": 14469302529,
+      "artifact_name": "rc-build-smoke-b93d553856a0339af7468bcff2070e735a1a3c71",
+      "artifact_api_digest": "sha256:1c633ecec930ce8a2e4f95a2fe859ddefcd89f3a2898fc77105775448ad6035b",
+      "downloaded_zip_sha256": "1c633ecec930ce8a2e4f95a2fe859ddefcd89f3a2898fc77105775448ad6035b",
+      "archive": "/Users/skotlov/d/temp/20261118_comet12-rc-workflow/qualified-artifact-44388252264.zip",
+      "output_directory": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/gha-44388252264",
+      "artifact_bytes": 189616637,
+      "unpacked_bytes": 429572457,
+      "jar_sha256": {
+        "comet-spark-spark4.2_2.13-1.2.0.jar": "9f7d57bfb88efceeecce15d96ca320a2d38f81aacc95f4bbf67d46915bfc0686",
+        "comet-contrib-delta-spark4.2_2.13-1.2.0.jar": "5581281ff5bf826f04a038318d802be13d9f66cb8084e3d8a40846b5175bd632"
+      },
+      "smoke_architectures": {
+        "amd64": {
+          "passed": 12,
+          "receipt_sha256": "43daf2cd5fa45b6823d9440ecf01d014f41d4b5c768ed3ad47f1da85bf592bde"
+        },
+        "aarch64": {
+          "passed": 12,
+          "receipt_sha256": "7d65b78eea3bd86777d4adc151a342611b5cb0a5d560e21b484fb44c9f68f3d1"
+        }
+      },
+      "archive_runtime_provenance_and_smoke_receipts_verified": true
+    },
+    "qualification": {
+      "source_commit": "b93d553856a0339af7468bcff2070e735a1a3c71",
+      "cargo_lock_sha256": "8067744e33e7a5adfa94b22d47a6178285083e27ffda4258fe4d70aba355209a",
+      "qualification": "RELEASE_BUILD_AND_PACKAGED_SMOKE_PASSED",
+      "scope": "G01 baseline; later Joom feature groups and production GCP qualification remain",
+      "release_jar_sha256": {
+        "comet-spark-spark4.2_2.13-1.2.0.jar": "9f7d57bfb88efceeecce15d96ca320a2d38f81aacc95f4bbf67d46915bfc0686",
+        "comet-contrib-delta-spark4.2_2.13-1.2.0.jar": "5581281ff5bf826f04a038318d802be13d9f66cb8084e3d8a40846b5175bd632"
+      },
+      "checksum_manifest_sha256": "07b34e42c9f38aeb8c9f331bd7914b24f6091fb71135f8919af570945cef74b1",
+      "test_support_manifest_sha256": "87351ce516521f54db6e4ba95d303632e4849f3f0d6596ef6c9dd1a7da25761d",
+      "architectures": {
+        "amd64": {
+          "passed": 12,
+          "receipt_sha256": "43daf2cd5fa45b6823d9440ecf01d014f41d4b5c768ed3ad47f1da85bf592bde"
+        },
+        "aarch64": {
+          "passed": 12,
+          "receipt_sha256": "7d65b78eea3bd86777d4adc151a342611b5cb0a5d560e21b484fb44c9f68f3d1"
+        }
+      },
+      "github_run_id": "44388252264",
+      "github_run_attempt": "1"
+    },
+    "source_rat": "EXACT_B93_PASSED",
+    "runtime_source_equal_to_ci_qualified_26590264b": true
+  },
+  "source_commit_role": "Historical B93 qualified artifact; final RC1 source is resolved from the annotated release tag.",
+  "final_rc1_identity": {
+    "tag": "joom-1.2-1-rc1",
+    "receipt": "release-qualification.json delivered beside the JARs",
+    "closeout": "G01-CLOSEOUT.md"
+  }
+}

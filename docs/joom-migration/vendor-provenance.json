@@ -735,5 +735,25 @@
     "source": "registry+https://github.com/rust-lang/crates.io-index",
     "checksum": "b1451d6817e5ac0dd21819b19949d1c420ab51d748f55dd9a96ecb5418a24c97"
   },
-  "target_manifest_requirement": "Use standalone normalizedpublishedcrate manifest; preserve display.rs/serde55.2.0, license/notice; do not inherit Cometworkspace version1.2.0."
+  "target_manifest_requirement": "Use standalone normalizedpublishedcrate manifest; preserve display.rs/serde55.2.0, license/notice; do not inherit Cometworkspace version1.2.0.",
+  "target_vendor_execution": {
+    "pristine_import_commit": "b7f25aa37569ad50b1dee2f8204f57ac219ddc91",
+    "integration_commit": "a7b044913fa411cf8130876b9f2e1cbe7f734f35",
+    "published_archive_sha256": "b1451d6817e5ac0dd21819b19949d1c420ab51d748f55dd9a96ecb5418a24c97",
+    "production_algorithm_changes": "NONE_IN_G01",
+    "test_only_adaptations": [
+      "src/spill/mod.rs: flush and compare metric to physical file bytes at batch/finish checkpoints, preserve lifetime cleanup checks",
+      "src/spill/spill_pool.rs: compare metric to physical file bytes before/after writer drop"
+    ],
+    "why": "Comet Arrow59.3.2 omits all-valid IPC bitmap buffers; pristine DF55.2 lock used59.2.0. Runtime spill behavior is unchanged.",
+    "additional_format_config": "rustfmt.toml from DataFusion tag55.2.0; edition2024,width90",
+    "workspace_lock": "native/Cargo.lock; nested published lockfile is provenance only",
+    "default_unit_tests_passed": 1695,
+    "test_utils_statistics_passed": 42,
+    "historical_pre_cleanup_pristine_import_commit": "98c9f2f195c52d1b291e933be0c91624afece67a",
+    "history_cleanup_mapping": "G01-results.json",
+    "historical_pre_pr_import_commit": "0a76d68a33f6b4bcbce9fbb412b90350c5fed80b",
+    "historical_pre_pr_integration_commit": "15a466a09abf6106bbd80402e1967ba96076fbcc",
+    "pr_alignment_mapping": "G01-PR-preparation.json"
+  }
 }

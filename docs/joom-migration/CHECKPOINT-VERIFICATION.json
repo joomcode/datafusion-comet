@@ -1,0 +1,15 @@
+{
+  "status": "G01_PR_PREPARED_AMD64_GHA_PENDING",
+  "source_before_documentation_commit": "235f3d306e3ec4be2d571b93a6c7dc99fb0af512",
+  "base_unchanged": "9691385f35e4c5bd29514dca78d2044dd20e4bed",
+  "alignment_receipt": "G01-PR-preparation.json",
+  "all_source_docs_identical_during_alignment": true,
+  "intentional_followup_changes": [
+    "3ANSIassume removals",
+    "approvedpolicyandPRhandoffdocs"
+  ],
+  "active_sessions": {},
+  "merge_rc1_g02_authorized": false,
+  "new_ansi_tests_passed": false,
+  "restart_entry_point": "PAUSED.md"
+}

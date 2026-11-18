@@ -1,121 +1,86 @@
-# Joom Comet 1.2: план и передача работы
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
 
-Этот каталог — постоянная точка входа для реализации миграции в Joom Comet.
-История чата не является единственным источником решений. Состояние на 2026-11-17:
-План утверждён, Java/Rust и Docker проверены, сеть разрешена с условием безопасности.
-**Код не писать до нового прямого указания пользователя.** Сейчас только документация
-и read-only подготовка рабочих сессий; реализация групп не начата.
+  http://www.apache.org/licenses/LICENSE-2.0
 
-## Что читать перед работой
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
 
-1. `decisions.json`: действующие пользовательские решения и разрешения.
-2. `STATE.json`: текущая группа, ветки, проверки, ограничения и следующий шаг.
-3. `approved-plan.json`: утверждённые девять групп и резерв десятой, зависимости, RC.
-4. `feature-register.json`: полный реестр 58 действующих пунктов + историческая H01;
-   выбрать все карточки своей группы из `approved-plan.json`, не исключать их молча.
-5. `correctness-test-plan-ru.txt`, `vendor-provenance.json`,
-   `target-native-dependencies.json`: требования корректности и происхождение vendor.
-6. `NETWORK.md`: согласованный сетевой scope с условием безопасности.
-   Действующий статус и буквальное согласие брать из `decisions.json`.
-7. `HANDOFF.md`: правила задания и отчёта для рабочей сессии.
-8. `PERFORMANCE.md`, `cleanup-ledger.json`, `CLEANUP.md`: штатные benchmarks и учёт диска.
+> **Final source-freeze note:** G01 implementation and documentation are complete. RC1 acceptance is a post-commit gate recorded by the immutable `joom-1.2-1-rc1` tag and the delivered artifact receipts; see `G01-CLOSEOUT.md`. Earlier source SHAs, runs and pending states below are historical evidence. G02 and Java 21 work remain unauthorized.
 
-## Неизменные решения
+> **G01 finalization authorized:** documentation and history cleanup, followed by exact-SHA RC qualification, are in progress. Integration into `branch-1.2` and `joom-1.2-1-rc1` are conditional on successful checks. G02 and Java 21 work remain on hold.
+
+> **Latest completed G01 qualification:** RC Build & Smoke passed on `b93d55385`. All7 jobs and12 packaged smoke cases on each architecture passed. Final JARs were downloaded to `target/joom-release/gha-44388252264`; SHA256 and provenance were verified. Full runtime CI on 26590264b is retained; runtime code has not changed. Results: `RC-BUILD-SMOKE.md`, `G01-report.md`, `G01-results.json`, `STATE.json`. The subsequent finalization instruction authorizes history cleanup, English documentation, matching final RC qualification, integration and RC1 tagging after successful checks. Publication and G02 remain excluded.
+
+# Joom Comet 1.2: plan and handoff
+
+This directory is the durable entry point for implementing the Joom Comet migration. Chat history is not the only source of decisions. Initial environment/preparation state on2026-11-17: plan approved, Java/Rust and Docker checked, network approved subject to safety conditions. **G01 implementation is authorized.** The user separately authorizes each subsequent group after evaluating the previous one; do not start G02–G10 now.
+
+## Read before working
+
+1. `decisions.json`: current user decisions and permissions.
+2. `STATE.json`: current group, branches, checks, limitations and next step.
+3. `approved-plan.json`: approved nine groups and tenth-group reserve, dependencies, RCs.
+4. `feature-register.json`: full register of58 active items plus historical H01; select every card of your group from `approved-plan.json`, excluding none silently.
+5. `correctness-test-plan.txt`, `vendor-provenance.json`, `target-native-dependencies.json`: correctness requirements and vendor provenance.
+6. `NETWORK.md`: approved network scope with safety condition. Read the active authorization and its translated user statement in `decisions.json`.
+7. `HANDOFF.md`: worker-session task and reporting rules.
+8. `PERFORMANCE.md`, `cleanup-ledger.json`, `CLEANUP.md`: established benchmarks and disk accounting.
+
+## Fixed decisions
 
 - Source: `joom-1.1-13`, commit `981e26dff6b64110a8b3949a0ed065523d9012e4`.
-- Apache `branch-1.2` зафиксирована на `93cc6f9d71136bd0d87f77dd901989144d8c09fb`.
-  Не заменять базу более новым upstream без отдельного обсуждения.
-- Spark4.2.1 / Scala2.13.18; DataFusion55.2.0, Arrow/Parquet59.3.2;
-  целевая Delta integration4.4.1. Точная совместимость проверяется при реализации.
-- Максимально использовать согласованные upstream-реализации и сохранять все
-  недостающие Joom-возможности. Наличие похожего upstream-кода не доказывает эквивалентность.
-- ANSI=true. Сравнивать Spark4.2.1 Comet-off/on: результаты И обязательные ошибки;
-  сохранить mixed SUM/AVG overflow guards. Известный unsafe путь исправить или
-  ограничить до исполнения. Успешная сборка сама по себе не доказывает корректность.
-- PR5889 не трогать и не включать. Доработки после source tag13 не добавлять автоматически.
-- Итог: локальные Comet/Delta JAR для Linux amd64+arm64 и Spark4.2 image,
-  SHA256, Git SHA, параметры сборки и результаты проверок. Push/PR/JFrog publish/
-  изменение datasci image/production rollout сейчас не выполняются.
-- Performance проверять штатными средствами Comet: Scala microbenchmarks, Rust
-  Criterion и доступные TPC-H/DS runners; специальную инфраструктуру не создавать.
-  Полные production GCP performance tests пользователь проведёт позже;
-  этот перенос не следует объявлять прошедшим такие тесты.
+- Apache `branch-1.2` pinned to `93cc6f9d71136bd0d87f77dd901989144d8c09fb`. Do not replace the base with newer upstream without separate discussion.
+- Spark4.2.1 / Scala2.13.18; DataFusion55.2.0, Arrow/Parquet59.3.2; target Delta integration4.4.1. Exact compatibility is checked during implementation.
+- Maximize use of agreed upstream implementations while retaining all missing Joom capabilities. Similar upstream code does not prove equivalence.
+- ANSI=true. Compare Spark4.2.1 Comet-off/on: results AND mandatory errors; retain mixed SUM/AVG overflow guards. Fix or restrict a known unsafe path before execution. A successful build alone does not prove correctness.
+- Do not touch/include PR5889. Do not automatically add changes after source tag13.
+- Delivery: local Comet/Delta JARs for Linux amd64+arm64 and Spark4.2 image, SHA256, Git SHA, build parameters and test results. Feature Git push/PR updates and conditional G01 integration/RC1 tagging are now authorized as recorded in `decisions.json`; JFrog publication, datasci image changes and production rollout remain excluded.
+- Check performance using established Comet tools: Scala microbenchmarks, Rust Criterion and available TPC-H/DS runners; do not create special infrastructure. The user will later run full production GCP performance checks; do not claim this migration has passed them.
 
-## Организация работы
+## Work organization
 
-Основной чат реализует и координирует G01–G09 последовательно в утверждённых
-feature branches (G10 — резерв). Координатор сам делегирует внутренним помощникам
-ограниченные исследования и независимый review, передаёт контекст и проверяет результат.
-Девять веток не требуют девяти чатов. В общем checkout один пишущий исполнитель;
-тяжёлые builds не запускать все параллельно.
+The main chat implements and coordinates G01–G09 sequentially in approved feature branches (G10 is a reserve). The coordinator independently delegates bounded research and independent review to internal helpers, passes context and verifies results. Nine branches do not require nine chats. There is one implementation writer in the shared checkout; do not run all heavy builds concurrently. Bounded disjoint documentation/review assignments may be delegated explicitly by the coordinator.
 
-Отдельную пользовательскую сессию создавать по решению координатора при конкретной
-пользе от длительной изолированной задачи/отдельного контекста либо необходимости
-передачи продолжения. Новый PR, большой diff или compaction сами по себе не повод.
-Сначала объяснить причину и сохранить HEAD/tree/tests/next step, затем передать
-задание и проверить результат. Права управления сессиями уже даны пользователем.
-Существующий G01 prep-чат оставить idle; реализацию там автоматически не начинать.
+Create a separate user-visible session at the coordinator's discretion when a long isolated task/separate context or continuation handoff offers a concrete benefit. A new PR, large diff or compaction alone is not a reason. First explain why and preserve HEAD/tree/tests/next step, then pass the task and verify the result. Session-management permissions have already been granted. Leave the existing G01 preparation chat idle; do not automatically start implementation there.
 
-После каждой законченной стадии сохранять коммиты, проверки и следующий шаг в
-`STATE.json` и отчёте внутри `docs/joom-migration`.
-Одноразовые raw logs/tool outputs сохранять в датированных temp-каталогах и учитывать
-в cleanup ledger. В репозитории миграционные инструкции хранить только здесь.
-Перед началом следующей группы проверить реальный Git HEAD/чистоту и зависимости;
-файлы состояния не заменяют эту проверку. Интеграцией управляет координатор.
-Не коммитить заведомо не относящиеся к своей группе изменения другого исполнителя.
+After each completed stage, record commits, checks and next step in `STATE.json` and the report inside `docs/joom-migration`. Save one-off raw logs/tool outputs in dated temp directories and account for them in the cleanup ledger. Repository migration instructions belong only here. Before the next group, verify actual Git HEAD/cleanliness and dependencies; state files do not replace this check. The coordinator owns integration. Do not commit known unrelated changes from another executor.
 
-RC1: после G01. RC2: после интеграции G02–G06. RC3: после G07–G09 и необходимых
-итоговых исправлений. При дополнительных попытках расходовать следующий свободный
-номер; теги не двигать. Stable `joom-1.2-1` — на квалифицированном последнем RC.
-Финальные проверки обязательны независимо от наличия отдельной ветки G10.
+RC1: after G01. RC2: after integrating G02–G06. RC3: after G07–G09 and necessary final fixes. Additional attempts consume the next unused number; tags are immutable. Stable `joom-1.2-1` uses the last qualified RC. Final checks remain mandatory whether or not a separate G10 branch is used.
 
-## Передача разрешений
+## Transferring permissions
 
-В `decisions.json` записано прямое пользовательское разрешение необходимых локальных
-операций в этом checkout, включая `.git`. Старый запрет Git для этой работы заменён.
-Сетевые операции `NETWORK.md` разрешены на всю миграцию с прямым условием:
-скачиваемые и запускаемые артефакты должны быть известными и широко используемыми,
-без обоснованных сомнений в их безопасности. При сомнениях или необходимости
-нестандартного инструмента/источника согласовать отдельно. Push, внешняя публикация
-и production-операции не входят в это разрешение.
-Пользователь добавил локальный Comet-проект и прямо разрешил координатору создавать/
-вести рабочие сессии, передавать им задания/уточнения и проверять результаты.
-Передачу между сессиями организует координатор без ручного копирования пользователем.
-Это не снимает последний запрет писать код до отдельного поручения.
+`decisions.json` records explicit user authorization for necessary local operations in this checkout, including `.git`. The previous Git prohibition was superseded for this work. Network operations in `NETWORK.md` are authorized for the entire migration with an explicit condition: downloaded/executed artifacts must be known and widely used, with no reasonable safety concerns. Seek separate agreement if an unusual tool/source is needed or safety is uncertain. That dependency-download authorization alone does not include push, external publication or production operations; later explicit feature-push/PR and G01 integration/tag permissions are recorded separately in `decisions.json`.
 
-Все одноразовые скрипты, raw logs и tool outputs сохранять только в подкаталогах
-`/Users/skotlov/d/temp`; каждая новая директория там имеет имя `YYYYMMDD_description`.
-Не использовать `/tmp` для выбираемых исполнителем output/temp файлов. Стандартные
-tool-managed caches сохраняют обычное расположение. Не очищать общий Maven/SBT cache
-из `dev/local-ci.sh` автоматически; сначала проверить поведение и использовать
-имеющийся Spark checkout вместо бесконтрольных новых скачиваний исходников.
-Дополнительные исходники для исследования просить скачать/checkout у пользователя;
-не использовать UI для получения кода. Cargo git dependencies — отдельная часть
-согласованного сетевого scope, а не разрешение клонировать любые проекты.
+The user added the local Comet project and explicitly authorized the coordinator to create/manage working sessions, send tasks/clarifications and verify results. The coordinator handles inter-session transfer without requiring the user to copy context manually. Current implementation authorization covers only G01; later groups remain gated.
 
-## Сохранность и исходный аудит
+Keep all one-off scripts, raw logs and tool outputs only in subdirectories of `/Users/skotlov/d/temp`; each new directory there is named `YYYYMMDD_description`. Do not use `/tmp` for executor-selected output/temp files. Standard tool-managed caches retain their usual locations. Do not automatically clear the shared Maven/SBT cache through `dev/local-ci.sh`; inspect its behavior first and use the existing Spark checkout instead of downloading source without control. Ask the user to download/checkout additional research sources; do not obtain source through UI. Cargo Git dependencies are a separate approved network scope, not permission to clone arbitrary projects.
 
-Этот пакет предназначен для хранения в Git. `MANIFEST.json` фиксирует SHA256 файлов
-на момент передачи; при намеренном обновлении файла обновить и его checksum.
-Прежние материалы сохранены в:
+## Preservation and original audit
+
+This package is intended for Git storage. `MANIFEST.json` records file SHA256 at handoff; update its checksum when intentionally changing a file. Previous materials are preserved in:
 
 - `/Users/skotlov/d/temp/20261116_comet12-migration-register`
 - `/Users/skotlov/d/temp/20261116_comet12-consolidated-plan`
 - `/Users/skotlov/d/temp/20261116_comet12-execution-setup`
 
-Снимки `approved-plan.json`/`feature-register.json` фиксируют утверждённый состав
-до реализации; прогресс вести в `STATE.json`. Не запускать старый генератор реестра
-для обновления прогресса: он намеренно выставляет NOT_STARTED/NOT_RUN и не является
-трекером выполнения. Подтверждённые новые пользовательские решения заносить прежде
-всего в `decisions.json` и отражать в текущем задании; старые temp-отчёты могут быть
-историческими снимками. Не рассчитывать на автоматическую синхронизацию истории чатов.
+`approved-plan.json`/`feature-register.json` snapshots preserve approved pre-implementation scope; track progress in `STATE.json`. Do not run the old register generator to update progress: it deliberately sets NOT_STARTED/NOT_RUN and is not an execution tracker. Record new confirmed user decisions primarily in `decisions.json` and reflect them in current tasks; old temp reports may be historical snapshots. Do not rely on automatic synchronization of chat histories.
 
-## Окружение и блокеры
+All newly committed documentation and commit messages must be English. Original Russian evidence and pre-translation content are retained in `/Users/skotlov/d/temp/20261118_comet12-g01-finalization/documentation-before.zip`. Translated user statements in the documentation preserve the decisions rather than claiming to be original English quotations.
 
-Java17.0.19-tem подходит и проверена вместе с javac; глобально сейчас выбрана Java21.
-Координатор задаёт JAVA_HOME на17.0.19-tem для сборочной команды, не меняя глобальную Java.
-Rust/Cargo1.100.0 установлены и проверены; Homebrew proxies находятся в
-`/opt/homebrew/opt/rustup/bin`. Для своих команд можно добавить этот путь в PATH;
-редактирование пользовательского `~/.zshrc` не требуется.
-Если реально отсутствует tool/access/capability, сообщить конкретный блокер
-пользователю и решить его вместе; не тратить время на длинные обходные пути.
+## Environment and blockers
+
+Java17.0.19-tem is suitable and verified with javac; the global selection at the preparation checkpoint was Java21. The coordinator sets JAVA_HOME to17.0.19-tem per build command without changing global Java. Java21 qualification is currently on hold at the user's request.
+Rust/Cargo1.100.0 are installed and checked; Homebrew proxies are in `/opt/homebrew/opt/rustup/bin`. Add that path to PATH for individual commands if needed; editing the user's `~/.zshrc` is unnecessary.
+If a required tool/access/capability is actually missing, report the concrete blocker to the user and resolve it together; do not spend time on long workarounds.

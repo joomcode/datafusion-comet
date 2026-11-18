@@ -1,0 +1,191 @@
+{
+  "old_head": "b93d553856a0339af7468bcff2070e735a1a3c71",
+  "base": "9691385f35e4c5bd29514dca78d2044dd20e4bed",
+  "code_head": "cced071d47aa0fb4c1e896f901f4d4cff671fa97",
+  "code_tree_unchanged": true,
+  "mapping": [
+    {
+      "old": "57bcfbb6a94c29ea6592b9cbdd7e17840a0f94c8",
+      "title": "spark: establish Joom Spark 4.2.1 and Delta baseline",
+      "new": "57cc4cb6243692ef00da22428c9441c70aaf1239",
+      "tree": "2ff9e74202695c6208b56aad110309f4e03e5308",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "b7f25aa37569ad50b1dee2f8204f57ac219ddc91",
+      "title": "native: vendor pristine datafusion-physical-plan 55.2.0",
+      "new": "5a9cbf8569721ce18733cf0cf18c73bc57abd48f",
+      "tree": "8782f890fc8da0fb699a9bf9464df98ebfc84041",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "a7b044913fa411cf8130876b9f2e1cbe7f734f35",
+      "title": "native: test vendored DataFusion in the Comet workspace",
+      "new": "1322919571ef70a4f454ea41b545a6efc9d3d301",
+      "tree": "457710e58b82070739c42769d48fef12743d2be5",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "525658d82e634af16b1f2212957f03ca9e16c657",
+      "title": "ci: exclude generated Spark trees from suite inventory",
+      "new": "d354026be7e18a6a2e8fed90f3772e3b078eeea5",
+      "tree": "de135f5a112b7737e08ee67a2c88968db69c950a",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "b58bd65b24a8f2a20c576143ceafd17c42e25b22",
+      "title": "release: build and validate Joom Comet for Spark 4.2.1",
+      "new": "0710508c40bca0caee88b489da78e03bd00db922",
+      "tree": "978a02fdd5028001d35e105c93c0ea322c96ea59",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "b20edd3a1f58ad22aac76a6baf6bf0227c5d1aef",
+      "title": "test: import shuffle exchange in Spark 4.2.1 fixture",
+      "new": "92e97e46fa6de19c10824b3a1aef9908e5193633",
+      "tree": "f1c7f1133b4c5136c4fdb992a4a9e421a7dfa67d",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "56129e487b4404f1835dcb6e6b2df32cc295bd6f",
+      "title": "release: handle optional Maven flags in macOS Bash",
+      "new": "ed5d78ed9d1ed22236d7060fe03989d6da232b62",
+      "tree": "cbddb6045f8f3fa0bf1827779ad48827d4e400a5",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "fecf2b29051ec5b67e6ef81b08844710d5ef53ac",
+      "title": "docs: preserve complete G01 migration decisions and evidence",
+      "disposition": "CONSOLIDATED_DOCUMENTATION"
+    },
+    {
+      "old": "235f3d306e3ec4be2d571b93a6c7dc99fb0af512",
+      "title": "test: run legacy ANSI overflow cases on Spark 4.2",
+      "new": "87f58a83cef6c13e36815664a335e4fc2afcee17",
+      "tree": "9ffafc4beb8f705a9a6942ecf87941e453f7c9c1",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "ac48332d4f76e64d5835d0dd0e31daaa13a2110f",
+      "title": "docs: record G01 PR handoff and verification policy",
+      "disposition": "CONSOLIDATED_DOCUMENTATION"
+    },
+    {
+      "old": "b406dccadc420b5896c0702083b60fe7da5c85db",
+      "title": "ci: use standard Ubuntu runners for Joom PR gates",
+      "new": "a41d3e9116437b6d63a8d14beec7f085d6d5ed9b",
+      "tree": "19900db998d051ad2de658e1aad946f2479e6b22",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "db2bd16584c1381853cc170abab7cd87f289c85c",
+      "title": "docs: format G01 migration records for PR checks",
+      "disposition": "CONSOLIDATED_DOCUMENTATION"
+    },
+    {
+      "old": "8ffa31a01a32da0d8846da4482febfca0cdbef62",
+      "title": "cast: match Spark tiny-decimal rescaling fixes",
+      "new": "f8223f0f325c76a272e2eef63e28eb61daa67e98",
+      "tree": "3047c0fab6021bd8ff9e191c86672fd028590260",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "0b7078ca49e27ec2d95bb0e1b7041db51c157814",
+      "title": "parquet: reject duplicate projected field selection",
+      "new": "3c1e8b71e2a523776329aefe3193f0fb735caec4",
+      "tree": "8b6c1cac93815320d3108a417cc0cf861af2c6de",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "2be57cf8afe2d70f4190af2bf607a46f4890ca17",
+      "title": "union: enforce known partition layouts during execution",
+      "new": "99ed2f61a9e92d765b3f0d09099c61c1e44ff20b",
+      "tree": "6b2c8a9097d7695998e6cb879736691881b5cd36",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "16c46b14fcdab2b878e68f74af6c68fadf0c48bc",
+      "title": "test: preserve Spark SQL contracts with Comet plans",
+      "new": "b642976a191e96d03896f61ec89b01fd4e915b47",
+      "tree": "ac6ab53bb0c55680901ef493298735217ba8b63c",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "e3fa097f4dae3340ab8586526286fc5a1393c990",
+      "title": "test(delta): give deletion-vector fixtures an explicit offset",
+      "new": "72758d302c62f2560c8abce755ae76296a66cbcc",
+      "tree": "2b0fe5f39a52640dee3825b3a65f6f2db52a4059",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "6ae961dcbae949db09e349b05c91fc1cd6464d87",
+      "title": "ci: retry transient parent POM resolution before builds",
+      "new": "d1c85348c8d38c8743a27f077715863eb0938278",
+      "tree": "f7d99f8e08adbd098cb6599fa92e71e9544b7df3",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "ac3694504de3d5e3b93d19d8be87e48d6346b804",
+      "title": "docs: record G01 CI corrections and local validation",
+      "disposition": "CONSOLIDATED_DOCUMENTATION"
+    },
+    {
+      "old": "6fc14d57d378d147d65bd53b5fe28bcb0ca1265f",
+      "title": "union: preserve partitioning policy and bindings through AQE copies",
+      "new": "43af9beaf9dab627064758e84dbfd71035c24d6f",
+      "tree": "9987bb43713809c325091f3922ac49dfab2ffbe4",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "30b6c4d7f531fad7b6550c5d3f1c92cefd096e58",
+      "title": "parquet: assert typed read errors from duplicate-name prevalidation",
+      "new": "6277197a7c760f775f782f76a1d8aabcf8a01ce3",
+      "tree": "c5a9a6e0515f23e8d52d8d25040661fcabd3ee08",
+      "disposition": "RETAINED_CODE_COMMIT"
+    },
+    {
+      "old": "26590264b878fb8eae2ca439a8bcc0dfb513cb36",
+      "title": "docs: record G01 follow-up correctness evidence",
+      "disposition": "CONSOLIDATED_DOCUMENTATION"
+    },
+    {
+      "old": "c6e9d375b0f9511eac09934e44861eb666bc6f1d",
+      "title": "release: build and smoke-test RC artifacts on native Linux runners",
+      "disposition": "CONSOLIDATED_RC_TOOLING",
+      "new": "cced071d47aa0fb4c1e896f901f4d4cff671fa97"
+    },
+    {
+      "old": "548ca55ab573b6d8e52b3c40a849775ba058ea24",
+      "title": "docs: record G01 qualification and manual RC workflow authorization",
+      "disposition": "CONSOLIDATED_DOCUMENTATION"
+    },
+    {
+      "old": "966b8529b4a0e32b272af9a21aebe29b721069ba",
+      "title": "test: isolate duplicate receipt rejection from filesystem order",
+      "disposition": "CONSOLIDATED_RC_TOOLING",
+      "new": "cced071d47aa0fb4c1e896f901f4d4cff671fa97"
+    },
+    {
+      "old": "ee6bddb07e95af4bdb22ff801230871f913a6018",
+      "title": "release: resolve smoke classpaths within the packaging reactor",
+      "disposition": "CONSOLIDATED_RC_TOOLING",
+      "new": "cced071d47aa0fb4c1e896f901f4d4cff671fa97"
+    },
+    {
+      "old": "d7f0df5bd4750b204aedcbdb0a69efb1e984287e",
+      "title": "release: scope container Git trust through protected system config",
+      "new": "cced071d47aa0fb4c1e896f901f4d4cff671fa97",
+      "tree": "dd4c53dedd3689ee1e5ed4e19b4552824599b33b",
+      "disposition": "CONSOLIDATED_RC_TOOLING"
+    },
+    {
+      "old": "b93d553856a0339af7468bcff2070e735a1a3c71",
+      "title": "docs: restore ASF headers on migration reports",
+      "disposition": "CONSOLIDATED_DOCUMENTATION"
+    }
+  ],
+  "documentation_commit": "The final English documentation commit follows this code history; resolve joom-1.2-1-rc1 for the final source SHA.",
+  "policy": "All G01 service/checkpoint documentation changes are consolidated into one final English documentation commit; the pristine vendor import remains separate. RC tooling fixes are folded into its substantive commit.",
+  "recovery_ref": "refs/joom-migration/checkpoints/20261118-before-finalization",
+  "scope": "Commits after the existing integration base only. Existing branch-1.2 ancestry is retained."
+}

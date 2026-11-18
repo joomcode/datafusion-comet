@@ -1,7 +1,7 @@
 {
   "date": "2026-11-16",
   "status": "APPROVED_PLAN_NO_IMPLEMENTATION",
-  "recommendation": "9основныхPRсрезервом10;неукрупнятьсортировку,агрегаты,SMJиокнавобщийбольшойnativePRрадиуменьшениячисла.",
+  "recommendation": "9 main PRs with a tenth in reserve; do not combine sort, aggregates, SMJ and windows into one large native PR merely to reduce the count.",
   "supersedes_plan_for_review": "/Users/skotlov/d/temp/20261116_comet12-branch-release-plan/implementation-plan.json",
   "refs": {
     "source_tag": "joom-1.1-13",
@@ -33,15 +33,7 @@
     {
       "id": "G01",
       "branch": "joom/1.2-dev",
-      "old_work_packages": [
-        "B01",
-        "B03",
-        "B04",
-        "B05",
-        "B02",
-        "B06",
-        "B07"
-      ],
+      "old_work_packages": ["B01", "B03", "B04", "B05", "B02", "B06", "B07"],
       "cards": [
         "D01",
         "I01",
@@ -57,94 +49,60 @@
         "P03"
       ],
       "depends_on": [],
-      "scope": "База Spark/Scala, pristine DF vendor, Delta/GCP ADC/planning, release builder/publisher.",
-      "internal_review_plan": "Внутри одного PR сначала Spark/Delta на штатном DF55.2; затем отдельный pristinevendor commit, rootpatch/sharedlock/explicitvendor-tests и повторная проверка; затем release tooling. Все этапы — проверяемые коммиты без Joom-алгоритмов в vendor. Старые отдельные PR объединены, проверки не сокращены.",
+      "scope": "Spark/Scala baseline, pristine DF vendor, Delta/GCP ADC/planning, release builder/publisher.",
+      "internal_review_plan": "Within one PR, first Spark/Delta on stock DF55.2; then a separate pristine vendor commit, root patch/shared lock/explicit vendor tests and repeat validation; then release tooling. All stages are reviewable commits without Joom algorithms in vendor. Earlier separate PRs are combined; checks are not reduced.",
       "status": "PLAN_APPROVED_NOT_CREATED",
       "internal_stages": [
         {
           "id": "G01.1",
-          "name": "Spark/Delta на штатном DataFusion",
-          "scope": "Настроить точные Spark4.2.1/Scala2.13.18 и Delta4.4.1, минимальные GCP ADC/planning адаптации; использовать штатные registry crates DataFusion55.2.0 с текущим target-lock Arrow/Parquet59.3.2. До vendoring получить результаты базовых Comet/Delta/ANSI fixtures.",
-          "validation": "EffectivePOM и actualtestSparkversion; native/Delta/schema/DV/rebase/DPP базовые результаты и ожидаемые ошибки. Никаких Joom-патчей DataFusion."
+          "name": "Spark/Delta on stock DataFusion",
+          "scope": "Configure exact Spark4.2.1/Scala2.13.18 and Delta4.4.1, minimal GCP ADC/planning adaptations; use stock registry DataFusion55.2.0 crates with the current target lock's Arrow/Parquet59.3.2. Obtain baseline Comet/Delta/ANSI fixture results before vendoring.",
+          "validation": "Effective POM and actual test Spark version; baseline native/Delta/schema/DV/rebase/DPP results and expected errors. No Joom DataFusion patches."
         },
         {
           "id": "G01.2",
-          "name": "Чистый vendor отдельным коммитом",
-          "scope": "Импортировать published standalone datafusion-physical-plan55.2.0 с provenance/checksum/license отдельным механическим коммитом. Не переносить старый Cargo55.1 и не наследовать Comet workspace.version1.2.0; имя/версия crate остаются datafusion-physical-plan55.2.0.",
-          "validation": "Исходники соответствуют pristine55.2; Joom алгоритмический diff отсутствует."
+          "name": "Pristine vendor in a separate commit",
+          "scope": "Import the published standalone datafusion-physical-plan55.2.0 with provenance/checksum/license in a separate mechanical commit. Do not port the old Cargo55.1 or inherit Comet workspace.version1.2.0; the crate name/version remains datafusion-physical-plan55.2.0.",
+          "validation": "Sources match pristine55.2; no Joom algorithmic diff."
         },
         {
           "id": "G01.3",
-          "name": "Подключение vendor и отдельный тестовый target",
-          "scope": "Настроить root patch и включить vendored crate в native workspace с явным unit/regression test target. Использовать общий native/Cargo.lock/root patch; одного membership или cargo test --manifest-path недостаточно.",
-          "validation": "Проверить resolved graph: releaseComet и vendor-tests используют одну локальную physical-plan identity55.2.0, runtimeDF55.2/Arrow59.3.2. Unit-test dev-deps могут добавить lockentries, но не должны обновлять runtimegraph произвольно. CI явно выбирает package; Comet-only default-members не означают запуск vendor unit tests."
+          "name": "Connect vendor and a separate test target",
+          "scope": "Configure the root patch and include the vendored crate in the native workspace with an explicit unit/regression test target. Use shared native/Cargo.lock/root patch; membership alone or cargo test --manifest-path is insufficient.",
+          "validation": "Verify the resolved graph: release Comet and vendor tests use a single local physical-plan55.2.0 identity, runtime DF55.2/Arrow59.3.2. Unit-test dev dependencies may add lock entries, but must not arbitrarily update the runtime graph. CI explicitly selects the package; Comet-only default-members do not imply running vendor unit tests."
         },
         {
           "id": "G01.4",
-          "name": "Повторная проверка и release tooling",
-          "scope": "Повторить базовые проверки после подмены registry на чистый path crate. Подготовить build-release.sh/publish-jfrog.sh, multiarch packaging/provenance; отдельно проверить upstream native-library reload.",
-          "validation": "Сопоставить before/aftervendoring результаты и планы, прогнать именно vendorunit/regressions и Comet/Delta suites, проверить libcomet packaging/GLIBC/Scala. Итог G01 — внутренний RC1; полный Joom-набор ещё не перенесён."
+          "name": "Repeat validation and release tooling",
+          "scope": "Repeat baseline checks after replacing the registry crate with a pristine path crate. Prepare build-release.sh/publish-jfrog.sh, multiarch packaging/provenance; separately verify upstream native-library reload.",
+          "validation": "Compare before/after-vendoring results and plans, explicitly run vendor unit/regression tests and Comet/Delta suites, verify libcomet packaging/GLIBC/Scala. G01 produces an internal RC1; the full Joom capability set is not yet ported."
         }
       ]
     },
     {
       "id": "G02",
       "branch": "joom/1.2-native-runtime",
-      "old_work_packages": [
-        "B08",
-        "B09",
-        "B10",
-        "B11",
-        "B27"
-      ],
-      "cards": [
-        "I05",
-        "I06",
-        "J14",
-        "J15",
-        "J16",
-        "J22"
-      ],
-      "depends_on": [
-        "G01"
-      ],
+      "old_work_packages": ["B08", "B09", "B10", "B11", "B27"],
+      "cards": ["I05", "I06", "J14", "J15", "J16", "J22"],
+      "depends_on": ["G01"],
       "scope": "Offsets/FFI, TaskContext, block ownership, cancellation, timestamp compatibility.",
-      "internal_review_plan": "Сначала shared types/offsets, затем off-threadcontext, block lifecycle, cancellation, timestamp regressions/residuals. Каждая стадия проверяется до следующей; generic ANSI arithmetic/cast gaps здесь.",
+      "internal_review_plan": "First shared types/offsets, then off-thread context, block lifecycle, cancellation, timestamp regressions/residuals. Validate each stage before the next; generic ANSI arithmetic/cast gaps belong here.",
       "status": "PLAN_APPROVED_NOT_CREATED"
     },
     {
       "id": "G03",
       "branch": "joom/1.2-sort-spill-budget",
-      "old_work_packages": [
-        "B13",
-        "B14",
-        "B15"
-      ],
-      "cards": [
-        "D02",
-        "D03",
-        "D04",
-        "D11"
-      ],
-      "depends_on": [
-        "G01"
-      ],
-      "scope": "Полный sort/wide-payload/spill/output-handoff контракт.",
-      "internal_review_plan": "Раздельные коммиты дляreserve1/32, SpillWorkspace, wide sort, JVMhandoff1/4; один PR позволяет тестировать итоговыйmemorylifecycleбезпромежуточныхнесогласованныхAPI.",
+      "old_work_packages": ["B13", "B14", "B15"],
+      "cards": ["D02", "D03", "D04", "D11"],
+      "depends_on": ["G01"],
+      "scope": "Complete sort/wide-payload/spill/output-handoff contract.",
+      "internal_review_plan": "Separate commits for reserve1/32, SpillWorkspace, wide sort and JVM handoff1/4; one PR allows the final memory lifecycle to be tested without intermediate inconsistent APIs.",
       "status": "PLAN_APPROVED_NOT_CREATED"
     },
     {
       "id": "G04",
       "branch": "joom/1.2-native-aggregates",
-      "old_work_packages": [
-        "B12",
-        "B18",
-        "B19",
-        "B20",
-        "B21",
-        "B22",
-        "B23"
-      ],
+      "old_work_packages": ["B12", "B18", "B19", "B20", "B21", "B22", "B23"],
       "cards": [
         "D06",
         "D07",
@@ -158,62 +116,35 @@
         "N08",
         "N09"
       ],
-      "depends_on": [
-        "G01"
-      ],
+      "depends_on": ["G01"],
       "scope": "Upstream aggregate parity, spill/offset/emit/drain, collect_list, FIRST/LAST/bool/string-value MIN_BY/MAX_BY, SortAggregate.",
-      "internal_review_plan": "D08+N09остаются одним согласованным подшагом. Остальные изменения отдельными коммитами; сохранить state/overflowguards. Остаточные SUM/AVG ANSI fixes иихтесты принадлежатэтомуPR.",
+      "internal_review_plan": "D08+N09 remain a single coordinated substep. Other changes use separate commits; preserve state/overflow guards. Residual SUM/AVG ANSI fixes and their tests belong to this PR.",
       "status": "PLAN_APPROVED_NOT_CREATED"
     },
     {
       "id": "G05",
       "branch": "joom/1.2-smj-filter",
-      "old_work_packages": [
-        "B16",
-        "B17"
-      ],
-      "cards": [
-        "D05"
-      ],
-      "depends_on": [
-        "G01"
-      ],
-      "scope": "Filter-before-payload, outer-join correctness, one-side hoisting и ANSI eligibility.",
-      "internal_review_plan": "Сначала filter+всеобязательныеoutercorrectnessfixes, затем hoisting сcan-throw/lazy проверками. Вобщуюветкупопадаетполныйбезопасныйблок, не временная некорректная outerjoin-версия.",
+      "old_work_packages": ["B16", "B17"],
+      "cards": ["D05"],
+      "depends_on": ["G01"],
+      "scope": "Filter-before-payload, outer-join correctness, one-side hoisting and ANSI eligibility.",
+      "internal_review_plan": "First filter plus all mandatory outer-join correctness fixes, then hoisting with can-throw/lazy checks. Integrate the complete safe block, not a temporary incorrect outer-join version.",
       "status": "PLAN_APPROVED_NOT_CREATED"
     },
     {
       "id": "G06",
       "branch": "joom/1.2-native-windows",
-      "old_work_packages": [
-        "B24",
-        "B25",
-        "B26"
-      ],
-      "cards": [
-        "N01",
-        "N02",
-        "N03"
-      ],
-      "depends_on": [
-        "G01",
-        "G02"
-      ],
-      "scope": "Spillable partition windows, tiny-partition batching и SortedWindow.",
-      "internal_review_plan": "Три самостоятельных review/test этапа внутриоднойветки. OffsetBudget уже есть. Сохранить FILTER fallback, RANGE/ANSI/ordering иrequired distribution.",
+      "old_work_packages": ["B24", "B25", "B26"],
+      "cards": ["N01", "N02", "N03"],
+      "depends_on": ["G01", "G02"],
+      "scope": "Spillable partition windows, tiny-partition batching and SortedWindow.",
+      "internal_review_plan": "Three independent review/test stages within one branch. OffsetBudget already exists. Preserve FILTER fallback, RANGE/ANSI/ordering and required distribution.",
       "status": "PLAN_APPROVED_NOT_CREATED"
     },
     {
       "id": "G07",
       "branch": "joom/1.2-shuffle-and-c2r",
-      "old_work_packages": [
-        "B28",
-        "B29",
-        "B30",
-        "B31",
-        "B32",
-        "B33"
-      ],
+      "old_work_packages": ["B28", "B29", "B30", "B31", "B32", "B33"],
       "cards": [
         "J08",
         "J09",
@@ -228,62 +159,29 @@
         "J26",
         "J27"
       ],
-      "depends_on": [
-        "G01",
-        "G02"
-      ],
-      "scope": "C2R borrowing/pool, BHJ/Kryo/offsets, writer optimisations/spill, direct read и coalescer.",
-      "internal_review_plan": "Не один монолитный commit: C2R+pool; broadcast; writers; spillcallback; initialdirectread; coalescerJVM/native/proto. Ownershipиbufferlifetimeпроверятьпослекаждогошага. Самыйширокийinteropблок;приобъективнойнеобозримостиdiffиспользоватьрезервразделения,нежертвоватьreview.",
+      "depends_on": ["G01", "G02"],
+      "scope": "C2R borrowing/pool, BHJ/Kryo/offsets, writer optimizations/spill, direct read and coalescer.",
+      "internal_review_plan": "Not one monolithic commit: C2R+pool; broadcast; writers; spill callback; initial direct read; JVM/native/proto coalescer. Check ownership and buffer lifetime after every step. This is the broadest interop block; if the diff becomes objectively unreviewable, use the reserve split instead of sacrificing review.",
       "status": "PLAN_APPROVED_NOT_CREATED"
     },
     {
       "id": "G08",
       "branch": "joom/1.2-jvm-codegen",
-      "old_work_packages": [
-        "B34",
-        "B35",
-        "B36",
-        "B37"
-      ],
-      "cards": [
-        "J05",
-        "J06",
-        "J07",
-        "J17"
-      ],
-      "depends_on": [
-        "G01",
-        "G02"
-      ],
-      "scope": "Scalar runtime arguments, JVM short-circuit, UDF pools, plan/task serialization; необходимые native expression evaluation-order fixes.",
-      "internal_review_plan": "JVMdispatch/пулы/serializationпоследовательнымикоммитами; shadedartifacttests. Native ANSI issue7246ширеJ06:необходимыеfixesявновыделитьотдельнымикоммитамивэтомPR,неподмешиватьисключённыйPR5889.",
+      "old_work_packages": ["B34", "B35", "B36", "B37"],
+      "cards": ["J05", "J06", "J07", "J17"],
+      "depends_on": ["G01", "G02"],
+      "scope": "Scalar runtime arguments, JVM short-circuit, UDF pools, plan/task serialization; necessary native expression evaluation-order fixes.",
+      "internal_review_plan": "Sequential commits for JVM dispatch/pools/serialization; shaded-artifact tests. Native ANSI issue7246 is broader than J06: identify necessary fixes in separate commits within this PR; do not mix in excluded PR5889.",
       "status": "PLAN_APPROVED_NOT_CREATED"
     },
     {
       "id": "G09",
       "branch": "joom/1.2-cost-based-engines",
-      "old_work_packages": [
-        "B38",
-        "B39",
-        "B40"
-      ],
-      "cards": [
-        "I07",
-        "J01",
-        "J02",
-        "J03",
-        "J04"
-      ],
-      "depends_on": [
-        "G03",
-        "G04",
-        "G05",
-        "G06",
-        "G07",
-        "G08"
-      ],
-      "scope": "BoundaryFormats, wide-row fallback и calibrated cost model вместе.",
-      "internal_review_plan": "Общийкод переноситсясразуцелостно:нетвременного standaloneConversionCount этапабезEngineCostModel. Сохранятьитоговуютаблицутега13. Полнаяcoston/off/AQE/mixedhash/nativecoverageматрицапослевсехnativeвозможностей.",
+      "old_work_packages": ["B38", "B39", "B40"],
+      "cards": ["I07", "J01", "J02", "J03", "J04"],
+      "depends_on": ["G03", "G04", "G05", "G06", "G07", "G08"],
+      "scope": "BoundaryFormats, wide-row fallback and calibrated cost model together.",
+      "internal_review_plan": "Port the shared code as a coherent whole immediately: no temporary standaloneConversionCount stage without EngineCostModel. Preserve the final table from tag13. Run the complete cost on/off/AQE/mixed-hash/native-coverage matrix after all native capabilities.",
       "status": "PLAN_APPROVED_NOT_CREATED"
     }
   ],
@@ -291,17 +189,17 @@
     "id": "G10",
     "branch": "joom/1.2-release-qualification",
     "status": "APPROVED_RESERVE_ONLY_IF_NEEDED",
-    "scope": "Межфункциональные тесты и необходимые ограниченные интеграционные исправления с отдельнымикоммитами. Есликонтрольдиффаобъективнотребуетразделитьодиниз9блоков, резервможетбытьпереназначеннаэтотsplitпослеобсужденияконкретнойграницы. НеобязательныйпустойPRнесоздаётся."
+    "scope": "Cross-feature tests and necessary bounded integration fixes in separate commits. If controlling the diff objectively requires splitting one of the 9 blocks, the reserve may be reassigned to that split after discussing the concrete boundary. Do not create an unnecessary empty PR."
   },
   "maximum_planned_pr_count": 10,
   "conditional_fix_ownership": {
     "C01": {
       "owner": "G02",
-      "note": "Arithmetic/cast/division ANSI correctness; нетотдельнойветкисверхлимита."
+      "note": "Arithmetic/cast/division ANSI correctness; no extra branch beyond the limit."
     },
     "C02": {
       "owner": "G08",
-      "note": "Native evaluation order/JVMdispatch compatibility; J06 не объявлятьполнымзакрытиемissue7246."
+      "note": "Native evaluation order/JVM dispatch compatibility; do not claim J06 fully resolves issue7246."
     },
     "C03": {
       "owner": "G04",
@@ -309,257 +207,141 @@
     },
     "Q01": {
       "owner": "G10",
-      "note": "Дополнительнаямежфункциональнаяквалификация, еслинуженотдельныйdiff."
+      "note": "Additional cross-feature qualification if a separate diff is needed."
     }
   },
   "card_coverage": {
-    "P01": [
-      "G01"
-    ],
-    "I10": [
-      "G01"
-    ],
-    "P03": [
-      "G01"
-    ],
-    "D01": [
-      "G01"
-    ],
-    "P02": [
-      "G01"
-    ],
-    "I01": [
-      "G01"
-    ],
-    "I02": [
-      "G01"
-    ],
-    "I03": [
-      "G01"
-    ],
-    "I04": [
-      "G01"
-    ],
-    "I08": [
-      "G01"
-    ],
-    "J18": [
-      "G01"
-    ],
-    "I09": [
-      "G01"
-    ],
-    "J14": [
-      "G02"
-    ],
-    "I05": [
-      "G02"
-    ],
-    "J16": [
-      "G02"
-    ],
-    "J22": [
-      "G02"
-    ],
-    "J15": [
-      "G02"
-    ],
-    "D10": [
-      "G04"
-    ],
-    "N06": [
-      "G04"
-    ],
-    "D11": [
-      "G03"
-    ],
-    "D02": [
-      "G03"
-    ],
-    "D04": [
-      "G03"
-    ],
-    "D03": [
-      "G03"
-    ],
-    "D05": [
-      "G05"
-    ],
-    "D06": [
-      "G04"
-    ],
-    "D07": [
-      "G04"
-    ],
-    "D08": [
-      "G04"
-    ],
-    "N09": [
-      "G04"
-    ],
-    "D09": [
-      "G04"
-    ],
-    "N04": [
-      "G04"
-    ],
-    "N05": [
-      "G04"
-    ],
-    "N08": [
-      "G04"
-    ],
-    "N07": [
-      "G04"
-    ],
-    "N01": [
-      "G06"
-    ],
-    "N02": [
-      "G06"
-    ],
-    "N03": [
-      "G06"
-    ],
-    "I06": [
-      "G02"
-    ],
-    "J08": [
-      "G07"
-    ],
-    "J09": [
-      "G07"
-    ],
-    "J21": [
-      "G07"
-    ],
-    "J25": [
-      "G07"
-    ],
-    "J27": [
-      "G07"
-    ],
-    "J10": [
-      "G07"
-    ],
-    "J13": [
-      "G07"
-    ],
-    "J11": [
-      "G07"
-    ],
-    "J23": [
-      "G07"
-    ],
-    "J12": [
-      "G07"
-    ],
-    "J24": [
-      "G07"
-    ],
-    "J26": [
-      "G07"
-    ],
-    "J05": [
-      "G08"
-    ],
-    "J06": [
-      "G08"
-    ],
-    "J07": [
-      "G08"
-    ],
-    "J17": [
-      "G08"
-    ],
-    "J02": [
-      "G09"
-    ],
-    "I07": [
-      "G09"
-    ],
-    "J03": [
-      "G09"
-    ],
-    "J04": [
-      "G09"
-    ],
-    "J01": [
-      "G09"
-    ]
+    "P01": ["G01"],
+    "I10": ["G01"],
+    "P03": ["G01"],
+    "D01": ["G01"],
+    "P02": ["G01"],
+    "I01": ["G01"],
+    "I02": ["G01"],
+    "I03": ["G01"],
+    "I04": ["G01"],
+    "I08": ["G01"],
+    "J18": ["G01"],
+    "I09": ["G01"],
+    "J14": ["G02"],
+    "I05": ["G02"],
+    "J16": ["G02"],
+    "J22": ["G02"],
+    "J15": ["G02"],
+    "D10": ["G04"],
+    "N06": ["G04"],
+    "D11": ["G03"],
+    "D02": ["G03"],
+    "D04": ["G03"],
+    "D03": ["G03"],
+    "D05": ["G05"],
+    "D06": ["G04"],
+    "D07": ["G04"],
+    "D08": ["G04"],
+    "N09": ["G04"],
+    "D09": ["G04"],
+    "N04": ["G04"],
+    "N05": ["G04"],
+    "N08": ["G04"],
+    "N07": ["G04"],
+    "N01": ["G06"],
+    "N02": ["G06"],
+    "N03": ["G06"],
+    "I06": ["G02"],
+    "J08": ["G07"],
+    "J09": ["G07"],
+    "J21": ["G07"],
+    "J25": ["G07"],
+    "J27": ["G07"],
+    "J10": ["G07"],
+    "J13": ["G07"],
+    "J11": ["G07"],
+    "J23": ["G07"],
+    "J12": ["G07"],
+    "J24": ["G07"],
+    "J26": ["G07"],
+    "J05": ["G08"],
+    "J06": ["G08"],
+    "J07": ["G08"],
+    "J17": ["G08"],
+    "J02": ["G09"],
+    "I07": ["G09"],
+    "J03": ["G09"],
+    "J04": ["G09"],
+    "J01": ["G09"]
   },
   "historical_only": {
-    "H01": "Отменённые доtag13правила не восстанавливаются; отдельная feature branch не нужна."
+    "H01": "Do not restore rules reverted before tag13; no separate feature branch is needed."
   },
   "quality_controls": [
-    "40старыхпакетовсохраняютсякаквнутреннийчеклистсостава,зависимостейипроверок,анекак40PR.",
-    "КаждыйкрупныйPRимеетатомарныекоммиты/смысловыеподшаги;проверкипослених,неединственныйтестовыйзапусквконце.",
-    "Одиногромныйsquashcommitбезпроверяемойструктурынепредлагается;сохранятьинформативнуюисторию.",
-    "Приreviewявноразделятьмеханическийvendorimportиручныеизменения;происхождение/hashприведенывреестре.",
-    "ОбщиеCI/feature/runtime/ANSIgatesнеуменьшаются. Известныйunsafe-resultпутьисправляетсяилиограничиваетсядоproduction.",
-    "Еслипакетобъективнонельзякачественнопроверитьвэтомразмере,неукрупнятьдальшерадилимита;показатьконкретныйdiffипредложитьразделениевпределахрезерва.",
-    "НеоставлятьC01/C02/C03/Q01какскрытые4дополнительныхPR:ихвладельцыявноназначенывтаблице.",
-    "G09квалифицируетсяпослевсехG03–G08. Группыидутпоосновномупоследовательномупорядку;параллельнаяработанетребуется."
+    "The 40 old packages remain an internal checklist of scope, dependencies and checks, rather than 40 PRs.",
+    "Each large PR has atomic commits/meaningful substeps, with checks after them rather than a single test run at the end.",
+    "A single enormous squash commit without reviewable structure is not proposed; retain informative history.",
+    "During review, clearly separate mechanical vendor import from manual changes; provenance/hashes are recorded in the register.",
+    "Overall CI/feature/runtime/ANSI gates are not reduced. Fix or restrict a known unsafe-result path before production.",
+    "If a package cannot objectively be reviewed well at this size, do not combine further merely to meet the limit; show the concrete diff and propose a split within the reserve.",
+    "Do not leave C01/C02/C03/Q01 as 4 hidden extra PRs: their owners are explicitly assigned in the table.",
+    "Qualify G09 after all of G03-G08. Groups follow the main sequential order; parallel implementation is not required."
   ],
   "cost_benefit": {
     "benefits": [
-      "МеньшеCI/rebase/mergeцикловбезпотерисостава.",
-      "УбираютсяискусственныевременныеграницыBoundaryFormats↔costmodel.",
-      "Вобщуюлиниюпопадаетполнаясвязаннаявозможностьсрегрессиями."
+      "Fewer CI/rebase/merge cycles without losing scope.",
+      "Removes artificial temporary boundaries between BoundaryFormats and the cost model.",
+      "Integrates a complete related capability together with regressions."
     ],
     "costs": [
-      "Reviewкрупнееиошибкувнутриблокаискатьсложнее;поэтомунужныатомарныекоммиты/подшаги.",
-      "G01содержитбольшоймеханическийvendorimport;G04/G06/G07могутдатьзначительныйdiff. Ихразмеркачественнооценитсяпофактическомуpatch,непообещанию."
+      "Review is larger and isolating a bug inside a block is harder; therefore atomic commits/substeps are needed.",
+      "G01 includes a large mechanical vendor import; G04/G06/G07 may produce substantial diffs. Assess their reviewability from the actual patch, not a promise."
     ]
   },
   "milestones": [
     {
       "planned_tag": "joom-1.2-1-rc1",
       "after": "G01",
-      "meaning": "Внутренняябазоваясборка;неполныйJoomперенос."
+      "meaning": "Internal baseline build; not the complete Joom migration."
     },
     {
       "planned_tag": "joom-1.2-1-rc2",
       "after": "G06",
-      "meaning": "Общиеruntimeмеханизмы/nativeблокготовы;остальныеJVM/shuffle/plannerещёнеполны."
+      "meaning": "Shared runtime mechanisms/native block are ready; remaining JVM/shuffle/planner work is still incomplete."
     },
     {
       "planned_tag": "joom-1.2-1-rc3",
-      "after": "G09(+G10еслипотребовался)",
-      "meaning": "Полныйкандидатсзакрытыми/ограниченнымиизвестнымиunsafe-resultпутями."
+      "after": "G09 (+G10 if needed)",
+      "meaning": "Complete candidate with known unsafe-result paths fixed/restricted."
     },
     {
       "planned_tag": "joom-1.2-1",
-      "after": "КвалифицированпоследнийRC",
-      "meaning": "ТотжеcommitпоследнегоуспешногоRC;никакихнепроверенныхизменений."
+      "after": "Latest RC qualified",
+      "meaning": "The same commit as the latest successful RC; no unverified changes."
     }
   ],
   "unchanged_policies": [
-    "ANSI=true;сравниватьSpark4.2.1без/сCometнаоднихвходах,результатыиожидаемыеошибки.",
-    "Максимальноиспользоватьupstream,сохранятьвсенедостающиеJoomчасти.",
-    "PR5889нетрогатьине включать.",
-    "RCтегинеизменяемы;при дополнительныхпопыткахследующийномеррасходуется,поздниеплановыеномерасдвигаются.",
-    "Тег/build/JFrogpublish/productionrollout—разныедействия."
+    "ANSI=true; compare Spark4.2.1 without/with Comet on identical inputs, checking results and expected errors.",
+    "Use upstream wherever possible; preserve all missing Joom parts.",
+    "Do not touch or include PR5889.",
+    "RC tags are immutable; additional attempts consume the next number, shifting later planned numbers.",
+    "Tag/build/JFrog publication/production rollout are separate actions."
   ],
-  "authorization": "Рабочие сессии и локальные Git-операции разрешены, сеть — с условием безопасности. Последнее указание запрещает писать код до нового поручения; сейчас только документация и read-only подготовка. Push, публикация и production исключены.",
+  "authorization": "Work sessions and local Git operations are authorized; network access is subject to the safety condition. At this historical planning snapshot the latest instruction prohibited coding until a new task, so only documentation and read-only preparation were allowed. Push, publication and production were excluded. Later G01 authorizations are recorded in decisions.json.",
   "approved_on": "2026-11-16",
-  "approval_quote": "Согласен, зафиксируй план из 9 PR с резервом десятого.",
+  "approval_quote": "Agreed; record the plan of 9 PRs with a tenth in reserve.",
   "supersedes_implementation_plan": "/Users/skotlov/d/temp/20261116_comet12-branch-release-plan/implementation-plan.json",
   "step2_relationship": {
     "status": "SAME_TECHNICAL_REQUIREMENTS_NEW_PR_GRANULARITY",
     "owner": "G01 joom/1.2-dev",
-    "superseded_requirement": "Spark/Delta/vendor/release scripts отдельными PR",
-    "replacement": "Отдельные этапы и коммиты внутри G01. Технический порядок stockDF→pristinevendor→samegraphvendor-tests сохранён.",
+    "superseded_requirement": "Spark/Delta/vendor/release scripts in separate PRs",
+    "replacement": "Separate stages and commits within G01. The technical order stock DF -> pristine vendor -> same-graph vendor tests is preserved.",
     "algorithm_ports": {
-      "G03": "Sort/spill vendor patches вместе с Comet wiring.",
-      "G04": "Aggregate vendor patches вместе с Comet functions/state guards.",
-      "G05": "SMJ vendor patches вместе с eligibility/correctness tests."
+      "G03": "Sort/spill vendor patches together with Comet wiring.",
+      "G04": "Aggregate vendor patches together with Comet functions/state guards.",
+      "G05": "SMJ vendor patches together with eligibility/correctness tests."
     }
   },
   "execution_decisions_ref": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/decisions.json",
   "delivery_scope": {
     "status": "APPROVED_EXPLICITLY",
-    "goal": "Реализовать согласованный перенос и получить локальные JAR-артефакты Comet и Delta integration для включения пользователем в Spark4.2 image.",
+    "goal": "Implement the agreed migration and produce local Comet and Delta integration JAR artifacts for the user to include in the Spark4.2 image.",
     "targets": [
       "Spark4.2.1",
       "Scala2.13.18",
@@ -567,23 +349,22 @@
       "Delta4.4.1",
       "GCP"
     ],
-    "linux_release_architectures": [
-      "amd64",
-      "arm64"
-    ],
-    "checks": "Обязательные correctness/ANSI/regression/integration и packaging проверки сохраняются. Финальные JAR должны иметь SHA256, Git SHA и сведения о сборке. Полную проверку на production GCP jobs пользователь проведёт отдельно.",
-    "user_quote": "Нам сейчас нужно сделать все задуманное, чтобы я получил jar артефакты для включения в наш spark 4.2 image. Проверять производительность я буду позже."
+    "linux_release_architectures": ["amd64", "arm64"],
+    "checks": "Mandatory correctness/ANSI/regression/integration and packaging checks remain. Final JARs must have SHA256, Git SHA and build details. The user will separately validate real production GCP jobs.",
+    "user_quote": "For now, we need to complete everything planned so that I receive JAR artifacts to include in our Spark 4.2 image. I will check performance later."
   },
   "performance_policy": {
     "status": "APPROVED_EXPLICITLY",
-    "user_quote": "ну по возможности ты ее конечно проверяй как сможешь во время реализации.",
-    "during_implementation": "Существующие Scala microbenchmarks/Spark Benchmark, Rust Criterion и доступные TPC-H/DS runners в принятом стиле. При необходимости обычное расширение соответствующего benchmark; отдельную инфраструктуру ради миграции не создавать.",
-    "production_benchmarks": "Полные замеры на реальных GCP jobs отложены на пользовательскую проверку и не являются текущим условием передачи локальных JAR.",
+    "user_quote": "Of course, check performance as far as you can during implementation where possible.",
+    "during_implementation": "Use existing Scala microbenchmarks/Spark Benchmark, Rust Criterion and available TPC-H/DS runners in the established style. Extend the relevant benchmark normally if necessary; do not create separate infrastructure for the migration.",
+    "production_benchmarks": "Full measurements on real GCP jobs are deferred to user validation and are not a current condition for handing over local JARs.",
     "correctness_unchanged": true,
-    "latest_user_quote": "Я хочу сказать, что с т.з. оценки производительности ты должен действовать точно так , как уже принято в этом проекте datafusion-comet. Не надо создавать специальных тестов, если там подобного никогда не было.",
+    "latest_user_quote": "For performance evaluation, follow exactly the established practice in the datafusion-comet project. Do not create special tests if nothing similar has existed there.",
     "reference": "PERFORMANCE.md",
     "correctness_tests_unchanged": true
   },
   "last_updated_on": "2026-11-17",
-  "execution_model_ref": "decisions.json#execution_model"
+  "execution_model_ref": "decisions.json#execution_model",
+  "translation_note": "Translated from Russian on 2026-11-18 without changing the approved scope, card coverage, dependencies or milestones. User quotes are English translations. Historical execution holds describe the planning snapshot; decisions.json and STATE.json control current authorization/progress.",
+  "snapshot_note": "Approved scope snapshot; original planning statuses are historical. Track implementation in STATE.json and resolve final G01 acceptance through G01-CLOSEOUT.md, the annotated RC1 tag and delivered artifact receipts. No later group is automatically authorized."
 }

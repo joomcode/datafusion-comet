@@ -1,363 +1,269 @@
 {
   "date": "2026-11-16",
-  "source": "Явные решения пользователя в текущем диалоге; пакет актуализирован2026-11-17. Историческое утверждение плана2026-11-16 сохранено.",
+  "source": "Explicit user decisions in the current conversation; package updated on 2026-11-17. Historical plan approval of 2026-11-16 is retained.",
   "general_policy": {
     "status": "APPROVED",
-    "user_quote": "По максимому используем upstream реализацию и добавляем наши исправления , где имеет смысл.",
-    "rule": "Максимально использовать upstream в качестве основы; сохранять все недостающие Joom-возможности, исправления и оптимизации. При потере поведения или оптимизации сохранять/адаптировать нашу часть.",
+    "user_quote": "Use upstream implementations as much as possible and add our fixes where appropriate.",
+    "rule": "Use upstream as the base wherever possible; preserve all missing Joom capabilities, fixes and optimizations. If behavior or an optimization is lost, preserve/adapt our part.",
     "conditions": [
-      "Функциональную эквивалентность подтвердить Joom regressions и проверкой native execution/планов.",
-      "Для оптимизаций проверить memory/spill lifecycle и по возможности выполнить доступные локальные performance measurements; непроверенную производительность явно отметить. Полные GCP benchmarks отложены на пользовательскую проверку.",
-      "Частичный аналог не означает полноценную замену Joom-возможности.",
-      "Не исключать Joom-поведение только потому, что в upstream существует похожий механизм."
+      "Confirm functional equivalence with Joom regressions and verification of native execution/plans.",
+      "For optimizations, check memory/spill lifecycle and, where possible, run available local performance measurements; explicitly identify unverified performance. Full GCP benchmarks are deferred to user validation.",
+      "A partial analogue does not constitute a complete replacement for a Joom capability.",
+      "Do not exclude Joom behavior merely because a similar mechanism exists upstream."
     ]
   },
   "explicitly_approved": {
     "I01": {
       "status": "APPROVED_EXPLICITLY",
-      "decision": "Использовать native Delta scanner Comet1.2; сохранить GCP ADC, сериализацию и защиту от planning deadlock, адаптируя недостающие Joom-особенности."
+      "decision": "Use the Comet 1.2 native Delta scanner; preserve GCP ADC, serialization and planning-deadlock protection, adapting missing Joom behavior."
     },
     "D10": {
       "status": "APPROVED_EXPLICITLY",
-      "decision": "Использовать upstream Single/Final+MergeAsPartial и новые Spark aggregate-state codecs; сохранить устойчивость к spill и перенести Joom memory/offset guards, ordered drain и low-copy collect_list. Не переносить старую Joom-маршрутизацию PartialReduce без необходимости."
+      "decision": "Use upstream Single/Final+MergeAsPartial and the new Spark aggregate-state codecs; preserve spill resilience and port Joom memory/offset guards, ordered drain and low-copy collect_list. Do not port the old Joom PartialReduce routing unless needed."
     },
     "N08": {
       "status": "APPROVED_EXPLICITLY",
-      "decision": "Сохранить upstream SortAggregate architecture и добавить недостающие Joom-оптимизации порядка/streaming и необходимые correctness guards."
+      "decision": "Keep the upstream SortAggregate architecture and add missing Joom ordering/streaming optimizations and necessary correctness guards."
     },
     "I06": {
       "status": "APPROVED_EXPLICITLY",
-      "decision": "Использовать upstream timestamp producer/CASE fixes и Spark4.2 semantics; переносить нашу дополнительную нормализацию сравнений там, где она ещё необходима."
+      "decision": "Use upstream timestamp producer/CASE fixes and Spark 4.2 semantics; port our additional comparison normalization wherever it is still necessary."
     },
     "I07": {
       "status": "APPROVED_EXPLICITLY",
-      "decision": "Использовать upstream native wide-decimal hashing вместо возвращения старого precision>18 запрета; проверить совместимость со Spark, включая mixed boundaries."
+      "decision": "Use upstream native wide-decimal hashing instead of restoring the old precision>18 prohibition; check compatibility with Spark, including mixed boundaries."
     },
     "N06": {
       "status": "APPROVED_EXPLICITLY",
-      "decision": "Использовать upstream native string MIN/MAX; сохранить Joom cases, native coverage и недостающие guards."
+      "decision": "Use upstream native string MIN/MAX; preserve Joom cases, native coverage and missing guards."
     },
     "I04": {
       "status": "APPROVED_EXPLICITLY",
-      "decision": "Использовать upstream DPP/empty-scan lifecycle; сохранить соответствующие Joom регрессии и недостающие исправления."
+      "decision": "Use the upstream DPP/empty-scan lifecycle; retain the corresponding Joom regressions and missing fixes."
     },
     "I05": {
       "status": "APPROVED_EXPLICITLY",
-      "decision": "Использовать upstream recursive boolean FFI repair; сохранить дополнительные Joom nested/sliced regressions."
+      "decision": "Use the upstream recursive boolean FFI repair; retain additional Joom nested/sliced regressions."
     },
     "J18": {
       "status": "APPROVED_EXPLICITLY",
-      "decision": "Использовать upstream однократную загрузку bundled native library; проверить исходный Joom reload-сценарий."
+      "decision": "Use upstream one-time loading of the bundled native library; verify the original Joom reload scenario."
     },
     "J21": {
       "status": "APPROVED_EXPLICITLY",
-      "decision": "Использовать upstream нормализацию sliced broadcast offsets; сохранить Joom регрессии и добавить недостающие исправления при обнаружении потери поведения."
+      "decision": "Use upstream normalization of sliced broadcast offsets; retain Joom regressions and add missing fixes if behavior is lost."
     },
     "J24": {
       "status": "APPROVED_EXPLICITLY",
-      "decision": "Использовать upstream small-batch/effective JVM shuffle batch cap; сохранить наши проверки."
+      "decision": "Use the upstream small-batch/effective JVM shuffle batch cap; retain our checks."
     },
     "P03": {
       "status": "APPROVED_EXPLICITLY",
-      "decision": "Сохранить ANSI=true. Приоритет — отсутствие успешных jobs с некорректными результатами. Сравнить Spark4.2.1 Comet-off/on на одинаковых входах/ANSI; проверить результаты и обязательные ошибки; сохранить SUM/AVG overflow guards, исправлять несовместимости или заранее ограничивать native-путь. По возможности добавить автоматические regression/differential tests при реализации. PR#5889 в текущую миграцию не включать."
+      "decision": "Keep ANSI=true. The priority is to avoid successful jobs with incorrect results. Compare Spark 4.2.1 Comet-off/on with identical inputs/ANSI; verify results and mandatory errors; preserve SUM/AVG overflow guards, fix incompatibilities or restrict the native path before execution. Add automated regression/differential tests during implementation where possible. Do not include PR#5889 in this migration."
     }
   },
   "covered_by_general_policy": {
     "I03": {
       "status": "RESOLVED_BY_APPROVED_POLICY",
-      "decision": "Сохранить защиту от planning deadlock через актуальный upstream lifecycle с корректным execution partition count; старое безусловное UnknownPartitioning(0) не копировать. Проверить исходные Joom reproductions."
+      "decision": "Preserve planning-deadlock protection under the current upstream core contract: UnknownPartitioning(0) without reading perPartitionData during planning; execution obtains the actual count separately. This is a verified lifecycle adaptation, not a blind port of the old always-zero behavior.",
+      "technical_clarification": {
+        "previous_preinvestigation_wording": "Preserve planning-deadlock protection through the current upstream lifecycle with the correct execution partition count; do not copy the old unconditional UnknownPartitioning(0). Verify the original Joom reproductions.",
+        "checked_on": "2026-11-17",
+        "evidence": [
+          "upstream operators.scala:1382 forbids perPartitionData reads in outputPartitioning and prescribes Unknown0",
+          "operators.scala:1135 derives runtime count independently from perPartitionData.length",
+          "ordinary CometNativeScanExec.scala:131 and Spark4.2.1 DataSourceScanExec.scala:482 return Unknown0 for nonbucketed scans"
+        ],
+        "relative_plan_limit": "Compared with obsolete contrib Unknown1 path, a one-split Delta scan may get an additional SinglePartition exchange; not measured. Matches standard Spark and source Joom, so no agreed Joom feature is lost."
+      }
     },
     "J09": {
       "status": "RESOLVED_BY_APPROVED_POLICY",
-      "decision": "Сохранить Joom projection-instance pool поверх upstream generated-class cache, соблюдая lifetime/bounds guards. Частичный class cache сам по себе не заменяет pool; упрощение возможно только при подтверждённой эквивалентности по утверждённому правилу."
+      "decision": "Preserve the Joom projection-instance pool on top of the upstream generated-class cache, respecting lifetime/bounds guards. A partial class cache alone does not replace the pool; simplification is allowed only after equivalence is confirmed under the approved rule."
     }
   },
   "not_decided": [],
   "authorization_boundary": {
     "repository_operations_authorized": true,
-    "implementation_authorized": false,
+    "implementation_authorized": true,
     "git_mutation_authorized": true,
     "repository_scope": "/Users/skotlov/d/projects/datafusion-comet",
     "git_scope": "/Users/skotlov/d/projects/datafusion-comet/.git",
-    "user_quote": "Отныне ты имеешь мое разрешение делать все необходимые манипуляции в /Users/skotlov/d/projects/datafusion-comet (в т.ч. в /Users/skotlov/d/projects/datafusion-comet/.git)",
-    "interpretation": "Разрешение охватывает необходимые локальные изменения репозитория, ветки, коммиты, интеграцию и локальные теги. Подготовка передачи работы не означает, что реализация G01 уже начата.",
-    "implementation_status": "NOT_STARTED_USER_CODE_HOLD",
+    "user_quote": "From now on you have my permission to perform all necessary operations in /Users/skotlov/d/projects/datafusion-comet (including /Users/skotlov/d/projects/datafusion-comet/.git).",
+    "interpretation": "Permission covers necessary local repository changes, branches, commits, integration and local tags. Preparing a handoff does not mean that G01 implementation has already started.",
+    "implementation_status": "G01_IN_PROGRESS",
     "network_build_dependencies_authorized": true,
     "network_scope_status": "APPROVED_WITH_USER_SAFETY_CONDITION",
     "github_api_read_only_audit_authorized": true,
     "automatic_worker_chat_creation_authorized": true,
     "automatic_cross_chat_messaging_authorized": true,
     "publishing_authorized": false,
-    "remote_push_status": "USER_REPORTED_403; LOCAL_WORK_ONLY",
-    "note": "Git/документация и создание/ведение рабочих сессий разрешены; сеть разрешена с условием безопасности. Последнее прямое указание запрещает писать код до нового поручения. Push, публикация и production-операции исключены.",
+    "remote_push_status": "AUTHORIZED_FOR_G01_PR_PREPARATION; base publication only at unchanged SHA",
+    "note": "G01 PR preparation/push is now authorized by current request. User creates PR manually. No merge/base content change, RC1, G02, artifact publication or production operations.",
     "recorded_on": "2026-11-17",
     "network_approval": {
       "recorded_on": "2026-11-17",
       "status": "APPROVED_WITH_USER_SAFETY_CONDITION",
-      "source": "Прямой ответ пользователя на request_user_input_async в координаторском чате.",
-      "user_quote": "Разрешаю на всю миграцию Comet1.2/Spark4.2.1 сетевые операции, перечисленные в docs/joom-migration/NETWORK.md: Maven/SBT, Rustup/Cargo, закреплённые git-зависимости и build tools с GitHub, Docker Hub и Ubuntu packages, включая дочерние процессы внутри контейнеров. При условии, что все скачиваемое на мой ноут из сети и запускаемое - является известными и широкоиспользуемыми артефактами, в безопасности которых для моей машины не приходится сомневаться. Без push, внешней публикации и production операций.",
+      "source": "Direct user response to request_user_input_async in the coordinator chat.",
+      "user_quote": "I authorize, for the entire Comet1.2/Spark4.2.1 migration, the network operations listed in docs/joom-migration/NETWORK.md: Maven/SBT, Rustup/Cargo, pinned Git dependencies and build tools from GitHub, Docker Hub and Ubuntu packages, including child processes inside containers. This is subject to the condition that everything downloaded from the network to my laptop and executed is a known and widely used artifact whose safety for my machine is not reasonably in doubt. No push, external publication or production operations.",
       "scope_document": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/NETWORK.md",
       "approved_proposal_commit": "fbc250a9867515958c6a33920c1ac15b5d2d62b1",
       "approved_proposal_sha256": "3bedf4a5dc5d14b1793d25c4ae9073b697a1691a614aa69494c37486bc8dac02",
-      "scope": "На всю утверждённую миграцию: Maven/SBT, Rustup/Cargo, закреплённые git-зависимости и build tools с GitHub, Docker Hub и Ubuntu packages, включая дочерние процессы внутри контейнеров.",
-      "user_safety_condition": "Все скачиваемые на ноутбук и запускаемые артефакты должны быть известными и широко используемыми, без обоснованных сомнений в их безопасности для машины пользователя.",
-      "execution_rule": "Использовать известные зависимости выбранного upstream-проекта и официальные источники/реестры, закреплённые версии/commit и доступные publisher checksums. Перед запуском внешнего installer/build script проверить его происхождение и содержание. Наличие пакета в registry или lockfile само по себе не отменяет условие пользователя. Не добавлять и не запускать нестандартный, непроверенный или сомнительный инструмент/источник на основании одного этого разрешения; при такой необходимости согласовать отдельно.",
+      "scope": "For the entire approved migration: Maven/SBT, Rustup/Cargo, pinned Git dependencies and build tools from GitHub, Docker Hub and Ubuntu packages, including child processes inside containers.",
+      "user_safety_condition": "All artifacts downloaded to the laptop and executed must be known and widely used, with no reasonable doubts about their safety for the user's machine.",
+      "execution_rule": "Use known dependencies of the selected upstream project and official sources/registries, pinned versions/commits and available publisher checksums. Before running an external installer/build script, verify its origin and contents. Registry or lockfile inclusion alone does not override the user's condition. Do not add or run an unusual, unverified or questionable tool/source solely on the basis of this permission; obtain separate approval if needed.",
       "excluded": [
         "Git push",
-        "Внешняя публикация артефактов/PR/images",
-        "Production-операции",
-        "Остальные исключения исходного NETWORK.md"
+        "External publication of artifacts/PRs/images",
+        "Production operations",
+        "Other exclusions in the original NETWORK.md"
       ],
       "network_operations_performed_during_recording": false
     },
     "implementation_hold": {
       "active": true,
-      "user_quote": "Код не пиши до моего укзания.",
-      "recorded_on": "2026-11-17",
-      "allowed_now": "Документация и read-only подготовка; реализацию не начинать."
+      "applies_to_groups": [
+        "G02",
+        "G03",
+        "G04",
+        "G05",
+        "G06",
+        "G07",
+        "G08",
+        "G09",
+        "G10"
+      ],
+      "allowed_group": "G01",
+      "user_quote": "Start implementing G01 under the approved plan. Report after completion and checks. Do not proceed to G02 yet, because I will explicitly authorize each new one of the 10 groups after reviewing the previous one."
     },
     "session_orchestration_authorization": {
       "recorded_on": "2026-11-17",
-      "user_quote": "Проект Comet добавлен (/Users/skotlov/d/projects/datafusion-comet). Создавай и веди рабочие сессии по утверждённому плану, передавай им задания и уточнения, проверяй результаты.",
+      "user_quote": "The Comet project has been added (/Users/skotlov/d/projects/datafusion-comet). Create and manage work sessions under the approved plan, pass them tasks and clarifications, and check their results.",
       "project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
       "code_hold_preserved": true
-    }
+    },
+    "implementation_authorized_groups": ["G01"],
+    "historical_scope_note": "Original stage-specific authorization/evidence retained. For current G01 finalization, g01_finalization_authorization supersedes earlier merge/tag holds; G02, Java 21, artifact publication and production remain unauthorized."
   },
   "ansi_policy": {
     "status": "APPROVED_EXPLICITLY",
     "spark_sql_ansi_enabled": true,
-    "user_quote": "Давай сохраним `ansi=true`.",
-    "rule": "Целевой режим Spark4.2.1 — ANSI=true. Подтверждённые несовместимости исправлять либо заранее ограничивать соответствующий native-путь; не отключать ANSI глобально для обхода расхождений."
+    "user_quote": "Let us keep `ansi=true`.",
+    "rule": "The target Spark 4.2.1 mode is ANSI=true. Fix confirmed incompatibilities or restrict the corresponding native path before execution; do not globally disable ANSI to work around differences."
   },
   "correctness_policy": {
     "status": "APPROVED_EXPLICITLY",
-    "priority": "Исключить ситуацию, когда job завершается без ошибки и публикует некорректный результат.",
-    "user_quote": "Самое главное, мы тут должны сделать все, чтобы исключить ситуацию, когда джоба завершается без ошибки, но создает некорректный результат.",
+    "priority": "Prevent a job from completing without error and publishing an incorrect result.",
+    "user_quote": "Above all, we must do everything possible to prevent a job from completing without error while producing an incorrect result.",
     "release_criteria": [
-      "Известные небезопасные native-пути исправлены либо исключены плановым fallback до исполнения; зелёный статус job/CI сам по себе недостаточен.",
-      "Сравнивать Spark4.2.1 безComet и сComet на одном snapshot входов, одинаковом ANSI=true и остальных значимых настройках.",
-      "Сравнивать сами результаты, типы, NULL, duplicate rows и гарантированный SQL порядок; не ограничиваться count или отдельными суммами.",
-      "Проверять обе стороны контракта: обязан завершиться/обязан упасть. Comet-success при обязательной Spark ANSI-ошибке считается нарушением корректности.",
-      "Сохранять overflow detection и guards mixedSpark/native partial-final SUM/AVG, включая новый state codec.",
-      "Для подтверждённой несовместимости fallback определяется до исполнения/публикации; не полагаться на retry вSpark после записи или ошибки.",
-      "Проверять actual native execution/планы, чтобы fallback не маскировал отсутствие тестирования custom-пути.",
-      "Не скрывать расхождения общей нормализацией, потерей duplicates или произвольными float tolerances; учитывать определённую Spark семантику и разрешённую недетерминированность."
+      "Known unsafe native paths are fixed or excluded through a planned fallback before execution; a green job/CI status alone is insufficient.",
+      "Compare Spark 4.2.1 without and with Comet on the same input snapshot, with identical ANSI=true and other significant settings.",
+      "Compare actual results, types, NULLs, duplicate rows and guaranteed SQL order; do not rely solely on counts or selected sums.",
+      "Check both sides of the contract: must succeed/must fail. Comet success instead of a mandatory Spark ANSI error is a correctness violation.",
+      "Preserve overflow detection and guards for mixed Spark/native partial-final SUM/AVG, including the new state codec.",
+      "For a confirmed incompatibility, select fallback before execution/publication; do not rely on retrying in Spark after a write or error.",
+      "Verify actual native execution/plans so that fallback does not conceal a lack of testing of the custom path.",
+      "Do not conceal differences through broad normalization, lost duplicates or arbitrary float tolerances; respect defined Spark semantics and permitted nondeterminism."
     ],
-    "automated_regressions": "По возможности добавить автоматизированные regression/differential tests при реализации; сейчас фиксируется план без написания кода.",
+    "automated_regressions": "Where possible, add automated regression/differential tests during implementation; this historical entry records the plan without writing code.",
     "priority_cases": [
-      "Mixed Spark/native decimal SUM/AVG и промежуточное переполнение, forced spill и новый PartialMerge codec.",
-      "Отдельно runtime codegen fallback decimal SUM; статических NO_CODEGEN guards недостаточно.",
-      "GroupeddecimalAVG + LIMIT, malformedcasts, arithmeticoverflow, divisionbyzero и lazy AND/OR/CASE/JVM dispatch.",
-      "SMJ hoisting: canthrow expressions/условные ветки/outer join, ANSI=true.",
-      "Custom RANGE windows на DATE/DECIMAL границах и существующие fallback guards.",
-      "Результаты с activeJoom cost/boundary flags, mixedshuffle, AQEon/off; проверки native-планов.",
-      "Известные silent-result edgecases независимоANSI, включая BINARY→STRING/invalidUTF8, где применимо."
+      "Mixed Spark/native decimal SUM/AVG and intermediate overflow, forced spill and the new PartialMerge codec.",
+      "Separately cover decimal SUM runtime codegen fallback; static NO_CODEGEN guards are insufficient.",
+      "Grouped decimal AVG + LIMIT, malformed casts, arithmetic overflow, division by zero and lazy AND/OR/CASE/JVM dispatch.",
+      "SMJ hoisting: can-throw expressions/conditional branches/outer join, ANSI=true.",
+      "Custom RANGE windows at DATE/DECIMAL boundaries and existing fallback guards.",
+      "Results with active Joom cost/boundary flags, mixed shuffle, AQE on/off; verification of native plans.",
+      "Known silent-result edge cases independently of ANSI, including BINARY-to-STRING/invalid UTF8, where applicable."
     ],
-    "limits": "Набор тестов не является математическим доказательством отсутствия всех ошибок. Непокрытые риски явно фиксировать; не объявлять совместимость доказанной без проверки."
+    "limits": "A test suite is not a mathematical proof of the absence of all bugs. Explicitly record uncovered risks; do not claim compatibility has been proved without verification."
   },
   "excluded_upstream_changes": {
     "PR5889": {
       "status": "EXCLUDED_FROM_CURRENT_MIGRATION",
-      "user_quote": "Этот PR #5889 пока не трогаем и не включаем.",
-      "rule": "Не переносить, не включать и не продолжать отдельную работу над PR#5889 без нового указания пользователя. Сохранять штатный безопасный fallback выбранной базы для неподдержанных struct scalar subqueries."
+      "user_quote": "Do not touch or include PR #5889 for now.",
+      "rule": "Do not port, include or continue separate work on PR#5889 without a new user instruction. Keep the selected base's standard safe fallback for unsupported struct scalar subqueries."
     }
   },
   "implementation_plan": {
     "status": "APPROVED_EXPLICITLY",
     "date": "2026-11-16",
-    "user_quote": "Согласен, зафиксируй план из 9 PR с резервом десятого.",
+    "user_quote": "Agreed; record the plan of 9 PRs with a tenth in reserve.",
     "main_pr_count": 9,
     "reserve_pr_count": 1,
     "maximum_planned_pr_count": 10,
     "path": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/approved-plan.json",
-    "readable_path": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/approved-plan-ru.txt",
+    "readable_path": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/approved-plan.txt",
     "step2_owner": "G01 joom/1.2-dev",
-    "step2_order": "Spark4.2.1/Delta4.4.1 на registryDF55.2 → pristinevendor55.2 отдельнымкоммитом → rootpatch/sharedlock/explicitvendorunitCI → повторныепроверки и release tooling.",
+    "step2_order": "Spark4.2.1/Delta4.4.1 on registry DF55.2 -> pristine vendor55.2 in a separate commit -> root patch/shared lock/explicit vendor-unit CI -> repeat checks and release tooling.",
     "step2_separate_prs_superseded": true,
     "card_groups": {
-      "P01": [
-        "G01"
-      ],
-      "I10": [
-        "G01"
-      ],
-      "P03": [
-        "G01"
-      ],
-      "D01": [
-        "G01"
-      ],
-      "P02": [
-        "G01"
-      ],
-      "I01": [
-        "G01"
-      ],
-      "I02": [
-        "G01"
-      ],
-      "I03": [
-        "G01"
-      ],
-      "I04": [
-        "G01"
-      ],
-      "I08": [
-        "G01"
-      ],
-      "J18": [
-        "G01"
-      ],
-      "I09": [
-        "G01"
-      ],
-      "J14": [
-        "G02"
-      ],
-      "I05": [
-        "G02"
-      ],
-      "J16": [
-        "G02"
-      ],
-      "J22": [
-        "G02"
-      ],
-      "J15": [
-        "G02"
-      ],
-      "D10": [
-        "G04"
-      ],
-      "N06": [
-        "G04"
-      ],
-      "D11": [
-        "G03"
-      ],
-      "D02": [
-        "G03"
-      ],
-      "D04": [
-        "G03"
-      ],
-      "D03": [
-        "G03"
-      ],
-      "D05": [
-        "G05"
-      ],
-      "D06": [
-        "G04"
-      ],
-      "D07": [
-        "G04"
-      ],
-      "D08": [
-        "G04"
-      ],
-      "N09": [
-        "G04"
-      ],
-      "D09": [
-        "G04"
-      ],
-      "N04": [
-        "G04"
-      ],
-      "N05": [
-        "G04"
-      ],
-      "N08": [
-        "G04"
-      ],
-      "N07": [
-        "G04"
-      ],
-      "N01": [
-        "G06"
-      ],
-      "N02": [
-        "G06"
-      ],
-      "N03": [
-        "G06"
-      ],
-      "I06": [
-        "G02"
-      ],
-      "J08": [
-        "G07"
-      ],
-      "J09": [
-        "G07"
-      ],
-      "J21": [
-        "G07"
-      ],
-      "J25": [
-        "G07"
-      ],
-      "J27": [
-        "G07"
-      ],
-      "J10": [
-        "G07"
-      ],
-      "J13": [
-        "G07"
-      ],
-      "J11": [
-        "G07"
-      ],
-      "J23": [
-        "G07"
-      ],
-      "J12": [
-        "G07"
-      ],
-      "J24": [
-        "G07"
-      ],
-      "J26": [
-        "G07"
-      ],
-      "J05": [
-        "G08"
-      ],
-      "J06": [
-        "G08"
-      ],
-      "J07": [
-        "G08"
-      ],
-      "J17": [
-        "G08"
-      ],
-      "J02": [
-        "G09"
-      ],
-      "I07": [
-        "G09"
-      ],
-      "J03": [
-        "G09"
-      ],
-      "J04": [
-        "G09"
-      ],
-      "J01": [
-        "G09"
-      ]
+      "P01": ["G01"],
+      "I10": ["G01"],
+      "P03": ["G01"],
+      "D01": ["G01"],
+      "P02": ["G01"],
+      "I01": ["G01"],
+      "I02": ["G01"],
+      "I03": ["G01"],
+      "I04": ["G01"],
+      "I08": ["G01"],
+      "J18": ["G01"],
+      "I09": ["G01"],
+      "J14": ["G02"],
+      "I05": ["G02"],
+      "J16": ["G02"],
+      "J22": ["G02"],
+      "J15": ["G02"],
+      "D10": ["G04"],
+      "N06": ["G04"],
+      "D11": ["G03"],
+      "D02": ["G03"],
+      "D04": ["G03"],
+      "D03": ["G03"],
+      "D05": ["G05"],
+      "D06": ["G04"],
+      "D07": ["G04"],
+      "D08": ["G04"],
+      "N09": ["G04"],
+      "D09": ["G04"],
+      "N04": ["G04"],
+      "N05": ["G04"],
+      "N08": ["G04"],
+      "N07": ["G04"],
+      "N01": ["G06"],
+      "N02": ["G06"],
+      "N03": ["G06"],
+      "I06": ["G02"],
+      "J08": ["G07"],
+      "J09": ["G07"],
+      "J21": ["G07"],
+      "J25": ["G07"],
+      "J27": ["G07"],
+      "J10": ["G07"],
+      "J13": ["G07"],
+      "J11": ["G07"],
+      "J23": ["G07"],
+      "J12": ["G07"],
+      "J24": ["G07"],
+      "J26": ["G07"],
+      "J05": ["G08"],
+      "J06": ["G08"],
+      "J07": ["G08"],
+      "J17": ["G08"],
+      "J02": ["G09"],
+      "I07": ["G09"],
+      "J03": ["G09"],
+      "J04": ["G09"],
+      "J01": ["G09"]
     },
     "quality_requirements_unchanged": true,
-    "no_implementation_authorization": true,
-    "execution_not_started": true,
+    "no_implementation_authorization": false,
+    "execution_not_started": false,
     "original_research_path": "/Users/skotlov/d/temp/20261116_comet12-consolidated-plan/consolidated-plan.json"
   },
   "delivery_scope": {
     "status": "APPROVED_EXPLICITLY",
-    "goal": "Реализовать согласованный перенос и получить локальные JAR-артефакты Comet и Delta integration для включения пользователем в Spark4.2 image.",
+    "goal": "Implement the agreed migration and produce local Comet and Delta integration JAR artifacts for the user to include in the Spark4.2 image.",
     "targets": [
       "Spark4.2.1",
       "Scala2.13.18",
@@ -365,58 +271,214 @@
       "Delta4.4.1",
       "GCP"
     ],
-    "linux_release_architectures": [
-      "amd64",
-      "arm64"
-    ],
-    "checks": "Обязательные correctness/ANSI/regression/integration и packaging проверки сохраняются. Финальные JAR должны иметь SHA256, Git SHA и сведения о сборке. Полную проверку на production GCP jobs пользователь проведёт отдельно.",
-    "user_quote": "Нам сейчас нужно сделать все задуманное, чтобы я получил jar артефакты для включения в наш spark 4.2 image. Проверять производительность я буду позже."
+    "linux_release_architectures": ["amd64", "arm64"],
+    "checks": "Mandatory correctness/ANSI/regression/integration and packaging checks remain. Final JARs must have SHA256, Git SHA and build details. The user will separately validate real production GCP jobs.",
+    "user_quote": "For now, we need to complete everything planned so that I receive JAR artifacts to include in our Spark 4.2 image. I will check performance later."
   },
   "performance_policy": {
     "status": "APPROVED_EXPLICITLY",
-    "user_quote": "ну по возможности ты ее конечно проверяй как сможешь во время реализации.",
-    "during_implementation": "Существующие Scala microbenchmarks/Spark Benchmark, Rust Criterion и доступные TPC-H/DS runners в принятом стиле. При необходимости обычное расширение соответствующего benchmark; отдельную инфраструктуру ради миграции не создавать.",
-    "production_benchmarks": "Полные замеры на реальных GCP jobs отложены на пользовательскую проверку и не являются текущим условием передачи локальных JAR.",
+    "user_quote": "Of course, check performance as far as you can during implementation where possible.",
+    "during_implementation": "Use existing Scala microbenchmarks/Spark Benchmark, Rust Criterion and available TPC-H/DS runners in the established style. Extend the relevant benchmark normally if necessary; do not create separate infrastructure for the migration.",
+    "production_benchmarks": "Full measurements on real GCP jobs are deferred to user validation and are not a current condition for handing over local JARs.",
     "correctness_unchanged": true,
-    "latest_user_quote": "Я хочу сказать, что с т.з. оценки производительности ты должен действовать точно так , как уже принято в этом проекте datafusion-comet. Не надо создавать специальных тестов, если там подобного никогда не было.",
+    "latest_user_quote": "For performance evaluation, follow exactly the established practice in the datafusion-comet project. Do not create special tests if nothing similar has existed there.",
     "reference": "PERFORMANCE.md",
     "correctness_tests_unchanged": true
   },
   "last_updated_on": "2026-11-17",
   "execution_documentation_policy": {
-    "user_quote": "вся подобная документация для целей выполнения миграции, будет только в /Users/skotlov/d/projects/datafusion-comet/docs/joom-migration",
+    "user_quote": "All such documentation for carrying out the migration will be kept only in /Users/skotlov/d/projects/datafusion-comet/docs/joom-migration.",
     "directory": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration",
-    "rule": "В репозитории миграционные инструкции/решения/handoffs/прогресс/cleanup только здесь. Корневой AGENTS.md восстановлен. Raw logs/tool outputs — в датированных temp по общим правилам и в cleanup ledger."
+    "rule": "Keep repository migration instructions/decisions/handoffs/progress/cleanup only here. Root AGENTS.md has been restored. Keep raw logs/tool outputs in dated temp directories under the general rules and record them in the cleanup ledger."
   },
   "environment_blocker_policy": {
-    "user_quote": "если ты видишь, что тебе что-то не хватает в окружении (тулов, прав,...), то ты не пытаешься это обойти трудными и долгими путями, а говоришь мне и мы решаем вопрос.",
-    "rule": "Сообщать конкретный blocker; не строить длительные обходы. Обычная per-command PATH/JAVA_HOME настройка и штатный Maven wrapper допустимы."
+    "user_quote": "If you see that something is missing from the environment (tools, permissions, etc.), do not try difficult and lengthy workarounds; tell me and we will resolve it.",
+    "rule": "Report the specific blocker; do not build lengthy workarounds. Normal per-command PATH/JAVA_HOME settings and the standard Maven wrapper are allowed."
   },
   "cleanup_policy": {
-    "user_quote": "Хотелось бы в конце получить перечень, что и куда было сохранено и создано, чтобы я потом мог почистить. Т.е. мне нужна инструкция как мне чистить более ненужное после окончания твоей работы.",
+    "user_quote": "At the end, I would like a list of what was saved and created, and where, so that I can clean it up later. I need instructions for removing what is no longer needed after your work is finished.",
     "ledger": "cleanup-ledger.json",
     "baseline": "resource-baseline.json",
     "final_guide": "CLEANUP.md",
-    "rule": "Записывать точные paths/IDs, размеры, происхождение и shared/task-owned статус; в конце точечные cleanup-команды с сохранением final JAR/checksums/build manifests."
+    "rule": "Record exact paths/IDs, sizes, origin and shared/task-owned status; finish with targeted cleanup commands while preserving final JARs/checksums/build manifests."
   },
   "execution_model": {
     "selected_on": "2026-11-17",
     "status": "SELECTED_BY_COORDINATOR_WITHIN_USER_AUTHORIZED_ORCHESTRATION",
     "primary": "ONE_MAIN_CHAT_EXECUTES_AND_COORDINATES",
-    "main_chat_responsibility": "Последовательная реализация G01–G09 в утверждённых feature branches, интеграция, запуск необходимых проверок, состояние/решения/cleanup учёт; единственный пишущий исполнитель checkout.",
-    "internal_helpers": "Ограниченные исследования, сверка совместимости, независимый review diff/тестового покрытия. По умолчанию read-only; не запускать параллельную запись в общий checkout или все тяжёлые builds одновременно.",
-    "delegation_owner": "Координатор самостоятельно выбирает задачи, границы и время делегирования, передаёт контекст и проверяет результат. Пользователь не должен управлять помощниками вручную.",
+    "main_chat_responsibility": "Sequential G01-G09 implementation in the approved feature branches, integration, necessary checks and state/decisions/cleanup records; sole writer in the checkout.",
+    "internal_helpers": "Bounded research, compatibility checks and independent review of diffs/test coverage. Read-only by default; do not write concurrently to the shared checkout or run all heavy builds simultaneously.",
+    "delegation_owner": "The coordinator independently chooses tasks, boundaries and delegation timing, passes context and checks results. The user should not have to manage helpers manually.",
     "delegation_checkpoints": {
-      "G01": "Dependency graph/vendor provenance, Spark/Delta compatibility и Linux JAR packaging.",
-      "G02_G07": "JNI/FFI, ownership/cancellation и buffer lifetime.",
-      "G03_G06": "Sort/aggregate/SMJ/window memory/spill, outer-join/window correctness и ANSI semantics.",
+      "G01": "Dependency graph/vendor provenance, Spark/Delta compatibility and Linux JAR packaging.",
+      "G02_G07": "JNI/FFI, ownership/cancellation and buffer lifetime.",
+      "G03_G06": "Sort/aggregate/SMJ/window memory/spill, outer-join/window correctness and ANSI semantics.",
       "G08": "Expression evaluation order, UDF/serialization.",
-      "G09_FINAL": "Полнота 58 карточек, engine boundaries/AQE, совместные regressions и артефакты."
+      "G09_FINAL": "Completeness of the 58 cards, engine boundaries/AQE, combined regressions and artifacts."
     },
-    "new_user_visible_chat_policy": "Создавать по решению координатора при конкретной пользе от длительной изолированной задачи/отдельного ограниченного контекста или технической необходимости передачи продолжения. Новый PR/большой diff/compaction сами по себе не требуют нового чата. Сначала сообщить причину, сохранить checkpoint (actual HEAD, tree, tests, next step), передать контекст и проверить результат; повторное разрешение на каждую сессию не требуется в существующем scope.",
-    "existing_g01_preparation_chat": "Оставить idle; подготовка завершена. Реализацию в нём автоматически не начинать; использовать при реальной необходимости отдельной проверки.",
-    "user_involvement": "Явное начало кода, новые решения о поведении/объёме/разрешениях и реальные environment blockers. Не повседневное распределение задач.",
+    "new_user_visible_chat_policy": "Create a new user-visible chat at the coordinator's discretion when a lengthy isolated task/separate bounded context or a technical handoff need offers concrete benefit. A new PR/large diff/compaction alone does not require a new chat. First explain the reason, save a checkpoint (actual HEAD, tree, tests, next step), transfer context and check the result; no repeated permission is needed for each session within the existing scope.",
+    "existing_g01_preparation_chat": "Leave idle; preparation is complete. Do not automatically start implementation there; use it if a genuinely separate check is needed.",
+    "user_involvement": "Explicit start of coding, new decisions about behavior/scope/permissions and actual environment blockers. Not everyday task allocation.",
     "implementation_hold_preserved": true,
     "approved_feature_groups_and_release_milestones_unchanged": true
+  },
+  "stage_start_policy": {
+    "explicit_user_approval_per_group": true,
+    "currently_authorized": ["G01"],
+    "groups_not_authorized": [
+      "G02",
+      "G03",
+      "G04",
+      "G05",
+      "G06",
+      "G07",
+      "G08",
+      "G09",
+      "G10"
+    ]
+  },
+  "execution_pause": {
+    "status": "G01_AMD64_QUALIFICATION_PENDING_USER_REVIEW",
+    "requested_on": "2026-11-17T05:06:02.577827+00:00",
+    "user_quote": "Let us pause again now. Save current progress so that I can restart you and resume from the stopping point.",
+    "resume_requires": "Explicit user resume; G01 only. No G02 authorization. Verify effective sandbox access.",
+    "unsandboxed_sbt_request": "Rejected by user; never executed. Do not retry without explicit consent.",
+    "previous_pause_and_resume": {
+      "status": "RESUMED_G01",
+      "requested_on": "2026-11-17",
+      "reason": "User wants scoped sandbox grants and restart instead of recurring unsandboxed approvals.",
+      "scope": "No implementation/builds until explicit resume. Documentation/checkpoint only during pause preparation.",
+      "resume": "Verify effective sandbox roots/network/socket access. Preserve existing network authorization and no-push/no-publish/no-production boundary.",
+      "resumed_on": "2026-11-17",
+      "resume_quote": "Continue G01 from /Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/PAUSED.md. First check the new permissions inside the sandbox."
+    },
+    "resumed_on": "2026-11-17T13:34:17.545289+00:00",
+    "resume_quote": "I added access to the ProtocBridge cache. Continue G01 from /Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/PAUSED.md. First check access inside the sandbox. Report after completion and checks; do not proceed to G02 yet.",
+    "historical_scope_note": "Original stage-specific authorization/evidence retained. For current G01 finalization, g01_finalization_authorization supersedes earlier merge/tag holds; G02, Java 21, artifact publication and production remain unauthorized."
+  },
+  "commit_history_cleanup": {
+    "status": "APPROVED_EXPLICITLY",
+    "user_quote": "Yes, let us at least combine the service/checkpoint commits later.",
+    "policy": "Combine migration service/checkpoint documentation commits before integration. Keep substantive implementation commits separate, including pristine vendor import. Rewrite before release provenance freeze; retain local pre-cleanup backup ref and mapping. Never move an existing release tag."
+  },
+  "integration_review_gate": {
+    "status": "APPROVED_EXPLICITLY",
+    "user_quote": "Before the final merge into branch-1.2, first show me what you are going to merge there.",
+    "rule": "Present concrete candidate commits/tree diff, tests and artifacts. Wait for user confirmation before any branch-1.2 ref update. G02 still requires separate explicit authorization.",
+    "historical_scope_note": "Original stage-specific authorization/evidence retained. For current G01 finalization, g01_finalization_authorization supersedes earlier merge/tag holds; G02, Java 21, artifact publication and production remain unauthorized."
+  },
+  "amd64_environment_limit": {
+    "user_answer": "Only the Mac is available for now; show the result with that limitation.",
+    "rule": "Show actual build/test results with AMD64 runtime gap. Do not claim botharch smoke passed or create qualified RC1. No lengthy additional emulation workarounds without new request.",
+    "historical_scope_note": "Original stage-specific authorization/evidence retained. For current G01 finalization, g01_finalization_authorization supersedes earlier merge/tag holds; G02, Java 21, artifact publication and production remain unauthorized."
+  },
+  "testing_distribution": {
+    "status": "APPROVED_EXPLICITLY",
+    "user_quote": "Agreed. Let us record this. Above all, the final correctness checks must not suffer.",
+    "local": "Fast changed-area checks, focused regressions and failure diagnosis. Do not repeat broad GHA suites locally without a concrete reason.",
+    "pr_gha": "Full applicable native/vendor, Comet, Delta and Spark SQL suites on exact target versions/SHA. Inspect actual jobs/test outcomes, including skipped/canceled.",
+    "rc": "Small smoke of actual final release JARs; retain artifact acceptance.",
+    "correctness": "No reduction in total correctness coverage; result/error parity and native execution remain required."
+  },
+  "release_infrastructure_policy": {
+    "status": "APPROVED_EXPLICITLY",
+    "user_quote": "Agreed. We definitely should not rebuild the release infrastructure.",
+    "previous_action": "Use existing native AMD64 GHA first. Do not add a standalone release producer/workflow now. Retain final JAR smoke at RC checkpoints.",
+    "action": "SUPERSEDED by explicit2026-11-18 authorization for separate manual RC Build & Smoke; artifact-only, no externaldeploy/publication."
+  },
+  "ansi_three_cases": {
+    "status": "USER_AUTHORIZED_EXECUTION_ON_AMD64_GHA",
+    "tests": [
+      "ANSI support for add",
+      "ANSI support for subtract",
+      "ANSI support for multiply"
+    ],
+    "change": "Exactly3 assume guards removed; inputs/native/error checks unchanged",
+    "result": "PASS on current HEAD26590264b, nativeAMD64 Spark4.2.1 expressions job134482241958; artifact14386009386 confirms all3 actually executed, not canceled",
+    "if_failure": "Investigate; fix or narrowly fall back rather than re-cancel silently",
+    "scope_limit": "Other upstream ANSI cancellations and full G02/G04/G08 ANSI scope remain."
+  },
+  "hdfs_scope": {
+    "user_quote": "We do not and will not have an HDFS cluster.",
+    "acceptance": "Four explicitly HDFS-cluster-only ignored tests are not applicable to Joom GCP; do not provision a cluster. Retain upstream tests and generic Hadoop/libhdfs code because it can also serve other schemes."
+  },
+  "vendor_lint_policy": {
+    "user_quote": "We will not change production vendor code merely to remove this Clippy warning.",
+    "action": "Keep production vendor pristine; strict Comet lint excludes only vendor/no-deps. Retain documented upstream deprecation warning."
+  },
+  "migration_docs_retention": {
+    "user_quote": "OK; we will decide before the stable release.",
+    "action": "Retain docs/joom-migration through migration; decide cleanup before stable, no automatic exclusion now."
+  },
+  "github_pr_preparation": {
+    "status": "AUTHORIZED_BY_CURRENT_G01_REQUEST",
+    "scope": "Prepare and push G01 feature branch; publish existing base ref at exactly unchanged SHA if absent, solely to enable PR. No merge or base content/ref update.",
+    "user_requested_actions": [
+      "Do it.",
+      "Do all of this and, above all, ensure the correctness and completeness of the resulting code and documentation."
+    ],
+    "user_followup": "I can create the PR manually if you provide the details.",
+    "pr_creation_actor": "USER_MANUAL; provide compare URL/title/body",
+    "repository": "joomcode/datafusion-comet",
+    "base": "branch-1.2",
+    "head": "joom/1.2-dev",
+    "integration_gate": "Still requires explicit user confirmation. RC1/G02 remain held.",
+    "excluded": "No artifact/JFrog/Docker publication or production operations.",
+    "historical_scope_note": "Original stage-specific authorization/evidence retained. For current G01 finalization, g01_finalization_authorization supersedes earlier merge/tag holds; G02, Java 21, artifact publication and production remain unauthorized."
+  },
+  "ci_runner_fix": {
+    "user_request": "GHA are not starting ... Can you fix this?",
+    "scope": "Replace unavailableubuntu-slim withubuntu24 in normalPRgatejobs; preservetests and base ref. Fix observedRATheaderfailuresin4migrationdocs. No releasepipeline/vendorproductionchanges."
+  },
+  "g01_ci_corrections": {
+    "status": "AUTHORIZED_EXPLICITLY",
+    "user_quote": "Fix the problems found within G01 without disabling or weakening correctness checks. Update the PR and check GHA. Do not change branch-1.2 yet or proceed to G02. Report after checks. Check GHA every 5 minutes.",
+    "scope": "CorrectobservedG01Spark4.2.1compatibility/correctness/testcontract/dependencyfailures; localtargetedchecks thenonepushandfullGHA; noG02featureports/basechanges/RCtag",
+    "success_criterion": "Correctexpectedresultsandmandatoryerrors; no suppressedorweakenedcorrectnesschecks",
+    "network": "Existingapprovedbuilddependencies+GitHubAPI/pushforPR28; no newprivatehosts orpublication"
+  },
+  "ci_fail_fast_user_policy": {
+    "recorded_on": "2026-11-18",
+    "user_quote": "Analyze all new errors. If you see a problem that will require changes and another GHA run, tell me and we will stop this build. Continuing the build is allowed only if, after it finishes, you can rerun only the failed jobs selectively.",
+    "rule": "Immediately inspect each new failure. Continue only for failures that can be rerun selectively on sameSHA. If source/CI changes and a new full run are needed, notify user immediately and stop current build instead of waiting for completion. Do not classify unknown test failure as infrastructure without evidence.",
+    "current_application": "Final run succeeded. Attempts1/2 contained only HTTP429 and dependent failures; only failed jobs rerun, no source push. Policy retained for future runs."
+  },
+  "rc_build_smoke_authorization": {
+    "status": "APPROVED_EXPLICITLY",
+    "user_quote": "Agreed. Implement a separate manual workflow called RC Build & Smoke (do not put Joom in the name), run builds and checks on both architectures, download the finished artifacts and report. Do not change branch-1.2 yet or proceed to G02.",
+    "comet_ci_policy": "Cancel any automatically started Comet CI; do not wait for a new full run. Prior runtime source qualification on26590264b retained separately.",
+    "bootstrap_authorization": "I authorize a bootstrap commit in main.",
+    "bootstrap_scope": "Only .github/workflows/rc_build_smoke.yml inorigin/main for firstworkflow_dispatch registration; never mergeG01sourceinto main orchangebranch-1.2/defaultbranch.",
+    "tag_or_publication_authorized": false,
+    "historical_scope_note": "Original stage-specific authorization/evidence retained. For current G01 finalization, g01_finalization_authorization supersedes earlier merge/tag holds; G02, Java 21, artifact publication and production remain unauthorized."
+  },
+  "translation_note": {
+    "language": "English",
+    "translated_on": "2026-11-18",
+    "user_quotes": "User quotations and answers originally written in Russian are faithful English translations, not verbatim English statements.",
+    "original_snapshot": "/Users/skotlov/d/temp/20261118_comet12-g01-finalization/documentation-before.zip",
+    "historical_entries": "Earlier authorization boundaries, pauses and holds remain as historical records. The latest g01_finalization_authorization controls G01 completion; G02-G10 still require separate explicit authorization."
+  },
+  "g01_finalization_authorization": {
+    "recorded_on": "2026-11-18",
+    "status": "APPROVED_EXPLICITLY",
+    "user_request_translation": "Do nothing further on Java 21 compatibility for now. Finish G01: finalize documentation; combine service/checkpoint commits; communicate in Russian but commit only English text, including docs/joom-migration, translating carefully without losing important meaning. Squash history before RC1 (all service/checkpoint commits; other commits at your discretion). Repeat RC Build & Smoke if needed. If there are no remaining questions or unfinished work, integrate into branch-1.2 and create joom-1.2-1-rc1. Afterwards carefully check that translation and squashing lost or damaged nothing important and that final branch-1.2 contains all required changes and documentation. Do not start G02 without explicit permission.",
+    "scope": [
+      "English-only committed documentation and commit messages",
+      "Consolidate service/checkpoint history before RC1; preserve meaningful reviewable implementation history",
+      "Repeat exact-source RC qualification after history/provenance changes where required",
+      "Integrate qualified G01 into branch-1.2 and create immutable joom-1.2-1-rc1",
+      "Verify final source/documentation completeness and correctness after translation, history rewrite and integration"
+    ],
+    "supersedes_for_G01": [
+      "Historical no-merge/no-RC1 holds in integration_review_gate, github_pr_preparation and rc_build_smoke_authorization",
+      "Historical execution pause once G01 was explicitly resumed"
+    ],
+    "remaining_boundaries": [
+      "No Java 21 compatibility work",
+      "No G02-G10 implementation without new explicit authorization",
+      "No JFrog/Maven/Docker artifact publication or production operations"
+    ],
+    "verification_required_before_integration": true
   }
 }

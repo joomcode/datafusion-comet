@@ -1,8 +1,8 @@
 {
-  "updated_on": "2026-11-17",
-  "stage": "PRE_IMPLEMENTATION",
+  "updated_on": "2026-11-18T22:39:06.361313+00:00",
+  "stage": "G01_FINAL_HISTORY_AND_RC1_QUALIFICATION",
   "baseline": "resource-baseline.json",
-  "no_dependency_downloads_or_release_outputs_yet": true,
+  "no_dependency_downloads_or_release_outputs_yet": false,
   "entries": [
     {
       "type": "migration_documentation",
@@ -24,9 +24,120 @@
       "path": "/Users/skotlov/d/temp/20261117_comet12-session-setup",
       "ownership": "TASK_CREATED",
       "shared": false,
-      "created_files": [
-        "resource-baseline-command-results.json"
-      ]
+      "created_files": ["resource-baseline-command-results.json"]
+    },
+    {
+      "type": "g01_auxiliary_outputs",
+      "path": "/Users/skotlov/d/temp/20261117_comet12-g01",
+      "ownership": "TASK_CREATED",
+      "stage": "G01",
+      "contains": "API verification, downloaded Maven POMs, build logs and selected download/fixture outputs; update after actual builds.",
+      "shared": false
+    },
+    {
+      "type": "local_spark_test_fixture",
+      "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-spark-4.2.1",
+      "ownership": "TASK_CREATED",
+      "creation_command": "local git clone --shared from user Spark checkout; detach v4.2.1; apply generated Comet diff",
+      "shared": false,
+      "cleanup_conditions": "After Spark SQL qualification; preserve source diff in Git"
+    },
+    {
+      "type": "native_build_outputs",
+      "path": "/Users/skotlov/d/projects/datafusion-comet/native/target",
+      "ownership": "TASK_CREATED_BUILD_OUTPUT",
+      "shared": false,
+      "cleanup_conditions": "After preserving qualified release artifacts and evidence"
+    },
+    {
+      "type": "dependency_caches",
+      "paths": [
+        "/Users/skotlov/.m2",
+        "/Users/skotlov/.cargo/registry",
+        "/Users/skotlov/.cargo/git",
+        "/Users/skotlov/.sbt"
+      ],
+      "ownership": "SHARED_TOOL_CACHES",
+      "shared": true,
+      "cleanup_conditions": "Do not delete automatically; distinguish initial resource-baseline and new entries"
+    },
+    {
+      "type": "pause_checkpoint",
+      "path": "/Users/skotlov/d/temp/20261117_comet12-g01/20261117_pause-checkpoint",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "preserve_until": "Resume verified; preserve patch/archive until code committed",
+      "contains": "Tracked binary diff, untracked source archive, Git status and file checksums"
+    },
+    {
+      "type": "official_build_tool_downloads",
+      "path": "/Users/skotlov/d/temp/20261117_comet12-g01",
+      "ownership": "TASK_CREATED",
+      "files": [
+        "protoc-30.2-linux-x86_64.zip",
+        "protoc-30.2-linux-aarch_64.zip",
+        "rustup-init.sh",
+        "protobuf-v30.2-release.json"
+      ],
+      "executed_on_host": false,
+      "note": "Official sources; archive/script hashes pinned in draft Dockerfile. Docker build not run."
+    },
+    {
+      "type": "g01_resumed_auxiliary_outputs",
+      "path": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "contains": "Sandbox probe report and resumed build/test/review evidence; update after qualification"
+    },
+    {
+      "type": "release_validator_test_models",
+      "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release-validator-cases",
+      "ownership": "TASK_CREATED_BUILD_TEST_OUTPUT",
+      "shared": false,
+      "note": "Synthetic ELF/JAR/schema models and mock command scripts; not real release artifacts."
+    },
+    {
+      "type": "docker_builder_image",
+      "image": "comet-joom-builder-focal:1.2-arm64",
+      "id": "sha256:de016db98defac03c0715462aeddb86738cb89b44c34656d6be0ce511f082e7c",
+      "ownership": "TASK_CREATED",
+      "shared": false
+    },
+    {
+      "type": "docker_builder_image",
+      "image": "comet-joom-builder-focal:1.2-amd64",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "id": "sha256:92564ee97ddb02f4b12cf71243936c313dd774878603221f59abaac281095a49"
+    },
+    {
+      "type": "planned_linux_release_outputs",
+      "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1",
+      "ownership": "TASK_BUILD_OUTPUT",
+      "shared": false,
+      "preserve": "BothJARs,13-filechecksumset,commit/build manifest andqualificationevidence; cargo-target/.work separately disposable after qualification"
+    },
+    {
+      "type": "planned_docker_dependency_volumes",
+      "names": [
+        "comet-joom-1.2-cargo-arm64",
+        "comet-joom-1.2-cargo-amd64",
+        "comet-joom-1.2-cargo-git"
+      ],
+      "ownership": "TASK_CREATED_WHEN_RELEASE_STARTS",
+      "shared": false,
+      "note": "Do not confuse with preexistingSparkDocker volumes. Recordactualsize/IDs afterbuild."
+    },
+    {
+      "type": "g01_finalization",
+      "path": "/Users/skotlov/d/temp/20261118_comet12-g01-finalization",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "contains": "Original documentation archive, history rewrite/translation verification, final RC API/logs and qualified ZIP, final integration receipt.",
+      "preserve_until": "User has retained RC1 JARs/provenance and verified final migration handoff.",
+      "cleanup_conditions": "No automatic deletion; archive and Git backup refs preserve pre-rewrite evidence.",
+      "expected_release_directory_pattern": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/gha-<final-run-id>",
+      "expected_additional_disk": "Approximately 190 MiB downloaded ZIP plus 410 MiB unpacked qualified artifacts; builds execute on GitHub runners."
     }
   ],
   "preexisting_or_shared": {
@@ -39,10 +150,7 @@
     "/Users/skotlov/d/temp/src/spark",
     "/Users/skotlov/d/projects/spark"
   ],
-  "user_installed_tools_preserve": [
-    "Rust/Rustup via Homebrew",
-    "SDKMAN JDKs"
-  ],
+  "user_installed_tools_preserve": ["Rust/Rustup via Homebrew", "SDKMAN JDKs"],
   "historical_auxiliary_directories_review_before_cleanup": [
     "/Users/skotlov/d/temp/20261115_comet-upstream-audit",
     "/Users/skotlov/d/temp/20261115_comet-upstream-branches-pr-audit",
@@ -73,5 +181,527 @@
     "targeted_cleanup_command",
     "cleanup_conditions"
   ],
-  "final_guide": "CLEANUP.md"
+  "final_guide": "CLEANUP.md",
+  "resume_sizes_kib": {
+    "native_target": 15983300,
+    "spark_fixture": 252664,
+    "shared_m2": 6731496,
+    "shared_cargo": 820360,
+    "shared_sbt": 1020,
+    "prior_g01_aux": 88752
+  },
+  "second_pause_preserved_resources": {
+    "task_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed",
+    "release_output": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1",
+    "task_container": "de92fed928af stopped deliberately; exit137",
+    "images": [
+      "comet-joom-builder-focal:1.2-arm64",
+      "comet-joom-builder-focal:1.2-amd64"
+    ],
+    "volumes": [
+      "comet-joom-1.2-cargo-arm64",
+      "comet-joom-1.2-cargo-amd64",
+      "comet-joom-1.2-cargo-git"
+    ],
+    "preserve": "All caches/partial targets for resuming. Shared Docker resources and Maven/Cargo caches are not disposable task outputs. No deletion/prune performed."
+  },
+  "final_qualification_resources": {
+    "task_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-final-qualification",
+    "release_output": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1",
+    "reusing_existing_cargo_caches_and_volumes": true,
+    "protocbridge_standard_cache": "/Users/skotlov/Library/Caches/com.thesamet.scalapb.protocbridge.protocbridge",
+    "cleanup": "Preserve shared caches; no prune/deletion."
+  },
+  "final_g01_inventory": {
+    "recorded_at_utc": "2026-11-17T14:12:24.384022+00:00",
+    "snapshot_while_builds_running": true,
+    "source_baseline": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/resource-baseline.json",
+    "source_ledger": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/cleanup-ledger.json",
+    "task_build_outputs": [
+      {
+        "path": "/Users/skotlov/d/projects/datafusion-comet/native/target",
+        "exists": true,
+        "allocated_kib": 27276308,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-spark-4.2.1",
+        "exists": true,
+        "allocated_kib": 841656,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1",
+        "exists": true,
+        "allocated_kib": 5760548,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1/cargo-target",
+        "exists": true,
+        "allocated_kib": 5181796,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1/.work",
+        "exists": true,
+        "allocated_kib": 0,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release-validator-cases",
+        "exists": true,
+        "allocated_kib": 1156,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/d/projects/datafusion-comet/common/target",
+        "exists": true,
+        "allocated_kib": 136,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/d/projects/datafusion-comet/contrib/delta-spark/target",
+        "exists": true,
+        "allocated_kib": 1592,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/d/projects/datafusion-comet/spark/target",
+        "exists": true,
+        "allocated_kib": 409668,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/d/projects/datafusion-comet/spark-integration/target",
+        "exists": true,
+        "allocated_kib": 36,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      }
+    ],
+    "shared_cache_usage_only": [
+      {
+        "path": "/Users/skotlov/.m2",
+        "exists": true,
+        "allocated_kib": 6922456,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/.cargo",
+        "exists": true,
+        "allocated_kib": 820828,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/.rustup",
+        "exists": true,
+        "allocated_kib": 519240,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/.sbt",
+        "exists": true,
+        "allocated_kib": 76212,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/.ivy2",
+        "exists": true,
+        "allocated_kib": 164,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/Library/Caches/Coursier",
+        "exists": true,
+        "allocated_kib": 300616,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "path": "/Users/skotlov/Library/Caches/com.thesamet.scalapb.protocbridge.protocbridge",
+        "exists": true,
+        "allocated_kib": 9236,
+        "exit_code": 0,
+        "note": null,
+        "measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      }
+    ],
+    "task_builder_images": [
+      {
+        "tag": "comet-joom-builder-focal:1.2-arm64",
+        "id": "sha256:de016db98defac03c0715462aeddb86738cb89b44c34656d6be0ce511f082e7c",
+        "architecture": "arm64",
+        "os": "linux",
+        "size_bytes": 1334036913,
+        "existed_at_baseline": false
+      },
+      {
+        "tag": "comet-joom-builder-focal:1.2-amd64",
+        "id": "sha256:92564ee97ddb02f4b12cf71243936c313dd774878603221f59abaac281095a49",
+        "architecture": "amd64",
+        "os": "linux",
+        "size_bytes": 1495106429,
+        "existed_at_baseline": false
+      }
+    ],
+    "task_dependency_volumes": [
+      {
+        "CreatedAt": "2026-11-17T04:39:33Z",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/comet-joom-1.2-cargo-arm64/_data",
+        "Name": "comet-joom-1.2-cargo-arm64",
+        "Options": null,
+        "Scope": "local",
+        "existed_at_baseline": false,
+        "usage_line": "comet-joom-1.2-cargo-arm64                                         0         725.4MB",
+        "usage_measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "CreatedAt": "2026-11-17T04:47:06Z",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/comet-joom-1.2-cargo-amd64/_data",
+        "Name": "comet-joom-1.2-cargo-amd64",
+        "Options": null,
+        "Scope": "local",
+        "existed_at_baseline": false,
+        "usage_line": "comet-joom-1.2-cargo-amd64                                         0         725.4MB",
+        "usage_measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      },
+      {
+        "CreatedAt": "2026-11-17T04:39:33Z",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/comet-joom-1.2-cargo-git/_data",
+        "Name": "comet-joom-1.2-cargo-git",
+        "Options": null,
+        "Scope": "local",
+        "existed_at_baseline": false,
+        "usage_line": "comet-joom-1.2-cargo-git                                           0         17.98MB",
+        "usage_measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+      }
+    ],
+    "docker_usage_selected_lines": [
+      "comet-joom-builder-focal                                                            1.2-amd64         92564ee97ddb   10 hours ago   1.5GB     0B            1.495GB       1",
+      "comet-joom-builder-focal                                                            1.2-arm64         de016db98def   10 hours ago   1.33GB    0B            1.334GB       0",
+      "comet-joom-1.2-cargo-amd64                                         0         725.4MB",
+      "comet-joom-1.2-cargo-git                                           0         17.98MB",
+      "comet-joom-1.2-cargo-arm64                                         0         725.4MB",
+      "Build cache usage: 3.199GB"
+    ],
+    "recommendations": {
+      "status": "INVENTORY_ONLY_NO_DELETION_PERFORMED",
+      "during_migration": "Retain native target, Spark fixture, both architecture Cargo targets, builder images and all three dependency volumes: G02-G09/RC2/RC3 can reuse them. Sizes may grow while current builds run.",
+      "preserve_release": "Retain final core and Delta JARs, both native libraries, commit.txt, build-manifest.json, effective-pom.xml, architecture metadata/toolchain/import reports, sha256.txt and smoke evidence. Back up before deleting any enclosing target directory.",
+      "after_entire_migration_only": [
+        {
+          "description": "Native host build outputs, not source/vendor",
+          "command": "rm -rf -- /Users/skotlov/d/projects/datafusion-comet/native/target"
+        },
+        {
+          "description": "Generated Spark qualification checkout; original user Spark checkout remains untouched",
+          "command": "rm -rf -- /Users/skotlov/d/projects/datafusion-comet/target/joom-spark-4.2.1"
+        },
+        {
+          "description": "Release compiler intermediates only; keeps final JARs/manifests/native files/smoke",
+          "command": "rm -rf -- /Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1/cargo-target /Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1/.work"
+        },
+        {
+          "description": "Synthetic negative-validator fixtures",
+          "command": "rm -rf -- /Users/skotlov/d/projects/datafusion-comet/target/joom-release-validator-cases"
+        },
+        {
+          "description": "Only these task-exclusive builder tags, after no task containers remain; no force and no prune",
+          "command": "docker --context desktop-linux image rm comet-joom-builder-focal:1.2-arm64 comet-joom-builder-focal:1.2-amd64"
+        },
+        {
+          "description": "Only these task-created dependency volumes, after no task containers remain; no force and no prune",
+          "command": "docker --context desktop-linux volume rm comet-joom-1.2-cargo-arm64 comet-joom-1.2-cargo-amd64 comet-joom-1.2-cargo-git"
+        }
+      ],
+      "shared_caches": "Measured usage only. No attribution of whole cache sizes to migration; do not delete or clean automatically. Preserve SDKMAN JDKs, Rustup toolchains and user-provided source checkouts.",
+      "avoid": "Do not run root mvnw clean, git clean -fdx, Docker system/builder/volume prune, or delete root target while release outputs and Spark fixture remain there.",
+      "accounting_limits": "du reports allocated KiB, may vary during active builds; nested release cargo-target/.work sizes are included in release total and must not be summed twice. Docker image Size is logical layer size and is not a guarantee of physical space reclaimed in Docker Desktop disk image. Docker Build cache is shared/unattributed.",
+      "branch_1_2_integration": "User now requires concrete preview and confirmation before ANY branch-1.2 update; no integration performed by this inventory task."
+    },
+    "measurement_history": [
+      {
+        "recorded_at_utc": "2026-11-17T13:36:32.575258+00:00",
+        "snapshot_while_builds_running": true,
+        "task_build_outputs": [
+          {
+            "path": "/Users/skotlov/d/projects/datafusion-comet/native/target",
+            "exists": true,
+            "allocated_kib": 27276308,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-spark-4.2.1",
+            "exists": true,
+            "allocated_kib": 689316,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1",
+            "exists": true,
+            "allocated_kib": 4612500,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1/cargo-target",
+            "exists": true,
+            "allocated_kib": 4478120,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1/.work",
+            "exists": true,
+            "allocated_kib": 0,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release-validator-cases",
+            "exists": true,
+            "allocated_kib": 1156,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/d/projects/datafusion-comet/common/target",
+            "exists": true,
+            "allocated_kib": 140,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/d/projects/datafusion-comet/contrib/delta-spark/target",
+            "exists": true,
+            "allocated_kib": 2276,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/d/projects/datafusion-comet/spark/target",
+            "exists": true,
+            "allocated_kib": 869240,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/d/projects/datafusion-comet/spark-integration/target",
+            "exists": true,
+            "allocated_kib": 36,
+            "exit_code": 0,
+            "note": null
+          }
+        ],
+        "shared_cache_usage_only": [
+          {
+            "path": "/Users/skotlov/.m2",
+            "exists": true,
+            "allocated_kib": 6913140,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/.cargo",
+            "exists": true,
+            "allocated_kib": 820828,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/.rustup",
+            "exists": true,
+            "allocated_kib": 519240,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/.sbt",
+            "exists": true,
+            "allocated_kib": 76212,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/.ivy2",
+            "exists": true,
+            "allocated_kib": 164,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/Library/Caches/Coursier",
+            "exists": true,
+            "allocated_kib": 300616,
+            "exit_code": 0,
+            "note": null
+          },
+          {
+            "path": "/Users/skotlov/Library/Caches/com.thesamet.scalapb.protocbridge.protocbridge",
+            "exists": true,
+            "allocated_kib": 9236,
+            "exit_code": 0,
+            "note": null
+          }
+        ],
+        "task_dependency_volumes": [
+          {
+            "CreatedAt": "2026-11-17T04:39:33Z",
+            "Driver": "local",
+            "Labels": null,
+            "Mountpoint": "/var/lib/docker/volumes/comet-joom-1.2-cargo-arm64/_data",
+            "Name": "comet-joom-1.2-cargo-arm64",
+            "Options": null,
+            "Scope": "local",
+            "existed_at_baseline": false,
+            "usage_line": "comet-joom-1.2-cargo-arm64                                         0         725.4MB",
+            "usage_measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+          },
+          {
+            "CreatedAt": "2026-11-17T04:47:06Z",
+            "Driver": "local",
+            "Labels": null,
+            "Mountpoint": "/var/lib/docker/volumes/comet-joom-1.2-cargo-amd64/_data",
+            "Name": "comet-joom-1.2-cargo-amd64",
+            "Options": null,
+            "Scope": "local",
+            "existed_at_baseline": false,
+            "usage_line": "comet-joom-1.2-cargo-amd64                                         0         725.4MB",
+            "usage_measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+          },
+          {
+            "CreatedAt": "2026-11-17T04:39:33Z",
+            "Driver": "local",
+            "Labels": null,
+            "Mountpoint": "/var/lib/docker/volumes/comet-joom-1.2-cargo-git/_data",
+            "Name": "comet-joom-1.2-cargo-git",
+            "Options": null,
+            "Scope": "local",
+            "existed_at_baseline": false,
+            "usage_line": "comet-joom-1.2-cargo-git                                           0         17.98MB",
+            "usage_measured_at_utc": "2026-11-17T14:12:24.384022+00:00"
+          }
+        ],
+        "docker_usage_selected_lines": [
+          "comet-joom-builder-focal                                                            1.2-amd64         92564ee97ddb   9 hours ago    1.5GB     0B            1.495GB       0",
+          "comet-joom-builder-focal                                                            1.2-arm64         de016db98def   10 hours ago   1.33GB    0B            1.334GB       1",
+          "comet-joom-1.2-cargo-arm64                                         1         725.4MB",
+          "comet-joom-1.2-cargo-amd64                                         0         444.7MB",
+          "comet-joom-1.2-cargo-git                                           1         17.98MB",
+          "Build cache usage: 3.199GB"
+        ]
+      }
+    ],
+    "snapshot_stage": "AFTER_BOTH_ARCH_RELEASE_BUILD_PASSED_DURING_AMD_PACKAGED_SMOKE",
+    "release_source_commit_reported_by_coordinator": "2b8f80b3f"
+  },
+  "final_artifacts_preserve": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1",
+  "raw_qualification_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-final-qualification",
+  "pr_preparation_auxiliary_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-pr-qualification",
+  "pr_ci_runner_fix_auxiliary_directory": {
+    "path": "/Users/skotlov/d/temp/20261117_comet12-g01-runner-fix",
+    "contents": "GitHub metadata/logs, local CI and RAT logs, formatting snapshots/receipt; prepared npm downloader was not executed and no npm package was downloaded",
+    "cleanup": "Review and remove task-created auxiliary files after migration evidence is no longer needed; preserve shared caches and user-installed Homebrew Prettier",
+    "allocated_kib_snapshot": 43888,
+    "snapshot_note": "FinalGHAmonitoring snapshot, approximately43MiB oflogs/JSON/scripts; no downloadednpm package; userinstalledHomebrewPrettierpreserved."
+  },
+  "g01_ci_corrections_resources": {
+    "directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes",
+    "ownership": "TASK_CREATED",
+    "contents": "Baseline/docsbackup, helperpatches, localregressionlogs, GitHubCIresults; standardexistingcachespreserved",
+    "cleanup": "Reviewtaskdirectoryafterqualification; donotdeleteusercheckouts/sharedcaches",
+    "planned_local_builds": [
+      "Existingnative/target incremental targetedRust tests/build",
+      "ExistingrootMaven outputs forSpark4.2.1/Delta targetedregressions",
+      "Existingtarget/joom-spark-4.2.1 targetedsbtfixtures; nofullsuite duplication"
+    ],
+    "local_validation_summary": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/local-validation.json",
+    "temporary_pristine_spark_subset": "Created for patch equality proof, then removed after validation; sources/user checkouts preserved",
+    "new_project_files": [
+      "/Users/skotlov/d/projects/datafusion-comet/dev/ci/prepare-maven-model.sh",
+      "/Users/skotlov/d/projects/datafusion-comet/dev/ci/test-maven-model.py"
+    ],
+    "status": "FINAL_GHA_PASSED_NO_NEW_RELEASE_ARTIFACTS",
+    "measured_kib": {
+      "auxiliary_directory": 21952,
+      "native_target_total_including_prior_builds": 41661508,
+      "spark_fixture_checkout_and_outputs_total": 848852
+    },
+    "followup_ci_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
+    "additional_usage": "Existing Maven/SBT targets and standard caches for targeted Spark3.5/Scala2.12,4.1 and4.2 checks; no additional Rust/release build",
+    "large_console_streams": "Selected finished-job logs streamed with64MiB/55s cap and discarded; only small receipts/selected lines saved",
+    "measured_on": "2026-11-18T03:16:00.841276+00:00",
+    "final_gha_run": 44205897075,
+    "notes": "Small additional API/log receipts may slightly increase auxiliary size. Global tools/caches and Docker resources not modified during final monitoring."
+  },
+  "rc_workflow_resources": {
+    "directory": "/Users/skotlov/d/temp/20261118_comet12-rc-workflow",
+    "ownership": "TASK_CREATED",
+    "contents": "Beforepatch/docschecksums, helperpatches/validation, officialactionlintarchive+binary+checksums, GitHubcontrol/evidence andlaterartifactdownloads. No globaltoolsinstallation.",
+    "artifact_download_target": "target/joom-release/gha-<runid>",
+    "shared_caches": "No clearing or wholesale cleanup; m2RATplugin/additionalstandardcache mayhavegrown",
+    "status": "FINAL_ARTIFACTS_DOWNLOADED_VERIFIED",
+    "download_directory": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/gha-44388252264",
+    "unpacked_bytes": 429572457,
+    "downloaded_zip": "/Users/skotlov/d/temp/20261118_comet12-rc-workflow/qualified-artifact-44388252264.zip",
+    "downloaded_zip_bytes": 189616637,
+    "artifact_id": 14469302529,
+    "run_id": 44388252264,
+    "source_commit": "b93d553856a0339af7468bcff2070e735a1a3c71",
+    "local_docker_probes": "Existingcachedbuilderonly; --networknone; ephemeralcontainersremoved, hostGitconfigurationuntouched",
+    "tool_download": "Officialactionlint1.7.12archive/checksums/binary under task/20261118_tools; no globalinstallation",
+    "new_project_files": [
+      "/Users/skotlov/d/projects/datafusion-comet/.github/workflows/rc_build_smoke.yml",
+      "/Users/skotlov/d/projects/datafusion-comet/dev/release/joom/native-build-provenance.py",
+      "/Users/skotlov/d/projects/datafusion-comet/dev/release/joom/test-native-build-provenance.py",
+      "/Users/skotlov/d/projects/datafusion-comet/dev/release/joom/verify-packaged-runtime.py",
+      "/Users/skotlov/d/projects/datafusion-comet/dev/release/joom/test-packaged-runtime.py",
+      "/Users/skotlov/d/projects/datafusion-comet/dev/release/joom/verify-rc-result.py",
+      "/Users/skotlov/d/projects/datafusion-comet/dev/release/joom/test-rc-result.py",
+      "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/RC-BUILD-SMOKE.md"
+    ],
+    "allocated_kib": {
+      "auxiliary": 195040,
+      "downloaded_qualified_directory": 419620
+    }
+  }
 }

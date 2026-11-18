@@ -1,50 +1,69 @@
-# Проверка производительности в принятом стиле Comet
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
 
-Пользовательское решение2026-11-17: действовать так, как принято в проекте;
-не создавать специальную методику/инфраструктуру тестов ради миграции.
+  http://www.apache.org/licenses/LICENSE-2.0
 
-## Существующие инструменты
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Performance validation in the established Comet style
+
+User decision, 2026-11-17: follow the project's established practice;
+do not create a special testing method/infrastructure solely for the migration.
+
+## Existing tools
 
 - Scala microbenchmarks: `spark/src/test/scala/org/apache/spark/sql/benchmark`,
-  `CometBenchmarkBase` на Spark `SqlBasedBenchmark`; Makefile `benchmark-%`.
-- Rust microbenchmarks: существующие Criterion benches в
+  `CometBenchmarkBase` on Spark `SqlBasedBenchmark`; Makefile `benchmark-%`.
+- Rust microbenchmarks: existing Criterion benches in
   `native/{core,operators,shuffle,spark-expr}/benches`; Makefile `bench` / Cargo bench.
-- Macro benchmarks: существующие TPC-H/TPC-DS runners в `benchmarks/tpc`.
-- Общая инструкция: `docs/source/contributor-guide/benchmarking.md`;
-  учитывать macOS-ограничения из `benchmarking_macos.md`.
+- Macro benchmarks: existing TPC-H/TPC-DS runners in `benchmarks/tpc`.
+- General guide: `docs/source/contributor-guide/benchmarking.md`;
+  respect the macOS limitations in `benchmarking_macos.md`.
 
-Для каждого изменения выбирать подходящий существующий suite/case, проверять,
-что действительно исполняется изменённый путь, и сохранять команды, параметры,
-версии, результаты и ограничения. При необходимости расширять соответствующий
-существующий benchmark обычным для проекта способом; отдельный новый framework,
-нестандартный генератор или специальную систему сравнения не создавать.
+For each change, choose an appropriate existing suite/case, verify that the changed
+path actually executes, and record commands, parameters, versions, results and
+limitations. If necessary, extend the relevant existing benchmark in the project's
+normal style; do not create a separate new framework, unusual generator or special
+comparison system.
 
-| Группа | Подходящие существующие suites/benches |
-|---|---|
-| G01 | Штатные read suites и доступный baseline; packaging не является benchmark |
-| G02 | `CometStringFfiImportBenchmark`, temporal suites и Rust cast/timestamp benches |
-| G03 | `CometExecBenchmark`, `CometTopKBenchmark`, Rust `sort_row_partitions` |
-| G04 | `CometAggregateExpressionBenchmark`, Rust `aggregate`, `collect`, `aggregate_misc`, `min_max` |
-| G05 | `CometSortMergeJoinBenchmark` |
-| G06 | `CometWindowBenchmark`, Rust operators `window` |
-| G07 | `CometShuffleBenchmark`, `CometColumnarShuffleWriteBenchmark`, `CometColumnarToRowBenchmark`, `CometC2RIsolatedBench`, Rust shuffle benches |
-| G08 | `CometCodegenDispatchBenchmark`, `CometScalaUDFDispatchBenchmark`, `CometOperatorSerdeBenchmark` |
-| G09 | Доступные TPC-H/DS и operator suites; учитывать фактические планы/выбор engines |
+| Group | Suitable existing suites/benches                                                                                                            |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| G01   | Standard read suites and available baseline; packaging is not a benchmark                                                                   |
+| G02   | `CometStringFfiImportBenchmark`, temporal suites and Rust cast/timestamp benches                                                            |
+| G03   | `CometExecBenchmark`, `CometTopKBenchmark`, Rust `sort_row_partitions`                                                                      |
+| G04   | `CometAggregateExpressionBenchmark`, Rust `aggregate`, `collect`, `aggregate_misc`, `min_max`                                               |
+| G05   | `CometSortMergeJoinBenchmark`                                                                                                               |
+| G06   | `CometWindowBenchmark`, Rust operators `window`                                                                                             |
+| G07   | `CometShuffleBenchmark`, `CometColumnarShuffleWriteBenchmark`, `CometColumnarToRowBenchmark`, `CometC2RIsolatedBench`, Rust shuffle benches |
+| G08   | `CometCodegenDispatchBenchmark`, `CometScalaUDFDispatchBenchmark`, `CometOperatorSerdeBenchmark`                                            |
+| G09   | Available TPC-H/DS and operator suites; inspect actual plans/engine selection                                                               |
 
-## Границы проверки
+## Validation boundaries
 
-`CometBenchmarkBase` устанавливает ANSI=false из-за invalid-input fixtures.
-Эти измерения не заменяют обязательные ANSI=true correctness/regression tests.
-Разрешённые ранее новые correctness-тесты остаются частью реализации; ограничение
-на новую performance-инфраструктуру их не отменяет.
+`CometBenchmarkBase` sets ANSI=false because its fixtures include invalid inputs.
+Those measurements do not replace mandatory ANSI=true correctness/regression tests.
+Previously authorized new correctness tests remain part of implementation;
+restrictions on new performance infrastructure do not cancel them.
 
-Focused suite/bench предпочтительнее бесконтрольного `setup/all/publish`:
-`benchmarks/micro/run.py` может устанавливать пакеты, клонировать/обновлять исходники,
-строить release и публиковать изменения. Не запускать эти побочные действия.
-Перед запуском смотреть фактический Makefile/runner: некоторые targets сначала
-делают release; старые README примеры не гарантируют актуальность флагов/версий.
+Prefer a focused suite/bench over an uncontrolled `setup/all/publish`:
+`benchmarks/micro/run.py` may install packages, clone/update sources, build a release
+and publish changes. Do not run these side effects. Inspect the actual Makefile/runner
+before execution: some targets build a release first; old README examples do not
+guarantee current flags/versions.
 
-Не копировать механически пример генерации100GB из macOS guide. Выбирать
-ограниченный репрезентативный размер и фиксировать созданные данные в cleanup ledger.
-AWS provisioning не входит в GCP-only работу. Полные измерения на реальных GCP jobs
-пользователь проведёт позже. Непроверенное ускорение не объявлять подтверждённым.
+Do not mechanically copy the 100GB generation example from the macOS guide. Select
+a bounded representative size and record generated data in the cleanup ledger.
+AWS provisioning is outside this GCP-only work. The user will run full measurements
+on real GCP jobs later. Do not present unmeasured acceleration as confirmed.
