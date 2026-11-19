@@ -26,6 +26,8 @@ pub use scan::*;
 mod arrow_python_udf;
 #[cfg(feature = "python-udf")]
 pub use arrow_python_udf::{ArrowPythonUdfExec, ArrowPythonUdfSpec};
+mod cancellable;
+pub(crate) use cancellable::CancellableExec;
 mod dynamic_filter;
 pub(crate) use dynamic_filter::{DynamicFilterJoinExec, TopKReaderFilterExec};
 pub(crate) mod iceberg_common;

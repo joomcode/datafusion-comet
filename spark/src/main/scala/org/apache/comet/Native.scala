@@ -144,6 +144,9 @@ class Native extends NativeBase {
    */
   @native def getShufflePartitionOffsets(plan: Long): Array[Long]
 
+  /** Cancel a killed task without dereferencing the plan from the watcher thread. */
+  @native def cancelPlan(plan: Long): Unit
+
   /**
    * Release and drop the native query plan object and context object.
    *

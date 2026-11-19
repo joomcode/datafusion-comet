@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+pub mod cancellation;
 mod error;
 mod ffi_offsets;
 /// Test fixtures, reached by tests in other crates only. See the module docs.

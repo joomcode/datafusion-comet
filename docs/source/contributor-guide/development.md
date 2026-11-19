@@ -71,6 +71,29 @@ and they return what they hold the next time they yield. This matters because Sp
 a task still holds when the task ends and can hand that memory to another task, so memory a plan
 returns later was still in use while Spark counted it as free.
 
+### Task cancellation
+
+`CometExecIterator` captures its Spark `TaskContext` on creation, including when another
+thread later consumes its output. A daemon watcher checks that context's kill flag every
+50 ms and calls `cancelPlan`. Cancellation clones a token from a registry, without accessing
+the execution-context pointer on the watcher thread. Iterator cleanup stops the watcher and
+serializes cancellation against release, so a released handle cannot cancel a later plan.
+
+The token wakes native-I/O and producer-channel waits with an error; cancellation is never
+interpreted as successful end of output. Each Spark-native operator checks the token between
+batches, and shuffle spill/final-write iterators check it between encoded batches. JVM UDF
+kernels and the row-to-Arrow reader check Spark's kill flag every 256 rows. Resource release
+still drops the stream synchronously and waits briefly for outstanding reservations, as
+described above. Cancellation exceptions are reported to Spark as task kills.
+
+Spark's execution-memory wait is synchronous and does not check the task's kill flag. After
+setting the native token, cancellation therefore interrupts threads currently acquiring memory
+through the task's `CometTaskMemoryManager`. Acquisition registration, interruption and removal
+share a separate lock; it is never held while entering Spark. The outermost acquisition removes
+its record and clears the interrupt issued by Comet before the thread can be reused by Tokio.
+An interrupt present on entry is preserved. Killed-task cleanup also cancels before releasing
+the native plan, covering completion that races the watcher.
+
 ### Rules for native code
 
 **Do not use `thread_local!` or assume thread identity.** Tokio may run your operator's `poll`

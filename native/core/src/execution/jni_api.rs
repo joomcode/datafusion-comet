@@ -59,6 +59,7 @@ use datafusion::{
     physical_plan::{display::DisplayableExecutionPlan, SendableRecordBatchStream},
     prelude::{SessionConfig, SessionContext},
 };
+use datafusion_comet_common::cancellation::{cancelled_error, PlanCancellation};
 use datafusion_comet_common::decode_string_arrays;
 use datafusion_comet_proto::spark_expression::agg_expr::ExprStruct as AggExprStruct;
 use datafusion_comet_proto::spark_operator::{AggregateMode, Operator, ShuffleScan};
@@ -530,6 +531,11 @@ fn collect_op_names<'a>(op: &'a Operator, names: &mut std::collections::BTreeSet
     }
 }
 
+fn plan_cancellations() -> &'static Mutex<HashMap<i64, Arc<PlanCancellation>>> {
+    static CANCELLATIONS: OnceLock<Mutex<HashMap<i64, Arc<PlanCancellation>>>> = OnceLock::new();
+    CANCELLATIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Comet native execution context. Kept alive across JNI calls.
 struct ExecutionContext {
     /// The id of the execution context.
@@ -550,6 +556,8 @@ struct ExecutionContext {
     pub stream: Option<SendableRecordBatchStream>,
     /// Runs the plan when it has no JVM input (async I/O path)
     batch_producer: Option<BatchProducer>,
+    /// Shared with the kill watcher without sharing the execution context itself.
+    cancellation: Arc<PlanCancellation>,
     /// The pool every reservation the plan makes goes through
     plan_memory: Arc<PlanMemoryPool>,
     /// The JVM `CometMetricNode` the plan's metrics are published to. `None` only without a
@@ -713,9 +721,33 @@ pub unsafe extern "system" fn Java_org_apache_comet_Native_createPlan(
                 create_memory_pool(config, task_memory_manager, task_attempt_id)
             })?;
 
-            Ok(Box::into_raw(exec_context) as i64)
+            let cancellation = Arc::clone(&exec_context.cancellation);
+            let handle = Box::into_raw(exec_context) as i64;
+            plan_cancellations().lock().insert(handle, cancellation);
+            Ok(handle)
         })
     })
+}
+
+/// Only the registry's Arc is accessed concurrently; releasePlan can free the context safely.
+#[no_mangle]
+pub extern "system" fn Java_org_apache_comet_Native_cancelPlan(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) {
+    try_unwrap_or_throw(&e, |_| {
+        cancel_registered_plan(handle);
+        Ok(())
+    })
+}
+
+fn cancel_registered_plan(handle: i64) {
+    // Never hold the registry lock while waking operators or aborting the producer.
+    let cancellation = plan_cancellations().lock().get(&handle).cloned();
+    if let Some(cancellation) = cancellation {
+        cancellation.cancel();
+    }
 }
 
 /// What `createPlan` takes from the Spark configs.
@@ -853,6 +885,13 @@ fn create_execution_context(
         &spark_plan,
     )?;
 
+    let cancellation = session
+        .copied_config()
+        .get_extension::<PlanCancellation>()
+        .ok_or_else(|| {
+            CometError::Internal("Native session is missing its cancellation token".to_string())
+        })?;
+
     let plan_creation_time = start.elapsed();
 
     let metrics_update_interval = if metrics_update_interval > 0 {
@@ -888,6 +927,7 @@ fn create_execution_context(
         input_sources: jvm.input_sources,
         stream: None,
         batch_producer: None,
+        cancellation,
         plan_memory,
         metrics: jvm.metrics,
         metrics_update_interval,
@@ -1074,7 +1114,8 @@ fn prepare_datafusion_session_context(
         // This DataFusion context is within the scope of an executing Spark Task. We want to set
         // its internal parallelism to the number of CPUs allocated to Spark Tasks. This can be
         // modified by changing spark.task.cpus in the Spark config.
-        .with_batch_size(batch_size);
+        .with_batch_size(batch_size)
+        .with_extension(PlanCancellation::new());
 
     // Translate the Comet-namespaced row-level pushdown flag into the equivalent
     // DataFusion session options. `pushdown_filters` enables the parquet reader's
@@ -1313,12 +1354,16 @@ impl Wake for WakeFlag {
 /// this thread's budget unconstrained.
 async fn next_batch<S>(
     stream: &mut S,
+    cancellation: &PlanCancellation,
     mut on_pending: impl FnMut() -> Result<(), CometError>,
 ) -> Result<Option<RecordBatch>, CometError>
 where
     S: Stream<Item = DataFusionResult<RecordBatch>> + Unpin,
 {
     poll_fn(|cx| {
+        if cancellation.poll_cancelled(cx).is_ready() {
+            return Poll::Ready(Err(cancelled_error().into()));
+        }
         let flag = Arc::new(WakeFlag {
             woken: AtomicBool::new(false),
             parent: cx.waker().clone(),
@@ -1330,6 +1375,7 @@ where
         // `on_pending` calls into the JVM, which can run another Comet plan on this thread.
         // `block_in_place` exits the runtime context so that plan's `block_on` doesn't panic.
         tokio::task::block_in_place(&mut on_pending)?;
+        cancellation.check()?;
         if flag.woken.load(Ordering::Acquire) {
             // Poll again at once: a nested `block_on` may have taken the wake-up.
             cx.waker().wake_by_ref();
@@ -1412,8 +1458,14 @@ impl BatchProducer {
     /// A channel that closes before the stream has ended means the task was cancelled, and the
     /// plan's output is incomplete. That is an error, or the Spark task would end successfully
     /// with only the batches it has read so far.
-    fn next_batch(&mut self) -> CometResult<Option<RecordBatch>> {
-        match self.batches.blocking_recv() {
+    fn next_batch(&mut self, cancellation: &PlanCancellation) -> CometResult<Option<RecordBatch>> {
+        let next = get_runtime().block_on(poll_fn(|cx| {
+            if cancellation.poll_cancelled(cx).is_ready() {
+                return Poll::Ready(Err(CometError::from(cancelled_error())));
+            }
+            self.batches.poll_recv(cx).map(Ok)
+        }))?;
+        match next {
             Some(batch) => Ok(Some(batch?)),
             None if self.stream_ended.load(Ordering::Acquire) => Ok(None),
             None => Err(CometError::Internal(
@@ -1526,6 +1578,7 @@ fn execute_plan(
     partition: i32,
     publish_metrics: &mut PublishMetrics,
 ) -> CometResult<Option<RecordBatch>> {
+    exec_context.cancellation.check()?;
     let exec_context_id = exec_context.id;
 
     // Initialize the execution stream.
@@ -1566,7 +1619,10 @@ fn execute_plan(
         if exec_context.scans.is_empty() && exec_context.shuffle_scans.is_empty() {
             // No JVM data sources — spawn onto tokio so the executor
             // thread parks in blocking_recv instead of busy-polling.
-            exec_context.batch_producer = Some(BatchProducer::spawn(&get_runtime(), stream));
+            let producer = BatchProducer::spawn(&get_runtime(), stream);
+            let abort = producer.task.abort_handle();
+            exec_context.cancellation.on_cancel(move || abort.abort());
+            exec_context.batch_producer = Some(producer);
         } else {
             exec_context.stream = Some(stream);
         }
@@ -1577,7 +1633,7 @@ fn execute_plan(
     }
 
     if let Some(producer) = &mut exec_context.batch_producer {
-        return match producer.next_batch()? {
+        return match producer.next_batch(&exec_context.cancellation)? {
             Some(batch) => {
                 // Publish on the configured interval, as the ScanExec path below does,
                 // since each publish walks the whole metric tree and calls into the JVM.
@@ -1597,7 +1653,8 @@ fn execute_plan(
     // the stream by the end of the pull, waits on native I/O, and `next_batch` parks
     // until it completes.
     let mut stream = exec_context.stream.take().unwrap();
-    let next = get_runtime().block_on(next_batch(&mut stream, || {
+    let cancellation = Arc::clone(&exec_context.cancellation);
+    let next = get_runtime().block_on(next_batch(&mut stream, &cancellation, || {
         pull_input_batches(exec_context)?;
         update_metrics_on_interval(exec_context, publish_metrics)
     }));
@@ -1625,6 +1682,8 @@ pub extern "system" fn Java_org_apache_comet_Native_releasePlan(
             exec_context, 0,
             "Comet execution context shouldn't be null!"
         );
+
+        plan_cancellations().lock().remove(&exec_context);
 
         // Reclaim ownership of the context up front so that it is always freed, even if a step
         // below fails. Dropping it releases the memory pool and every JNI global ref the context
@@ -1798,9 +1857,8 @@ fn shuffle_partition_offsets(
         )
     })?;
 
-    // `ExecutionPlan` has `Any` as a supertrait but no `as_any` method of its own, so upcast
-    // the trait object before downcasting to the writer.
-    let writer = (root_plan as &dyn std::any::Any)
+    // ExecutionPlan's delegate-aware downcast sees through cancellation wrappers.
+    let writer = root_plan
         .downcast_ref::<ShuffleWriterExec>()
         .ok_or_else(|| {
             CometError::Internal(
@@ -3078,11 +3136,15 @@ mod tests {
         .boxed();
         let mut pulls = 0;
         let next = single_worker_runtime()
-            .block_on(without_a_lost_wake(next_batch(&mut stream, || {
-                // Every JVM-fed scan already holds a batch, so the pull wakes nothing.
-                pulls += 1;
-                Ok(())
-            })))
+            .block_on(without_a_lost_wake(next_batch(
+                &mut stream,
+                &PlanCancellation::default(),
+                || {
+                    // Every JVM-fed scan already holds a batch, so the pull wakes nothing.
+                    pulls += 1;
+                    Ok(())
+                },
+            )))
             .unwrap();
         assert!(next.is_some());
         assert!(
@@ -3108,12 +3170,24 @@ mod tests {
         };
         // Only the refill's wake gets the stream polled again.
         single_worker_runtime().block_on(without_a_lost_wake(async {
-            let first = next_batch(&mut stream, &mut pull).await.unwrap();
+            let first = next_batch(&mut stream, &PlanCancellation::default(), &mut pull)
+                .await
+                .unwrap();
             assert_eq!(first.unwrap().num_rows(), 3);
             assert_eq!(pulls.get(), 1);
-            assert!(next_batch(&mut stream, &mut pull).await.unwrap().is_none());
+            assert!(
+                next_batch(&mut stream, &PlanCancellation::default(), &mut pull)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             assert_eq!(pulls.get(), 2);
-            assert!(next_batch(&mut stream, &mut pull).await.unwrap().is_none());
+            assert!(
+                next_batch(&mut stream, &PlanCancellation::default(), &mut pull)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
             assert_eq!(pulls.get(), 2);
         }));
     }
@@ -3134,14 +3208,94 @@ mod tests {
         .boxed();
         let mut pulls = 0;
         let next = runtime
-            .block_on(without_a_lost_wake(next_batch(&mut stream, || {
-                pulls += 1;
-                handle.block_on(tokio::time::sleep(Duration::from_millis(100)));
-                Ok(())
-            })))
+            .block_on(without_a_lost_wake(next_batch(
+                &mut stream,
+                &PlanCancellation::default(),
+                || {
+                    pulls += 1;
+                    handle.block_on(tokio::time::sleep(Duration::from_millis(100)));
+                    Ok(())
+                },
+            )))
             .unwrap();
         assert!(next.is_some());
         assert_eq!(pulls, 1);
+    }
+
+    #[test]
+    fn killed_plan_wakes_a_wait_on_native_io() {
+        let cancellation = PlanCancellation::new();
+        let cancel = Arc::clone(&cancellation);
+        let (polled, first_poll) = std::sync::mpsc::channel();
+        let mut polled = Some(polled);
+        let mut stream = futures::stream::poll_fn(move |_| {
+            if let Some(polled) = polled.take() {
+                polled.send(()).unwrap();
+            }
+            Poll::<Option<DataFusionResult<RecordBatch>>>::Pending
+        });
+        let thread = std::thread::spawn(move || {
+            first_poll.recv_timeout(Duration::from_secs(5)).unwrap();
+            cancel.cancel();
+        });
+        let result = single_worker_runtime().block_on(without_a_lost_wake(next_batch(
+            &mut stream,
+            &cancellation,
+            || Ok(()),
+        )));
+        thread.join().unwrap();
+        assert!(result.unwrap_err().to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn killed_producer_reports_an_error_and_releases_its_stream() {
+        let runtime = single_worker_runtime();
+        let pool: Arc<dyn MemoryPool> = Arc::new(UnboundedMemoryPool::default());
+        let reservation = MemoryConsumer::new("cancelled producer").register(&pool);
+        reservation.grow(4096);
+        let (polled, first_poll) = std::sync::mpsc::channel();
+        let mut polled = Some(polled);
+        let stream = futures::stream::poll_fn(move |_| {
+            let _held = &reservation;
+            if let Some(polled) = polled.take() {
+                polled.send(()).unwrap();
+            }
+            Poll::<Option<DataFusionResult<RecordBatch>>>::Pending
+        });
+        let mut producer = BatchProducer::spawn(runtime.handle(), plan_stream(stream));
+        let cancellation = PlanCancellation::new();
+        let abort = producer.task.abort_handle();
+        cancellation.on_cancel(move || abort.abort());
+        let cancel = Arc::clone(&cancellation);
+        let thread = std::thread::spawn(move || {
+            first_poll.recv_timeout(Duration::from_secs(5)).unwrap();
+            cancel.cancel();
+        });
+        let result = producer.next_batch(&cancellation);
+        thread.join().unwrap();
+        assert!(result.unwrap_err().to_string().contains("cancelled"));
+        producer.stop().unwrap();
+        assert_eq!(pool.reserved(), 0);
+    }
+
+    #[test]
+    fn cancel_and_unregister_share_only_the_token_not_the_execution_context() {
+        let handle = i64::MIN;
+        let cancellation = PlanCancellation::new();
+        assert!(plan_cancellations()
+            .lock()
+            .insert(handle, Arc::clone(&cancellation))
+            .is_none());
+        let thread = std::thread::spawn(move || {
+            for _ in 0..1000 {
+                cancel_registered_plan(handle);
+            }
+        });
+        plan_cancellations().lock().remove(&handle);
+        thread.join().unwrap();
+        cancel_registered_plan(handle);
+        assert!(!plan_cancellations().lock().contains_key(&handle));
+        assert_eq!(Arc::strong_count(&cancellation), 1);
     }
 
     fn empty_batch() -> RecordBatch {
@@ -3176,7 +3330,10 @@ mod tests {
         });
 
         let mut producer = BatchProducer::spawn(runtime.handle(), plan_stream(stream));
-        assert!(producer.next_batch().unwrap().is_some());
+        assert!(producer
+            .next_batch(&PlanCancellation::default())
+            .unwrap()
+            .is_some());
         producer.stop().unwrap();
         assert_eq!(pool.reserved(), 0, "the stream outlived its producer");
     }
@@ -3204,7 +3361,10 @@ mod tests {
         });
 
         let mut producer = BatchProducer::spawn(runtime.handle(), plan_stream(stream));
-        assert!(producer.next_batch().unwrap().is_some());
+        assert!(producer
+            .next_batch(&PlanCancellation::default())
+            .unwrap()
+            .is_some());
         polling_rx.recv().unwrap();
         let finished = Arc::new(AtomicBool::new(false));
         let finishing = {
@@ -3317,7 +3477,10 @@ mod tests {
             }
         });
         let mut producer = BatchProducer::spawn(runtime.handle(), plan_stream(stream));
-        assert!(producer.next_batch().unwrap().is_some());
+        assert!(producer
+            .next_batch(&PlanCancellation::default())
+            .unwrap()
+            .is_some());
 
         // Holds the only worker until the stopped plan's memory comes back, as another task
         // waiting in `acquireMemory` does. It gives up eventually so a failure cannot hang the
@@ -3427,14 +3590,17 @@ mod tests {
             None => Poll::Pending,
         });
         let mut producer = BatchProducer::spawn(runtime.handle(), plan_stream(stream));
-        assert!(producer.next_batch().unwrap().is_some());
+        assert!(producer
+            .next_batch(&PlanCancellation::default())
+            .unwrap()
+            .is_some());
 
         // Shuts the runtime down while the consumer waits for the next batch.
         let shutting_down = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(50));
             runtime.shutdown_timeout(Duration::from_secs(10));
         });
-        match producer.next_batch() {
+        match producer.next_batch(&PlanCancellation::default()) {
             Err(CometError::Internal(msg)) => assert!(msg.contains("cancelled"), "{msg}"),
             other => panic!("expected an error, got {other:?}"),
         }
@@ -3453,9 +3619,18 @@ mod tests {
         runtime.block_on(&mut producer.task).unwrap();
         runtime.shutdown_timeout(Duration::from_secs(10));
 
-        assert!(producer.next_batch().unwrap().is_some());
-        assert!(producer.next_batch().unwrap().is_some());
-        assert!(producer.next_batch().unwrap().is_none());
+        assert!(producer
+            .next_batch(&PlanCancellation::default())
+            .unwrap()
+            .is_some());
+        assert!(producer
+            .next_batch(&PlanCancellation::default())
+            .unwrap()
+            .is_some());
+        assert!(producer
+            .next_batch(&PlanCancellation::default())
+            .unwrap()
+            .is_none());
         producer.stop().unwrap();
     }
 
@@ -3501,8 +3676,10 @@ mod tests {
             None,
         )
         .unwrap();
+        let bare: Arc<dyn datafusion::physical_plan::ExecutionPlan> = Arc::new(writer);
+        let writer = crate::execution::operators::CancellableExec::wrap(Arc::clone(&bare));
 
-        let error = shuffle_partition_offsets(Some(&writer)).unwrap_err();
+        let error = shuffle_partition_offsets(Some(writer.as_ref())).unwrap_err();
         assert!(
             error.to_string().contains("not drained to completion"),
             "{error}"
@@ -3516,7 +3693,11 @@ mod tests {
             .unwrap();
 
         // One offset per partition plus the data file length.
-        let offsets = shuffle_partition_offsets(Some(&writer)).unwrap();
+        let offsets = shuffle_partition_offsets(Some(writer.as_ref())).unwrap();
+        assert_eq!(
+            offsets,
+            shuffle_partition_offsets(Some(bare.as_ref())).unwrap()
+        );
         assert_eq!(offsets.len(), num_partitions + 1);
         assert_eq!(offsets[0], 0);
         assert!(offsets.windows(2).all(|pair| pair[0] <= pair[1]));

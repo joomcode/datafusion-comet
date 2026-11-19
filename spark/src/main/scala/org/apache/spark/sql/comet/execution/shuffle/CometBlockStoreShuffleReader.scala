@@ -19,7 +19,7 @@
 
 package org.apache.spark.sql.comet.execution.shuffle
 
-import java.io.{FilterInputStream, InputStream}
+import java.io.{InputStream, IOException}
 
 import org.apache.spark.{InterruptibleIterator, MapOutputTracker, SparkEnv, TaskContext}
 import org.apache.spark.internal.{config, Logging}
@@ -158,26 +158,8 @@ class CometBlockStoreShuffleReader[K, C](
    * Returns the raw concatenated InputStream of all shuffle blocks, bypassing the decode step.
    * Used by ShuffleScan direct read path.
    */
-  override def readAsRawStream(): InputStream = {
-    val streams = fetchIterator.map(_._2)
-    val blocks = new java.io.SequenceInputStream(new java.util.Enumeration[InputStream] {
-      override def hasMoreElements: Boolean = streams.hasNext
-      override def nextElement(): InputStream = streams.next()
-    })
-    // Native code reads this stream on the task thread, outside any InterruptibleIterator, so
-    // every read checks whether the task was killed.
-    new FilterInputStream(blocks) {
-      override def read(): Int = {
-        context.killTaskIfInterrupted()
-        in.read()
-      }
-
-      override def read(buffer: Array[Byte], offset: Int, length: Int): Int = {
-        context.killTaskIfInterrupted()
-        in.read(buffer, offset, length)
-      }
-    }
-  }
+  override def readAsRawStream(): InputStream =
+    CometBlockStoreShuffleReader.concatenate(context, fetchIterator.map(_._2))
 
   private def fetchContinuousBlocksInBatch: Boolean = {
     val conf = SparkEnv.get.conf
@@ -205,5 +187,96 @@ class CometBlockStoreShuffleReader[K, C](
           s"$useOldFetchProtocol, io encryption: $ioEncryption.")
     }
     doBatchFetch
+  }
+}
+
+private[shuffle] object CometBlockStoreShuffleReader {
+  def concatenate(context: TaskContext, blocks: Iterator[InputStream]): InputStream =
+    new FetchedBlocksInputStream(context, blocks)
+}
+
+/**
+ * Closing a fetched block releases the fetcher's current buffer. Finish it before fetching
+ * another block, and never fetch from close(): Spark's fetcher owns and releases unread blocks.
+ * SequenceInputStream.close() instead traverses the remaining iterator, which can wait for
+ * in-flight blocks or release queued buffers again after the fetcher's task-completion cleanup.
+ */
+private final class FetchedBlocksInputStream(context: TaskContext, blocks: Iterator[InputStream])
+    extends InputStream {
+
+  private var current: InputStream = null
+  private var closed = false
+
+  private def block(): InputStream = synchronized {
+    if (closed) {
+      throw new IOException("Shuffle block stream is closed")
+    }
+    if (current == null) {
+      context.killTaskIfInterrupted()
+      if (blocks.hasNext) {
+        current = blocks.next()
+      }
+    }
+    current
+  }
+
+  private def finish(finished: InputStream): Unit = synchronized {
+    if (current eq finished) {
+      current = null
+      try {
+        finished.close()
+      } catch {
+        case failure: Throwable =>
+          // Do not replace the fetcher's current result after a failed release. Its completion
+          // listener must still have the opportunity to clean that result up.
+          closed = true
+          throw failure
+      }
+    }
+  }
+
+  override def read(): Int = {
+    // Preserve the upstream check on every read, not just at block boundaries: native code
+    // consumes this stream outside an InterruptibleIterator.
+    context.killTaskIfInterrupted()
+    var in = block()
+    while (in != null) {
+      val value = in.read()
+      if (value >= 0) {
+        return value
+      }
+      finish(in)
+      in = block()
+    }
+    -1
+  }
+
+  override def read(buffer: Array[Byte], offset: Int, length: Int): Int = {
+    java.util.Objects.checkFromIndexSize(offset, length, buffer.length)
+    context.killTaskIfInterrupted()
+    if (length == 0) {
+      return 0
+    }
+    var in = block()
+    while (in != null) {
+      val count = in.read(buffer, offset, length)
+      if (count >= 0) {
+        return count
+      }
+      finish(in)
+      in = block()
+    }
+    -1
+  }
+
+  override def close(): Unit = synchronized {
+    if (!closed) {
+      closed = true
+      val open = current
+      current = null
+      if (open != null) {
+        open.close()
+      }
+    }
   }
 }

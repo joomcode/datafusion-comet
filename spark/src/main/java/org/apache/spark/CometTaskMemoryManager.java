@@ -20,6 +20,8 @@
 package org.apache.spark;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
@@ -52,6 +54,24 @@ public class CometTaskMemoryManager {
   private final NativeMemoryConsumer nativeMemoryConsumer;
   private final AtomicLong used = new AtomicLong();
 
+  // Never hold this lock while entering Spark or a spill callback. Spark can wait while holding
+  // the TaskMemoryManager monitor, so cancellation must not acquire that monitor either.
+  private final Object acquireLock = new Object();
+  private final Map<Thread, PendingAcquire> pendingAcquires = new HashMap<>();
+  private boolean acquiresCancelled;
+
+  private static final class PendingAcquire {
+    private final Thread thread;
+    private final boolean interruptedOnEntry;
+    private int depth = 1;
+    private boolean interruptIssued;
+
+    private PendingAcquire(Thread thread) {
+      this.thread = thread;
+      this.interruptedOnEntry = thread.isInterrupted();
+    }
+  }
+
   public CometTaskMemoryManager(long id, long taskAttemptId) {
     this.id = id;
     this.taskAttemptId = taskAttemptId;
@@ -73,6 +93,15 @@ public class CometTaskMemoryManager {
   // Called by Comet native through JNI.
   // Returns the actual amount of memory (in bytes) granted.
   public long acquireMemory(long size) {
+    PendingAcquire pending = beginAcquire();
+    try {
+      return acquireMemoryTracked(size);
+    } finally {
+      endAcquire(pending);
+    }
+  }
+
+  private long acquireMemoryTracked(long size) {
     if (logger.isTraceEnabled()) {
       logger.trace("Task {} requested {} bytes", taskAttemptId, size);
     }
@@ -98,6 +127,58 @@ public class CometTaskMemoryManager {
           internal.getMemoryConsumptionForThisTask());
     }
     return acquired;
+  }
+
+  /**
+   * Unblocks this killed task's memory requests, including JNI calls made by native workers.
+   * Spark's execution pool waits without checking TaskContext, and aborting a Tokio task cannot
+   * preempt a synchronous JNI call. Only threads inside an owned acquisition are interrupted.
+   */
+  public void cancelPendingAcquires() {
+    synchronized (acquireLock) {
+      acquiresCancelled = true;
+      for (PendingAcquire pending : pendingAcquires.values()) {
+        if (!pending.interruptIssued) {
+          pending.interruptIssued = true;
+          pending.thread.interrupt();
+        }
+      }
+    }
+  }
+
+  private PendingAcquire beginAcquire() {
+    synchronized (acquireLock) {
+      taskContext.killTaskIfInterrupted();
+      if (acquiresCancelled) {
+        throw new TaskKilledException("Comet memory acquisition was cancelled");
+      }
+      Thread thread = Thread.currentThread();
+      PendingAcquire pending = pendingAcquires.get(thread);
+      if (pending == null) {
+        pending = new PendingAcquire(thread);
+        pendingAcquires.put(thread, pending);
+      } else {
+        // A Spark spill callback can synchronously enter another native plan of the same task.
+        pending.depth++;
+      }
+      return pending;
+    }
+  }
+
+  private void endAcquire(PendingAcquire pending) {
+    synchronized (acquireLock) {
+      if (--pending.depth == 0) {
+        pendingAcquires.remove(pending.thread);
+        // Unregistration and interruption share the lock: a late kill can never interrupt this
+        // thread after it has returned to Tokio or begun another task's work. Do not leave our
+        // interrupt flag behind on a reused native worker, or erase an interrupt it had on entry.
+        if (pending.interruptedOnEntry) {
+          pending.thread.interrupt();
+        } else if (pending.interruptIssued) {
+          Thread.interrupted();
+        }
+      }
+    }
   }
 
   /**

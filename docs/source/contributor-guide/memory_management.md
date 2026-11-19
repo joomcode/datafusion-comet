@@ -212,6 +212,15 @@ three ways and `NonFatal` catches only the first. It runs other consumers' `spil
 killing a task raises a plain `InterruptedException`, which `NonFatal` excludes by name. Comet
 reaches this method from native over JNI, so whatever escapes crosses the JNI boundary.
 
+**A killed task must unblock acquisitions made by native workers too.** Aborting a Tokio task
+cannot preempt a synchronous JNI call already waiting in Spark. Comet's kill watcher first sets
+the native cancellation token, then calls `CometTaskMemoryManager.cancelPendingAcquires` to
+interrupt only threads registered inside that killed task's acquisitions. Registration and exit
+use the same lock as interruption, so a late cancellation cannot interrupt a reused worker. The
+lock is never held during a Spark call, and neither `getUsed` nor `spill` takes it. Nested
+acquisitions keep the outermost registration alive; exit clears Comet's interrupt and preserves
+an interrupt present on entry. No additional per-acquisition timer or executor is created.
+
 **Spark exposes no per-consumer usage figure.** `TaskMemoryManager.getMemoryConsumptionForThisTask`
 is task-wide, and a consumer that reaches `acquireExecutionMemory` directly rather than through
 `MemoryConsumer.acquireMemory` keeps an inherited `used` of zero. That is why `NativeMemoryConsumer`
@@ -223,6 +232,10 @@ before asking other consumers to spill, so when a spill throws, the task has bee
 the call never returns. Nothing releases them until Spark's final task cleanup, so they are headroom
 nobody can use for the rest of the task. Any caller that swallows the exception has to reconcile
 that grant, and the only figure available for doing so is the task-wide one above.
+Cancellation does not estimate a refund from task-wide usage deltas: other consumers and native
+releases can change those figures concurrently. Comet accounts only grants returned to it and
+returns those through ordinary reservation release. Spark's normal failed-task cleanup reclaims
+any grant stranded by an interrupted sibling spill exactly as it does for its other consumers.
 
 **A parked acquire can wake up to a missing task entry.** Spark removes the task's `memoryForTask`
 entry when its balance reaches zero, and an acquire that was waiting in `lock.wait()` and wakes
