@@ -435,7 +435,11 @@
   "clippy": {
     "comet_no_deps_strict": "PASSED",
     "workspace_other_lints_diagnostic": "PASSED with local -A deprecated only",
-    "workspace_strict": "NOT_PASSED: existing pristine-vendor Atomic.fetch_update deprecation under Rust1.100; G03 toolchain backlog unchanged. No CI exemption or vendor warning-only change."
+    "workspace_strict": "PASSED with -D warnings and no command-line lint allowances after the user-approved statement-local fetch_update deprecation exception; final Linux CI remains required.",
+    "workspace_strict_before_approved_exception": "NOT_PASSED: existing pristine-vendor Atomic.fetch_update deprecation under Rust1.100; G03 toolchain backlog unchanged. No CI exemption or vendor warning-only change.",
+    "workspace_strict_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/strict-workspace-clippy-final.json",
+    "approved_policy": "decisions.json#vendor_lint_policy",
+    "lint_only_source_proof": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/lint-only-source-proof.json"
   },
   "performance": {
     "existing_benchmark": "aggregate_misc_pair/max_by",
@@ -447,7 +451,7 @@
     "Final full agreed Linux CI/release-feature graph and exact final-JAR native AMD64/ARM64 smoke",
     "25 full fuzz cases require explicit JVM property; default full GHA alone is insufficient",
     "Two upstream BloomFilter cancellations and two ignored metrics tests need final verification/disposition",
-    "Existing strict workspace lint/toolchain backlog"
+    "Final Linux strict workspace Clippy with the approved source-local exception and unchanged CI flags"
   ],
   "spill_fixture_adaptation": {
     "unchanged": "Original batch64/tinyPool/data/function/type coverage and mandatory aggregate-spill/native/result assertions",
@@ -469,5 +473,14 @@
   "full_gha_started": false,
   "g05_started": false,
   "production_use_allowed": false,
-  "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json"
+  "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json",
+  "lint_only_follow_up": {
+    "based_on_commit": "18f7550f1770423d5fc3b08a7ffd98835e575f9c",
+    "source_path": "native/vendor/datafusion-physical-plan/src/topk/mod.rs",
+    "qualified_source_before_sha256": "43d5b840b43862575b43f1a826773a377fe67c76c6ead96c9445b0dcbf2cc163",
+    "annotated_source_after_sha256": "1058ac361054b905ebd765b18c2114365cb8d71bd52f3389dc20f8315af1659e",
+    "runtime_code_unchanged": true,
+    "historical_test_and_library_receipts_preserved": true,
+    "runtime_tests_not_repeated_for_lint_only_annotations": true
+  }
 }

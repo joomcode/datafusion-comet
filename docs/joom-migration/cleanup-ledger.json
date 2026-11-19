@@ -159,6 +159,14 @@
       "contains": "Logs/receipts, failed intermediate and negative controls, source snapshots/reviews/manifests and local Criterion evidence; no release artifacts.",
       "cleanup_conditions": "Preserve until G04 acceptance and final migration qualification; do not delete automatically.",
       "size_note": "Exact post-commit auxiliary/shared-target sizes in G04 completion.json; shared targets include earlier groups."
+    },
+    {
+      "type": "g04_clippy_exception_evidence",
+      "path": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "contains": "Local strict workspace Clippy and formatting receipts, exact lint-only source diff and protected-ref verification. No downloads or release artifacts.",
+      "preserve_until": "Final migration acceptance and user cleanup decision"
     }
   ],
   "preexisting_or_shared": {

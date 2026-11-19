@@ -285,6 +285,14 @@ impl TopKDynamicFilters {
     }
 
     fn mark_topk_emitted(&self) {
+        #[expect(
+            clippy::allow_attributes,
+            reason = "A deprecated expectation would fail on supported older Rust versions"
+        )]
+        #[allow(
+            deprecated,
+            reason = "Keep the DataFusion 55.2 atomic update unchanged; Rust 1.100 renamed this API to try_update"
+        )]
         let previous = self
             .remaining_topk_emitters
             .fetch_update(

@@ -1385,14 +1385,23 @@
         "group": "G03",
         "feature_cards": ["D11", "D02", "D04", "D03"],
         "native_execution_requirement": "Actual native paths, result/mandatory-error parity, no canceled/ignored case counted as passed.",
-        "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/completion.json; final migration release SHA pending.",
+        "status": "LOCAL_STRICT_PASSED_FINAL_LINUX_CI_PENDING",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/strict-workspace-clippy-final.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/lint-only-source-proof.json",
         "id": "G03-WORKSPACE-CLIPPY-TOOLCHAIN",
-        "behavior_or_test": "Full workspace strict Clippy must pass with the final supported/reproducible toolchain; keep all CI lint checks.",
-        "required_inputs_and_settings": "Actual final Linux CI/release toolchains; cargo clippy --all-targets --workspace -- -D warnings, no diagnostic deprecation exemption.",
-        "reason_deferred": "Known pristine DF55.2 Atomic::fetch_update deprecation under local Rust1.100. User prohibited unrelated production-vendor edits solely for this warning. Strict Comet and diagnostic all-other-workspace lints pass; no CI flags changed.",
+        "behavior_or_test": "Strict workspace/all-targets Clippy must pass with the approved statement-local deprecated exception and unchanged CI flags.",
+        "required_inputs_and_settings": "Actual final Linux CI/release toolchains; cargo clippy --all-targets --workspace -- -D warnings. Only the approved fetch_update statement-local lint exception is allowed; no global diagnostic exemption.",
+        "reason_deferred": "Local strict workspace Clippy now passes. Final Linux CI remains pending under the agreed final-qualification policy.",
         "owner": "Final migration toolchain/CI qualification",
-        "intended_validation_command_or_job": "Resolve toolchain compatibility consistently with release/MSRV or obtain an approved compatible upstream remedy, then run unchanged strict CI. Diagnostic -Adeprecated is not acceptance."
+        "intended_validation_command_or_job": "Run unchanged final strict workspace CI with decisions.json#vendor_lint_policy applied. Preserve all other lint and correctness checks.",
+        "history_before_approved_exception": {
+          "status": "DEFERRED_FINAL_QUALIFICATION",
+          "behavior_or_test": "Full workspace strict Clippy must pass with the final supported/reproducible toolchain; keep all CI lint checks.",
+          "required_inputs_and_settings": "Actual final Linux CI/release toolchains; cargo clippy --all-targets --workspace -- -D warnings, no diagnostic deprecation exemption.",
+          "reason_deferred": "Known pristine DF55.2 Atomic::fetch_update deprecation under local Rust1.100. User prohibited unrelated production-vendor edits solely for this warning. Strict Comet and diagnostic all-other-workspace lints pass; no CI flags changed.",
+          "intended_validation_command_or_job": "Resolve toolchain compatibility consistently with release/MSRV or obtain an approved compatible upstream remedy, then run unchanged strict CI. Diagnostic -Adeprecated is not acceptance.",
+          "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/completion.json; final migration release SHA pending."
+        },
+        "decision_ref": "decisions.json#vendor_lint_policy"
       },
       {
         "id": "G04-LINUX-RELEASE",
@@ -1724,7 +1733,16 @@
     "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json",
     "runtime_library_sha256": "d999c11f45ab64a6b2aec77dfeedd75815ea0c88a962cc33fc9de8e86d2eb150",
     "source_manifest": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/final-source-manifest.json",
-    "source_freeze_note": "The 49 qualified non-migration file hashes remain unchanged after validation. Coherent local commits and protected refs/tree are recorded externally in completion.json to avoid self-referential commit hashes."
+    "source_freeze_note": "The original 49-file qualification manifest and completion receipt remain historical. A subsequent user-approved lint-only annotation changes only topk/mod.rs; removing the exact attributes reproduces the original file bytes. Runtime algorithms/tests/CI flags remain unchanged. See the follow-up source proof and strict Clippy receipt; no new runtime-library or release-JAR qualification is claimed.",
+    "pre_clippy_exception_source_freeze_note": "The 49 qualified non-migration file hashes remain unchanged after validation. Coherent local commits and protected refs/tree are recorded externally in completion.json to avoid self-referential commit hashes.",
+    "clippy_exception_follow_up": {
+      "decision_ref": "decisions.json#vendor_lint_policy",
+      "status": "LOCAL_STRICT_WORKSPACE_PASSED",
+      "source_sha256": "1058ac361054b905ebd765b18c2114365cb8d71bd52f3389dc20f8315af1659e",
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/strict-workspace-clippy-final.json",
+      "runtime_preservation_proof": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/lint-only-source-proof.json",
+      "final_linux_ci_still_required": true
+    }
   },
   "g01_qualification_summary_historical": "Runtime sources remain byte-identical to full Comet CI source 26590264b878fb8eae2ca439a8bcc0dfb513cb36. Prior B93 RC passed 7/7 jobs and 12/12 smoke cases per architecture. Rewritten final source must pass a fresh RC build; do not reuse B93 artifacts as RC1.",
   "g03_accepted_integration_gate_history": {

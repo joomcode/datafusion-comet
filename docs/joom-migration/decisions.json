@@ -400,8 +400,21 @@
     "acceptance": "Four explicitly HDFS-cluster-only ignored tests are not applicable to Joom GCP; do not provision a cluster. Retain upstream tests and generic Hadoop/libhdfs code because it can also serve other schemes."
   },
   "vendor_lint_policy": {
-    "user_quote": "We will not change production vendor code merely to remove this Clippy warning.",
-    "action": "Keep production vendor pristine; strict Comet lint excludes only vendor/no-deps. Retain documented upstream deprecation warning."
+    "recorded_on": "2026-11-19",
+    "status": "APPROVED_EXPLICITLY",
+    "user_request_translation": "Agreed: retain the existing DataFusion call and algorithm, allow deprecated only at this call with a reason, and retain strict checking of all other warnings and all Clippy checks. Record this decision.",
+    "action": "Keep AtomicUsize::fetch_update in mark_topk_emitted. Apply allow(deprecated) only to the let statement containing that call, with an explanatory reason. No algorithm, atomic ordering, dependency or toolchain change.",
+    "source_path": "native/vendor/datafusion-physical-plan/src/topk/mod.rs",
+    "meta_lint": "The same statement expects clippy::allow_attributes only for this intentional allow. Using expect(deprecated) would fail with unfulfilled expectations on supported older Rust versions where the API is not deprecated.",
+    "scope": "Permanent approved source-local exception, not a temporary CI workaround. No global deprecated allowance, Clippy exclusion, changed CI flags or weaker correctness tests.",
+    "validation": "Unchanged strict workspace/all-targets Clippy passed locally with -D warnings and no command-line lint allowances. Final Linux CI remains mandatory.",
+    "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/strict-workspace-clippy-final.json",
+    "runtime_preservation_proof": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/lint-only-source-proof.json",
+    "supersedes": "The prior unresolved deprecation/toolchain disposition only. Prior qualification receipts remain historical; no G04 merge/push, G05, full per-group GHA, publication or production authorization.",
+    "historical_policy_before_this_approval": {
+      "user_quote": "We will not change production vendor code merely to remove this Clippy warning.",
+      "action": "Keep production vendor pristine; strict Comet lint excludes only vendor/no-deps. Retain documented upstream deprecation warning."
+    }
   },
   "migration_docs_retention": {
     "user_quote": "OK; we will decide before the stable release.",
