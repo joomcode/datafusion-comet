@@ -774,5 +774,25 @@
     "negative_control": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/negative-control-restoration.json",
     "validation_state": "LOCAL_TARGETED_PASSED; detailed current results in G03-results.json, final Linux/release qualification remains required.",
     "historical_baseline_note": "Existing pristine hashes and G01 production_algorithm_changes describe the original import, not current G03-patched bytes."
+  },
+  "g04_aggregate_port": {
+    "source_tag": "joom-1.1-13",
+    "source_commit": "981e26dff6b64110a8b3949a0ed065523d9012e4",
+    "base_version": "55.2.0",
+    "arrow_version": "59.3.2",
+    "cards": ["D06", "D07", "D08", "D09", "D10", "N09"],
+    "origin": "Published55.2 crate imported in G01; affected existing aggregate production files matched pristine55.1. Adapt residuals while retaining upstream architecture/new codecs.",
+    "port_manifest": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/20261119_vendor/implementation-manifest.json",
+    "production_adaptations": [
+      "Retain Single/Final+MergeAsPartial; never restore oldPartialReduce routing.",
+      "Offset guards/exact grouping-set input resumption; hidden grouping-ID replay key.",
+      "Fallible future emit budget; retain pending raw states/backing storage and ordered range workspace.",
+      "replay_budget.rs prepares joint output/merge headroom, reshapes oversized IPC runs, budgets decoded capacities and uses unbuffered single-run replay.",
+      "Bounded-emit consumers avoid legacy future overcommit.",
+      "OrderedPartial pressure emission; no false Partial uniqueness; grouping-set NULL expansion cannot inherit false input properties.",
+      "Coordinate low-copy collect_list with variable-state emit budgets and nested/sliced/null/empty-struct handling."
+    ],
+    "validation": "G04-results.json; final Linux/release pending.",
+    "historical_note": "G01 pristine hashes describe original import, not G03/G04-patched bytes."
   }
 }

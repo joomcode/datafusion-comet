@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-19",
-  "phase": "G03_COMPLETE_G04_REQUIRES_EXPLICIT_AUTHORIZATION",
+  "phase": "G04_LOCAL_VALIDATION_COMPLETE_AWAITING_USER_REVIEW",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -101,10 +101,12 @@
         "N09"
       ],
       "depends_on": ["G01"],
-      "status": "NOT_STARTED",
+      "status": "IMPLEMENTED_LOCAL_TARGETED_VALIDATION_PASSED_AWAITING_USER_REVIEW",
       "head_commit": null,
-      "tests": "NOT_RUN",
-      "handoff_report": null
+      "tests": "559 native checks; 330 JVM passed, 27 canceled/2 ignored tracked; local ARM64 only",
+      "handoff_report": "G04-report.md",
+      "base_commit": "af05c94e7e5c669f36e783f65e5d5f2d35d328ce",
+      "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04"
     },
     {
       "id": "G05",
@@ -294,8 +296,8 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Report the G03 integration and post-merge audit, including the two final commit names. Await separate explicit G04 authorization; no further implementation, main/tag changes, full per-group GHA, artifact publication or production action.",
-  "qualification": "Runtime sources remain byte-identical to full Comet CI source 26590264b878fb8eae2ca439a8bcc0dfb513cb36. Prior B93 RC passed 7/7 jobs and 12/12 smoke cases per architecture. Rewritten final source must pass a fresh RC build; do not reuse B93 artifacts as RC1.",
+  "next_step": "Report G04 and await explicit integration instruction; no push/merge, G05 or full GHA.",
+  "qualification": "G04 local targeted ARM64/dev checks passed; see G04-results.json. Final full Linux/release/JAR qualification remains pending; G01 RC1 is historical evidence only.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
   "execution_model": {
@@ -318,7 +320,7 @@
     "implementation_hold_preserved": true,
     "approved_feature_groups_and_release_milestones_unchanged": true
   },
-  "active_branch": "branch-1.2",
+  "active_branch": "joom/1.2-native-aggregates",
   "g01_work_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01",
   "upstream_base_rechecked_on": "2026-11-17",
   "upstream_base_current_sha": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -518,20 +520,20 @@
     "source_commit": "b93d553856a0339af7468bcff2070e735a1a3c71",
     "rc_tag": "joom-1.2-1-rc1; authorized only after final qualification"
   },
-  "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-final-qualification",
+  "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04",
   "integration_gate": {
-    "status": "G03_USER_APPROVED_ACCEPTANCE",
-    "method": "Fast-forward branch-1.2 to the consolidated two-commit G03 feature; no merge commit.",
-    "previous_base": "6729883958442e865707d692f32a84e9554e4090",
-    "functional_source_previously_verified": "2241a53d252cbc168296072fb876747e764333fb",
-    "post_commit_gate": "This source snapshot records stage acceptance; actual integration, local/remote refs and the exact final tree are verified after commit in the integration receipt.",
-    "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json",
+    "group": "G04",
+    "status": "AWAITING_USER_REVIEW",
+    "base_commit": "af05c94e7e5c669f36e783f65e5d5f2d35d328ce",
+    "merge_authorized": false,
+    "push_authorized": false,
     "not_authorized": [
-      "G04-G10 implementation",
-      "main/tag changes",
+      "G04 push or merge before user review",
+      "G05-G10",
       "full per-group GHA",
-      "artifact publication",
-      "production use"
+      "main/tag changes",
+      "publication",
+      "production"
     ]
   },
   "pr_preparation": {
@@ -1391,6 +1393,81 @@
         "reason_deferred": "Known pristine DF55.2 Atomic::fetch_update deprecation under local Rust1.100. User prohibited unrelated production-vendor edits solely for this warning. Strict Comet and diagnostic all-other-workspace lints pass; no CI flags changed.",
         "owner": "Final migration toolchain/CI qualification",
         "intended_validation_command_or_job": "Resolve toolchain compatibility consistently with release/MSRV or obtain an approved compatible upstream remedy, then run unchanged strict CI. Diagnostic -Adeprecated is not acceptance."
+      },
+      {
+        "id": "G04-LINUX-RELEASE",
+        "group": "G04",
+        "feature_cards": [
+          "D06",
+          "D07",
+          "D08",
+          "D09",
+          "D10",
+          "N04",
+          "N05",
+          "N06",
+          "N07",
+          "N08",
+          "N09"
+        ],
+        "behavior_or_test": "Full final Linux native/vendor/JVM/SQL/Delta coverage and exact final-JAR AMD64/ARM64 smoke.",
+        "required_inputs_and_settings": "Spark4.2.1/ANSI=true/Java17; final root lock/vendor and agreed CI/release graph.",
+        "reason_deferred": "Approved local targeted per-group checks; complete final qualification remains required.",
+        "owner": "Final migration qualification",
+        "intended_validation_command_or_job": "Existing full Comet CI and RC Build & Smoke after all groups and temporary CI cleanup.",
+        "native_execution_requirement": "Compare results and mandatory errors; confirm actual native paths and exact loaded artifacts where applicable. Canceled/ignored never count as passed.",
+        "status": "DEFERRED_FINAL_QUALIFICATION",
+        "evidence_path_and_source_sha": "G04-results.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json; final release SHA pending."
+      },
+      {
+        "id": "G04-FULL-FUZZ",
+        "group": "G04",
+        "feature_cards": [
+          "D06",
+          "D07",
+          "D08",
+          "D09",
+          "D10",
+          "N04",
+          "N05",
+          "N06",
+          "N07",
+          "N08",
+          "N09"
+        ],
+        "behavior_or_test": "Execute all25 opt-in aggregate fuzz cases as well as6default cases; none canceled.",
+        "required_inputs_and_settings": "Spark4.2.1/ANSI=true/Java17; final root lock/vendor and agreed CI/release graph.",
+        "reason_deferred": "Approved local targeted per-group checks; complete final qualification remains required.",
+        "owner": "Final migration qualification",
+        "intended_validation_command_or_job": "Pass comet.test.aggFuzz.full=true to forked JVM (e.g. JAVA_TOOL_OPTIONS); execute CometFirstLastBoolAggFuzzSuite and verify all full: cases run.",
+        "native_execution_requirement": "Compare results and mandatory errors; confirm actual native paths and exact loaded artifacts where applicable. Canceled/ignored never count as passed.",
+        "status": "DEFERRED_FINAL_QUALIFICATION",
+        "evidence_path_and_source_sha": "G04-results.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json; final release SHA pending."
+      },
+      {
+        "id": "G04-INHERITED-UNRUN",
+        "group": "G04",
+        "feature_cards": [
+          "D06",
+          "D07",
+          "D08",
+          "D09",
+          "D10",
+          "N04",
+          "N05",
+          "N06",
+          "N07",
+          "N08",
+          "N09"
+        ],
+        "behavior_or_test": "Execute or explicitly resolve2Spark4.2 mixedBloom planning cancellations and2ignored metric tests; guards are not evidence of incompatibility.",
+        "required_inputs_and_settings": "Spark4.2.1/ANSI=true/Java17; final root lock/vendor and agreed CI/release graph.",
+        "reason_deferred": "Approved local targeted per-group checks; complete final qualification remains required.",
+        "owner": "Final migration qualification",
+        "intended_validation_command_or_job": "Inspect issue#4968 guards and metrics ignores; run applicable scenarios without suppressing correctness failures, or obtain explicit applicability disposition.",
+        "native_execution_requirement": "Compare results and mandatory errors; confirm actual native paths and exact loaded artifacts where applicable. Canceled/ignored never count as passed.",
+        "status": "DEFERRED_FINAL_QUALIFICATION",
+        "evidence_path_and_source_sha": "G04-results.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json; final release SHA pending."
       }
     ],
     "final_gate": "No unresolved/unverified applicable cases. Require actual passing evidence; retain only applicability exclusions explicitly agreed with the user (such as the existing HDFS-cluster exclusion)."
@@ -1411,7 +1488,7 @@
     "final_gate": "Audit actual CI, remove all temporary mechanisms, restore normal automatic triggers and full agreed coverage, then run full final GHA and exact final-JAR AMD64/ARM64 packaged smoke. An empty list alone is not proof of restoration."
   },
   "production_use_allowed": false,
-  "active_implementation_group": null,
+  "active_implementation_group": "G04",
   "local_documentation_update_pending": null,
   "g02": {
     "base_commit": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
@@ -1602,5 +1679,68 @@
     "base_commit": "6729883958442e865707d692f32a84e9554e4090",
     "merge_authorized": false,
     "next_step": "Complete local G03 validation and report the feature diff. No automatic integration or G04."
-  }
+  },
+  "g04": {
+    "status": "IMPLEMENTED_LOCAL_TARGETED_VALIDATION_PASSED_AWAITING_USER_REVIEW",
+    "base": "af05c94e7e5c669f36e783f65e5d5f2d35d328ce",
+    "branch": "joom/1.2-native-aggregates",
+    "evidence": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04",
+    "authorization_ref": "decisions.json#g04_authorization",
+    "merge_allowed": false,
+    "full_gha_allowed": false,
+    "implementation_cards": [
+      "D06",
+      "D07",
+      "D08",
+      "D09",
+      "D10",
+      "N04",
+      "N05",
+      "N06",
+      "N07",
+      "N08",
+      "N09"
+    ],
+    "review_evidence": [
+      "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/20261119_specialized/memory-review.json",
+      "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/20261119_spark/legacy-memory-review.json",
+      "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/20261119_spark/g04-scope-provenance-matrix.json"
+    ],
+    "qualification": "PASSED_LOCAL_TARGETED_WITH_EXPLICIT_FINAL_BACKLOG",
+    "blocking_local_case": {
+      "status": "CLOSED_LOCALLY",
+      "evidence": "G04-results.json",
+      "summary": "Replay/Partial/offset/drain/property and ordering regressions pass at unchanged budgets; negative control proves wrong-row hazard."
+    },
+    "initial_memory_failure_history": {
+      "status": "MAIN_MEMORY_FIX_PASSED_FINAL_DECODE_REFINEMENT_IN_PROGRESS",
+      "original_fixture": "aggregate-emit-memory-replay-fix-third.json passed at unchanged130.8MiB pool; peak137.0MiB, exact524288elements/65536groups",
+      "latest_cohort": "29 core passed,203vendor passed; single new physical IPC footprint assertion fails (decoded523264 vsdeclared262604 bytes)",
+      "reason": "Arrow reader scratch capacity grows across fixed128KiB I/O chunks; writer already slices correctly. Strict physical assertion retained. Legacy hidden grouping-ID and NULL replay regression now passes.",
+      "evidence": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/native-aggregate-qualified.log"
+    },
+    "results": "G04-results.json",
+    "report": "G04-report.md",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json",
+    "runtime_library_sha256": "d999c11f45ab64a6b2aec77dfeedd75815ea0c88a962cc33fc9de8e86d2eb150",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/final-source-manifest.json",
+    "source_freeze_note": "The 49 qualified non-migration file hashes remain unchanged after validation. Coherent local commits and protected refs/tree are recorded externally in completion.json to avoid self-referential commit hashes."
+  },
+  "g01_qualification_summary_historical": "Runtime sources remain byte-identical to full Comet CI source 26590264b878fb8eae2ca439a8bcc0dfb513cb36. Prior B93 RC passed 7/7 jobs and 12/12 smoke cases per architecture. Rewritten final source must pass a fresh RC build; do not reuse B93 artifacts as RC1.",
+  "g03_accepted_integration_gate_history": {
+    "status": "G03_USER_APPROVED_ACCEPTANCE",
+    "method": "Fast-forward branch-1.2 to the consolidated two-commit G03 feature; no merge commit.",
+    "previous_base": "6729883958442e865707d692f32a84e9554e4090",
+    "functional_source_previously_verified": "2241a53d252cbc168296072fb876747e764333fb",
+    "post_commit_gate": "This source snapshot records stage acceptance; actual integration, local/remote refs and the exact final tree are verified after commit in the integration receipt.",
+    "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json",
+    "not_authorized": [
+      "G04-G10 implementation",
+      "main/tag changes",
+      "full per-group GHA",
+      "artifact publication",
+      "production use"
+    ]
+  },
+  "historical_g01_qualification_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-final-qualification"
 }

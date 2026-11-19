@@ -17,7 +17,9 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-> **Current G03 acceptance, 2026-11-19:** The user approved pushing and integrating G03 into branch-1.2 after local validation. G03 is complete; actual final refs/tree and post-merge proof are recorded after commit in `${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json`. Preserve two substantive commits and the original implementation receipt. G04-G10, main/tag changes, full per-group GHA, artifact publication and production remain unauthorized. Final Linux/release and the known baseline workspace lint/toolchain checks remain required. See decisions.json#g03_integration_authorization and STATE.json.
+> **Current G04 review gate, 2026-11-19:** G04 is implemented and locally qualified in `joom/1.2-native-aggregates` on accepted G03 `af05c94e7`. See G04-report.md/G04-results.json and STATE.json. Await review before push or integration; `branch-1.2`, main and RC1 are unchanged. G05-G10, full per-group GHA, publication and production remain unauthorized. Final qualification/backlogs remain required.
+
+> **Historical G03 acceptance, 2026-11-19:** The user approved pushing and integrating G03 into branch-1.2 after local validation. G03 is complete; actual final refs/tree and post-merge proof are recorded after commit in `${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json`. Preserve two substantive commits and the original implementation receipt. G04-G10, main/tag changes, full per-group GHA, artifact publication and production remain unauthorized. Final Linux/release and the known baseline workspace lint/toolchain checks remain required. See decisions.json#g03_integration_authorization and STATE.json.
 
 > **Historical pre-integration G03 result, 2026-11-19:** G03 is implemented and locally validated, ready for integration review. See G03-report.md/G03-results.json and STATE.json. The documentation push is verified; branch-1.2 stays at672988395 until further approval. G04-G10 remain unauthorized. Final Linux/release qualification and the known pristine-vendor/toolchain lint issue remain tracked; no production use.
 
@@ -55,7 +57,7 @@ One main chat executes and coordinates. The nine feature branches remain;
 a separate user-visible chat per group is unnecessary. The coordinator chooses
 bounded source/compatibility research and independent review tasks for internal
 helpers, and when to delegate them. Implementation and integration stay in the main
-chat by default, with a single writer per checkout.
+chat by default. The coordinator owns shared files and integration; helpers may implement explicitly assigned disjoint files, with one owner per file.
 
 The coordinator creates a new user-visible session when a lengthy isolated task,
 a bounded separate context or a continuation handoff offers concrete benefit.
@@ -64,6 +66,10 @@ to the user and transfer the checkpoint/context independently; repeated consent 
 not required within the existing scope. The user does not manually allocate tasks.
 
 ## Current phase
+
+G04 is implemented and locally qualified, awaiting user review before push or integration. See G04-report.md/G04-results.json and STATE.json; preserve the final source and external completion receipt. G05-G10 need separate authorization. Final full CI/JAR qualification remains required.
+
+## Historical phase before G04
 
 **G03 is complete and accepted for integration into branch-1.2 under explicit user approval.** Actual final source/ref/tree proof is recorded after commit in `${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json`.
 G01/RC1 and the G02 implementation remain preserved. G03-results.json/G03-report.md
@@ -83,8 +89,7 @@ proof in `${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json
    A current explicit code hold takes precedence over general Git permission.
 4. Read the worker response, verify evidence and save the report here.
    Separate chats do not automatically synchronize later messages.
-5. Once implementation is authorized, keep one writer per checkout; review and
-   research may run in parallel. The coordinator owns integration/shared STATE/decisions.
+5. Once implementation is authorized, keep one owner per file. Helper implementation may run in explicitly assigned disjoint files; review and research may run in parallel. The coordinator owns integration/shared STATE/decisions.
    Any explicit assignment of disjoint documentation files must remain nonoverlapping.
 6. Forward clarifications independently. Report real environment blockers or a new
    required decision to the user.

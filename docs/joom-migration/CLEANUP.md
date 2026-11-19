@@ -197,3 +197,14 @@ Preserve both directories and the recovery ref through final migration acceptanc
 no automatic deletion is authorized. No runtime build, new release artifact or
 Docker image is created by integration. Exact source/ref identities and auxiliary
 size are recorded in the integration completion receipt.
+
+## G04 local qualification
+
+`${MIGRATION_AUX_ROOT}/20261119_comet12-g04` holds source/command manifests,
+reviews, benchmarks, failed receipts and intentional ordering negative controls.
+Preserve it through review/final acceptance; exact current auxiliary/shared-target
+sizes are in `completion.json`. G04 reused `native/target`, `spark/target` and
+existing caches; their full size is not G04 growth. Maven copied the debug dylib
+to runtime resources; these are not release JARs. No Docker image, toolchain or
+release artifact was created. Use existing manual cleanup instructions after
+all migration builds finish; nothing is automatically deleted.

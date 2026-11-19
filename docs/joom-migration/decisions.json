@@ -586,5 +586,40 @@
     "remote_scope": "github.com/joomcode/datafusion-comet: inspect refs, create the G03 feature branch and fast-forward branch-1.2; do not overwrite unexpected remote updates. No PR/full per-group GHA, artifact publication or production action.",
     "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json",
     "next_group_authorized": false
+  },
+  "g04_authorization": {
+    "date": "2026-11-19",
+    "status": "APPROVED_EXPLICITLY",
+    "scope": "Implement G04 in joom/1.2-native-aggregates on the accepted G03 base; local builds and targeted correctness regressions; report before merge.",
+    "cards": [
+      "D06",
+      "D07",
+      "D08",
+      "D09",
+      "D10",
+      "N04",
+      "N05",
+      "N06",
+      "N07",
+      "N08",
+      "N09"
+    ],
+    "excluded": [
+      "merge before user review",
+      "full per-group GHA",
+      "G05 and later groups",
+      "main changes",
+      "release tags",
+      "publication",
+      "production",
+      "datasci repository access"
+    ]
+  },
+  "g04_implementation_findings": {
+    "status": "IMPLEMENTATION_DETAILS_WITHIN_APPROVED_SCOPE_NOT_NEW_USER_APPROVAL",
+    "ordering": "Preserve ordering by default; optimize only below proven unordered shuffle and for count/nonfloating min/max. Negative control returned successfully wrong SORT BY rows. Retain ANSI/error and order-sensitive behavior.",
+    "memory": "Adapt replay/output budgets and recoverable orderedPartial emission atop selected upstream design; no higher test limits or weaker checks.",
+    "properties": "No Partial uniqueness; Final uniqueness includes GID; discard grouping-set NULL-invalidated input properties.",
+    "stage_gate": "Local targeted validation only; review before integration; no G05/full per-group GHA."
   }
 }

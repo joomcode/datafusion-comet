@@ -26,7 +26,7 @@ import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Expression, SortOrder}
-import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateMode, Final, Partial, PartialMerge}
+import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateFunction, AggregateMode, Count, Final, Max, Min, Partial, PartialMerge}
 import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, BuildRight, BuildSide}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreeNodeTag
@@ -94,6 +94,15 @@ object CometExecRule {
    */
   val COMET_UNSAFE_PARTIAL: TreeNodeTag[String] =
     TreeNodeTag[String]("comet.unsafePartialAgg")
+
+  val SORT_AGGREGATE_ORDER_CONSUMED_TAG: TreeNodeTag[Unit] =
+    TreeNodeTag[Unit]("comet.sortAggregateOrderConsumed")
+
+  val SORT_AGGREGATE_ORDER_UNUSED_TAG: TreeNodeTag[Unit] =
+    TreeNodeTag[Unit]("comet.sortAggregateOrderUnused")
+
+  val UNORDERED_SORT_AGGREGATE_TAG: TreeNodeTag[Unit] =
+    TreeNodeTag[Unit]("comet.unorderedSortAggregate")
 
   /**
    * Info message for a native operator that keeps a `Scan` over an input that now reads its
@@ -321,7 +330,7 @@ case class CometExecRule(session: SparkSession, queryStagePrep: Boolean = false)
    * when AQE replans the exchange without its Final, and records why the Partial stays in Spark.
    */
   private def restoreSparkPartial(agg: CometBaseAggregateExec, reason: String): SparkPlan = {
-    val partial = agg.originalPlan.withNewChildren(agg.children)
+    val partial = agg.sparkFallback(agg.children)
     partial.setTagValue(CometExecRule.COMET_UNSAFE_PARTIAL, reason)
     withFallbackReason(partial, reason)
   }
@@ -363,7 +372,7 @@ case class CometExecRule(session: SparkSession, queryStagePrep: Boolean = false)
             // A native ancestor embeds its old child in nativeOp. Replacing only its SparkPlan
             // child would leave the incompatible native partial in that serialized plan.
             case comet: CometExec =>
-              withFallbackReason(comet.originalPlan.withNewChildren(children), reason)
+              withFallbackReason(comet.sparkFallback(children), reason)
             case _ => other.withNewChildren(children)
           }
         }
@@ -665,6 +674,10 @@ case class CometExecRule(session: SparkSession, queryStagePrep: Boolean = false)
         convertToComet(s, CometShuffleExchangeExec)
           .getOrElse(preserveSparkAggregateBuffers(s))
 
+      case aggregate: SortAggregateExec
+          if aggregate.children.forall(_.isInstanceOf[CometNativeExec]) =>
+        convertSortAggregate(aggregate)
+
       case op =>
         // if all children are native (or if this is a leaf node) then see if there is a
         // registered handler for creating a fully native plan
@@ -726,6 +739,7 @@ case class CometExecRule(session: SparkSession, queryStagePrep: Boolean = false)
         }
     }
 
+    markSortAggregateOrdering(plan)
     plan.transformUp { case op =>
       val converted = convertNode(refreshStaleShuffleScans(op))
       // Replace SubqueryBroadcastExec with CometSubqueryBroadcastExec in DPP expressions
@@ -733,6 +747,106 @@ case class CometExecRule(session: SparkSession, queryStagePrep: Boolean = false)
       // between the DPP subquery and the join's CometBroadcastExchangeExec because both
       // will have the same CometBroadcastExchangeExec type and canonical form.
       convertSubqueryBroadcasts(converted)
+    }
+  }
+
+  /** Omit ordering only where a known boundary proves it unobservable. */
+  private def markSortAggregateOrdering(plan: SparkPlan): Unit = {
+    // Spark may already have removed an ORDER BY sort using a SortAggregate's advertised order.
+    // The remaining physical plan cannot tell a root aggregate with such an ORDER BY from one
+    // whose caller never requested it. In particular, an empty requiredChildOrdering is not
+    // evidence that an operator (for example a hash join) cannot forward order to its caller.
+    // Default to preserving order, and recompute proof tags whenever AQE revisits a Spark node.
+    plan.foreach {
+      case aggregate: SortAggregateExec =>
+        aggregate.unsetTagValue(CometExecRule.SORT_AGGREGATE_ORDER_CONSUMED_TAG)
+        aggregate.unsetTagValue(CometExecRule.SORT_AGGREGATE_ORDER_UNUSED_TAG)
+        aggregate.unsetTagValue(CometExecRule.UNORDERED_SORT_AGGREGATE_TAG)
+      case _ =>
+    }
+    // A projection can rename grouping keys. Check the consumer-facing order once, then walk
+    // through unary wrappers conservatively instead of comparing the renamed attributes again.
+    def provider(node: SparkPlan): Option[SortAggregateExec] = node match {
+      case aggregate: SortAggregateExec => Some(aggregate)
+      case _: SortExec | _: CometSortExec => None
+      case unary if unary.children.size == 1 => provider(unary.children.head)
+      case _ => None
+    }
+    // A plain shuffle destroys input order. Only projects/filters are crossed here: neither
+    // observes row order, unlike a limit/window/aggregate, and no binary operator is inferred.
+    def unusedProvider(node: SparkPlan): Option[SortAggregateExec] = node match {
+      case aggregate: SortAggregateExec => Some(aggregate)
+      case unary @ (_: ProjectExec | _: FilterExec | _: CometProjectExec | _: CometFilterExec)
+          if unary.children.size == 1 && unary.requiredChildOrdering.forall(_.isEmpty) =>
+        unusedProvider(unary.children.head)
+      case _ => None
+    }
+    plan.foreach {
+      case exchange @ (_: ShuffleExchangeExec | _: CometShuffleExchangeExec)
+          if exchange.children.size == 1 && exchange.outputOrdering.isEmpty &&
+            exchange.requiredChildOrdering.forall(_.isEmpty) =>
+        unusedProvider(exchange.children.head)
+          .foreach(_.setTagValue(CometExecRule.SORT_AGGREGATE_ORDER_UNUSED_TAG, ()))
+      case _ =>
+    }
+    plan.foreach { parent =>
+      val required = parent match {
+        case native: CometNativeExec if native.originalPlan != null =>
+          native.originalPlan.requiredChildOrdering
+        case other => other.requiredChildOrdering
+      }
+      if (required.length == parent.children.length) {
+        parent.children.zip(required).foreach { case (child, ordering) =>
+          if (ordering.nonEmpty && SortOrder.orderingSatisfies(child.outputOrdering, ordering)) {
+            provider(child).foreach(
+              _.setTagValue(CometExecRule.SORT_AGGREGATE_ORDER_CONSUMED_TAG, ()))
+          }
+        }
+      }
+    }
+  }
+
+  private def orderInsensitiveAggregate(fn: AggregateFunction): Boolean = fn match {
+    case _: Count => true
+    case extrema @ (_: Min | _: Max) =>
+      extrema.dataType != FloatType && extrema.dataType != DoubleType
+    // SUM/AVG can depend on intermediate overflow and floating-point accumulation order.
+    // MIN_BY/MAX_BY/FIRST/LAST and floating extrema retain tie/order-sensitive input behavior.
+    case _ => false
+  }
+
+  private def convertSortAggregate(aggregate: SortAggregateExec): SparkPlan = {
+    val orderConsumed =
+      aggregate.getTagValue(CometExecRule.SORT_AGGREGATE_ORDER_CONSUMED_TAG).isDefined
+    val orderProvenUnused =
+      aggregate.getTagValue(CometExecRule.SORT_AGGREGATE_ORDER_UNUSED_TAG).isDefined
+    if (!orderProvenUnused || orderConsumed ||
+      !aggregate.aggregateExpressions.forall(e =>
+        orderInsensitiveAggregate(e.aggregateFunction))) {
+      // Preserve upstream streaming and restore-sort behavior for order-sensitive aggregates.
+      aggregate.unsetTagValue(CometExecRule.UNORDERED_SORT_AGGREGATE_TAG)
+      return convertToComet(aggregate, CometSortAggregateExec).getOrElse(aggregate)
+    }
+    val required = aggregate.requiredChildOrdering.headOption.getOrElse(Nil)
+    val input = aggregate.child match {
+      case sort: CometSortExec
+          if sort.originalPlan.isInstanceOf[SortExec] &&
+            !sort.originalPlan.asInstanceOf[SortExec].global &&
+            sort.sortOrder.length == required.length &&
+            sort.sortOrder.zip(required).forall { case (actual, expected) =>
+              actual.semanticEquals(expected)
+            } =>
+        sort.child
+      case other => other
+    }
+    val unordered = aggregate.copy(child = input)
+    unordered.copyTagsFrom(aggregate)
+    unordered.setTagValue(CometExecRule.UNORDERED_SORT_AGGREGATE_TAG, ())
+    convertToComet(unordered, CometSortAggregateExec).getOrElse {
+      unordered
+        .getTagValue(CometExplainInfo.FALLBACK_REASONS)
+        .foreach(reasons => withFallbackReasons(aggregate, reasons))
+      aggregate
     }
   }
 
@@ -1857,7 +1971,7 @@ case class CometExecRule(session: SparkSession, queryStagePrep: Boolean = false)
           if agg.modes.forall(m => m == Partial || m == PartialMerge) =>
         val merges = agg.aggregateExpressions.nonEmpty
         revertChain(agg.child, belowNativeMerge || merges).map { child =>
-          val restored = agg.originalPlan.withNewChildren(Seq(child))
+          val restored = agg.sparkFallback(Seq(child))
           // A native PartialMerge decodes a Spark partial's collect_list / collect_set buffer,
           // so without the tag the transform below would convert the restored merge again.
           if (merges) {

@@ -2350,7 +2350,9 @@ trait CometBaseAggregate[T <: BaseAggregateExec] extends CometOperatorSerde[T] {
     if (aggregateExpressions.isEmpty) {
       val hashAggBuilder = OperatorOuterClass.HashAggregate.newBuilder()
       hashAggBuilder.addAllGroupingExprs(groupingExprs.map(_.get).asJava)
-      hashAggBuilder.setOrderedByGroupingKeys(orderedByGroupingKeys)
+      hashAggBuilder.setOrderedByGroupingKeys(
+        orderedByGroupingKeys &&
+          aggregate.getTagValue(CometExecRule.UNORDERED_SORT_AGGREGATE_TAG).isEmpty)
       // Spark has no expression mode to serialize here. An empty aggregate with a required child
       // distribution must fully deduplicate its keys (Final, or a pre-distinct PartialMerge), so
       // use native Final to keep skip-partial disabled.
@@ -2415,7 +2417,9 @@ trait CometBaseAggregate[T <: BaseAggregateExec] extends CometOperatorSerde[T] {
         hashAggBuilder.addAllGroupingExprs(groupingExprs.map(_.get).asJava)
         hashAggBuilder.addAllAggExprs(aggExprs.map(_.get).asJava)
         hashAggBuilder.setModeValue(mode.getNumber)
-        hashAggBuilder.setOrderedByGroupingKeys(orderedByGroupingKeys)
+        hashAggBuilder.setOrderedByGroupingKeys(
+          orderedByGroupingKeys &&
+            aggregate.getTagValue(CometExecRule.UNORDERED_SORT_AGGREGATE_TAG).isEmpty)
 
         // Send per-expression modes and buffer offset for PartialMerge handling
         if (hasPartialMerge) {
@@ -2720,7 +2724,8 @@ object CometSortAggregateExec extends CometBaseAggregate[SortAggregateExec] {
       op.resultExpressions,
       op.child.output,
       op.child,
-      SerializedPlan(None))
+      SerializedPlan(None),
+      preservesGroupingOrder = op.getTagValue(CometExecRule.UNORDERED_SORT_AGGREGATE_TAG).isEmpty)
   }
 }
 
@@ -2838,8 +2843,32 @@ case class CometSortAggregateExec(
     resultExpressions: Seq[NamedExpression],
     input: Seq[Attribute],
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    override val serializedPlanOpt: SerializedPlan,
+    preservesGroupingOrder: Boolean = true)
     extends CometBaseAggregateExec {
+
+  override def outputOrdering: Seq[SortOrder] =
+    if (preservesGroupingOrder) originalPlan.outputOrdering else Nil
+
+  override def equals(obj: Any): Boolean = obj match {
+    case other: CometSortAggregateExec =>
+      preservesGroupingOrder == other.preservesGroupingOrder && super.equals(other)
+    case _ => false
+  }
+
+  override def hashCode(): Int =
+    Objects.hashCode(Int.box(super.hashCode()), Boolean.box(preservesGroupingOrder))
+
+  override def sparkFallback(newChildren: Seq[SparkPlan]): SparkPlan = {
+    val restored = super.sparkFallback(newChildren).asInstanceOf[SortAggregateExec]
+    val ordering = restored.requiredChildOrdering.headOption.getOrElse(Nil)
+    if (!preservesGroupingOrder &&
+      !SortOrder.orderingSatisfies(restored.child.outputOrdering, ordering)) {
+      restored.copy(child = SortExec(ordering, global = false, restored.child))
+    } else {
+      restored
+    }
+  }
 
   override protected def withNewChildInternal(newChild: SparkPlan): SparkPlan =
     this.copy(child = newChild)

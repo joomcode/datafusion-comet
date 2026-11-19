@@ -177,8 +177,8 @@ object CometAggregateExpressionBenchmark extends CometBenchmarkBase {
       "approx_percentile_double_high_card",
       "SELECT approx_percentile(c_double, 0.5) FROM parquetV1Table GROUP BY high_card_grp"))
 
-  // max_by / min_by run natively only when both the value and ordering are fixed-length types (a
-  // variable-length value or ordering forces Spark's SortAggregate, which Comet does not run).
+  // max_by / min_by support fixed-length ordering with fixed-length or UTF8_BINARY string values.
+  // These cases focus on fixed-length values; string values use the native SortAggregate path.
   private val maxMinByAggregates = List(
     AggExprConfig("max_by_int", "SELECT max_by(c_int, c_long) FROM parquetV1Table GROUP BY grp"),
     AggExprConfig(

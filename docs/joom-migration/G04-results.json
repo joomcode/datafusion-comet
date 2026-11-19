@@ -1,0 +1,473 @@
+{
+  "stage": "G04",
+  "status": "IMPLEMENTED_LOCAL_TARGETED_VALIDATION_PASSED_AWAITING_USER_REVIEW",
+  "base_commit": "af05c94e7e5c669f36e783f65e5d5f2d35d328ce",
+  "branch": "joom/1.2-native-aggregates",
+  "cards": [
+    "D06",
+    "D07",
+    "D08",
+    "D09",
+    "D10",
+    "N04",
+    "N05",
+    "N06",
+    "N07",
+    "N08",
+    "N09"
+  ],
+  "platform": "macOS ARM64, Java17.0.19-tem, Spark4.2.1, native dev profile",
+  "versions": {
+    "datafusion_physical_plan": "55.2.0",
+    "arrow": "59.3.2",
+    "comet": "1.2.0",
+    "scala": "2.13.18"
+  },
+  "evidence_root": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04",
+  "source_files_sha256": {
+    ".github/workflows/pr_build_linux.yml": "eec9d540b55b3c0ca93b8c4120c5cc2878e00b77d622fd72416813a1ca72f745",
+    ".github/workflows/pr_build_macos.yml": "bdc3ccab24bd0e40ac48d07020a0f101f71f2b61c60a34d3ec5fbe2df50dcab4",
+    "docs/source/contributor-guide/expression-audits/agg_funcs.md": "5214725c9a5490fb4f936017e2da6bf0fff758b7eb6eba3f7d19da81bb5ead92",
+    "docs/source/contributor-guide/memory_management.md": "39ca79330530f3ad0efdb4cfbc8330adacacc006244c11960e18f3b76edaa58a",
+    "native/core/src/execution/memory_pools/spill_replay.rs": "23af1b8d307f24a855baf85470a31794df754506ff5dc1f4e9e11fff5ea65e28",
+    "native/core/src/execution/planner.rs": "0820cfbfbb1375247a32ff7527b157468ae7210b2194a1ed7587ce0d3bcd00f2",
+    "native/core/src/execution/planner/aggregate.rs": "590fb206d52121c459b064d456f49c10ea16e2ebef1f4be9466ada9f1ad56927",
+    "native/core/src/execution/planner/tests/aggregate_regressions.rs": "03830dc8d951488ab8771bc348f12ed22b8773e0cb50f0df3224eed64f788b82",
+    "native/core/tests/aggregate_emit_memory.rs": "cc6ed3cb137d83e1dc47a28ab670b3a39021b52e3482ebc140b3a879f100a7d0",
+    "native/spark-expr/Cargo.toml": "83808d2134f72b8922699aa139a1df51842fe7c201607367aa1a09915a7e0894",
+    "native/spark-expr/benches/first_last.rs": "b244bce8b9fd8545d55f2fb8edb716940123bdbdc9296082db5877ddf78b4e84",
+    "native/spark-expr/src/agg_funcs/collect.rs": "b4dfc6111d45fc61097785e76410a4d3d0e2445e2f6b1a94bfb52bb1d1b7a4cd",
+    "native/spark-expr/src/agg_funcs/first_last.rs": "0d8ea5dd8e191b46bbe31a586c8f6fc7d3a74cd8ee339c1766f4abcfba6af906",
+    "native/spark-expr/src/agg_funcs/max_min_by.rs": "f562ffd56e1ef2f6a42ffc287ea33d376e6bd578cf6e2a42870bdfe6bb7b90fe",
+    "native/spark-expr/src/agg_funcs/mod.rs": "f9a845bb80a78a9b391c2333746bf9f58b1803d12604c969a6dc8f8d36ac7de8",
+    "native/vendor/datafusion-physical-plan/src/aggregates/aggregate_hash_table/common.rs": "5e3756a9999797c89f5fd59036c8dc51dda9fc0870bd216199eae8f48b2ceb27",
+    "native/vendor/datafusion-physical-plan/src/aggregates/aggregate_hash_table/common_ordered.rs": "b03c42ca242067936d8eff646a593a245b38bd56f594f6aa6a7ae50c172012d3",
+    "native/vendor/datafusion-physical-plan/src/aggregates/aggregate_hash_table/final_table.rs": "6e61c835ca14dddea4536fcd3f897dda5ad3232099a88c02cfa908fe9f004dfb",
+    "native/vendor/datafusion-physical-plan/src/aggregates/aggregate_hash_table/mod.rs": "f29b5150f2adcd897b85f1998b94b2b2a53b67a4fb50d044c2147ebe2c8e673e",
+    "native/vendor/datafusion-physical-plan/src/aggregates/aggregate_hash_table/ordered_final_table.rs": "e4716735cfec176fc984709ed7dd9af68b955cc6153506a245aa6d201f8d2948",
+    "native/vendor/datafusion-physical-plan/src/aggregates/aggregate_hash_table/ordered_partial_table.rs": "6fbd2e3d9e08e2e7762aa8701f65dbd5d63e6471d1026ca4b8f815d5cb8fa156",
+    "native/vendor/datafusion-physical-plan/src/aggregates/aggregate_hash_table/partial_reduce_table.rs": "d71acbce3b576e16795572541c5386bb2ca3bc47f0b4b9710ee7ee266af82301",
+    "native/vendor/datafusion-physical-plan/src/aggregates/aggregate_hash_table/partial_table.rs": "5206fd6bab191e41e7b42e2d3a307af7c9292dfcd49865545a5562bdad698814",
+    "native/vendor/datafusion-physical-plan/src/aggregates/aggregate_hash_table/single_table.rs": "358dfab413cfebfcb343b2ef9c03f00c6b738d4e5b5571ff50dfb899ffce6f5b",
+    "native/vendor/datafusion-physical-plan/src/aggregates/group_values/mod.rs": "51bd99ad9210104293927cc4b160a28d4b903fba8afd8fbcd219a6c67766f701",
+    "native/vendor/datafusion-physical-plan/src/aggregates/group_values/multi_group_by/bytes.rs": "92d2ec51576433e0fe1ae826053347c93b6f78afedb53c9d64b3533e27c09e61",
+    "native/vendor/datafusion-physical-plan/src/aggregates/group_values/multi_group_by/mod.rs": "4d80755670f79dc12a54746324efc3b744a776bdb125654155c0b5cfb599a793",
+    "native/vendor/datafusion-physical-plan/src/aggregates/group_values/multi_group_by/row_backed.rs": "f888a098fc30a67564178974ae8aac4918b3f728eab3c3676b3e1e5c569b9f52",
+    "native/vendor/datafusion-physical-plan/src/aggregates/group_values/row.rs": "20e66e8afffa8415aa1fee7bf368f1db4942a1490de2f6520952de876c45635e",
+    "native/vendor/datafusion-physical-plan/src/aggregates/group_values/single_group_by/bytes.rs": "80bf10f4a47ce39cf48dd9757a2ffaf108db6d5d670f01451470b11258a15233",
+    "native/vendor/datafusion-physical-plan/src/aggregates/grouped_hash_stream.rs": "11a4b488d20035d821fd243bf0a2d9114edea04f70a918e6c9c1d97effbee055",
+    "native/vendor/datafusion-physical-plan/src/aggregates/hash_stream.rs": "826b5cda3813d8042976da26ab0e8861aa6d30e54dddca2df7885f42a5d65e56",
+    "native/vendor/datafusion-physical-plan/src/aggregates/mod.rs": "9511d4e322b435d5d6cff32a24ff186090117cd0df404aaae14ad6a73f5eed36",
+    "native/vendor/datafusion-physical-plan/src/aggregates/ordered_drain_tests.rs": "0aae1f42c8cb44d7341d97c008e684fa3fd4f51382807d8c7d3e576b4b60e23b",
+    "native/vendor/datafusion-physical-plan/src/aggregates/ordered_final_stream.rs": "dfc8e4a79c7d67a15e100be9b133e11125841b65ad820f4760e5ec86c8818d32",
+    "native/vendor/datafusion-physical-plan/src/aggregates/ordered_partial_stream.rs": "3d3844e92ea967e588f1d4bf72c6d7b57d458ae199d901ca84871e448eead46a",
+    "native/vendor/datafusion-physical-plan/src/aggregates/partial_reduce_stream.rs": "67ab0042e69593f030421caed2ba6f2f3e044f492767dc2cfba5aacedc807ab0",
+    "native/vendor/datafusion-physical-plan/src/aggregates/replay_budget.rs": "489df0794c2f68c85e34c0e1c6835977f979109facf56c5e4c87fcb7d065c632",
+    "native/vendor/datafusion-physical-plan/src/aggregates/replay_budget_tests.rs": "d948266bdc475143ca94543caf7fb594569f2551981146457e9c4dda5d8d51ec",
+    "native/vendor/datafusion-physical-plan/src/aggregates/single_stream.rs": "ac648aaf57db96191623218e2705bf815af8542592248825081825195f09703c",
+    "native/vendor/datafusion-physical-plan/src/aggregates/starved_spill_tests.rs": "8cbf7ba15cb9d2f63d80157284f3d44e78ab9a5eb633cbe3f82f5470348340d8",
+    "spark/src/main/scala/org/apache/comet/rules/CometExecRule.scala": "64305ef4457ce9b4b596abf7ddbda35c4bb1074948c487222e406ddfef482517",
+    "spark/src/main/scala/org/apache/comet/serde/aggregates.scala": "4ef2e606a841fdb37df3903621d8ee420b65dbc2d4d70164d82bdf6e49f3137f",
+    "spark/src/main/scala/org/apache/spark/sql/comet/operators.scala": "3ebca4792a1af1f1460b969c853b063a5de3e7559b7a5255587f24051ce87b18",
+    "spark/src/test/resources/sql-tests/expressions/aggregate/max_by.sql": "65c16b58f365ae9173284b44941e6d64d4cece5e90537333fb1e7e1a9f6548df",
+    "spark/src/test/resources/sql-tests/expressions/aggregate/min_by.sql": "c2e3364991bfb2d0595721c9cf68ce825109c6db088221740ee8cfa95ba90dec",
+    "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "6a40af8456bce07865cb5600b75638e667f19aa9f1683b2fe3332795e9b75863",
+    "spark/src/test/scala/org/apache/comet/exec/CometFirstLastBoolAggFuzzSuite.scala": "7e2e15e3c77456650fdef212cd8c59a1da3e981880abf67f18cf5587c69702e2",
+    "spark/src/test/scala/org/apache/spark/sql/benchmark/CometAggregateExpressionBenchmark.scala": "e4d2a714c8b9ebed6e6baf5532eeaf2e4b7f581531f638ecfa189626fc444e57"
+  },
+  "native": {
+    "unique_unit_tests_passed": 558,
+    "integration_fixtures_passed": 1,
+    "total_unique_passed": 559,
+    "failed": 0,
+    "ignored": 0,
+    "unit_selections": {
+      "native-aggregate-final": 239,
+      "specialized-acceptance": 244,
+      "pools-acceptance": 33,
+      "jni-acceptance": 43,
+      "cancellable-acceptance": 4
+    },
+    "test_case_manifest": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/final-native-test-cases.json",
+    "original_memory_fixture": {
+      "elements": 524288,
+      "groups": 65536,
+      "bounded_pool_mib": 130.8,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/emit-memory-final.json",
+      "note": "Exact payload/identity/cardinality, actual spill, zero reservations. Pool is not an RSS bound."
+    }
+  },
+  "jvm": {
+    "passed": 330,
+    "failed": 0,
+    "canceled": 27,
+    "ignored": 2,
+    "pending": 0,
+    "canceled_names": [
+      "full: single_aqe, group by []",
+      "full: single_aqe, group by [k1]",
+      "full: single_aqe, group by [k1, k2]",
+      "full: single_noaqe, group by []",
+      "full: single_noaqe, group by [k1]",
+      "full: single_noaqe, group by [k1, k2]",
+      "full: single_batch8_noaqe, group by []",
+      "full: single_batch8_noaqe, group by [k1]",
+      "full: single_batch8_noaqe, group by [k1, k2]",
+      "full: single_spill, group by []",
+      "full: single_spill, group by [k1]",
+      "full: single_spill, group by [k1, k2]",
+      "full: multi_aqe, group by []",
+      "full: multi_aqe, group by [k1]",
+      "full: multi_aqe, group by [k1, k2]",
+      "full: multi_batch8_noaqe, group by []",
+      "full: multi_batch8_noaqe, group by [k1]",
+      "full: multi_batch8_noaqe, group by [k1, k2]",
+      "full: multi_spill, group by []",
+      "full: multi_spill, group by [k1]",
+      "full: multi_spill, group by [k1, k2]",
+      "full: 200k groups, single_aqe, group by [g]",
+      "full: 200k groups, single_spill, group by [g]",
+      "full: 200k groups, multi_aqe, group by [k1, k2]",
+      "full: 200k groups, multi_spill, group by [g]",
+      "CometExecRule should allow BloomFilter mixed Comet partial and Spark final",
+      "CometExecRule should allow BloomFilter mixed Spark partial and Comet final"
+    ],
+    "reports": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/jvm-final-reports.zip",
+    "ignored_note": "Two pre-existing aggregate metric tests; not counted as passed.",
+    "canceled_note": "25 opt-in full fuzz cases plus two unchanged upstream Spark4.2 BloomFilter mixed-planning guards; not counted as passed."
+  },
+  "native_library": [
+    {
+      "path": "native/target/debug/libcomet.dylib",
+      "size": 439260576,
+      "sha256": "d999c11f45ab64a6b2aec77dfeedd75815ea0c88a962cc33fc9de8e86d2eb150"
+    },
+    {
+      "path": "spark/target/classes/org/apache/comet/darwin/aarch64/libcomet.dylib",
+      "size": 439260576,
+      "sha256": "d999c11f45ab64a6b2aec77dfeedd75815ea0c88a962cc33fc9de8e86d2eb150"
+    }
+  ],
+  "replay_header_causal_check": {
+    "positive": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/native-short-state-positive.json",
+    "negative": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/native-short-state-without-headers.json",
+    "disposition": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/header-allowance-disposition.json",
+    "result": "Onlyallowance disabled ->4096-group futureemit fails; restoredsource passes. This is separatefromwideone-rowencodingminimum."
+  },
+  "negative_control": {
+    "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/ordering-negative-control-summary.json",
+    "real_wrong_row_reproductions": [
+      "G04 root SORT BY survives an eliminated local sort (AQE=false)"
+    ],
+    "other_property_only_failures": 5,
+    "fixed_source_restored": {
+      "sha256": "64305ef4457ce9b4b596abf7ddbda35c4bb1074948c487222e406ddfef482517",
+      "source_restored": true
+    },
+    "positive": "All six root ORDER BY/SORT BY cases pass with the restored source; included in final JVM run."
+  },
+  "commands": {
+    "native-aggregate-final": {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-j4",
+        "--manifest-path",
+        "native/Cargo.toml",
+        "-p",
+        "datafusion-comet",
+        "-p",
+        "datafusion-physical-plan",
+        "-p",
+        "datafusion-comet-spark-expr",
+        "--lib",
+        "aggregate",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 121.78,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/native-aggregate-final.json"
+    },
+    "specialized-acceptance": {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-j4",
+        "--manifest-path",
+        "native/Cargo.toml",
+        "-p",
+        "datafusion-comet",
+        "-p",
+        "datafusion-physical-plan",
+        "-p",
+        "datafusion-comet-spark-expr",
+        "--lib",
+        "agg_funcs",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 3.22,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/specialized-acceptance.json"
+    },
+    "pools-acceptance": {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-j4",
+        "--manifest-path",
+        "native/Cargo.toml",
+        "-p",
+        "datafusion-comet",
+        "-p",
+        "datafusion-physical-plan",
+        "-p",
+        "datafusion-comet-spark-expr",
+        "--lib",
+        "memory_pools",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.64,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/pools-acceptance.json"
+    },
+    "jni-acceptance": {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-j4",
+        "--manifest-path",
+        "native/Cargo.toml",
+        "-p",
+        "datafusion-comet",
+        "-p",
+        "datafusion-physical-plan",
+        "-p",
+        "datafusion-comet-spark-expr",
+        "--lib",
+        "jni_api::tests",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.96,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/jni-acceptance.json"
+    },
+    "cancellable-acceptance": {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-j4",
+        "--manifest-path",
+        "native/Cargo.toml",
+        "-p",
+        "datafusion-comet",
+        "-p",
+        "datafusion-physical-plan",
+        "-p",
+        "datafusion-comet-spark-expr",
+        "--lib",
+        "cancellable::tests",
+        "--",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.85,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/cancellable-acceptance.json"
+    },
+    "emit-memory-final": {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-j4",
+        "--manifest-path",
+        "native/Cargo.toml",
+        "-p",
+        "datafusion-comet",
+        "-p",
+        "datafusion-physical-plan",
+        "-p",
+        "datafusion-comet-spark-expr",
+        "--test",
+        "aggregate_emit_memory",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 24.96,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/emit-memory-final.json"
+    },
+    "native-build-final": {
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--offline",
+        "-j4",
+        "--manifest-path",
+        "native/Cargo.toml",
+        "-p",
+        "datafusion-comet"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 79.63,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/native-build-final.json"
+    },
+    "jvm-compile-final": {
+      "command": ["./mvnw", "-B", "-Pspark-4.2", "-DskipTests", "test-compile"],
+      "exit_code": 0,
+      "elapsed_seconds": 22.83,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/jvm-compile-final.json"
+    },
+    "jvm-aggregate-final": {
+      "command": [
+        "./mvnw",
+        "-B",
+        "-Pspark-4.2",
+        "-Dtest=none",
+        "-Dsurefire.failIfNoSpecifiedTests=false",
+        "-Dsuites=org.apache.comet.exec.CometAggregateSuite,org.apache.comet.exec.CometFirstLastBoolAggFuzzSuite,org.apache.comet.rules.CometExecRuleSuite,org.apache.comet.exec.CometInMemoryCacheSuite sort aggregate over a sorted cache,org.apache.comet.CometSqlFileTestSuite min_max,org.apache.comet.CometSqlFileTestSuite max_by,org.apache.comet.CometSqlFileTestSuite min_by,org.apache.comet.CometSqlFileTestSuite first_last,org.apache.comet.CometSqlFileTestSuite sort_aggregate,org.apache.spark.sql.comet.CometNativeTaskKillSuite,org.apache.spark.sql.comet.CometNativeMemoryWaitSuite,org.apache.spark.CometTaskMemoryManagerSuite",
+        "test"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 370.16,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/jvm-aggregate-final.json"
+    },
+    "clippy-comet-final": {
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "-j4",
+        "--manifest-path",
+        "native/Cargo.toml",
+        "-p",
+        "datafusion-comet",
+        "-p",
+        "datafusion-comet-spark-expr",
+        "--all-targets",
+        "--no-deps",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 49.29,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/clippy-comet-final.json"
+    },
+    "clippy-workspace-final-diagnostic": {
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "-j4",
+        "--manifest-path",
+        "native/Cargo.toml",
+        "--workspace",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings",
+        "-A",
+        "deprecated"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 3.53,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/clippy-workspace-final-diagnostic.json"
+    },
+    "rustfmt-final": {
+      "command": [
+        "cargo",
+        "fmt",
+        "--manifest-path",
+        "native/Cargo.toml",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 2.51,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/rustfmt-final.json"
+    },
+    "vendor-rustfmt-final": {
+      "command": [
+        "cargo",
+        "fmt",
+        "--manifest-path",
+        "native/vendor/datafusion-physical-plan/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.82,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/vendor-rustfmt-final.json"
+    },
+    "ci-config-final": {
+      "command": ["python3", "dev/ci/check-ci-config.py"],
+      "exit_code": 0,
+      "elapsed_seconds": 0.1,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/ci-config-final.json"
+    },
+    "ci-suites-final": {
+      "command": ["python3", "dev/ci/check-suites.py"],
+      "exit_code": 0,
+      "elapsed_seconds": 4.49,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/ci-suites-final.json"
+    }
+  },
+  "clippy": {
+    "comet_no_deps_strict": "PASSED",
+    "workspace_other_lints_diagnostic": "PASSED with local -A deprecated only",
+    "workspace_strict": "NOT_PASSED: existing pristine-vendor Atomic.fetch_update deprecation under Rust1.100; G03 toolchain backlog unchanged. No CI exemption or vendor warning-only change."
+  },
+  "performance": {
+    "existing_benchmark": "aggregate_misc_pair/max_by",
+    "local_debug_milliseconds": [40.653, 40.829, 41.534],
+    "evidence": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/aggregate-misc-benchmark.json",
+    "interpretation": "Diagnostic only; no before/after or production-speed claim. Original first_last benchmark restored and compiles."
+  },
+  "deferred": [
+    "Final full agreed Linux CI/release-feature graph and exact final-JAR native AMD64/ARM64 smoke",
+    "25 full fuzz cases require explicit JVM property; default full GHA alone is insufficient",
+    "Two upstream BloomFilter cancellations and two ignored metrics tests need final verification/disposition",
+    "Existing strict workspace lint/toolchain backlog"
+  ],
+  "spill_fixture_adaptation": {
+    "unchanged": "Original batch64/tinyPool/data/function/type coverage and mandatory aggregate-spill/native/result assertions",
+    "new_coverage": "Fixed-width61 retains old107374 pool/batch64; newvariableFIRSTLAST14+sortedcollectlist IDs uses a1MiB tier, nativehash/actualspill/exactchecks, because its prior107374 attempt required108393B evenat one-rowreshape. Dedicatedcorevariablefixture remains107374. Mixed75functional queries retained; globalshapesneveraddcollect_list.",
+    "failed_experiments": [
+      "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/jvm-aggregate-after-partial.json",
+      "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/focused-forced-spill.json"
+    ],
+    "qualification": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/focused-forced-spill-hash-final.json"
+  },
+  "scope_provenance": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/20261119_spark/g04-scope-provenance-matrix.json",
+  "review_evidence": [
+    "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/20261119_specialized/memory-review.json",
+    "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/20261119_specialized/ordered-partial-review.json",
+    "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/20261119_spark/legacy-memory-review.json"
+  ],
+  "merge_authorized": false,
+  "pushed": false,
+  "full_gha_started": false,
+  "g05_started": false,
+  "production_use_allowed": false,
+  "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json"
+}

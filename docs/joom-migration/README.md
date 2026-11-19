@@ -17,7 +17,9 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-> **Current G03 acceptance, 2026-11-19:** The user approved pushing and integrating G03 into branch-1.2 after local validation. G03 is complete; actual final refs/tree and post-merge proof are recorded after commit in `${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json`. Preserve two substantive commits and the original implementation receipt. G04-G10, main/tag changes, full per-group GHA, artifact publication and production remain unauthorized. Final Linux/release and the known baseline workspace lint/toolchain checks remain required. See decisions.json#g03_integration_authorization and STATE.json.
+> **Current G04 review gate, 2026-11-19:** G04 is implemented and locally qualified in `joom/1.2-native-aggregates` on accepted G03 `af05c94e7`. See G04-report.md/G04-results.json and STATE.json. Await review before push or integration; `branch-1.2`, main and RC1 are unchanged. G05-G10, full per-group GHA, publication and production remain unauthorized. Final qualification/backlogs remain required.
+
+> **Historical G03 acceptance, 2026-11-19:** The user approved pushing and integrating G03 into branch-1.2 after local validation. G03 is complete; actual final refs/tree and post-merge proof are recorded after commit in `${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json`. Preserve two substantive commits and the original implementation receipt. G04-G10, main/tag changes, full per-group GHA, artifact publication and production remain unauthorized. Final Linux/release and the known baseline workspace lint/toolchain checks remain required. See decisions.json#g03_integration_authorization and STATE.json.
 
 > **Historical pre-integration G03 result, 2026-11-19:** G03 is implemented and locally validated, ready for integration review. See G03-report.md/G03-results.json and STATE.json. The documentation push is verified; branch-1.2 stays at672988395 until further approval. G04-G10 remain unauthorized. Final Linux/release qualification and the known pristine-vendor/toolchain lint issue remain tracked; no production use.
 

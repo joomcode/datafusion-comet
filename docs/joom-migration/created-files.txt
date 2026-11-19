@@ -238,3 +238,8 @@ native/vendor/datafusion-physical-plan/src/sorts/sort/comet_memory_tests.rs
 native/vendor/datafusion-physical-plan/src/sorts/sort/late_materialize.rs
 native/vendor/datafusion-physical-plan/src/sorts/sort/wide_payload.rs
 native/vendor/datafusion-physical-plan/src/sorts/spill_workspace.rs
+
+G04 durable results (2026-11-19):
+docs/joom-migration/G04-report.md
+docs/joom-migration/G04-results.json
+Source/test inventory: G04-results.json#source_files_sha256. Auxiliary/ref inventory: ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json.

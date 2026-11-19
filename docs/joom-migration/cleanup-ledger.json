@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-19",
-  "stage": "G02_LOCAL_VALIDATION_COMPLETE_PENDING_REVIEW",
+  "stage": "G04_LOCAL_VALIDATION_COMPLETE",
   "baseline": "resource-baseline.json",
   "no_dependency_downloads_or_release_outputs_yet": false,
   "entries": [
@@ -149,6 +149,16 @@
       "build_outputs_reused": ["native/target", "spark/target"],
       "new_docker_images": false,
       "new_release_artifacts": false
+    },
+    {
+      "type": "g04_auxiliary_outputs",
+      "path": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04",
+      "ownership": "TASK_CREATED",
+      "stage": "G04",
+      "shared": false,
+      "contains": "Logs/receipts, failed intermediate and negative controls, source snapshots/reviews/manifests and local Criterion evidence; no release artifacts.",
+      "cleanup_conditions": "Preserve until G04 acceptance and final migration qualification; do not delete automatically.",
+      "size_note": "Exact post-commit auxiliary/shared-target sizes in G04 completion.json; shared targets include earlier groups."
     }
   ],
   "preexisting_or_shared": {

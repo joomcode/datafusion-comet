@@ -17,8 +17,8 @@
 
 -- min_by(x, y) returns the value of x associated with the minimum value of y.
 --
--- The value (x) must be a fixed-length type. A variable-length value type such as string makes
--- Spark plan SortAggregate rather than HashAggregate, and Comet falls back for it.
+-- The value (x) may be fixed-length or a UTF8_BINARY string. String values use the native
+-- SortAggregate path; variable-length ordering and non-default string collations fall back.
 --
 -- Ordering values are kept unique within each group so results are deterministic (min_by is
 -- non-deterministic when several rows tie on the minimum ordering).
@@ -244,10 +244,10 @@ query
 SELECT grp, min_by(v, ord) FROM mnb_signed_zero GROUP BY grp ORDER BY grp
 
 -- ============================================================
--- Variable-length value or ordering falls back to Spark
+-- String values run natively; variable-length ordering falls back to Spark
 --
--- See the equivalent section in max_by.sql: with or without a TypedImperativeAggregate
--- alongside it, the serde's type check is what keeps the aggregate off the native path.
+-- See the equivalent section in max_by.sql: a UTF8_BINARY string value is stored without
+-- comparison. The serde type check keeps variable-length ordering on Spark's comparison path.
 -- ============================================================
 
 statement
@@ -257,13 +257,13 @@ statement
 INSERT INTO mnb_varlen VALUES
   (1, 'a', 'g1'), (2, 'b', 'g1'), (3, 'c', 'g2')
 
-query expect_fallback(Unsupported value data type)
+query
 SELECT grp, min_by(s, v), percentile(v, 0.5) FROM mnb_varlen GROUP BY grp ORDER BY grp
 
 query expect_fallback(Unsupported ordering data type)
 SELECT grp, min_by(v, s), percentile(v, 0.5) FROM mnb_varlen GROUP BY grp ORDER BY grp
 
-query expect_fallback(Unsupported value data type)
+query
 SELECT grp, min_by(s, v) FROM mnb_varlen GROUP BY grp ORDER BY grp
 
 query expect_fallback(Unsupported ordering data type)
