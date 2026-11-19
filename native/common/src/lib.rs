@@ -20,6 +20,7 @@ mod ffi_offsets;
 /// Test fixtures, reached by tests in other crates only. See the module docs.
 #[doc(hidden)]
 pub mod nested_nullability_fixture;
+pub mod offset_extents;
 mod query_context;
 mod schema;
 pub mod struct_nulls;
