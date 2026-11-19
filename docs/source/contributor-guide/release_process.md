@@ -356,13 +356,14 @@ in the release artifacts (see [#2232](https://github.com/apache/datafusion-comet
 #### Setup to do the build
 
 The build process requires Docker. Download the latest Docker Desktop from https://www.docker.com/products/docker-desktop/.
-If you have multiple docker contexts running switch to the context of the Docker Desktop. For example -
+If you have multiple docker contexts running switch to the context of the Docker Desktop.
+In the example output below, `${HOME}` stands for your own home directory. For example -
 
 ```shell
 $ docker context ls
 NAME              DESCRIPTION                               DOCKER ENDPOINT                               ERROR
 default           Current DOCKER_HOST based configuration   unix:///var/run/docker.sock
-desktop-linux     Docker Desktop                            unix:///Users/parth/.docker/run/docker.sock
+desktop-linux     Docker Desktop                            unix://${HOME}/.docker/run/docker.sock
 my_custom_context *                                         tcp://192.168.64.2:2376
 
 $ docker context use desktop-linux

@@ -23,7 +23,7 @@ Keep migration execution guidance, decisions, handoffs, progress and cleanup
 instructions inside this directory. Do not add migration-specific guidance to
 the repository root AGENTS.md or other project documentation.
 
-Before work, read README.md, decisions.json, STATE.json and approved-plan.json.
+Before work, read README.md, PATHS.md, decisions.json, STATE.json and approved-plan.json.
 G01 is complete at joom-1.2-1-rc1. The user explicitly authorized G02 on
 2026-11-19; see decisions.json#g02_authorization. Start G03 or any later group
 only after separate explicit user authorization. Session orchestration, local Git and the approved network scope
@@ -83,7 +83,7 @@ create a standalone service commit. G02 was explicitly authorized on 2026-11-19;
 ## Repository boundary and validation policy (2026-11-19)
 
 Do not access, modify, build, test or perform Git operations in
-`/Users/skotlov/d/projects/datasci/`; another chat is working there in parallel.
+`${DATASCI_ROOT}/`; another chat is working there in parallel.
 Keep all migration work in Comet and the approved auxiliary/cache locations.
 
 Do not run full GHA after every G. Use local builds and targeted regression
@@ -113,4 +113,19 @@ The user approved closing the JNI memory-wait cancellation case, rerunning affec
 
 ## G02 accepted integration (2026-11-19)
 
-The user explicitly approved the practical performance conclusions, service-change consolidation, integration of G02 into branch-1.2, post-merge verification and reporting the final merged commit names. See decisions.json#g02_performance_acceptance and #g02_integration_authorization. This supersedes prior G02 merge holds and the feature-push-only limit for this integration. Keep three substantive commits, fold documentation into the existing third commit and fast-forward without an extra merge commit. Synchronize only the feature/integration refs using guarded Git operations; main and release tags remain unchanged. Final local/remote/tree proof is recorded after commit in `/Users/skotlov/d/temp/20261119_comet12-g02-integration/completion.json`. G02 is complete; G03-G10 require separate explicit authorization. No new full per-group GHA or release qualification is requested. Production remains unauthorized.
+The user explicitly approved the practical performance conclusions, service-change consolidation, integration of G02 into branch-1.2, post-merge verification and reporting the final merged commit names. See decisions.json#g02_performance_acceptance and #g02_integration_authorization. This supersedes prior G02 merge holds and the feature-push-only limit for this integration. Keep three substantive commits, fold documentation into the existing third commit and fast-forward without an extra merge commit. Synchronize only the feature/integration refs using guarded Git operations; main and release tags remain unchanged. Final local/remote/tree proof is recorded after commit in `${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json`. G02 is complete; G03-G10 require separate explicit authorization. No new full per-group GHA or release qualification is requested. Production remains unauthorized.
+
+## Portable committed paths (2026-11-19)
+
+The user explicitly requested replacement of existing absolute local paths and
+one coherent documentation commit. Follow PATHS.md in every subsequent committed
+project file: use Comet-root-relative paths, documented root placeholders for
+external evidence/checkouts, and HOME for standard user locations. Keep exact
+machine bindings and raw evidence outside Git. JSON placeholders are literal;
+resolve them explicitly without eval. Preserve suffixes, hashes, permissions,
+feature scope and stage gates; validate cleanup roots and quote required variables.
+Normalize historical output/translated statements transparently; do not claim
+they are byte-identical raw records. Update MANIFEST.json after intentional edits.
+Do not access the datasci repository, regardless of its local checkout location.
+This documentation-only authorization does not start G03 or authorize push,
+CI, release, production, source/history rewriting or artifact publication.

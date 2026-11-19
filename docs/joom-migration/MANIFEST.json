@@ -4,7 +4,7 @@
   "files": [
     {
       "path": "AGENTS.md",
-      "sha256": "98d9e6dd207ef0764ef9d20ef8d54c1638081418e01ece53d4a021522d2b90c6"
+      "sha256": "2d9b13caedcef1a1c1f3810fdf59f67994a4b2e8aa73da46e8239d6943be263c"
     },
     {
       "path": "CHECKPOINT-VERIFICATION.json",
@@ -12,11 +12,11 @@
     },
     {
       "path": "CLEANUP.md",
-      "sha256": "3b837277d1e93b3b1d9ad2850b9390912aba5b56f9d59afe1a4e8aee49ccdb50"
+      "sha256": "d30b33a4d07e7325d7859820ee491a953c12d9533790169df82ab5b3e80aa7c0"
     },
     {
       "path": "G01-CLOSEOUT.md",
-      "sha256": "d7038e27674f621c1777ccda5e9c2d34711c5be1aa08c711cf09715e1a00d694"
+      "sha256": "c7bd26e7c726d131fa9dab567f60c1ebe8b093acd2613038dbab54fcd493cd6d"
     },
     {
       "path": "G01-HISTORY.json",
@@ -36,43 +36,47 @@
     },
     {
       "path": "G01-progress.md",
-      "sha256": "f4dfcc1bd9f8b852c3fa86cef0e0a63e11598637cb099e8085da6d1c2ba07e0d"
+      "sha256": "88f1fa0b33ed0463b8b46aa48a7438bf50c0c830343d6b0f68532d199ee63683"
     },
     {
       "path": "G01-report.md",
-      "sha256": "db3f5edd55e256667eb01aff7193c0672ee20a20388c5d34269df0f97ec1475f"
+      "sha256": "cf668973ffd4b9f358ad72b43c61336b16e233afd12a9d07d90b2312cfca018d"
     },
     {
       "path": "G01-results.json",
-      "sha256": "0457b55f6c2c4d61b7181bbfdfe807633c6c1ae355e6805f0ff4e18685a3b30d"
+      "sha256": "235e15113029f33e2b0b67dcc5aba1cce574428ac128c60579911bf5f0a8da3e"
     },
     {
       "path": "G01-review-notes.json",
-      "sha256": "4bdcdfe191a2ebecea10e037ebf0ebe271e760356d77f30b0f15016ec154e476"
+      "sha256": "af2c3c0ecc3f09832405e01d11e2156dd978b767d2c6cd462c40959b0e65d7c3"
     },
     {
       "path": "G02-performance.md",
-      "sha256": "3f6c3fd1f9ef7059048ed3c29546429ee7a39b2433226f98492fd466785a6842"
+      "sha256": "015b3c23a042d5d6f08b1d5857a27e9c5b17337a8d5ddea78a39d5fa0a0f5e48"
     },
     {
       "path": "G02-report.md",
-      "sha256": "e54b2c537320960f7c695a16823ecf7f62843d10547ba12e903dc907d85c2cf8"
+      "sha256": "56b7842cd644c12fc4a8ee3a5aaa887a8699293898ed9cbf2975dfcdaf02b8cd"
     },
     {
       "path": "G02-results.json",
-      "sha256": "b8a121bb355f34974b3d92b1931d2c7ebe42d26c4951a5c656e611cfd61a37b6"
+      "sha256": "caa2f6e504ec3e7f4ba150f2e23bb1cd8fb33aaf1f60d6df5b47fd7f13fd214e"
     },
     {
       "path": "HANDOFF.md",
-      "sha256": "9fb03a5492615bc497687e53ba3e3aa91e3f2abb497d01f81ffbbba0cf13a1d4"
+      "sha256": "7344dd09ed6e7152e6ff93b9edd09e76417e73eaa59dd418d96b39bc9ff9b1f0"
     },
     {
       "path": "NETWORK.md",
-      "sha256": "d3c208fa6b88319d5f390d2b3ef77001b0f129485ef22751f7d4ffe311e65091"
+      "sha256": "fde96856e9ff1d5e61587815201999c70212964b5039e7af16b74f191c6ba461"
+    },
+    {
+      "path": "PATHS.md",
+      "sha256": "ca743a7cc6573e57b34e5033a98b6492accaa22af0695366a86126765a4ab96b"
     },
     {
       "path": "PAUSED.md",
-      "sha256": "109aa3ba1f1471a99f6751e64469100cd340172a02df73b9c5cb26daf10c6a9d"
+      "sha256": "3e0c60ff0579a4af2c72a93ca2f2e7ed813f36ea9588107e429606bd73f9430e"
     },
     {
       "path": "PERFORMANCE.md",
@@ -80,47 +84,47 @@
     },
     {
       "path": "RC-BUILD-SMOKE.md",
-      "sha256": "d91bc8391388dad69670ee784e515ef8b28d2ad54f976960534a2f3faed56653"
+      "sha256": "80cac78cc7dec5a4b56dfb04ba06ba3737375d21fff66620c4c5d82b96ad0a08"
     },
     {
       "path": "README.md",
-      "sha256": "efa38d1107cca40c1cc34095bc934b42e1dd3480516fbcff98f81769eab0a81a"
+      "sha256": "a3782dde1dcfa61baab8c9e279af90aa59510294612e734c4a45eaaf6afa4194"
     },
     {
       "path": "STATE.json",
-      "sha256": "d18e6572806427258e79f6b56c8fea340f6c5eac506b529078d3dc685e383e3a"
+      "sha256": "14f22864f4f0abec62d8ef0b3360b12bf560aa4e01c824bcff56afbcdaf61d80"
     },
     {
       "path": "approved-plan.json",
-      "sha256": "a8ca43cee558a39dc697f2f6f4e5b6177ef08471454bedfbe6debbb8ac9c89c3"
+      "sha256": "ebe1fe08453b47344381e5dc3289e46f03a5acdfe56aab4a16661b4bcf9a3b24"
     },
     {
       "path": "approved-plan.txt",
-      "sha256": "1c0e864e64c0710849eb11a6199099fc78cc5b57563533111774d2d85fbf7a78"
+      "sha256": "c88e5472d8347174a435eee67ceb29b6a74817e41dd2226a442addf904ebbed7"
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "49cdcb69d049fd8374df74da820589f942c11ddee74c48e7f5fd627ef84dfbe1"
+      "sha256": "fb67892bc891b051a2cb3286d4fd120cf944103dd3c572974526631a58cdc448"
     },
     {
       "path": "correctness-test-plan.txt",
-      "sha256": "0112fd716544326b8656dde4050bb20fedd622f939c766a16fb86f02a5534f36"
+      "sha256": "920c48e62ee0d39f45bcc1755d0d813f4f3af7365c449ce55171837e75576b8a"
     },
     {
       "path": "created-files.txt",
-      "sha256": "336c5fda7f0b7a93ef6507889934109084c29308107763499e0d16638b6aaf99"
+      "sha256": "3aa4208a317646fd78ad4b5827ad75422b6a7de083442564d0ba3d191bf02fb9"
     },
     {
       "path": "decisions.json",
-      "sha256": "aea45c500026aae73195b4297e79da2873839d74f939ad90f80d5ae2d55956e3"
+      "sha256": "58d3ad0d8136890b702cd42d6f70d62dbe18b9ffa5c37df250cff8fa49e8da92"
     },
     {
       "path": "feature-register.json",
-      "sha256": "1753641cb7a48bec5adbb4d74be14644512e2ad2a3d1531d701258f88d1020bf"
+      "sha256": "4d14e25315c97f56534a2d405c4c5a5ab6f12663796eca3b353fd5eaa92cca94"
     },
     {
       "path": "resource-baseline.json",
-      "sha256": "e32d57857f61310d54421da31041fb6f2546aa2b33bac0ec2912e7ca3b61a957"
+      "sha256": "01a44689f3b7f964ac720b7008ad4550e5a648c13077c51f1c4511c3e16669c2"
     },
     {
       "path": "target-native-dependencies.json",
@@ -132,10 +136,11 @@
     }
   ],
   "original_research_directories": [
-    "/Users/skotlov/d/temp/20261116_comet12-migration-register",
-    "/Users/skotlov/d/temp/20261116_comet12-consolidated-plan"
+    "${MIGRATION_AUX_ROOT}/20261116_comet12-migration-register",
+    "${MIGRATION_AUX_ROOT}/20261116_comet12-consolidated-plan"
   ],
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
   "source_commit": "981e26dff6b64110a8b3949a0ed065523d9012e4",
-  "updated_on": "2026-11-19"
+  "updated_on": "2026-11-19",
+  "path_notation_ref": "PATHS.md"
 }

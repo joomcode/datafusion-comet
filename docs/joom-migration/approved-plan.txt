@@ -159,7 +159,7 @@ The historical code/merge/RC1 holds above are superseded for G01 only by the exp
 
 CURRENT VALIDATION AND REPOSITORY POLICY — 2026-11-19
 Authoritative policy: decisions.json#future_migration_validation_policy.
-Do not access /Users/skotlov/d/projects/datasci/; another chat works there.
+Do not access ${DATASCI_ROOT}/; another chat works there.
 Do not run full GHA after every G. Use local builds/targeted regressions and explicitly track deferred/unverified cases, owners and intended final verification. Focused Linux AMD64 GHA may be used when necessary. Final coverage is not reduced.
 Remove every temporary CI disablement, switch and workaround before final acceptance; restore normal automatic full CI with all agreed coverage. Only then qualify the resulting final state with full GHA and packaged smoke of the exact final JARs on native AMD64 and ARM64. Fixes may require further runs.
 CI edits belong in authorized feature branches and branch-1.2, with no additional main commits. No intermediate qualification after G06.

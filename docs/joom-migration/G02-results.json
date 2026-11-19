@@ -20,7 +20,7 @@
     "failed": 0,
     "canceled": 0,
     "ignored": 0,
-    "log": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait/maven-final-regressions.log",
+    "log": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait/maven-final-regressions.log",
     "coverage": [
       "off-task-thread native/JVM shuffle AQE on/off + values/metrics/TLS",
       "block ownership and actual Netty refcounts/early close/interrupt/error",
@@ -66,22 +66,22 @@
   "datasci_accessed": false,
   "production_used": false,
   "next_group_authorized": false,
-  "auxiliary_directory": "/Users/skotlov/d/temp/20261119_comet12-g02",
+  "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02",
   "closed_validation_cases": {
     "G02-CANCEL-SPARK-MEMORY-WAIT": {
       "status": "CLOSED_LOCAL_ARM64_VALIDATION",
       "proof": "Negative control without scoped interruption fails both JNI paths at blocked cancellation/close; restored fix passes all four path/pool combinations. All 93 selected JVM/SQL cases pass.",
-      "log": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait/maven-final-regressions.log",
-      "negative_control": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait/memory-wait-negative-control.json",
-      "test_source_hashes": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait/tested-source-manifest.json"
+      "log": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait/maven-final-regressions.log",
+      "negative_control": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait/memory-wait-negative-control.json",
+      "test_source_hashes": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait/tested-source-manifest.json"
     }
   },
   "feature_push_authorized": true,
-  "followup_receipt_directory": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait",
+  "followup_receipt_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait",
   "performance_report": "G02-performance.md",
   "performance_status": "LOCAL_EXPLORATORY_COMPARISON_COMPLETE; measurable bridge overhead, saturated two-worker slowdown, SQL effect inconclusive; no runtime optimization applied.",
   "functional_source_previously_validated": "e0388e3bc0e5415ea2b85664b1c8cf8e3cbd7574",
-  "integration_receipt": "/Users/skotlov/d/temp/20261119_comet12-g02-integration/completion.json",
+  "integration_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json",
   "integration_runtime_changes": "NONE; migration documentation consolidation and fast-forward only",
   "performance_disposition": "Accepted engineering expectation for ordinary batches; measured micro costs and SQL uncertainty retained. No optimization required solely from current evidence for G02 integration."
 }

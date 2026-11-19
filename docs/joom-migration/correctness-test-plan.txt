@@ -64,7 +64,7 @@ This scheduling policy supersedes earlier per-group full-GHA and intermediate-RC
 - Before final acceptance: inventory and remove every temporary CI disablement, switch and workaround; restore full CI, normal automatic triggers and the complete agreed matrix.
 - AFTER removal/restoration: full agreed native/vendor, Comet, Delta, Spark SQL and other applicable GHA; packaged smoke of the exact final JARs on native AMD64 and ARM64, with matching source/lockfile/class origins/native bytes/checksums. Verify all deferred applicable cases. Further fixes require qualification of the resulting final state and artifacts.
 - ANSI=true, identical Spark/Comet inputs/settings, result and mandatory-error parity and actual native-execution proof remain mandatory. Do not weaken assertions. Fix incompatibilities or safely select a targeted fallback before execution.
-- CI changes only in authorized feature branches and branch-1.2; no additional main commits. No access to /Users/skotlov/d/projects/datasci/.
+- CI changes only in authorized feature branches and branch-1.2; no additional main commits. No access to ${DATASCI_ROOT}/.
 - No production use before all agreed features and successful final qualification. This does not grant deployment/publication permission.
 - Every next G requires separate explicit user authorization; G02 is not started by these documentation changes.
 Tracking: STATE.json#validation_backlog and STATE.json#temporary_ci_mechanisms. Authoritative decision: decisions.json#future_migration_validation_policy.

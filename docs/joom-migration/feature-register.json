@@ -11,9 +11,9 @@
     "target_datafusion_tag": "55.2.0",
     "target_datafusion_commit": "500744d5c25499055e3b2ca46b022bc425989203",
     "repos": {
-      "joom": "/Users/skotlov/d/projects/datafusion-comet",
-      "upstream_comet": "/Users/skotlov/d/temp/src/datafusion-comet",
-      "upstream_datafusion": "/Users/skotlov/d/temp/src/datafusion"
+      "joom": "${COMET_ROOT}",
+      "upstream_comet": "${UPSTREAM_COMET_ROOT}",
+      "upstream_datafusion": "${UPSTREAM_DATAFUSION_ROOT}"
     },
     "audit_date": "2026-11-16",
     "previous_target_comet_commit": "bb457e5284d31b9993689bd50a862dbb19d17689",
@@ -1152,7 +1152,7 @@
         "The Spark4.2 profile sets Scala2.13.18, while the separate scala-2.13 profile later in the POM sets2.13.16. Do not mechanically substitute profiles; check the effective POM.",
         "Preserve GLIBC<=2.31 and verify the build on target GCP CPUs, including amd64 x86-64-v3. Actual node CPUs were not checked in this audit.",
         "The old release build skips tests: a separate passing test gate for the same commit is required.",
-        "For our local runs, explicitly set working/output directories inside a dated /Users/skotlov/d/temp directory. The old publisher uses bare mktemp -d; the new implementation must accept a working directory while remaining portable in CI without a hardcoded personal path."
+        "For our local runs, explicitly set working/output directories inside a dated ${MIGRATION_AUX_ROOT} directory. The old publisher uses bare mktemp -d; the new implementation must accept a working directory while remaining portable in CI without a hardcoded personal path."
       ],
       "acceptance_tests": [
         "Artifact IDs comet-spark-spark4.2_2.13 and comet-contrib-delta-spark4.2_2.13; correct Scala/Spark/Delta classpath.",
@@ -1217,7 +1217,7 @@
       "risks": [
         "Do not publish an old JAR under a new name or an artifact from a different commit.",
         "Publishing does not update datasci Docker images itself; rollout is a subsequent separate stage.",
-        "For our local runs, explicitly set working/output directories inside a dated /Users/skotlov/d/temp directory. The old publisher uses bare mktemp -d; the new implementation must accept a working directory while remaining portable in CI without a hardcoded personal path."
+        "For our local runs, explicitly set working/output directories inside a dated ${MIGRATION_AUX_ROOT} directory. The old publisher uses bare mktemp -d; the new implementation must accept a working directory while remaining portable in CI without a hardcoded personal path."
       ],
       "acceptance_tests": [
         "Check parameters and artifacts for the specific RC.",
@@ -5383,9 +5383,9 @@
       "repository_operations_authorized": true,
       "implementation_authorized": true,
       "git_mutation_authorized": true,
-      "repository_scope": "/Users/skotlov/d/projects/datafusion-comet",
-      "git_scope": "/Users/skotlov/d/projects/datafusion-comet/.git",
-      "user_quote": "[English translation] From now on, you have my permission to perform all necessary operations in /Users/skotlov/d/projects/datafusion-comet (including /Users/skotlov/d/projects/datafusion-comet/.git).",
+      "repository_scope": "${COMET_ROOT}",
+      "git_scope": ".git",
+      "user_quote": "[English translation] From now on, you have my permission to perform all necessary operations in ${COMET_ROOT} (including .git).",
       "interpretation": "Permission covers necessary local repository changes, branches, commits, integration and local tags. Preparing a handoff does not mean G01 implementation has already started.",
       "implementation_status": "G01_IN_PROGRESS",
       "network_build_dependencies_authorized": true,
@@ -5402,7 +5402,7 @@
         "status": "APPROVED_WITH_USER_SAFETY_CONDITION",
         "source": "Direct user reply to request_user_input_async in the coordinator chat.",
         "user_quote": "[English translation] For the entire Comet1.2/Spark4.2.1 migration, I authorize the network operations listed in docs/joom-migration/NETWORK.md: Maven/SBT, Rustup/Cargo, pinned Git dependencies and build tools from GitHub, Docker Hub and Ubuntu packages, including child processes inside containers. All artifacts downloaded from the network to my laptop and executed must be well-known and widely used, with no reason to doubt their safety for my machine. No push, external publication or production operations.",
-        "scope_document": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/NETWORK.md",
+        "scope_document": "docs/joom-migration/NETWORK.md",
         "approved_proposal_commit": "fbc250a9867515958c6a33920c1ac15b5d2d62b1",
         "approved_proposal_sha256": "3bedf4a5dc5d14b1793d25c4ae9073b697a1691a614aa69494c37486bc8dac02",
         "scope": "For the entire approved migration: Maven/SBT, Rustup/Cargo, pinned Git dependencies and build tools from GitHub, Docker Hub and Ubuntu packages, including child processes inside containers.",
@@ -5434,7 +5434,7 @@
       },
       "session_orchestration_authorization": {
         "recorded_on": "2026-11-17",
-        "user_quote": "[English translation] The Comet project has been added (/Users/skotlov/d/projects/datafusion-comet). Create and manage working sessions under the approved plan, pass tasks and clarifications to them, and review their results.",
+        "user_quote": "[English translation] The Comet project has been added (${COMET_ROOT}). Create and manage working sessions under the approved plan, pass tasks and clarifications to them, and review their results.",
         "project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
         "code_hold_preserved": true
       },
@@ -5486,8 +5486,8 @@
       "main_pr_count": 9,
       "reserve_pr_count": 1,
       "maximum_planned_pr_count": 10,
-      "path": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/approved-plan.json",
-      "readable_path": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/approved-plan-ru.txt",
+      "path": "docs/joom-migration/approved-plan.json",
+      "readable_path": "docs/joom-migration/approved-plan-ru.txt",
       "step2_owner": "G01 joom/1.2-dev",
       "step2_order": "Spark4.2.1/Delta4.4.1 on registryDF55.2 → pristine vendor55.2 in a separate commit → root patch/shared lock/explicit vendor-unit CI → repeated checks and release tooling.",
       "step2_separate_prs_superseded": true,
@@ -5554,7 +5554,7 @@
       "quality_requirements_unchanged": true,
       "no_implementation_authorization": false,
       "execution_not_started": false,
-      "original_research_path": "/Users/skotlov/d/temp/20261116_comet12-consolidated-plan/consolidated-plan.json"
+      "original_research_path": "${MIGRATION_AUX_ROOT}/20261116_comet12-consolidated-plan/consolidated-plan.json"
     },
     "delivery_scope": {
       "status": "APPROVED_EXPLICITLY",
@@ -5582,8 +5582,8 @@
     },
     "last_updated_on": "2026-11-17",
     "execution_documentation_policy": {
-      "user_quote": "[English translation] All such migration-execution documentation must be kept only in /Users/skotlov/d/projects/datafusion-comet/docs/joom-migration.",
-      "directory": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration",
+      "user_quote": "[English translation] All such migration-execution documentation must be kept only in docs/joom-migration.",
+      "directory": "docs/joom-migration",
       "rule": "Keep repository migration instructions/decisions/handoffs/progress/cleanup only here. Root AGENTS.md is restored. Raw logs/tool outputs go into dated temp directories under the general rules and cleanup ledger."
     },
     "environment_blocker_policy": {
@@ -5700,8 +5700,8 @@
     "main_pr_count": 9,
     "reserve_pr_count": 1,
     "maximum_planned_pr_count": 10,
-    "path": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/approved-plan.json",
-    "readable_path": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/approved-plan-ru.txt",
+    "path": "docs/joom-migration/approved-plan.json",
+    "readable_path": "docs/joom-migration/approved-plan-ru.txt",
     "step2_owner": "G01 joom/1.2-dev",
     "step2_order": "Spark4.2.1/Delta4.4.1 on registryDF55.2 → pristine vendor55.2 in a separate commit → root patch/shared lock/explicit vendor-unit CI → repeated checks and release tooling.",
     "step2_separate_prs_superseded": true,
@@ -5768,7 +5768,7 @@
     "quality_requirements_unchanged": true,
     "no_implementation_authorization": false,
     "execution_not_started": true,
-    "original_research_path": "/Users/skotlov/d/temp/20261116_comet12-consolidated-plan/consolidated-plan.json"
+    "original_research_path": "${MIGRATION_AUX_ROOT}/20261116_comet12-consolidated-plan/consolidated-plan.json"
   },
   "global_pending_decisions": [],
   "out_of_scope": [
@@ -5784,7 +5784,7 @@
     "purpose": "Approved scope before implementation; implementation_status/validation_status record that initial point, not current progress.",
     "current_decisions": "decisions.json",
     "current_execution_state": "STATE.json",
-    "original_research_file": "/Users/skotlov/d/temp/20261116_comet12-migration-register/migration-register.json",
+    "original_research_file": "${MIGRATION_AUX_ROOT}/20261116_comet12-migration-register/migration-register.json",
     "latest_permissions_ref": "decisions.json#authorization_boundary"
   },
   "snapshot_note": "Approved scope snapshot; original planning statuses are historical. Track implementation in STATE.json and resolve final G01 acceptance through G01-CLOSEOUT.md, the annotated RC1 tag and delivered artifact receipts. No later group is automatically authorized."

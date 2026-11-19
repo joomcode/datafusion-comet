@@ -17,7 +17,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-> **Current rules, 2026-11-19:** G01 is complete at `joom-1.2-1-rc1` (`c04d2d03c`); G02 is complete and accepted for integration into branch-1.2, including the closed JNI memory-wait cancellation case and accepted performance assessment; actual integration/remote refs are recorded in the post-commit receipt; G03-G10 remain gated. Do not touch `/Users/skotlov/d/projects/datasci/`. For each remaining group use local builds/targeted regressions and track unverified cases; focused Linux AMD64 GHA is available when needed. Do not run full GHA after every group, and G06 intermediate release qualification is removed. Before final acceptance remove all temporary CI mechanisms, restore normal automatic full CI, then run the full agreed GHA and exact final-JAR smoke on native AMD64/ARM64. No additional main commits or production use. Correctness requirements remain unchanged. See `decisions.json#future_migration_validation_policy`.
+> **Current rules, 2026-11-19:** G01 is complete at `joom-1.2-1-rc1` (`c04d2d03c`); G02 is complete and accepted for integration into branch-1.2, including the closed JNI memory-wait cancellation case and accepted performance assessment; actual integration/remote refs are recorded in the post-commit receipt; G03-G10 remain gated. Do not touch `${DATASCI_ROOT}/`. For each remaining group use local builds/targeted regressions and track unverified cases; focused Linux AMD64 GHA is available when needed. Do not run full GHA after every group, and G06 intermediate release qualification is removed. Before final acceptance remove all temporary CI mechanisms, restore normal automatic full CI, then run the full agreed GHA and exact final-JAR smoke on native AMD64/ARM64. No additional main commits or production use. Correctness requirements remain unchanged. See `decisions.json#future_migration_validation_policy`.
 
 > **Historical G01 source-freeze note:** G01 implementation and documentation are complete. RC1 acceptance is a post-commit gate recorded by the immutable `joom-1.2-1-rc1` tag and the delivered artifact receipts; see `G01-CLOSEOUT.md`. Earlier source SHAs, runs and pending states below are historical evidence. G02 and Java 21 work remain unauthorized.
 
@@ -28,6 +28,14 @@ under the License.
 # Joom Comet 1.2: plan and handoff
 
 This directory is the durable entry point for implementing the Joom Comet migration. Chat history is not the only source of decisions. Initial environment/preparation state on2026-11-17: plan approved, Java/Rust and Docker checked, network approved subject to safety conditions. **G01 implementation is authorized.** The user separately authorizes each subsequent group after evaluating the previous one; do not start G02–G10 now.
+
+## Portable path notation
+
+Read [PATHS.md](PATHS.md) before resolving paths in this directory. Comet file
+paths are repository-relative; external evidence uses documented root variables.
+Local bindings and original receipts stay outside Git. Historical path-bearing
+output and translated quotations use normalized notation, preserving their
+meaning rather than claiming byte-identical raw output.
 
 ## Read before working
 
@@ -67,22 +75,22 @@ RC1 after G01 is complete and immutable. The planned intermediate G06 qualificat
 
 The user added the local Comet project and explicitly authorized the coordinator to create/manage working sessions, send tasks/clarifications and verify results. The coordinator handles inter-session transfer without requiring the user to copy context manually. Current implementation authorization covers only G01; later groups remain gated.
 
-Keep all one-off scripts, raw logs and tool outputs only in subdirectories of `/Users/skotlov/d/temp`; each new directory there is named `YYYYMMDD_description`. Do not use `/tmp` for executor-selected output/temp files. Standard tool-managed caches retain their usual locations. Do not automatically clear the shared Maven/SBT cache through `dev/local-ci.sh`; inspect its behavior first and use the existing Spark checkout instead of downloading source without control. Ask the user to download/checkout additional research sources; do not obtain source through UI. Cargo Git dependencies are a separate approved network scope, not permission to clone arbitrary projects.
+Keep all one-off scripts, raw logs and tool outputs only in subdirectories of `${MIGRATION_AUX_ROOT}`; each new directory there is named `YYYYMMDD_description`. Do not use `/tmp` for executor-selected output/temp files. Standard tool-managed caches retain their usual locations. Do not automatically clear the shared Maven/SBT cache through `dev/local-ci.sh`; inspect its behavior first and use the existing Spark checkout instead of downloading source without control. Ask the user to download/checkout additional research sources; do not obtain source through UI. Cargo Git dependencies are a separate approved network scope, not permission to clone arbitrary projects.
 
 ## Preservation and original audit
 
 This package is intended for Git storage. `MANIFEST.json` records file SHA256 at handoff; update its checksum when intentionally changing a file. Previous materials are preserved in:
 
-- `/Users/skotlov/d/temp/20261116_comet12-migration-register`
-- `/Users/skotlov/d/temp/20261116_comet12-consolidated-plan`
-- `/Users/skotlov/d/temp/20261116_comet12-execution-setup`
+- `${MIGRATION_AUX_ROOT}/20261116_comet12-migration-register`
+- `${MIGRATION_AUX_ROOT}/20261116_comet12-consolidated-plan`
+- `${MIGRATION_AUX_ROOT}/20261116_comet12-execution-setup`
 
 `approved-plan.json`/`feature-register.json` snapshots preserve approved pre-implementation scope; track progress in `STATE.json`. Do not run the old register generator to update progress: it deliberately sets NOT_STARTED/NOT_RUN and is not an execution tracker. Record new confirmed user decisions primarily in `decisions.json` and reflect them in current tasks; old temp reports may be historical snapshots. Do not rely on automatic synchronization of chat histories.
 
-All newly committed documentation and commit messages must be English. Original Russian evidence and pre-translation content are retained in `/Users/skotlov/d/temp/20261118_comet12-g01-finalization/documentation-before.zip`. Translated user statements in the documentation preserve the decisions rather than claiming to be original English quotations.
+All newly committed documentation and commit messages must be English. Original Russian evidence and pre-translation content are retained in `${MIGRATION_AUX_ROOT}/20261118_comet12-g01-finalization/documentation-before.zip`. Translated user statements in the documentation preserve the decisions rather than claiming to be original English quotations.
 
 ## Environment and blockers
 
 Java17.0.19-tem is suitable and verified with javac; the global selection at the preparation checkpoint was Java21. The coordinator sets JAVA_HOME to17.0.19-tem per build command without changing global Java. Java21 qualification is currently on hold at the user's request.
-Rust/Cargo1.100.0 are installed and checked; Homebrew proxies are in `/opt/homebrew/opt/rustup/bin`. Add that path to PATH for individual commands if needed; editing the user's `~/.zshrc` is unnecessary.
+Rust/Cargo1.100.0 are installed and checked; Homebrew proxies are in `${RUSTUP_PACKAGE_ROOT}/bin`. Add that path to PATH for individual commands if needed; editing the user's `~/.zshrc` is unnecessary.
 If a required tool/access/capability is actually missing, report the concrete blocker to the user and resolve it together; do not spend time on long workarounds.

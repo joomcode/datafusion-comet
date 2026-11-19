@@ -80,7 +80,7 @@ The implementation contains extra per-acquire coordination and record/map alloca
 
 ## Reproduction and saved files
 
-All source copies, compiled class hashes, commands, stdout, GC logs, diagnostic proofs, parsers and machine-readable summaries are under `/Users/skotlov/d/temp/20261119_comet12-g02-performance`:
+All source copies, compiled class hashes, commands, stdout, GC logs, diagnostic proofs, parsers and machine-readable summaries are under `${MIGRATION_AUX_ROOT}/20261119_comet12-g02-performance`:
 
 - `start.json`, `compiled-class-hashes.json`, `compiled-class-hashes-final.json`, `benchmark-metadata-only.patch`.
 - `run_benchmarks.py`, `run_concurrent.py`, `analyze.py`, `classpath.txt`, `jvm-opens.json`.

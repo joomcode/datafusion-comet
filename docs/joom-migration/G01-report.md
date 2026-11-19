@@ -76,7 +76,7 @@ The SHA of our installed Joom JAR was checked on the Spark SQL classpath. Packag
 
 ## Historical artifacts
 
-Directory: `/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1`.
+Directory: `target/joom-release/joom-1.2-1-rc1`.
 
 | File                                        | SHA256                                                             |
 | ------------------------------------------- | ------------------------------------------------------------------ |
@@ -97,13 +97,13 @@ Actual GCS/GKE ADC reads and production performance were not checked. Full Bound
 
 ## Preview and integration sequence at that stage
 
-Full diff and separate implementation/vendor previews are in `/Users/skotlov/d/temp/20261117_comet12-g01-final-qualification`. Tree comparison: `git diff branch-1.2 joom/1.2-dev`; vendor residual: `git diff 0a76d68a3 joom/1.2-dev -- native/vendor/datafusion-physical-plan`.
+Full diff and separate implementation/vendor previews are in `${MIGRATION_AUX_ROOT}/20261117_comet12-g01-final-qualification`. Tree comparison: `git diff branch-1.2 joom/1.2-dev`; vendor residual: `git diff 0a76d68a3 joom/1.2-dev -- native/vendor/datafusion-physical-plan`.
 
 The feature branch resolved add/add conflicts introduced by history cleanup: branch-1.2 became its ancestor without changing branch-1.2 itself. The entire file tree and24 documents matched the pre-alignment candidate; seven substantive patches and a separate vendor import were preserved. The PR could then be prepared without moving or overwriting the base ref. **The historical integration gate required GHA/review and direct user confirmation; the user has now authorized integration after finalization checks.**
 
 The user first reviews the composition and diff. G02 still requires a separate direct authorization even after G01 integration.
 
-Full machine-readable results: `G01-results.json`. Raw logs and auxiliary scripts: `/Users/skotlov/d/temp/20261117_comet12-g01-final-qualification` and previous `/Users/skotlov/d/temp/20261117_comet12-g01-resumed`. Cleanup: `CLEANUP.md`; new-file list: `created-files.txt`.
+Full machine-readable results: `G01-results.json`. Raw logs and auxiliary scripts: `${MIGRATION_AUX_ROOT}/20261117_comet12-g01-final-qualification` and previous `${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed`. Cleanup: `CLEANUP.md`; new-file list: `created-files.txt`.
 
 ## First native AMD64 GHA result for PR28
 
@@ -119,7 +119,7 @@ Groups unresolved at that stage:
 - **Other test-compatibility cases:**3 corrupted-Parquet diagnostic mismatches (a read error did occur); one synthetic DV-fixture failure each on Spark3.5/4.0 (Delta serializer assertion; target Spark4.2.1 passed).
 - **Dependency infrastructure:**3 jobs failed on Maven Central HTTP429 before tests; SparkSQL core-2 `SPARK-33084: Add jar support Ivy URI in SQL` could not resolve `spring-core:6.1.6` through Ivy. The Ivy log did not state an HTTP code.
 
-Full diagnostics and exact tests: `/Users/skotlov/d/temp/20261117_comet12-g01-runner-fix/gha-final-summary.json` and JSON/log files listed there. About43MiB were saved in the task directory and recorded in the cleanup ledger. Sources and Git refs did not change during monitoring. Final documents were saved locally without another commit/push to avoid starting CI again. `branch-1.2`/RC1/G02 were unchanged. CI-profile execution did not replace final release-JAR smoke at RC checkpoints.
+Full diagnostics and exact tests: `${MIGRATION_AUX_ROOT}/20261117_comet12-g01-runner-fix/gha-final-summary.json` and JSON/log files listed there. About43MiB were saved in the task directory and recorded in the cleanup ledger. Sources and Git refs did not change during monitoring. Final documents were saved locally without another commit/push to avoid starting CI again. `branch-1.2`/RC1/G02 were unchanged. CI-profile execution did not replace final release-JAR smoke at RC checkpoints.
 
 ## Corrections after the first full GHA
 
@@ -143,7 +143,7 @@ Corrected source package: `6ae961dcbae949db09e349b05c91fc1cd6464d87`. At this hi
 
 Early local compilation/assertion failures are preserved in logs; the table reflects the final successful checks of those scenarios. No correctness checks were disabled. Full Rust/vendor/Comet/Delta/Spark SQL suites were delegated to the upcoming GHA. Local results do not prove the complete absence of bugs.
 
-No new release build/smoke or RC1 tag occurred at that stage. Earlier JARs referred to the old source SHA and were not final artifacts of the corrected PR. `branch-1.2` remained unchanged; G02 had not started. Raw evidence: `/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes`; machine summary: `G01-results.json#ci_corrections`.
+No new release build/smoke or RC1 tag occurred at that stage. Earlier JARs referred to the old source SHA and were not final artifacts of the corrected PR. `branch-1.2` remained unchanged; G02 had not started. Raw evidence: `${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes`; machine summary: `G01-results.json#ci_corrections`.
 
 ## Follow-up after run44180095887
 
@@ -159,7 +159,7 @@ New source commit `30b6c4d7f531fad7b6550c5d3f1c92cefd096e58` contains:
 
 The local negative control reproduced wrong groups before the fix. Afterwards: Spark4.1 union12passed; Spark4.2 union12passed; Spark3.5/Scala2.12 legacy controls35passed; reader42 —27passed; converter19passed; SparkSQL with the newly installed JAR —21 native Union+9 extension+3 field guards, all passed without cancellations/ignored. Coverage includes both directions of configuration change, AQE on/off, Hash/Single, copy/withNewChildren, live child-layout replacement, late conversion, complete data and RDD counts. Maven install/format and independent review passed. Rust/vendor did not change in this follow-up.
 
-A new full GHA was pending a single follow-up push at that stage. Source-commit files matched the locally tested worktree byte for byte (`followup-source-commit-verification.json`). Evidence of the first corrected run is frozen in `/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes`; the next run is stored separately in `20261117_followup-gha`. Old Linux release JARs had not been updated and RC1 had not been created; merge/base/G02 were then subject to the direct user gate.
+A new full GHA was pending a single follow-up push at that stage. Source-commit files matched the locally tested worktree byte for byte (`followup-source-commit-verification.json`). Evidence of the first corrected run is frozen in `${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes`; the next run is stored separately in `20261117_followup-gha`. Old Linux release JARs had not been updated and RC1 had not been created; merge/base/G02 were then subject to the direct user gate.
 
 ## Final full GHA on the qualified runtime-source PR HEAD
 
@@ -173,7 +173,7 @@ This closes the native AMD64 source/runtime GHA gap for G01. **Smoke of the exac
 
 PR28 was updated with the result without pushing another commit; local progress documents were saved without another GHA. `branch-1.2` remained `9691385f35e4c5bd29514dca78d2044dd20e4bed`; no merge/RC1/G02 occurred. The next step then was user review.
 
-Evidence: `/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha`, including immutable attempt1/2/3 snapshots, failure classifications and `java-artifact-*-verification.json`. The cleanup ledger records final size (~21.4MiB auxiliary;39.7GiB total existing native target;829MiB Spark fixture). Nothing was automatically removed.
+Evidence: `${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha`, including immutable attempt1/2/3 snapshots, failure classifications and `java-artifact-*-verification.json`. The cleanup ledger records final size (~21.4MiB auxiliary;39.7GiB total existing native target;829MiB Spark fixture). Nothing was automatically removed.
 
 ## Manual RC Build & Smoke
 
@@ -181,7 +181,7 @@ Qualified source before finalization: `b93d553856a0339af7468bcff2070e735a1a3c71`
 
 Native AMD64 and ARM64 were built on native runners with the release profile. Final Comet and Delta JARs were packaged once. Each architecture actually passed **12/12 cases**: Delta4, DPP1, reload1, ANSI6. Checks verified Spark4.2.1, Java17, final-JAR class origins and SHA256 of the bundled `.so` actually loaded. The final job matched both receipts to identical source/lock/JAR/package/support/native hashes.
 
-Artifacts were downloaded to `/Users/skotlov/d/projects/datafusion-comet/target/joom-release/gha-44388252264`. ZIP SHA256 matched GitHub: `1c633ecec930ce8a2e4f95a2fe859ddefcd89f3a2898fc77105775448ad6035b`. Local checks verified checksums, embedded Git revision, versions, ELF/dependency graph, provenance and both receipts.
+Artifacts were downloaded to `target/joom-release/gha-44388252264`. ZIP SHA256 matched GitHub: `1c633ecec930ce8a2e4f95a2fe859ddefcd89f3a2898fc77105775448ad6035b`. Local checks verified checksums, embedded Git revision, versions, ELF/dependency graph, provenance and both receipts.
 
 | Runtime JAR                                 | SHA256                                                             |
 | ------------------------------------------- | ------------------------------------------------------------------ |

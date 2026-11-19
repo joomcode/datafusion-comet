@@ -1,7 +1,7 @@
 {
   "updated_on": "2026-11-19",
   "phase": "G02_COMPLETE_G03_REQUIRES_EXPLICIT_AUTHORIZATION",
-  "repository": "/Users/skotlov/d/projects/datafusion-comet",
+  "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
   "observed_code_head_before_documentation_commit": "2b8f80b3f253559bc999f73769b05c88ebcd5fc2",
@@ -64,8 +64,8 @@
       "tests": "157 native tests retained on unchanged native source/library; 93 final selected JVM/SQL cases passed, zero failed/canceled/ignored. JNI memory-wait gap closed locally with negative-control proof. Strict Clippy/format/config passed.",
       "handoff_report": "G02-report.md",
       "base_commit": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
-      "auxiliary_directory": "/Users/skotlov/d/temp/20261119_comet12-g02",
-      "integration_receipt": "/Users/skotlov/d/temp/20261119_comet12-g02-integration/completion.json",
+      "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02",
+      "integration_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json",
       "head_ref": "refs/heads/branch-1.2",
       "functional_source_previously_verified": "e0388e3bc0e5415ea2b85664b1c8cf8e3cbd7574"
     },
@@ -173,7 +173,7 @@
   },
   "docker_checks": {
     "context": "desktop-linux",
-    "endpoint": "unix:///Users/skotlov/.docker/run/docker.sock",
+    "endpoint": "unix://${HOME}/.docker/run/docker.sock",
     "engine": "27.4.0",
     "host": "linux/arm64",
     "cpus": 14,
@@ -184,7 +184,7 @@
     "output_write_mount": "PASSED",
     "network": "none; pull=never; cached images only",
     "release_builder_compilation": "PASSED_BOTH_ARCHITECTURES",
-    "evidence": "/Users/skotlov/d/temp/20261116_comet12-execution-setup/docker-probes.json",
+    "evidence": "${MIGRATION_AUX_ROOT}/20261116_comet12-execution-setup/docker-probes.json",
     "note": "One unused default builder points to the unavailable /var/run/docker.sock. The working desktop-linux and spark-builder are available; no default-builder repair or reconnection is needed."
   },
   "build_tools": {
@@ -195,9 +195,9 @@
     "rustc_version": "1.100.0",
     "cargo_version": "1.100.0",
     "rustup_toolchain": "stable-aarch64-apple-darwin",
-    "rust_bin": "/opt/homebrew/opt/rustup/bin",
+    "rust_bin": "${RUSTUP_PACKAGE_ROOT}/bin",
     "cargo_rustc_in_current_PATH": false,
-    "java_17_verified": "/Users/skotlov/.sdkman/candidates/java/17.0.19-tem",
+    "java_17_verified": "${HOME}/.sdkman/candidates/java/17.0.19-tem",
     "java_17_version": "17.0.19",
     "current_sdkman_java": "21.0.9-tem",
     "selection_policy": "Explicit per-command JAVA_HOME/PATH; do not change global user settings."
@@ -206,9 +206,9 @@
     "repository_operations_authorized": true,
     "implementation_authorized": true,
     "git_mutation_authorized": true,
-    "repository_scope": "/Users/skotlov/d/projects/datafusion-comet",
-    "git_scope": "/Users/skotlov/d/projects/datafusion-comet/.git",
-    "user_quote": "From now on you have my permission to perform all necessary operations in /Users/skotlov/d/projects/datafusion-comet, including /Users/skotlov/d/projects/datafusion-comet/.git.",
+    "repository_scope": "${COMET_ROOT}",
+    "git_scope": ".git",
+    "user_quote": "From now on you have my permission to perform all necessary operations in ${COMET_ROOT}, including .git.",
     "interpretation": "Authorization covers necessary local repository changes, branches, commits, integration and local tags. Preparation of a handoff did not itself start G01 implementation.",
     "implementation_status": "G01_AMD64_QUALIFICATION_PENDING_G02_NOT_AUTHORIZED",
     "network_build_dependencies_authorized": true,
@@ -225,7 +225,7 @@
       "status": "APPROVED_WITH_USER_SAFETY_CONDITION",
       "source": "Direct user reply to request_user_input_async in the coordinator chat; Russian quotations are translated into English.",
       "user_quote": "I authorize, for the entire Comet 1.2 / Spark 4.2.1 migration, the network operations listed in docs/joom-migration/NETWORK.md: Maven/SBT, Rustup/Cargo, pinned Git dependencies and build tools from GitHub, Docker Hub and Ubuntu packages, including child processes inside containers. Everything downloaded to and executed on my laptop must be a known, widely used artifact whose safety for my machine is not reasonably in doubt. No push, external publication or production operations.",
-      "scope_document": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/NETWORK.md",
+      "scope_document": "docs/joom-migration/NETWORK.md",
       "approved_proposal_commit": "fbc250a9867515958c6a33920c1ac15b5d2d62b1",
       "approved_proposal_sha256": "3bedf4a5dc5d14b1793d25c4ae9073b697a1691a614aa69494c37486bc8dac02",
       "scope": "For the entire approved migration: Maven/SBT, Rustup/Cargo, pinned Git dependencies and build tools from GitHub, Docker Hub and Ubuntu packages, including child processes inside containers.",
@@ -257,7 +257,7 @@
     },
     "session_orchestration_authorization": {
       "recorded_on": "2026-11-17",
-      "user_quote": "The Comet project has been added at /Users/skotlov/d/projects/datafusion-comet. Create and manage working sessions according to the approved plan, pass them assignments and clarifications, and review their results.",
+      "user_quote": "The Comet project has been added at ${COMET_ROOT}. Create and manage working sessions according to the approved plan, pass them assignments and clarifications, and review their results.",
       "project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
       "code_hold_preserved": true
     },
@@ -314,7 +314,7 @@
     "approved_feature_groups_and_release_milestones_unchanged": true
   },
   "active_branch": "branch-1.2",
-  "g01_work_directory": "/Users/skotlov/d/temp/20261117_comet12-g01",
+  "g01_work_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01",
   "upstream_base_rechecked_on": "2026-11-17",
   "upstream_base_current_sha": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
   "active_sessions": {},
@@ -322,7 +322,7 @@
     {
       "check": "effective-pom",
       "status": "PASSED",
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01/maven-effective-pom.log",
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01/maven-effective-pom.log",
       "versions": {
         "spark": "4.2.1",
         "scala": "2.13.18",
@@ -340,29 +340,29 @@
     {
       "check": "registry-jvm-initial",
       "status": "FAILED_TEST_SELECTION",
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01/registry-baseline-jvm.log"
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01/registry-baseline-jvm.log"
     },
     {
       "check": "registry-jvm-discovery",
       "status": "FAILED_LOCAL_RPC_ENVIRONMENT",
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01/registry-baseline-jvm-discovery.log"
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01/registry-baseline-jvm-discovery.log"
     },
     {
       "check": "loopback-smoke",
       "status": "PASSED",
       "tests": 10,
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01/registry-loopback-smoke.log",
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01/registry-loopback-smoke.log",
       "note": "SPARK_LOCAL_IP127.0.0.1; DPP+NativeBase suites andParquetEncryptionITCase passed."
     },
     {
       "check": "delta-first-compile",
       "status": "FAILED_FORMATTING_FIXED",
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01/registry-baseline-delta.log"
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01/registry-baseline-delta.log"
     },
     {
       "check": "spotless",
       "status": "PASSED",
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01/g01-spotless.log"
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01/g01-spotless.log"
     },
     {
       "check": "ci-config-static",
@@ -378,13 +378,13 @@
       "check": "registry-full-delta",
       "status": "283_PASS_1_FAIL_NEW_HADOOP_CONTEXT_GUARD_FIXED",
       "tests": 284,
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01/registry-baseline-delta-formatted.log"
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01/registry-baseline-delta-formatted.log"
     },
     {
       "check": "registry-context-guard-delta",
       "status": "PASSED",
       "tests": 164,
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01/registry-context-guard-tests.log",
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01/registry-context-guard-tests.log",
       "note": "Selected production/unit portions of upstream draftPR7593; local-only tests. Explicit gs control added afterward, pending next compilation."
     },
     {
@@ -393,12 +393,12 @@
       "tests_passed": 65,
       "tests_cancelled": 3,
       "note": "Existing add/subtract/multiply generic tests cancel on Spark4.2 per issue4967; typed overflow fidelity and SQL ANSI fixtures pass. No claim of full ANSI compatibility.",
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01/registry-ansi-baseline.log"
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01/registry-ansi-baseline.log"
     },
     {
       "check": "vendor-graph",
       "status": "PASSED",
-      "report": "/Users/skotlov/d/temp/20261117_comet12-g01/vendor-graph-verification.json",
+      "report": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01/vendor-graph-verification.json",
       "note": "One local physical-plan55.2.0; existing registry package versions/checksums unchanged; root native lockfile."
     },
     {
@@ -407,13 +407,13 @@
       "tests_passed": 961,
       "tests_failed": 12,
       "tests_ignored": 5,
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01/vendor-and-core-unit-direct-cargo.log",
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01/vendor-and-core-unit-direct-cargo.log",
       "note": "Direct installed Cargo fixes libjvm loader environment. Twelve UDF tests fail missing test library path although comet-test-udfs build passed. Vendor tests not executed because core binary failed first. Investigate core/build.rs OUT_DIR ancestry under Cargo1.100; not yet established/fixed."
     },
     {
       "check": "resumed-sandbox-access",
       "status": "PASSED",
-      "report": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed/sandbox-probes.json"
+      "report": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed/sandbox-probes.json"
     },
     {
       "check": "native-workspace-unit",
@@ -421,53 +421,53 @@
       "passed": 4326,
       "ignored": 5,
       "vendor_tests_passed": 1695,
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed/native-workspace-unit.log"
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed/native-workspace-unit.log"
     },
     {
       "check": "strict-workspace-clippy",
       "status": "FAILED_PRISTINE_VENDOR_DEPRECATED_API",
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed/clippy-workspace-strict.log"
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed/clippy-workspace-strict.log"
     },
     {
       "check": "strict-comet-clippy",
       "status": "PASSED",
       "note": "All Comet workspace members selected, vendor excluded with --no-deps; explicit vendor tests mandatory.",
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed/clippy-comet-strict.log"
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed/clippy-comet-strict.log"
     },
     {
       "check": "release-validator-publisher-negatives",
       "status": "PASSED",
       "cases": 19,
-      "report": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed/release-negative-results.json",
+      "report": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed/release-negative-results.json",
       "note": "Synthetic validation fixtures; all HTTP/tag calls mocked; no external publication or native execution qualification."
     },
     {
       "check": "vendor-statistics-test-utils",
       "status": "PASSED",
       "tests_passed": 42,
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed/vendor-statistics-stable-unit.log"
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed/vendor-statistics-stable-unit.log"
     },
     {
       "check": "vendor-default-native-build",
       "status": "PASSED",
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed/vendor-native-default-build.log",
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed/vendor-native-default-build.log",
       "elapsed": "1m35s"
     },
     {
       "check": "amd64-x86-64-v3-capability",
       "status": "PASSED",
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed/amd64-cpu-probe-cpuid.log"
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed/amd64-cpu-probe-cpuid.log"
     },
     {
       "check": "workspace-fmt",
       "status": "PASSED",
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed/cargo-fmt-final.log"
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed/cargo-fmt-final.log"
     },
     {
       "check": "vendor-delta-full-jvm",
       "status": "PASSED",
       "tests_passed": 291,
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed/vendor-delta-install.log",
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed/vendor-delta-install.log",
       "elapsed": "8m20s",
       "note": "Root install also installs current fork; includes explicit gs control and all ADC/planning/serialization/native/DV/DML regressions."
     },
@@ -476,7 +476,7 @@
       "status": "PASSED_WITH_UPSTREAM_CANCELLATIONS",
       "tests_passed": 75,
       "tests_cancelled": 3,
-      "log": "/Users/skotlov/d/temp/20261117_comet12-g01-resumed/vendor-ansi-runtime-baseline.log",
+      "log": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed/vendor-ansi-runtime-baseline.log",
       "elapsed": "1m40s",
       "note": "Typed ANSI/SQL fixtures plus DPP/NativeBase, and ParquetEncryptionITCase.3 old upstreamgeneric arithmetic tests cancel on Spark4.2."
     },
@@ -484,7 +484,7 @@
       "check": "final_g01_qualification",
       "status": "PARTIAL_AMD64_RUNTIME_CHECK_INCOMPLETE",
       "report": "G01-results.json",
-      "raw_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-final-qualification",
+      "raw_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-final-qualification",
       "source_commit": "2b8f80b3f253559bc999f73769b05c88ebcd5fc2"
     }
   ],
@@ -509,18 +509,18 @@
   "toolchain_invocation_note": "Direct Cargo on macOS requires RUSTUP_TOOLCHAIN=stable to keep child rustc wrappers on installed1.100 rather than dependency-local nightly override; DYLD_LIBRARY_PATH points JAVA_HOME/lib/server. Docker pins RUSTUP_TOOLCHAIN1.100.0.",
   "release_build_pending": {
     "status": "PRIOR_B93_QUALIFIED_REPLACED_ONLY_AFTER_FINAL_EXACT_SHA_RC_SUCCESS",
-    "output_directory": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/gha-44388252264",
+    "output_directory": "target/joom-release/gha-44388252264",
     "source_commit": "b93d553856a0339af7468bcff2070e735a1a3c71",
     "rc_tag": "joom-1.2-1-rc1; authorized only after final qualification"
   },
-  "current_qualification_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-final-qualification",
+  "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-final-qualification",
   "integration_gate": {
     "status": "G02_USER_APPROVED_ACCEPTANCE",
     "method": "Fast-forward branch-1.2 to the consolidated three-commit G02 feature; no merge commit.",
     "previous_base": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
     "functional_source_previously_verified": "e0388e3bc0e5415ea2b85664b1c8cf8e3cbd7574",
     "post_commit_gate": "This source snapshot records stage acceptance; exact local/remote refs, final tree and successful execution are recorded after commit in the integration completion receipt.",
-    "receipt": "/Users/skotlov/d/temp/20261119_comet12-g02-integration/completion.json",
+    "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json",
     "not_authorized": [
       "G03-G10 implementation",
       "main/tag changes",
@@ -554,7 +554,7 @@
       "pr_title": "PASSED",
       "observed_blocker": "Prettier formatting of four migration Markdown files; tests skipped before execution",
       "local_formatting": "Prettier3.10.1 installed by user through Homebrew; four files formatted; whole-repository Markdown check passed",
-      "raw_evidence": "/Users/skotlov/d/temp/20261117_comet12-g01-runner-fix",
+      "raw_evidence": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-runner-fix",
       "native_amd64_qualification": "NOT_YET_EXECUTED_BY_GHA",
       "labeler": "PASSED",
       "formatting_fix_commit": "db2bd16584c1381853cc170abab7cd87f289c85c",
@@ -575,7 +575,7 @@
     "source_commit": "30b6c4d7f531fad7b6550c5d3f1c92cefd096e58",
     "head_sha": "26590264b878fb8eae2ca439a8bcc0dfb513cb36",
     "run_id": 44205897075,
-    "raw_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
+    "raw_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
     "run_url": "https://github.com/joomcode/datafusion-comet/actions/runs/44205897075",
     "last_checked_at": "2026-11-18T03:16:00.841276+00:00",
     "counts": {
@@ -595,7 +595,7 @@
     "pending_infrastructure_rerun": null,
     "fail_fast_policy": "decisions.json#ci_fail_fast_user_policy",
     "run_attempt": 3,
-    "failure_classification_file": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/attempt-2-failure-classification.json",
+    "failure_classification_file": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha/attempt-2-failure-classification.json",
     "previous_attempt_final_counts": {
       "success": 125,
       "skipped": 17,
@@ -684,29 +684,29 @@
         "union_regressions": "Both conf-flip/native-grouping and live-copy/layout-binding tests passed on Spark4.1 and4.2"
       },
       "artifact_verification_receipts": [
-        "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386009386-verification.json",
-        "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386336295-verification.json",
-        "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386457154-verification.json",
-        "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386965743-verification.json"
+        "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386009386-verification.json",
+        "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386336295-verification.json",
+        "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386457154-verification.json",
+        "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386965743-verification.json"
       ],
-      "raw_evidence_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
+      "raw_evidence_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
       "qualification": "SOURCE_CI_PASSED; final exact-byte release JAR build/smoke remains RC gate; production/GCP validation not claimed",
-      "final_receipt": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/final-qualification-run-44205897075-head-26590264b.json",
+      "final_receipt": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha/final-qualification-run-44205897075-head-26590264b.json",
       "spark34_expressions": "2230passed/0failed/37canceled/12ignored"
     },
     "monitoring_stopped": true,
-    "pr_body_final_update_receipt": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/pr28-final-success-body-update.json",
+    "pr_body_final_update_receipt": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha/pr28-final-success-body-update.json",
     "local_progress_documents": "Saved uncommitted; no new source push, qualified HEAD unchanged"
   },
-  "g01_ci_corrections_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes",
+  "g01_ci_corrections_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes",
   "g01_ci_corrections_protoc": {
     "broken_system": "Homebrewprotobuf25.2 missingabseil2308dylib; nohostchanges",
-    "working_protoc": "/Users/skotlov/Library/Caches/com.thesamet.scalapb.protocbridge.protocbridge/v1/protoc-osx-aarch_64-4.33.5",
+    "working_protoc": "${HOME}/Library/Caches/com.thesamet.scalapb.protocbridge.protocbridge/v1/protoc-osx-aarch_64-4.33.5",
     "verified_version": "libprotoc33.5",
     "usage": "Explicitper-commandPROTOC; existingofficialSBTcache, nolang/globalconfigurationchange",
     "cargo_invocation": "Directstabletoolchain/bin inPATH +RUSTUP_TOOLCHAIN=stable +DYLD_LIBRARY_PATHandDYLD_FALLBACK_LIBRARY_PATH=$JAVA_HOME/lib/server"
   },
-  "g01_ci_corrections_checkpoint": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/implementation-checkpoint.json",
+  "g01_ci_corrections_checkpoint": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/implementation-checkpoint.json",
   "previous_ci_monitoring": {
     "status": "COMPLETED_FAILURE",
     "interval_seconds": 300,
@@ -804,7 +804,7 @@
         ]
       }
     },
-    "raw_evidence": "/Users/skotlov/d/temp/20261117_comet12-g01-runner-fix",
+    "raw_evidence": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-runner-fix",
     "no_automatic_code_changes_or_push_for_monitoring": true,
     "latest_summary": {
       "snapshot_utc": "2026-11-17T19:29:03.032223+00:00",
@@ -870,7 +870,7 @@
         "sql_core1": "33operator/fusion/partitioningcontractassertions; some laterdata checksunreached; cannotblanketskip",
         "sql_core4": "2missingmandatorymappingerrors +3corruptedParquetexceptiondiagnosticmismatches"
       },
-      "raw_evidence_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-runner-fix",
+      "raw_evidence_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-runner-fix",
       "diagnosis_files": [
         "first-test-job-failures.json",
         "sql42-failure-diagnosis.json",
@@ -951,7 +951,7 @@
       "spark_patch": "121 files; forward/reverse apply and exact patched-file equality passed",
       "whitespace": "Actual Spark sources pass git diff --check v4.2.1; Comet sources excluding generated patch pass git diff --check. Generated patch preserves required single-space context lines."
     },
-    "raw_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes",
+    "raw_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes",
     "independent_review": "Runtime and CI reviews: no outstanding substantive finding after followups",
     "push_strategy": "Single batched feature-branch push after local checks",
     "gha_interval_seconds": 300,
@@ -1027,12 +1027,12 @@
     },
     "independent_review": "No outstanding finding; namespace followup matches recommended remap; tests not weakened",
     "no_rust_or_vendor_change": true,
-    "raw_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes",
+    "raw_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes",
     "source_patch_sha256": "403deeae1ebde3e20511e54c593beeae682f230c14677b034f471eaf98c1c8b1",
     "pending": "Only user review/integration and final release-JAR acceptance; no unresolved GHA failures",
     "active_local_builds": [],
     "source_commit": "30b6c4d7f531fad7b6550c5d3f1c92cefd096e58",
-    "new_ci_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
+    "new_ci_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
     "pr_head_commit": "26590264b878fb8eae2ca439a8bcc0dfb513cb36",
     "run_id": 44205897075,
     "run_url": "https://github.com/joomcode/datafusion-comet/actions/runs/44205897075"
@@ -1197,7 +1197,7 @@
   "rc_workflow": {
     "name": "RC Build & Smoke",
     "file": ".github/workflows/rc_build_smoke.yml",
-    "auxiliary_directory": "/Users/skotlov/d/temp/20261118_comet12-rc-workflow",
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261118_comet12-rc-workflow",
     "bootstrap_main_authorized": true,
     "runtime_ci_baseline": "26590264b878fb8eae2ca439a8bcc0dfb513cb36",
     "stage": "SUCCESS_DOWNLOADED_LOCALLY_VERIFIED",
@@ -1242,16 +1242,16 @@
       "fix": "Bothheadersrestoredlocally; no runtime/toolchanges; do not restartRCfor documentation.",
       "local_source_tarball_rat": "PASSED",
       "rat_checked_document_tree": "ffbcbc1ac5e45926d0a98f4605f99b6ab2f9ee88",
-      "rat_log": "/Users/skotlov/d/temp/20261118_comet12-rc-workflow/rat-source-license-fix.log",
+      "rat_log": "${MIGRATION_AUX_ROOT}/20261118_comet12-rc-workflow/rat-source-license-fix.log",
       "not_yet_pushed": false,
       "committed_fix": "b93d55385",
-      "exact_fixed_source_rat_log": "/Users/skotlov/d/temp/20261118_comet12-rc-workflow/rat-source-b93d55385.log"
+      "exact_fixed_source_rat_log": "${MIGRATION_AUX_ROOT}/20261118_comet12-rc-workflow/rat-source-b93d55385.log"
     },
     "git_fix_commit": "d7f0df5bd",
     "license_fix_commit": "b93d55385",
     "latest_auto_ci": "44388222020 CANCELLED",
     "exact_source_rat": "b93d55385 PASSED",
-    "git_fix_reproduction": "/Users/skotlov/d/temp/20261118_comet12-rc-workflow/docker-git-safe-directory-reproduction.json",
+    "git_fix_reproduction": "${MIGRATION_AUX_ROOT}/20261118_comet12-rc-workflow/docker-git-safe-directory-reproduction.json",
     "conclusion": "SUCCESS",
     "job_counts": {
       "success": 7,
@@ -1265,8 +1265,8 @@
       "artifact_name": "rc-build-smoke-b93d553856a0339af7468bcff2070e735a1a3c71",
       "artifact_api_digest": "sha256:1c633ecec930ce8a2e4f95a2fe859ddefcd89f3a2898fc77105775448ad6035b",
       "downloaded_zip_sha256": "1c633ecec930ce8a2e4f95a2fe859ddefcd89f3a2898fc77105775448ad6035b",
-      "archive": "/Users/skotlov/d/temp/20261118_comet12-rc-workflow/qualified-artifact-44388252264.zip",
-      "output_directory": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/gha-44388252264",
+      "archive": "${MIGRATION_AUX_ROOT}/20261118_comet12-rc-workflow/qualified-artifact-44388252264.zip",
+      "output_directory": "target/joom-release/gha-44388252264",
       "artifact_bytes": 189616637,
       "unpacked_bytes": 429572457,
       "jar_sha256": {
@@ -1285,11 +1285,11 @@
       },
       "archive_runtime_provenance_and_smoke_receipts_verified": true
     },
-    "qualified_artifact_receipt": "/Users/skotlov/d/temp/20261118_comet12-rc-workflow/rc-run-44388252264-final-qualification.json",
+    "qualified_artifact_receipt": "${MIGRATION_AUX_ROOT}/20261118_comet12-rc-workflow/rc-run-44388252264-final-qualification.json",
     "workflow_definition_in_main": "fa7347e5ea549a01c77e325dbd3449d93c9d5700 (onlyworkflowfile)",
     "matching_bytes_both_architectures": true,
     "monitoring_stopped": true,
-    "final_pr_body_update_receipt": "/Users/skotlov/d/temp/20261118_comet12-rc-workflow/pr28-rc-success-update.json"
+    "final_pr_body_update_receipt": "${MIGRATION_AUX_ROOT}/20261118_comet12-rc-workflow/pr28-rc-success-update.json"
   },
   "final_documentation_checkpoint": "refs/joom-migration/checkpoints/20261118-rc-complete-docs",
   "finalization": {
@@ -1298,13 +1298,13 @@
     "historical_fields": "Old CI, pause, preparation and artifact sections retain their original source-specific facts. They are evidence, not current authorization or final RC1 identity.",
     "history_mapping": "G01-HISTORY.json",
     "closeout": "G01-CLOSEOUT.md",
-    "original_documentation_archive": "/Users/skotlov/d/temp/20261118_comet12-g01-finalization/documentation-before.zip",
-    "external_final_receipt": "/Users/skotlov/d/temp/20261118_comet12-g01-finalization/completion.json",
+    "original_documentation_archive": "${MIGRATION_AUX_ROOT}/20261118_comet12-g01-finalization/documentation-before.zip",
+    "external_final_receipt": "${MIGRATION_AUX_ROOT}/20261118_comet12-g01-finalization/completion.json",
     "g02_authorized": false,
     "java21_work_authorized": false
   },
   "current_validation_policy_ref": "decisions.json#future_migration_validation_policy",
-  "excluded_repository": "/Users/skotlov/d/projects/datasci/",
+  "excluded_repository": "${DATASCI_ROOT}/",
   "validation_backlog": {
     "scope": "Track every remaining-group check deferred, unverified or not runnable locally; this empty initial list does not certify final coverage. The complete requirements also include correctness-test-plan.txt and all feature-register acceptance criteria.",
     "required_entry_fields": [
@@ -1332,7 +1332,7 @@
         "intended_validation_command_or_job": "Existing full Comet CI matrix plus RC Build & Smoke final artifacts.",
         "native_execution_requirement": "Actual native execution and final loaded library/class-origin proof; no canceled/ignored case counted as passed.",
         "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "Current local source evidence under /Users/skotlov/d/temp/20261119_comet12-g02; final qualified SHA pending."
+        "evidence_path_and_source_sha": "Current local source evidence under ${MIGRATION_AUX_ROOT}/20261119_comet12-g02; final qualified SHA pending."
       },
       {
         "id": "G02-CANCEL-SPARK-MEMORY-WAIT",
@@ -1345,7 +1345,7 @@
         "intended_validation_command_or_job": "Focused cancellation+CometTaskMemoryManager regression before final acceptance; add deterministic scenario if existing agreed suites do not cover it.",
         "native_execution_requirement": "Verify native executing plan, captured Spark task context, actual blocked acquire and reservation accounting before/after cancellation.",
         "status": "CLOSED_LOCAL_ARM64_VALIDATION",
-        "evidence_path_and_source_sha": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait/completion.json (final source SHA), tested-source-manifest.json, maven-final-regressions.log and memory-wait-negative-control.json",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait/completion.json (final source SHA), tested-source-manifest.json, maven-final-regressions.log and memory-wait-negative-control.json",
         "actual_evidence": "Both JNI paths x verified fair/greedy pools stop within two seconds with competitor memory held, TaskKilledException, no success batch/EOF, zero native/Spark reservations/live contexts; 16 manager cases cover exact grants, partial spill cleanup, nested/reused threads. Unified 93/93 pass."
       },
       {
@@ -1359,7 +1359,7 @@
         "intended_validation_command_or_job": "Window/coalescer targeted regressions during their authorized ports; final agreed native/JVM/SQL and exact-JAR qualification.",
         "native_execution_requirement": "Assert actual native window/coalescer/FFI paths with Spark result parity; not incidental fallback.",
         "status": "PLANNED_DEPENDENT_GROUP_VALIDATION",
-        "evidence_path_and_source_sha": "Shared offset utility tests and explode tests under /Users/skotlov/d/temp/20261119_comet12-g02; future consumer SHA pending."
+        "evidence_path_and_source_sha": "Shared offset utility tests and explode tests under ${MIGRATION_AUX_ROOT}/20261119_comet12-g02; future consumer SHA pending."
       }
     ],
     "final_gate": "No unresolved/unverified applicable cases. Require actual passing evidence; retain only applicability exclusions explicitly agreed with the user (such as the existing HDFS-cluster exclusion)."
@@ -1386,7 +1386,7 @@
     "base_commit": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
     "branch": "joom/1.2-native-runtime",
     "source_tag": "joom-1.1-13",
-    "auxiliary_directory": "/Users/skotlov/d/temp/20261119_comet12-g02",
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02",
     "cards": ["I05", "I06", "J14", "J15", "J16", "J22"],
     "full_gha_run": false,
     "base_branch_update_authorized_this_stage": true,
@@ -1399,7 +1399,7 @@
         "passed": 81,
         "failed": 0,
         "ignored": 0,
-        "log": "/Users/skotlov/d/temp/20261119_comet12-g02/native-common-tests.log"
+        "log": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/native-common-tests.log"
       },
       "maven_targeted_status": "PASSED 93/93 on final local source, zero failures/canceled/ignored",
       "maven_session_id": null,
@@ -1413,20 +1413,20 @@
         "canceled": 0,
         "ignored": 0,
         "reason": "8 failures: wrapper-unaware shuffle-writer downcast; 1 metrics fixture inspecting a sibling QueryExecution; 1 stale Spark4.2 unary-overflow message expectation. All corrected, targeted regressions retained, final unified 71/71 batch passed.",
-        "evidence": "/Users/skotlov/d/temp/20261119_comet12-g02/initial-jvm-reports.zip"
+        "evidence": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/initial-jvm-reports.zip"
       },
       "native_jni_tests": {
         "passed": 43,
         "failed": 0,
         "ignored": 0,
-        "log": "/Users/skotlov/d/temp/20261119_comet12-g02/native-jni-tests-final-config.log",
+        "log": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/native-jni-tests-final-config.log",
         "environment": "Direct stable toolchain bin in PATH, RUSTUP_TOOLCHAIN=stable, both DYLD_LIBRARY_PATH and DYLD_FALLBACK_LIBRARY_PATH include Java17 lib/server; proxy invocation did not retain JVM runtime lookup."
       },
       "native_explode_tests": {
         "passed": 22,
         "failed": 0,
         "ignored": 0,
-        "log": "/Users/skotlov/d/temp/20261119_comet12-g02/native-explode-tests.log"
+        "log": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/native-explode-tests.log"
       },
       "native_targeted_results": {
         "common": 81,
@@ -1442,8 +1442,8 @@
       "ci_config_checks": "PASSED; new JVM suites registered on Linux/macOS; no disabled checks/triggers",
       "native_library_sha256": "8c14dc78b946e0048d9da14993cb200821e272c13556c4ab0d547995fe278938",
       "clippy": "PASSED strict four crates all-targets/no-deps",
-      "memory_wait_followup_log": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait/maven-final-regressions.log",
-      "negative_control": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait/memory-wait-negative-control.json",
+      "memory_wait_followup_log": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait/maven-final-regressions.log",
+      "negative_control": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait/memory-wait-negative-control.json",
       "pre_integration_no_main_or_base_changes": true,
       "integration_change": "Only the authorized branch-1.2 fast-forward; main and RC1 remain unchanged."
     },
@@ -1452,7 +1452,7 @@
     "memory_wait_followup": {
       "authorization": "User approved closing the scenario, targeted local regressions, fold fixes into existing substantive commits, push feature and show final diff for merge approval.",
       "base_head": "9dd53f98876f4541ac5ee99b0d06fda9826bb608",
-      "auxiliary_directory": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait",
+      "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait",
       "status": "CLOSED_LOCAL_ARM64_VALIDATION_ACCEPTED_FOR_INTEGRATION",
       "integration_authorized": true,
       "tests": "93/93 selected JVM/SQL cases, no failed/canceled/ignored; negative control reproduces blocked close in both JNI paths."
@@ -1460,7 +1460,7 @@
     "performance_review": {
       "status": "COMPLETED_LOCAL_EXPLORATORY_A_B",
       "authorization": "User requested before/after performance comparison using existing Comet benchmarks; no branch-1.2 merge or G03.",
-      "auxiliary_directory": "/Users/skotlov/d/temp/20261119_comet12-g02-performance",
+      "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02-performance",
       "source_head": "e0388e3bc0e5415ea2b85664b1c8cf8e3cbd7574",
       "variants": "9dd manager versus final e038 manager, all other final classes/native bytes fixed.",
       "git_mutation": false,
@@ -1478,7 +1478,7 @@
       "normal_execution_expectation": "Fractional-percent/generally below1% engineering expectation for normal batches; not a production measurement or bound.",
       "stage_disposition": "Accepted; current microbenchmark cost does not require another optimization before G02 integration."
     },
-    "integration_receipt": "/Users/skotlov/d/temp/20261119_comet12-g02-integration/completion.json",
+    "integration_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json",
     "integration_authorization_ref": "decisions.json#g02_integration_authorization",
     "source_freeze_note": "Only migration documentation is consolidated after the verified functional candidate. Post-commit integration execution/ref/hash proof is external to avoid a self-referencing source SHA."
   },
@@ -1493,5 +1493,6 @@
       "JFrog/Nexus/Docker publication",
       "production operations"
     ]
-  }
+  },
+  "path_notation_ref": "PATHS.md"
 }

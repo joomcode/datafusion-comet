@@ -17,7 +17,7 @@
     "rust": "1.100.0",
     "java": "17"
   },
-  "release_directory": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/gha-44388252264",
+  "release_directory": "target/joom-release/gha-44388252264",
   "jar_sha256": {
     "comet-spark-spark4.2_2.13-1.2.0.jar": "9f7d57bfb88efceeecce15d96ca320a2d38f81aacc95f4bbf67d46915bfc0686",
     "comet-contrib-delta-spark4.2_2.13-1.2.0.jar": "5581281ff5bf826f04a038318d802be13d9f66cb8084e3d8a40846b5175bd632"
@@ -75,7 +75,7 @@
     "Full runtime CI is retained by exact runtime/test/lockfile equality; the final rewritten SHA requires its own release build and packaged smoke.",
     "Earlier validation counters below are historical local runs; use final_full_gha and the RC receipt for the latest qualification."
   ],
-  "raw_evidence_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-final-qualification",
+  "raw_evidence_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-final-qualification",
   "history_cleanup": {
     "old_head": "3cae82c3f75a7c3aa85356515e85d0f6d984da24",
     "backup_ref": "refs/joom-migration/checkpoints/20261117-before-service-cleanup",
@@ -210,14 +210,14 @@
       "union_regressions": "Both conf-flip/native-grouping and live-copy/layout-binding tests passed on Spark4.1 and4.2"
     },
     "artifact_verification_receipts": [
-      "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386009386-verification.json",
-      "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386336295-verification.json",
-      "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386457154-verification.json",
-      "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386965743-verification.json"
+      "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386009386-verification.json",
+      "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386336295-verification.json",
+      "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386457154-verification.json",
+      "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha/java-artifact-14386965743-verification.json"
     ],
-    "raw_evidence_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
+    "raw_evidence_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
     "qualification": "SOURCE_CI_PASSED; final exact-byte release JAR build/smoke remains RC gate; production/GCP validation not claimed",
-    "final_receipt": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha/final-qualification-run-44205897075-head-26590264b.json",
+    "final_receipt": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha/final-qualification-run-44205897075-head-26590264b.json",
     "spark34_expressions": "2230passed/0failed/37canceled/12ignored"
   },
   "ci_corrections": {
@@ -289,7 +289,7 @@
       "spark_patch": "121 files; forward/reverse apply and exact patched-file equality passed",
       "whitespace": "Actual Spark sources pass git diff --check v4.2.1; Comet sources excluding generated patch pass git diff --check. Generated patch preserves required single-space context lines."
     },
-    "raw_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes",
+    "raw_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes",
     "independent_review": "Runtime and CI reviews: no outstanding substantive finding after followups",
     "push_strategy": "Single batched feature-branch push after local checks",
     "gha_interval_seconds": 300,
@@ -544,12 +544,12 @@
     },
     "independent_review": "No outstanding finding; namespace followup matches recommended remap; tests not weakened",
     "no_rust_or_vendor_change": true,
-    "raw_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes",
+    "raw_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes",
     "source_patch_sha256": "403deeae1ebde3e20511e54c593beeae682f230c14677b034f471eaf98c1c8b1",
     "pending": "Only user review/integration and final release-JAR acceptance; no unresolved GHA failures",
     "active_local_builds": [],
     "source_commit": "30b6c4d7f531fad7b6550c5d3f1c92cefd096e58",
-    "new_ci_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
+    "new_ci_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha",
     "pr_head_commit": "26590264b878fb8eae2ca439a8bcc0dfb513cb36",
     "run_id": 44205897075,
     "run_url": "https://github.com/joomcode/datafusion-comet/actions/runs/44205897075"
@@ -593,7 +593,7 @@
         "sql_core1": "33operator/fusion/partitioningcontractassertions; some laterdata checksunreached; cannotblanketskip",
         "sql_core4": "2missingmandatorymappingerrors +3corruptedParquetexceptiondiagnosticmismatches"
       },
-      "raw_evidence_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-runner-fix",
+      "raw_evidence_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-runner-fix",
       "diagnosis_files": [
         "first-test-job-failures.json",
         "sql42-failure-diagnosis.json",
@@ -608,7 +608,7 @@
   "historical_release_artifacts": {
     "source_commit": "2b8f80b3f253559bc999f73769b05c88ebcd5fc2",
     "source_commit_scope": "Historical release JARs only; source_commit and jar_sha256 below refer to2b8f80b3f, not the qualified PR",
-    "release_directory": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/joom-1.2-1-rc1",
+    "release_directory": "target/joom-release/joom-1.2-1-rc1",
     "jar_sha256": {
       "comet-spark-spark4.2_2.13-1.2.0.jar": "40182026a96ccbf4958d2f741d19268e518173ff2960f937f1d3b700172defff",
       "comet-contrib-delta-spark4.2_2.13-1.2.0.jar": "0c50187c4624b46b31a47326b7b281d6cde96d1b458697845d74debc0b07ae8c"
@@ -723,8 +723,8 @@
       "artifact_name": "rc-build-smoke-b93d553856a0339af7468bcff2070e735a1a3c71",
       "artifact_api_digest": "sha256:1c633ecec930ce8a2e4f95a2fe859ddefcd89f3a2898fc77105775448ad6035b",
       "downloaded_zip_sha256": "1c633ecec930ce8a2e4f95a2fe859ddefcd89f3a2898fc77105775448ad6035b",
-      "archive": "/Users/skotlov/d/temp/20261118_comet12-rc-workflow/qualified-artifact-44388252264.zip",
-      "output_directory": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/gha-44388252264",
+      "archive": "${MIGRATION_AUX_ROOT}/20261118_comet12-rc-workflow/qualified-artifact-44388252264.zip",
+      "output_directory": "target/joom-release/gha-44388252264",
       "artifact_bytes": 189616637,
       "unpacked_bytes": 429572457,
       "jar_sha256": {

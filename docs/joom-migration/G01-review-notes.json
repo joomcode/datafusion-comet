@@ -6,7 +6,7 @@
     "serialization": "nativeOp and serializedPlanOpt are driver-only transient fields. JVM regression passed clone/copy retention and Java serialization omission. Query-text interning is J17/G08, not completed by these changes. Full J17 interning requires the related internScan/internCommons/internScans core APIs and the task-binary regression; transient fields alone do not complete that old contract.",
     "old_deadlock_reproducer": "Original full Joom end-to-end reproducer depends on BoundaryFormats (G09). G01 adds direct scalar data-filter planning regression; preserve full reproduction for G09 rather than silently treating it as already covered.",
     "s3_encryption_context": {
-      "source": "Selected production/unit portions of upstream draftPR7593, local original JSON /Users/skotlov/d/temp/20261115_comet-upstream-branches-pr-audit/pr-7593-detail.json",
+      "source": "Selected production/unit portions of upstream draftPR7593, local original JSON ${MIGRATION_AUX_ROOT}/20261115_comet-upstream-branches-pr-audit/pr-7593-detail.json",
       "why": "Hadoop3.5 validates context during S3A initialization; native reader does not. Local Delta logs may reference S3 data/DV without metadata initializing that bucket, so missing guard permits success where Spark must fail.",
       "required_behavior": "After encryption-algorithm gate, inspect dataFileUris plus DV URIs. Reject nonempty/unverifiable Hadoop-effective context, preserve global/short/long aliases and credential-provider rules, redact values/paths. Pure GCS is unaffected.",
       "io": "Conf-only with no provider; may read local global JCEKS. Reject nonlocal and S3A-specific providers without opening them. Do not describe helper as unconditionally zero-I/O.",

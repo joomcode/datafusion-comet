@@ -5,8 +5,8 @@
   "tools": {
     "rustc": "1.100.0",
     "cargo": "1.100.0",
-    "rustup_bin": "/opt/homebrew/opt/rustup/bin",
-    "selected_jdk": "/Users/skotlov/.sdkman/candidates/java/17.0.19-tem",
+    "rustup_bin": "${RUSTUP_PACKAGE_ROOT}/bin",
+    "selected_jdk": "${HOME}/.sdkman/candidates/java/17.0.19-tem",
     "global_sdkman_java": "21.0.9-tem"
   },
   "commands": {
@@ -19,7 +19,7 @@
         "{{.Name}} {{.Endpoints.docker.Host}}"
       ],
       "exit_code": 0,
-      "stdout": "desktop-linux unix:///Users/skotlov/.docker/run/docker.sock\n",
+      "stdout": "desktop-linux unix://${HOME}/.docker/run/docker.sock\n",
       "stderr": ""
     },
     "docker_images": {
@@ -67,11 +67,7 @@
       "stderr": ""
     },
     "filesystem_free": {
-      "command": [
-        "df",
-        "-k",
-        "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration"
-      ],
+      "command": ["df", "-k", "docs/joom-migration"],
       "exit_code": 0,
       "stdout": "Filesystem   1024-blocks      Used Available Capacity iused      ifree %iused  Mounted on\n/dev/disk3s1   971350180 334226484 355182112    49% 5510573 3551821120    0%   /System/Volumes/Data\n",
       "stderr": ""
@@ -79,51 +75,52 @@
   },
   "paths": [
     {
-      "path": "/Users/skotlov/.m2",
+      "path": "${HOME}/.m2",
       "existed_before_implementation": true,
       "ownership": "PREEXISTING_OR_SHARED_UNLESS_PROVEN_OTHERWISE",
       "exit_code": 0,
-      "size_kib_output": "5612120\t/Users/skotlov/.m2",
+      "size_kib_output": "5612120\t${HOME}/.m2",
       "stderr": ""
     },
     {
-      "path": "/Users/skotlov/.cargo",
+      "path": "${HOME}/.cargo",
       "existed_before_implementation": false,
       "ownership": "PREEXISTING_OR_SHARED_UNLESS_PROVEN_OTHERWISE"
     },
     {
-      "path": "/Users/skotlov/.rustup",
+      "path": "${HOME}/.rustup",
       "existed_before_implementation": true,
       "ownership": "PREEXISTING_OR_SHARED_UNLESS_PROVEN_OTHERWISE",
       "exit_code": 0,
-      "size_kib_output": "519240\t/Users/skotlov/.rustup",
+      "size_kib_output": "519240\t${HOME}/.rustup",
       "stderr": ""
     },
     {
-      "path": "/Users/skotlov/.cache",
+      "path": "${HOME}/.cache",
       "existed_before_implementation": true,
       "ownership": "PREEXISTING_OR_SHARED_UNLESS_PROVEN_OTHERWISE",
       "exit_code": 0,
-      "size_kib_output": "6432652\t/Users/skotlov/.cache",
+      "size_kib_output": "6432652\t${HOME}/.cache",
       "stderr": ""
     },
     {
-      "path": "/opt/homebrew/opt/rustup",
+      "path": "${RUSTUP_PACKAGE_ROOT}",
       "existed_before_implementation": true,
       "ownership": "PREEXISTING_OR_SHARED_UNLESS_PROVEN_OTHERWISE",
       "exit_code": 0,
-      "size_kib_output": "0\t/opt/homebrew/opt/rustup",
+      "size_kib_output": "0\t${RUSTUP_PACKAGE_ROOT}",
       "stderr": ""
     },
     {
-      "path": "/Users/skotlov/d/projects/datafusion-comet/native/target",
+      "path": "native/target",
       "existed_before_implementation": false,
       "ownership": "PREEXISTING_OR_SHARED_UNLESS_PROVEN_OTHERWISE"
     },
     {
-      "path": "/Users/skotlov/d/projects/datafusion-comet/target",
+      "path": "target",
       "existed_before_implementation": false,
       "ownership": "PREEXISTING_OR_SHARED_UNLESS_PROVEN_OTHERWISE"
     }
-  ]
+  ],
+  "path_notation_ref": "PATHS.md; historical path-bearing commands/stdout are normalized, not byte-identical raw output."
 }

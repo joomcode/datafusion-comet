@@ -188,9 +188,11 @@ spark.executorEnv.COMET_LOG_LEVEL=DEBUG
 
 This produces output like the following:
 
+In this example log, `${TMPDIR}` represents the tool-managed temporary root.
+
 ```
 25/09/15 20:17:42 INFO core/src/lib.rs: Comet native library version 0.11.0 initialized
-25/09/15 20:17:44 DEBUG /xxx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/datafusion-execution-49.0.2/src/disk_manager.rs: Created local dirs [TempDir { path: "/private/var/folders/4p/9gtjq1s10fd6frkv9kzy0y740000gn/T/blockmgr-ba524f95-a792-4d79-b49c-276ba324941e/datafusion-qrpApx" }] as DataFusion working directory
+25/09/15 20:17:44 DEBUG /xxx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/datafusion-execution-49.0.2/src/disk_manager.rs: Created local dirs [TempDir { path: "${TMPDIR}/blockmgr-ba524f95-a792-4d79-b49c-276ba324941e/datafusion-qrpApx" }] as DataFusion working directory
 25/09/15 20:17:44 DEBUG /xxx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/datafusion-functions-nested-49.0.2/src/lib.rs: Overwrite existing UDF: array_to_string
 25/09/15 20:17:44 DEBUG /xxx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/datafusion-functions-nested-49.0.2/src/lib.rs: Overwrite existing UDF: string_to_array
 25/09/15 20:17:44 DEBUG /xxx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/datafusion-functions-nested-49.0.2/src/lib.rs: Overwrite existing UDF: range

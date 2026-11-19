@@ -101,7 +101,7 @@ production operations, further Java 21 work or G02-G10 implementation.
 
 ## Repository/CI boundary update, 2026-11-19
 
-No migration work may access /Users/skotlov/d/projects/datasci/; another chat
+No migration work may access ${DATASCI_ROOT}/; another chat
 works there in parallel. Further CI changes belong in authorized Comet feature
 branches and branch-1.2 only; no additional main commits. The earlier G01 main
 bootstrap permission was specific and historical. The new testing schedule in

@@ -19,7 +19,7 @@ under the License.
 
 # G02: native runtime migration — accepted and integrated
 
-Branch: `joom/1.2-native-runtime`, integrated into `branch-1.2`. Previous base: `c04d2d03c2f572f99e3767f3c8a65f5294ca5328` (`joom-1.2-1-rc1`). Source contracts: `joom-1.1-13`. The user accepted the performance interpretation and authorized integration on 2026-11-19. The final three-commit identity, local/remote refs and post-merge proof are recorded in `/Users/skotlov/d/temp/20261119_comet12-g02-integration/completion.json`. This source snapshot records stage acceptance; integration execution is a post-commit gate. G03 has not started.
+Branch: `joom/1.2-native-runtime`, integrated into `branch-1.2`. Previous base: `c04d2d03c2f572f99e3767f3c8a65f5294ca5328` (`joom-1.2-1-rc1`). Source contracts: `joom-1.1-13`. The user accepted the performance interpretation and authorized integration on 2026-11-19. The final three-commit identity, local/remote refs and post-merge proof are recorded in `${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json`. This source snapshot records stage acceptance; integration execution is a post-commit gate. G03 has not started.
 
 ## Delivered scope
 
@@ -73,7 +73,7 @@ These entries, owners and required evidence are in STATE.json#validation_backlog
 
 ## Evidence, environment and history
 
-Machine-readable results: `G02-results.json`. Raw commands/logs, source hashes, reviews and earlier failed reports: `/Users/skotlov/d/temp/20261119_comet12-g02`. Final follow-up test reports, negative-control proof, source hashes, reviewed diff and push receipt: `/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait`. Final commit identities are recorded in the follow-up directory's `completion.json` after coherent commits are created; no extra service commit is required merely to quote its own SHA.
+Machine-readable results: `G02-results.json`. Raw commands/logs, source hashes, reviews and earlier failed reports: `${MIGRATION_AUX_ROOT}/20261119_comet12-g02`. Final follow-up test reports, negative-control proof, source hashes, reviewed diff and push receipt: `${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait`. Final commit identities are recorded in the follow-up directory's `completion.json` after coherent commits are created; no extra service commit is required merely to quote its own SHA.
 
 Use the installed direct stable Rust toolchain in PATH, RUSTUP_TOOLCHAIN=stable and both DYLD library variables pointing at Java17 lib/server for native tests. The installed Homebrew protoc has a missing dynamic dependency; per-command PROTOC selects the existing official G01 ProtocBridge-cache 33.5 binary. No host tool/configuration changes, unsandboxed commands or replacement caches were needed. The existing pristine-vendor deprecation warning remains documented and unchanged.
 

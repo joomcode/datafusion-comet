@@ -17,7 +17,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-> **Current rules, 2026-11-19:** G01 is complete at `joom-1.2-1-rc1` (`c04d2d03c`); G02 is complete and accepted for integration into branch-1.2, including the closed JNI memory-wait cancellation case and accepted performance assessment; actual integration/remote refs are recorded in the post-commit receipt; G03-G10 remain gated. Do not touch `/Users/skotlov/d/projects/datasci/`. For each remaining group use local builds/targeted regressions and track unverified cases; focused Linux AMD64 GHA is available when needed. Do not run full GHA after every group, and G06 intermediate release qualification is removed. Before final acceptance remove all temporary CI mechanisms, restore normal automatic full CI, then run the full agreed GHA and exact final-JAR smoke on native AMD64/ARM64. No additional main commits or production use. Correctness requirements remain unchanged. See `decisions.json#future_migration_validation_policy`.
+> **Current rules, 2026-11-19:** G01 is complete at `joom-1.2-1-rc1` (`c04d2d03c`); G02 is complete and accepted for integration into branch-1.2, including the closed JNI memory-wait cancellation case and accepted performance assessment; actual integration/remote refs are recorded in the post-commit receipt; G03-G10 remain gated. Do not touch `${DATASCI_ROOT}/`. For each remaining group use local builds/targeted regressions and track unverified cases; focused Linux AMD64 GHA is available when needed. Do not run full GHA after every group, and G06 intermediate release qualification is removed. Before final acceptance remove all temporary CI mechanisms, restore normal automatic full CI, then run the full agreed GHA and exact final-JAR smoke on native AMD64/ARM64. No additional main commits or production use. Correctness requirements remain unchanged. See `decisions.json#future_migration_validation_policy`.
 
 > **Historical authorization (2026-11-18):** finish G01, finalize English documentation, consolidate service/checkpoint history, repeat exact-source RC Build & Smoke if needed, then integrate into branch-1.2 and create joom-1.2-1-rc1 after successful verification. Check completeness afterwards. Do not start G02 or do further Java 21 work. STATE.json records actual progress; decisions.json records the latest instruction.
 
@@ -35,9 +35,13 @@ under the License.
 
 The local datafusion-comet project is registered as
 `79ec4996-572a-4070-96f7-2344b555eb2c`, with primary directory
-`/Users/skotlov/d/projects/datafusion-comet`.
+`${COMET_ROOT}`.
 The user explicitly authorized the coordinator to create/manage sessions, pass tasks
 and clarifications, and verify results. The user does not need to copy context manually.
+
+Resolve all portable paths through PATHS.md and explicit local bindings before
+resuming. Actual paths and untouched evidence remain outside Git; do not evaluate
+JSON or treat a placeholder as an expansion of the authorized scope.
 
 ## Selected execution model
 
@@ -55,7 +59,7 @@ not required within the existing scope. The user does not manually allocate task
 
 ## Current phase
 
-**G02 is complete and integrated into branch-1.2 under explicit user approval.** Final source/ref/tree proof is in `/Users/skotlov/d/temp/20261119_comet12-g02-integration/completion.json`.
+**G02 is complete and integrated into branch-1.2 under explicit user approval.** Final source/ref/tree proof is in `${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json`.
 G01/RC1 remains unchanged. G02-results.json/G02-report.md and STATE.json record
 current checks and deferred cases. G03-G10 need separate explicit authorization.
 Apply the 2026-11-19 validation policy; no per-group full GHA or G06 qualification.
@@ -86,7 +90,7 @@ Apply the 2026-11-19 validation policy; no per-group full GHA or G06 qualificati
 - Performance using established Comet conventions, without special infrastructure.
 - Exact write scope; process documentation only in docs/joom-migration.
 - Report format; do not automatically begin the next group.
-- No access to /Users/skotlov/d/projects/datasci/; it belongs to a parallel chat.
+- No access to ${DATASCI_ROOT}/; it belongs to a parallel chat.
 - Local builds/targeted regressions during each G; track every deferred case and
   temporary CI mechanism in STATE.json. Focused Linux AMD64 GHA only if needed.
 - Before final acceptance restore normal automatic full CI and remove all
@@ -113,4 +117,4 @@ old snapshots must not overwrite the current state.
 
 Translation note: historical Russian statements above have been translated into
 English. The original pre-translation documents are archived at
-`/Users/skotlov/d/temp/20261118_comet12-g01-finalization/documentation-before.zip`.
+`${MIGRATION_AUX_ROOT}/20261118_comet12-g01-finalization/documentation-before.zip`.

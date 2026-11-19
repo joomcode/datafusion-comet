@@ -44,7 +44,7 @@ Status at the initial2026-11-17 checkpoint: registry baseline passed; G01.2 pris
 - Added zero-partition pruning regression from 45fad9eea (production equivalent already upstream).
 - CI Spark4.2.1 + Delta4.2 lane/routing; python3 dev/ci/check-ci-config.py passed.
 - Removed -pl from touched Makefile/Delta-workflow paths.
-- Local Spark fixture created WITHOUT network from the user's checkout in target/joom-spark-4.2.1. Original /Users/skotlov/d/temp/src/spark unchanged. Diff4.2.0 applied three-way to v4.2.1; six import-only conflicts resolved, preserving new Spark imports and Comet imports. dev/diffs/4.2.1.diff generated from an actual Spark Git diff,283345bytes; clean-index git apply --check passed.
+- Local Spark fixture created WITHOUT network from the user's checkout in target/joom-spark-4.2.1. Original ${UPSTREAM_SPARK_ROOT} unchanged. Diff4.2.0 applied three-way to v4.2.1; six import-only conflicts resolved, preserving new Spark imports and Comet imports. dev/diffs/4.2.1.diff generated from an actual Spark Git diff,283345bytes; clean-index git apply --check passed.
 
 ## Registry-baseline results
 
@@ -64,7 +64,7 @@ Logs of all successful and failed runs are preserved in the task directory below
 4. Adapt release builder/publisher, locked graph, GLIBC<=2.31, both architectures, local validate-only publisher checks, actual smoke tests. RC1 is internal and an incomplete port. No publication or production operations.
 5. Actual GCP ADC reads require an authorized isolated test resource; current network scope does not permit productionGCP. An auth-gate unit test does not constitute such a read.
 
-Main logs/download directory: `/Users/skotlov/d/temp/20261117_comet12-g01`. Add target/joom-spark-4.2.1, native/target and actual Maven/Cargo caches to the cleanup ledger. When changing sessions, first check actual Git status/HEAD and active tool sessions.
+Main logs/download directory: `${MIGRATION_AUX_ROOT}/20261117_comet12-g01`. Add target/joom-spark-4.2.1, native/target and actual Maven/Cargo caches to the cleanup ledger. When changing sessions, first check actual Git status/HEAD and active tool sessions.
 
 ## At the pause
 
@@ -89,11 +89,11 @@ Registry baseline and pristine vendor committed. Workspace integration and relea
 
 ## Resuming after the second pause
 
-Checked inside sandbox: ProtocBridge cache write, loopback bind/connect, Docker27.4.0. The user confirmed both architectures must be completed in G01 and service checkpoint commits combined. Implementation/checks only G01; current raw outputs: /Users/skotlov/d/temp/20261117_comet12-g01-final-qualification. Service history is combined before the final build, preserving substantive commits; mapping and backup ref are in this task directory.
+Checked inside sandbox: ProtocBridge cache write, loopback bind/connect, Docker27.4.0. The user confirmed both architectures must be completed in G01 and service checkpoint commits combined. Implementation/checks only G01; current raw outputs: ${MIGRATION_AUX_ROOT}/20261117_comet12-g01-final-qualification. Service history is combined before the final build, preserving substantive commits; mapping and backup ref are in this task directory.
 
 ## PR28 runner allocation fix
 
-GitHubAPI confirmed Preflight/RequiredChecks had ubuntu-slim labels, empty runner_name,0 steps. Replace6 runs-on labels in ci.yml/PRtitle/Icebergcoverage with ubuntu-24.04; update sourceCI diagram/comments. Tests/commands unchanged. LocalCIconfigcheckpassed. RAT found4migrationdocumentswithoutheaders; standardheadersadded. pull_request_target labeler reads unchangedbase and remains outsidefeaturefix. Rawlogs: /Users/skotlov/d/temp/20261117_comet12-g01-runner-fix.
+GitHubAPI confirmed Preflight/RequiredChecks had ubuntu-slim labels, empty runner_name,0 steps. Replace6 runs-on labels in ci.yml/PRtitle/Icebergcoverage with ubuntu-24.04; update sourceCI diagram/comments. Tests/commands unchanged. LocalCIconfigcheckpassed. RAT found4migrationdocumentswithoutheaders; standardheadersadded. pull_request_target labeler reads unchangedbase and remains outsidefeaturefix. Rawlogs: ${MIGRATION_AUX_ROOT}/20261117_comet12-g01-runner-fix.
 
 ## PR28 Markdown preflight fix
 

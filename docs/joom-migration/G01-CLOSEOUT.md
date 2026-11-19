@@ -31,7 +31,7 @@ git show --no-patch joom-1.2-1-rc1
 git merge-base --is-ancestor joom-1.2-1-rc1 branch-1.2
 ```
 
-Integration uses a fast-forward, preserving the qualified SHA. No post-build documentation or merge commit is added to the release. The final run's artifacts are downloaded to `target/joom-release/gha-<run-id>`. An additional local completion receipt is saved at `/Users/skotlov/d/temp/20261118_comet12-g01-finalization/completion.json`. The Actions run can be located from the tag annotation or [RC Build & Smoke](https://github.com/joomcode/datafusion-comet/actions/workflows/rc_build_smoke.yml).
+Integration uses a fast-forward, preserving the qualified SHA. No post-build documentation or merge commit is added to the release. The final run's artifacts are downloaded to `target/joom-release/gha-<run-id>`. An additional local completion receipt is saved at `${MIGRATION_AUX_ROOT}/20261118_comet12-g01-finalization/completion.json`. The Actions run can be located from the tag annotation or [RC Build & Smoke](https://github.com/joomcode/datafusion-comet/actions/workflows/rc_build_smoke.yml).
 
 ## Retained behavior and validation
 
@@ -47,7 +47,7 @@ Four ignored HDFS-cluster tests are inapplicable to Joom GCP; the fifth ignored 
 
 ## Translation and history preservation
 
-All committed migration documentation is English. User quotations originally written in Russian are translated quotations; the original snapshot is retained in `/Users/skotlov/d/temp/20261118_comet12-g01-finalization/documentation-before.zip`. The full 58 active feature cards plus historical H01, approved nine-group plan and tenth reserve, dependencies, source references, correctness guards and authorization boundaries are preserved. The English text snapshots are `approved-plan.txt` and `correctness-test-plan.txt`; external historical research paths retain their original names.
+All committed migration documentation is English. User quotations originally written in Russian are translated quotations; the original snapshot is retained in `${MIGRATION_AUX_ROOT}/20261118_comet12-g01-finalization/documentation-before.zip`. The full 58 active feature cards plus historical H01, approved nine-group plan and tenth reserve, dependencies, source references, correctness guards and authorization boundaries are preserved. The English text snapshots are `approved-plan.txt` and `correctness-test-plan.txt`; external historical research paths retain their original names.
 
 `G01-HISTORY.json` maps the original G01 commits to the rewritten history. All G01 service/checkpoint documentation is consolidated into one final documentation commit. Eighteen substantive code commits remain; RC implementation and its follow-up fixes are combined. Existing integration-base ancestry is retained. Backup ref `refs/joom-migration/checkpoints/20261118-before-finalization` and the original documentation archive preserve recovery evidence.
 
