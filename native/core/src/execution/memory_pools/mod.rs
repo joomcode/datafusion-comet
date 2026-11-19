@@ -116,6 +116,43 @@ pub(crate) fn create_memory_pool_with_fake_spark(
     create_pool(memory_pool_config, task_attempt_id, || fake.memory())
 }
 
+/// Controls the Spark task grant used by the sort integration regressions.
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct FakeSparkTask {
+    spark: Arc<spark_memory::fake::FakeSpark>,
+}
+
+#[cfg(test)]
+impl FakeSparkTask {
+    pub(crate) fn set_limit(&self, limit: usize) {
+        self.spark.set_limit(limit);
+    }
+
+    pub(crate) fn held(&self) -> usize {
+        self.spark.held()
+    }
+}
+
+/// A sort's pool built through the production decorators and per-plan accounting,
+/// connected to a fake Spark task whose grant can shrink while the sort is running.
+#[cfg(test)]
+pub(crate) fn fair_unified_pool_with_fake_spark(
+    pool_size: usize,
+    spark_task_limit: usize,
+) -> (Arc<dyn MemoryPool>, FakeSparkTask) {
+    use std::sync::atomic::{AtomicI64, Ordering};
+
+    // Production pools are task-shared, so concurrent regressions need distinct IDs.
+    static NEXT_TASK: AtomicI64 = AtomicI64::new(-10_000_000);
+    let task_attempt_id = NEXT_TASK.fetch_sub(1, Ordering::Relaxed);
+    let spark = spark_memory::fake::FakeSpark::with(spark_task_limit);
+    let config = MemoryPoolConfig::new(MemoryPoolType::FairUnified, pool_size);
+    let inner = create_pool(&config, task_attempt_id, || spark.memory());
+    let pool: Arc<dyn MemoryPool> = Arc::new(PlanMemoryPool::new(inner));
+    (pool, FakeSparkTask { spark })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

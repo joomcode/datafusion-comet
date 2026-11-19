@@ -41,6 +41,77 @@ mod schema;
 mod statistics;
 mod timestamp;
 
+#[test]
+#[expect(
+    deprecated,
+    reason = "Verify the legacy child-replacement API as well as its supported replacement"
+)]
+fn fresh_sort_runtime_reset_and_child_replacement_preserve_spill_before_output() {
+    let session = session(2);
+    for spill_before_output in [false, true] {
+        let template = sort(
+            memory_input(vec![Some(3), Some(1), Some(2)], &DataType::Int32),
+            2,
+            SortOptions::default(),
+        )
+        .with_spill_before_output(spill_before_output);
+        assert_eq!(template.clone().spill_before_output(), spill_before_output);
+        let plan = Arc::new(wrapper(&template, &session));
+        assert_eq!(plan.template.spill_before_output(), spill_before_output);
+        assert_eq!(
+            plan.build_runtime_sort()
+                .unwrap()
+                .sort
+                .spill_before_output(),
+            spill_before_output
+        );
+
+        let reset = Arc::clone(&plan).reset_state().unwrap();
+        let reset = reset.downcast_ref::<TopKReaderFilterExec>().unwrap();
+        assert_eq!(reset.template.spill_before_output(), spill_before_output);
+        assert_eq!(
+            reset
+                .build_runtime_sort()
+                .unwrap()
+                .sort
+                .spill_before_output(),
+            spill_before_output
+        );
+
+        for key_type in [DataType::Int64, DataType::Float64] {
+            let input = memory_input(vec![Some(103), Some(101), Some(102)], &key_type);
+            for replace in [false, true] {
+                let replaced = if replace {
+                    Arc::clone(&plan).replace_children(
+                        vec![Arc::clone(&input)],
+                        ReplaceChildrenOptions::new(ChildrenPropertiesMode::Recompute),
+                    )
+                } else {
+                    Arc::clone(&plan).with_new_children(vec![Arc::clone(&input)])
+                }
+                .unwrap();
+                // Int64 keeps the wrapper; unsupported Float64 falls back to the original
+                // native SortExec. Both rewrites must preserve the JVM-boundary contract.
+                let actual = if let Some(wrapper) = replaced.downcast_ref::<TopKReaderFilterExec>()
+                {
+                    assert_eq!(key_type, DataType::Int64);
+                    wrapper.template.spill_before_output()
+                } else {
+                    assert_eq!(key_type, DataType::Float64);
+                    replaced
+                        .downcast_ref::<SortExec>()
+                        .unwrap()
+                        .spill_before_output()
+                };
+                assert_eq!(
+                    actual, spill_before_output,
+                    "{key_type:?}, replace={replace}"
+                );
+            }
+        }
+    }
+}
+
 fn session(batch_size: usize) -> Arc<SessionContext> {
     let mut config = SessionConfig::new()
         .with_target_partitions(1)

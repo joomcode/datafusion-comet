@@ -120,6 +120,93 @@ class CometExecSuite extends CometTestBase {
     }
   }
 
+  test("SQLConf serde resolves the sort spill-before-output threshold") {
+    val key = CometConf.COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD.key
+    def entries = ConfigMap.parseFrom(CometExecIterator.serializeCometSQLConfs()).getEntriesMap
+    val conf = spark.sparkContext.getConf
+    val cores = entries.get("spark.executor.cores").toInt
+    val expected = if (conf.getBoolean("spark.memory.offHeap.enabled", false)) {
+      val tasks = math.max(cores / math.max(conf.getInt("spark.task.cpus", 1), 1), 1)
+      conf.getSizeAsBytes("spark.memory.offHeap.size", "0") / tasks / 4
+    } else {
+      0L
+    }
+    assert(entries.get(key) == expected.toString)
+
+    val offHeap = conf
+      .clone()
+      .set("spark.memory.offHeap.enabled", "true")
+      .set("spark.memory.offHeap.size", "12g")
+      .set("spark.task.cpus", "1")
+    assert(CometExecIterator.sortSpillBeforeOutputThreshold(offHeap, 8) == 384L * 1024 * 1024)
+    assert(
+      CometExecIterator.sortSpillBeforeOutputThreshold(
+        offHeap.clone().set("spark.task.cpus", "4"),
+        8) == 1536L * 1024 * 1024)
+    // Match Spark task-share clamping, including defensive handling of invalid zero values.
+    assert(
+      CometExecIterator.sortSpillBeforeOutputThreshold(
+        offHeap.clone().set("spark.task.cpus", "0"),
+        8) == 384L * 1024 * 1024)
+    assert(
+      CometExecIterator.sortSpillBeforeOutputThreshold(
+        offHeap.clone().set("spark.task.cpus", "32"),
+        8) == 3L * 1024 * 1024 * 1024)
+    assert(
+      CometExecIterator.sortSpillBeforeOutputThreshold(offHeap, 0) == 3L * 1024 * 1024 * 1024)
+    assert(
+      CometExecIterator.sortSpillBeforeOutputThreshold(
+        offHeap.clone().set("spark.memory.offHeap.enabled", "false"),
+        8) == 0L)
+
+    withSQLConf(key -> "512m") {
+      assert(entries.get(key) == (512L * 1024 * 1024).toString)
+    }
+    withSQLConf(key -> "0") {
+      assert(entries.get(key) == "0")
+      assert(CometExecIterator.sortSpillBeforeOutputThreshold(offHeap, 8) == 0L)
+    }
+  }
+
+  test("a native sort spills before output only when the JVM reads its output") {
+    def sortSpills(plan: SparkPlan): Seq[Long] =
+      collect(plan) { case s: CometSortExec => s.metrics("spill_count").value }
+    withSQLConf(
+      SQLConf.ANSI_ENABLED.key -> "true",
+      CometConf.COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD.key -> "1",
+      CometConf.COMET_EXEC_WINDOW_ENABLED.key -> "true",
+      SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+      SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+      withParquetTable((0 until 20000).map(i => (i % 37, s"v${i * 7919 % 20000}", i)), "a") {
+        withParquetTable((0 until 5000).map(i => (i % 37, s"w$i")), "b") {
+          val (_, jvmRead) = checkSparkAnswerAndOperator(
+            sql("SELECT _1, _2, _3 FROM a ORDER BY _2, _3"),
+            Seq(classOf[CometSortExec]))
+          assert(sortSpills(jvmRead).nonEmpty)
+          assert(sortSpills(jvmRead).forall(_ > 0), jvmRead)
+
+          val (_, filtered) = checkSparkAnswerAndOperator(
+            sql("SELECT _2, _3 + 1 FROM a WHERE _1 > 3 ORDER BY _2, _3"),
+            Seq(classOf[CometSortExec]))
+          assert(sortSpills(filtered).nonEmpty)
+          assert(sortSpills(filtered).forall(_ > 0), filtered)
+
+          val (_, windowRead) = checkSparkAnswerAndOperator(
+            sql("SELECT _1, _2, row_number() OVER (PARTITION BY _1 ORDER BY _2, _3) FROM a"),
+            Seq(classOf[CometWindowExec], classOf[CometSortExec]))
+          assert(sortSpills(windowRead).nonEmpty)
+          assert(sortSpills(windowRead).forall(_ == 0), windowRead)
+
+          val (_, joinRead) = checkSparkAnswerAndOperator(
+            sql("SELECT a._1, a._2, b._2 FROM a JOIN b ON a._1 = b._1 AND a._3 < 300"),
+            Seq(classOf[CometSortMergeJoinExec], classOf[CometSortExec]))
+          assert(sortSpills(joinRead).nonEmpty)
+          assert(sortSpills(joinRead).forall(_ == 0), joinRead)
+        }
+      }
+    }
+  }
+
   test("native sort spill files are compressed with the default spill codec") {
     val numRows = 20000
     val compressibleValue = "native-sort-spill-compression-" * 8
@@ -3447,6 +3534,37 @@ class CometExecSuite extends CometTestBase {
     }
 
     spark.sessionState.functionRegistry.dropFunction(funcId_bloom_filter_agg)
+  }
+
+  for (dictionaryEnabled <- Seq(false, true)) {
+    test(
+      s"sort wide binary payload preserves values across the native boundary, " +
+        s"dictionary=$dictionaryEnabled") {
+      // A small batch forces repeated output handoffs. Nulls and distinct backing buffers
+      // catch a view retaining the wrong payload, with both Parquet binary representations.
+      withTempDir { dir =>
+        val path = new Path(dir.toURI.toString, "wide-sort").toString
+        val rows = (0 until 384).map { i =>
+          val value = if (dictionaryEnabled) i % 5 else i % 251
+          val payload = if (i % 7 == 0) null else Array.fill[Byte](8192)(value.toByte)
+          (i, payload)
+        }
+        spark
+          .createDataFrame(rows)
+          .coalesce(1)
+          .write
+          .option("parquet.enable.dictionary", dictionaryEnabled.toString)
+          .parquet(path)
+        withSQLConf(
+          SQLConf.ANSI_ENABLED.key -> "true",
+          CometConf.COMET_BATCH_SIZE.key -> "32",
+          "spark.comet.exec.sort.enabled" -> "true",
+          "spark.comet.exec.transitionRevert.enabled" -> "false") {
+          val query = spark.read.parquet(path).sortWithinPartitions($"_1".desc)
+          checkSparkAnswerAndOperator(query, Seq(classOf[CometSortExec]))
+        }
+      }
+    }
   }
 
   test("sort (non-global)") {

@@ -17,6 +17,12 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+> **Current G03 acceptance, 2026-11-19:** The user approved pushing and integrating G03 into branch-1.2 after local validation. G03 is complete; actual final refs/tree and post-merge proof are recorded after commit in `${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json`. Preserve two substantive commits and the original implementation receipt. G04-G10, main/tag changes, full per-group GHA, artifact publication and production remain unauthorized. Final Linux/release and the known baseline workspace lint/toolchain checks remain required. See decisions.json#g03_integration_authorization and STATE.json.
+
+> **Historical pre-integration G03 result, 2026-11-19:** G03 is implemented and locally validated, ready for integration review. See G03-report.md/G03-results.json and STATE.json. The documentation push is verified; branch-1.2 stays at672988395 until further approval. G04-G10 remain unauthorized. Final Linux/release qualification and the known pristine-vendor/toolchain lint issue remain tracked; no production use.
+
+> **Historical G03 implementation authorization, 2026-11-19:** The user explicitly started G03 after the documentation push verified origin/branch-1.2 at672988395. Implement D11/D02/D04/D03 in joom/1.2-sort-spill-budget, using local builds/targeted regressions. Earlier G03 holds below are historical. Report before integration; G04-G10, main/tag changes, full per-group GHA, publication and production remain unauthorized. See decisions.json#g03_authorization and STATE.json.
+
 # Instructions for migration documentation
 
 Keep migration execution guidance, decisions, handoffs, progress and cleanup
@@ -24,9 +30,10 @@ instructions inside this directory. Do not add migration-specific guidance to
 the repository root AGENTS.md or other project documentation.
 
 Before work, read README.md, PATHS.md, decisions.json, STATE.json and approved-plan.json.
-G01 is complete at joom-1.2-1-rc1. The user explicitly authorized G02 on
-2026-11-19; see decisions.json#g02_authorization. Start G03 or any later group
-only after separate explicit user authorization. Session orchestration, local Git and the approved network scope
+G01 is complete at joom-1.2-1-rc1; G02 and G03 are completed under explicit user
+approval. See decisions.json#g03_integration_authorization for the current G03
+acceptance and integration scope. Start G04 or any later group only after
+separate explicit user authorization. Session orchestration, local Git and the approved network scope
 remain authorized; publishing/production actions remain excluded.
 
 If a required tool, permission or environment capability is missing, report the
@@ -49,14 +56,14 @@ The main chat is the default implementation/integration owner; internal helpers
 perform bounded research and independent review. The coordinator chooses delegation
 and occasional user-visible sessions autonomously within the authorized scope.
 Nine feature branches do not require nine separate chats. See HANDOFF.md and
-decisions.json#execution_model. G02 is authorized; the stage gate remains active for G03-G10.
+decisions.json#execution_model. G03 is complete; the stage gate remains active for G04-G10.
 
 ## G01 finalization and committed language
 
 The user authorized final English documentation, service-history consolidation,
 exact-SHA RC qualification, and conditional G01 integration/tagging on 2026-11-18.
 See decisions.json#g01_finalization_authorization and G01-CLOSEOUT.md. Earlier
-no-merge/no-tag statements are historical for G01. That historical hold was superseded for G02 on 2026-11-19; G03-G10 and
+no-merge/no-tag statements are historical for G01. That historical hold was superseded by the later G02/G03 authorizations; G04-G10 and
 Java 21 work remain closed. Commit messages and committed documentation must be English; user quotes
 originally written in Russian are translated, with originals preserved in the
 pre-finalization archive. A final post-build source commit would change provenance;
@@ -78,7 +85,7 @@ Preserve correctness, reviewability and immutable release tags.
 
 These rules were explicitly requested on 2026-11-19. The local documentation
 update should accompany the next authorized substantive change rather than
-create a standalone service commit. G02 was explicitly authorized on 2026-11-19; later groups remain gated.
+create a standalone service commit. G02 and G03 were explicitly authorized and completed; G04-G10 remain gated.
 
 ## Repository boundary and validation policy (2026-11-19)
 
@@ -107,11 +114,11 @@ condition does not itself grant permission to deploy or use production.
 See decisions.json#future_migration_validation_policy. Every next G remains
 subject to separate user authorization.
 
-## G02 follow-up authorization (2026-11-19)
+## Historical G02 follow-up authorization (2026-11-19)
 
 The user approved closing the JNI memory-wait cancellation case, rerunning affected local regressions, folding the fix into its substantive G02 commit, pushing `joom/1.2-native-runtime`, and showing the final diff for merge approval. At that stage the approval superseded the earlier remote-action hold for the feature push only. The subsequent G02 integration authorization below now supersedes its merge hold. G03, full per-group GHA, new release tags, main changes and artifact publication remain excluded. The memory-wait case is now closed by local evidence in G02-report.md/G02-results.json; platform/release qualification remains required.
 
-## G02 accepted integration (2026-11-19)
+## Historical G02 accepted integration (2026-11-19)
 
 The user explicitly approved the practical performance conclusions, service-change consolidation, integration of G02 into branch-1.2, post-merge verification and reporting the final merged commit names. See decisions.json#g02_performance_acceptance and #g02_integration_authorization. This supersedes prior G02 merge holds and the feature-push-only limit for this integration. Keep three substantive commits, fold documentation into the existing third commit and fast-forward without an extra merge commit. Synchronize only the feature/integration refs using guarded Git operations; main and release tags remain unchanged. Final local/remote/tree proof is recorded after commit in `${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json`. G02 is complete; G03-G10 require separate explicit authorization. No new full per-group GHA or release qualification is requested. Production remains unauthorized.
 
@@ -127,5 +134,7 @@ feature scope and stage gates; validate cleanup roots and quote required variabl
 Normalize historical output/translated statements transparently; do not claim
 they are byte-identical raw records. Update MANIFEST.json after intentional edits.
 Do not access the datasci repository, regardless of its local checkout location.
-This documentation-only authorization does not start G03 or authorize push,
-CI, release, production, source/history rewriting or artifact publication.
+That earlier documentation-only authorization did not start G03 or authorize
+push, CI, release, production, source/history rewriting or artifact publication.
+G03 implementation and integration were later authorized separately; G04-G10
+remain closed.

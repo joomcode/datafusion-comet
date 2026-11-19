@@ -116,3 +116,15 @@ The user approved `git push -u origin joom/1.2-native-runtime` to github.com/joo
 ## G02 integration authorization (2026-11-19)
 
 The user's explicit G02 merge instruction supersedes the earlier branch-1.2 hold for this stage. Necessary Git operations use github.com/joomcode/datafusion-comet: inspect remote refs/feature PR metadata, update the consolidated feature with an exact force-with-lease if its published commit is rewritten, and publish branch-1.2 by fast-forward. Prefer an atomic two-ref push; never overwrite an unexpected remote update. No main or tag push, PR/CI launch, artifact publication or production operation is authorized by this step. Existing read-only GitHub API and official Apache RAT/Maven download scopes still apply.
+
+## G03 integration authorization (2026-11-19)
+
+The user explicitly approved pushing `joom/1.2-sort-spill-budget` to origin and
+merging it into `branch-1.2`, then checking the result and reporting the included
+commits. Necessary scoped Git operations use github.com/joomcode/datafusion-comet:
+inspect remote refs, publish the consolidated feature and fast-forward the base.
+Prefer an atomic two-ref push and reject unexpected remote changes. Fold acceptance
+documentation into the existing second substantive commit; the original feature
+was not yet published. No main/tag push, PR/full per-group CI launch, artifact
+publication, production operation or G04 implementation is authorized here.
+Existing read-only GitHub and official Apache RAT/Maven scopes remain unchanged.

@@ -17,7 +17,13 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-> **Current rules, 2026-11-19:** G01 is complete at `joom-1.2-1-rc1` (`c04d2d03c`); G02 is complete and accepted for integration into branch-1.2, including the closed JNI memory-wait cancellation case and accepted performance assessment; actual integration/remote refs are recorded in the post-commit receipt; G03-G10 remain gated. Do not touch `${DATASCI_ROOT}/`. For each remaining group use local builds/targeted regressions and track unverified cases; focused Linux AMD64 GHA is available when needed. Do not run full GHA after every group, and G06 intermediate release qualification is removed. Before final acceptance remove all temporary CI mechanisms, restore normal automatic full CI, then run the full agreed GHA and exact final-JAR smoke on native AMD64/ARM64. No additional main commits or production use. Correctness requirements remain unchanged. See `decisions.json#future_migration_validation_policy`.
+> **Current G03 acceptance, 2026-11-19:** The user approved pushing and integrating G03 into branch-1.2 after local validation. G03 is complete; actual final refs/tree and post-merge proof are recorded after commit in `${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json`. Preserve two substantive commits and the original implementation receipt. G04-G10, main/tag changes, full per-group GHA, artifact publication and production remain unauthorized. Final Linux/release and the known baseline workspace lint/toolchain checks remain required. See decisions.json#g03_integration_authorization and STATE.json.
+
+> **Historical pre-integration G03 result, 2026-11-19:** G03 is implemented and locally validated, ready for integration review. See G03-report.md/G03-results.json and STATE.json. The documentation push is verified; branch-1.2 stays at672988395 until further approval. G04-G10 remain unauthorized. Final Linux/release qualification and the known pristine-vendor/toolchain lint issue remain tracked; no production use.
+
+> **Historical G03 implementation authorization, 2026-11-19:** The user explicitly started G03 after the documentation push verified origin/branch-1.2 at672988395. Implement D11/D02/D04/D03 in joom/1.2-sort-spill-budget, using local builds/targeted regressions. Earlier G03 holds below are historical. Report before integration; G04-G10, main/tag changes, full per-group GHA, publication and production remain unauthorized. See decisions.json#g03_authorization and STATE.json.
+
+> **Historical post-G02 rules, 2026-11-19:** G01 is complete at `joom-1.2-1-rc1` (`c04d2d03c`); G02 is complete and accepted for integration into branch-1.2, including the closed JNI memory-wait cancellation case and accepted performance assessment; actual integration/remote refs are recorded in the post-commit receipt; G03-G10 remain gated. Do not touch `${DATASCI_ROOT}/`. For each remaining group use local builds/targeted regressions and track unverified cases; focused Linux AMD64 GHA is available when needed. Do not run full GHA after every group, and G06 intermediate release qualification is removed. Before final acceptance remove all temporary CI mechanisms, restore normal automatic full CI, then run the full agreed GHA and exact final-JAR smoke on native AMD64/ARM64. No additional main commits or production use. Correctness requirements remain unchanged. See `decisions.json#future_migration_validation_policy`.
 
 > **Historical authorization (2026-11-18):** finish G01, finalize English documentation, consolidate service/checkpoint history, repeat exact-source RC Build & Smoke if needed, then integrate into branch-1.2 and create joom-1.2-1-rc1 after successful verification. Check completeness afterwards. Do not start G02 or do further Java 21 work. STATE.json records actual progress; decisions.json records the latest instruction.
 
@@ -59,10 +65,12 @@ not required within the existing scope. The user does not manually allocate task
 
 ## Current phase
 
-**G02 is complete and integrated into branch-1.2 under explicit user approval.** Final source/ref/tree proof is in `${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json`.
-G01/RC1 remains unchanged. G02-results.json/G02-report.md and STATE.json record
-current checks and deferred cases. G03-G10 need separate explicit authorization.
-Apply the 2026-11-19 validation policy; no per-group full GHA or G06 qualification.
+**G03 is complete and accepted for integration into branch-1.2 under explicit user approval.** Actual final source/ref/tree proof is recorded after commit in `${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json`.
+G01/RC1 and the G02 implementation remain preserved. G03-results.json/G03-report.md
+and STATE.json record current checks and deferred cases. G04-G10 need separate
+explicit authorization. Apply the 2026-11-19 validation policy; no per-group full
+GHA or G06 qualification. The original G02 integration receipt remains historical
+proof in `${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json`.
 
 ## Coordinator responsibilities
 

@@ -226,3 +226,15 @@ docs/joom-migration/G02-performance.md
 
 # Portable documentation notation
 docs/joom-migration/PATHS.md
+
+# G03 sort spill budget
+docs/joom-migration/G03-performance.md
+docs/joom-migration/G03-report.md
+docs/joom-migration/G03-results.json
+native/core/benches/sort_payload.rs
+native/core/src/execution/jni_api/sort_memory_tests.rs
+native/vendor/datafusion-physical-plan/benches/sort_wide_payload.rs
+native/vendor/datafusion-physical-plan/src/sorts/sort/comet_memory_tests.rs
+native/vendor/datafusion-physical-plan/src/sorts/sort/late_materialize.rs
+native/vendor/datafusion-physical-plan/src/sorts/sort/wide_payload.rs
+native/vendor/datafusion-physical-plan/src/sorts/spill_workspace.rs

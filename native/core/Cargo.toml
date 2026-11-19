@@ -177,3 +177,7 @@ harness = false
 [[bench]]
 name = "sort_row_partitions"
 harness = false
+
+[[bench]]
+name = "sort_payload"
+harness = false

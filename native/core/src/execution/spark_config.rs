@@ -30,6 +30,8 @@ pub(crate) const COMET_EXEC_AGGREGATE_SKIP_PARTIAL_ENABLED: &str =
     "spark.comet.exec.aggregate.skipPartial.enabled";
 pub(crate) const COMET_EXEC_SPILL_COMPRESSION_CODEC: &str =
     "spark.comet.exec.spill.compression.codec";
+pub(crate) const COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD: &str =
+    "spark.comet.exec.sort.spillBeforeOutputThreshold";
 pub(crate) const COMET_NATIVE_UDF_ENABLED: &str = "spark.comet.nativeUdf.enabled";
 pub(crate) const COMET_NATIVE_UDF_ALLOWED_PATHS: &str = "spark.comet.nativeUdf.allowedPaths";
 pub(crate) const COMET_STRICT_TIMESTAMP_LABELS: &str =

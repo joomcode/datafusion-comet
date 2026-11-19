@@ -744,5 +744,40 @@
     "contents": "Original documentation ZIP, explicit local root bindings, normalization/reference/state audit, formatting logs and completion receipt.",
     "preservation": "Keep through migration acceptance. Do not automatically delete; retain exact local bindings outside Git.",
     "source_artifact_cache_changes": "NONE; no downloads, builds, artifact/cache moves or deletions."
+  },
+  "g03_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03",
+    "contents": "Documentation-push verification, source-port manifests, local build/targeted test/benchmark logs, review and completion receipts.",
+    "reused_outputs": [
+      "native/target",
+      "spark/target",
+      "common/target",
+      "contrib/delta-spark/target"
+    ],
+    "cache_policy": "Reuse standard existing caches; no automatic cleanup. No new Docker/release artifact is planned for this group.",
+    "preserve": "Keep implementation/evidence until final migration acceptance.",
+    "baseline_native": {
+      "file": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/baseline-libcomet.dylib",
+      "bytes": 437362352,
+      "sha256": "8c14dc78b946e0048d9da14993cb200821e272c13556c4ab0d547995fe278938",
+      "purpose": "Preserved G02 debug-native baseline before the G03 build, for an optional existing SQL benchmark comparison. Task-created copy; original qualified evidence/artifacts remain unchanged.",
+      "preserve": "Keep through migration acceptance; no automatic deletion."
+    },
+    "measured_sizes_kib": {
+      "native/target": 53881884,
+      "spark/target": 1124536,
+      "native/target/criterion": 356,
+      "target/criterion": 372,
+      "auxiliary_directory": 427884
+    },
+    "criterion_outputs": ["native/target/criterion", "target/criterion"],
+    "attribution": "Entire reused directory sizes, not G03-only growth. Baseline dylib copy is task-created; shared cache/toolchain/release artifacts remain preserved."
+  },
+  "g03_integration_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration",
+    "contents": "Original documentation archive, qualified-source manifest, source/ref preservation checks, final RAT/static-check logs, push and completion receipts.",
+    "recovery_ref": "refs/joom-migration/checkpoints/20261119-g03-before-integration",
+    "preservation": "Keep original implementation and integration receipts separately through final migration acceptance. No automatic cleanup of records, refs or shared caches.",
+    "build_or_artifact_changes": "NONE: documentation consolidation and Git integration only; normal cached RAT may update its standard Maven cache/target."
   }
 }

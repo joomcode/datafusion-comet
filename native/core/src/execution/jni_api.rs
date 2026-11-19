@@ -133,6 +133,10 @@ use crate::execution::shuffle::{
 };
 use crate::execution::spark_plan::SparkPlan;
 use crate::execution::spill_dirs::plan_disk_manager;
+use datafusion::physical_plan::sorts::sort::SpillBeforeOutputThreshold;
+
+#[cfg(test)]
+mod sort_memory_tests;
 
 use crate::execution::tracing::{
     get_thread_id, log_memory_usage, trace_begin, trace_end, with_trace, POOL_TOTAL_METRIC,
@@ -141,10 +145,11 @@ use crate::execution::tracing::{
 use crate::execution::memory_pools::logging_pool::LoggingMemoryPool;
 use crate::execution::spark_config::{
     SparkConfig, COMET_DEBUG_ENABLED, COMET_DEBUG_MEMORY,
-    COMET_EXEC_AGGREGATE_SKIP_PARTIAL_ENABLED, COMET_EXEC_SPILL_COMPRESSION_CODEC,
-    COMET_EXPLAIN_NATIVE_ENABLED, COMET_MAX_TEMP_DIRECTORY_SIZE,
-    COMET_PARQUET_PREFETCH_NEXT_FILE_METADATA_ENABLED, COMET_PARQUET_ROW_FILTER_PUSHDOWN_ENABLED,
-    COMET_STRICT_TIMESTAMP_LABELS, COMET_TRACING_ENABLED, SPARK_EXECUTOR_CORES,
+    COMET_EXEC_AGGREGATE_SKIP_PARTIAL_ENABLED, COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD,
+    COMET_EXEC_SPILL_COMPRESSION_CODEC, COMET_EXPLAIN_NATIVE_ENABLED,
+    COMET_MAX_TEMP_DIRECTORY_SIZE, COMET_PARQUET_PREFETCH_NEXT_FILE_METADATA_ENABLED,
+    COMET_PARQUET_ROW_FILTER_PUSHDOWN_ENABLED, COMET_STRICT_TIMESTAMP_LABELS,
+    COMET_TRACING_ENABLED, SPARK_EXECUTOR_CORES,
 };
 use crate::parquet::encryption_support::{CometEncryptionFactory, ENCRYPTION_FACTORY_ID};
 use crate::parquet::parquet_exec::CometParquetScanOptions;
@@ -883,6 +888,7 @@ fn create_execution_context(
         task_cpus,
         &settings.spark_config,
         &spark_plan,
+        off_heap_mode.then_some(memory_limit as usize),
     )?;
 
     let cancellation = session
@@ -1093,7 +1099,24 @@ fn configure_skip_partial_aggregation(config: &mut SessionConfig, plan: &Operato
     }
 }
 
+/// DataFusion's fixed merge reserve can consume most of a small Spark task's share
+/// before the sorter admits its first batch. Cap this eager reservation at 1/32 of
+/// the per-task budget; the spillable merge can grow it as needed. Explicit
+/// DataFusion overrides are applied afterwards, and large tasks keep the default.
+fn configure_sort_spill_reservation(
+    config: &mut SessionConfig,
+    off_heap_limit: usize,
+    executor_cores: usize,
+    task_cpus: usize,
+) {
+    let concurrent_tasks = (executor_cores / task_cpus.max(1)).max(1);
+    let cap = (off_heap_limit / concurrent_tasks / 32).max(1);
+    let reservation = &mut config.options_mut().execution.sort_spill_reservation_bytes;
+    *reservation = (*reservation).min(cap);
+}
+
 /// Configure DataFusion session context.
+#[allow(clippy::too_many_arguments)]
 fn prepare_datafusion_session_context(
     batch_size: usize,
     memory_pool: Arc<dyn MemoryPool>,
@@ -1102,6 +1125,7 @@ fn prepare_datafusion_session_context(
     task_cpus: usize,
     spark_config: &HashMap<String, String>,
     spark_plan: &Operator,
+    off_heap_limit: Option<usize>,
 ) -> CometResult<SessionContext> {
     let paths = local_dirs.into_iter().map(PathBuf::from).collect();
     let mut rt_config = RuntimeEnvBuilder::new()
@@ -1116,6 +1140,11 @@ fn prepare_datafusion_session_context(
         // modified by changing spark.task.cpus in the Spark config.
         .with_batch_size(batch_size)
         .with_extension(PlanCancellation::new());
+
+    if let Some(limit) = off_heap_limit {
+        let executor_cores = spark_config.get_usize(SPARK_EXECUTOR_CORES, 1);
+        configure_sort_spill_reservation(&mut session_config, limit, executor_cores, task_cpus);
+    }
 
     // Translate the Comet-namespaced row-level pushdown flag into the equivalent
     // DataFusion session options. `pushdown_filters` enables the parquet reader's
@@ -1165,6 +1194,13 @@ fn prepare_datafusion_session_context(
             let df_key = format!("datafusion.{df_key}");
             session_config = session_config.set_str(&df_key, value);
         }
+    }
+
+    let spill_before_output =
+        spark_config.get_usize(COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD, 0);
+    if spill_before_output > 0 {
+        session_config = session_config
+            .with_extension(Arc::new(SpillBeforeOutputThreshold(spill_before_output)));
     }
 
     // The planner reads this back to decide whether a plan may load a native UDF library.
@@ -1588,6 +1624,7 @@ fn execute_plan(
         let start = Instant::now();
         let planner = PhysicalPlanner::new(Arc::clone(&exec_context.session_ctx), partition)
             .with_exec_id(exec_context_id)
+            .with_jvm_output_sorts(&exec_context.spark_plan)
             .with_strict_timestamp_labels(exec_context.strict_timestamp_labels)
             .with_sql_text_pool(&exec_context.spark_plan)
             .with_task_context(exec_context.task_context.clone())

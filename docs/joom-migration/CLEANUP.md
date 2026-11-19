@@ -169,3 +169,31 @@ and completion receipt. Only documentation and local audit files were created;
 no builds, dependency downloads, artifact moves or automatic cleanup occurred.
 Preserve the archive and bindings through acceptance so normalized paths remain
 resolvable. Consult completion.json for the final identity and directory size.
+
+## G03 sort/workspace implementation
+
+`${MIGRATION_AUX_ROOT}/20261119_comet12-g03` contains source/port/review manifests,
+local validation logs, the positive/negative ownership proof, benchmark results
+and the final receipt. It includes a 437362352-byte copy of the G02 native debug
+library for a possible existing SQL benchmark comparison; it is not a release JAR.
+At the measured checkpoint the whole auxiliary directory used 427884 KiB.
+
+Existing native/target used53881884KiB and spark/target
+used1124536KiB in total; these include earlier builds and
+are not G03 growth. Criterion manages outputs under the target/criterion paths
+listed in cleanup-ledger.json. No new Docker image, toolchain installation or
+release artifact was created. Keep this evidence, original shared caches, user
+checkouts and existing qualified G01 JARs through final migration acceptance.
+Nothing is automatically deleted; optional targeted cleanup remains manual.
+
+## G03 accepted integration
+
+`${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration` contains the original
+documentation ZIP, source/ref manifests, acceptance audit, RAT/static-check logs
+and push/completion receipts. Recovery ref:
+`refs/joom-migration/checkpoints/20261119-g03-before-integration`. The earlier
+G03 implementation receipt and raw test/benchmark evidence remain unchanged.
+Preserve both directories and the recovery ref through final migration acceptance;
+no automatic deletion is authorized. No runtime build, new release artifact or
+Docker image is created by integration. Exact source/ref identities and auxiliary
+size are recorded in the integration completion receipt.

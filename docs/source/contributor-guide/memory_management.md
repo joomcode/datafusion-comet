@@ -329,7 +329,8 @@ JNI, which goes through Spark's ordinary `TaskMemoryManager`. That means:
   so that Spark has something to charge, but its `spill()` always returns `0`
   (`CometTaskMemoryManager.java`). A Spark allocation can therefore never make a native sorter or
   aggregate release its reservations. Native operators spill only when their _own_ `try_grow`
-  fails, so a JVM consumer that is blocked behind native reservations has no way to reclaim them.
+  fails, apart from the sort's proactive JVM-output spill described below. A JVM consumer still
+  cannot directly reclaim native reservations through Spark's spill callback.
 - In `try_grow`, a partial grant (`acquired < additional`) is released immediately and reported as
   `ResourcesExhausted`, which is the signal DataFusion uses to spill.
 - `grow` cannot fail, so when Spark grants less than asked the pool records the full amount anyway
@@ -470,6 +471,32 @@ The writers register one consumer per task rather than one per open file because
 registered with `fair_unified` lowers the share of every other consumer in the task. A consumer per
 partition would shrink the task's other operators' shares as a fanout write widened.
 
+### Sort workspaces and JVM-output headroom
+
+The Joom sort retains its already charged reservations in a `SpillWorkspace` while it sorts
+and merges buffered batches into spill files. Merge cursors can reuse those bytes even when
+Spark has reduced the task's grant, rather than releasing them and failing to reacquire them.
+Intermediate and final merge passes retain the necessary headroom; shared input buffers and
+encoded row storage are accounted for without summing the same allocation per batch. This
+does not change the executor's fair-pool or Spark task-share rules, or turn reservations into
+a bound on RSS.
+
+In off-heap mode, the initial `datafusion.execution.sort_spill_reservation_bytes` is capped
+at the smaller of its upstream default and one thirty-second of the task's effective Comet
+memory budget (at least one byte). Explicit `spark.comet.datafusion.*` overrides, when enabled,
+apply after this cap and take precedence. No cap is applied in on-heap mode.
+
+For a sort whose output reaches the JVM through streaming operators, retaining the whole
+input can starve the JVM consumer: Spark cannot force that sort to spill. The configuration
+`spark.comet.exec.sort.spillBeforeOutputThreshold` lets the sort spill before output when
+its retained input exceeds the threshold. When unset, the threshold is a quarter of the
+Spark task's off-heap share; the default is zero in on-heap mode, and explicit zero disables
+it. An explicit byte threshold takes precedence over the default. Native buffering consumers
+(another sort, join, aggregate or writer) stop this JVM-boundary propagation, so a native-only
+chain does not acquire an unnecessary proactive spill. This is separate from the initial
+one-thirty-second merge reserve. A refused output-merge budget spills in groups while keeping
+the already granted workspace and permitting only the existing bounded shortfall.
+
 ## Crossing the FFI boundary
 
 Batches move between the JVM and native over the Arrow C Data and C Stream interfaces, which are
@@ -497,9 +524,12 @@ through a unified pool is charged to Spark. The same batch held by an operator t
 (a projection or filter, or `ScanExec` itself between polls) is charged to nothing.
 
 **Native → JVM (`CometExecIterator`).** DataFusion produces the batch in Rust, and whether it is
-still reserved when it reaches the boundary depends on the producing operator. The sort's output is
-wrapped in a `ReservationStream` that shrinks the reservation by the batch's size as each batch is
-emitted, so by the time `prepare_output` sees a sorted batch its bytes are no longer reserved.
+still reserved when it reaches the boundary depends on the producing operator. The sort's buffered
+output stream counts shared buffers across its chunks and shrinks their reservation as they are
+emitted; late-materialized gathers and spill merges release their own retained inputs as they
+advance. The exported batch does not carry its producer's reservation to the JVM. Shared buffers
+still retained by another native chunk can remain charged, but this is not a reservation owned by
+the JVM consumer.
 `prepare_output` then calls `move_to_spark`, which writes an `FFI_ArrowArray` whose release callback
 drops the Rust `ArrayData`; no reservation travels with it. The JVM wraps the pointers in
 `ArrowBuf`s and the memory is freed when the JVM calls `close()`. An exported batch is therefore
@@ -664,7 +694,9 @@ much they matter:
   withdrawn by individual operators while the bytes outlive them.
 - **Spark cannot trigger native spilling.** `NativeMemoryConsumer.spill()` returns `0`, so native
   reservations are released only when a native operator decides to spill on its own failed
-  `try_grow`. JVM consumers in the same task can be starved behind them.
+  `try_grow`, apart from the sort's proactive JVM-output spill. That targeted mechanism reduces
+  retention for the marked sorts; it does not provide general Spark-triggered reclamation, and
+  other JVM consumers can still be starved behind native reservations.
 
 [Issue #4576](https://github.com/apache/datafusion-comet/issues/4576) tracks work on the first two.
 

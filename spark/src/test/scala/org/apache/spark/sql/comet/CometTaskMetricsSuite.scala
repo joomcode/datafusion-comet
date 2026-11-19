@@ -762,11 +762,14 @@ class CometTaskMetricsSuite extends CometTestBase with AdaptiveSparkPlanHelper {
       (0 until expectedRecords.toInt).map(index => (index, compressibleValue)),
       "tbl") {
       withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
         CometConf.COMET_SHUFFLE_MODE.key -> "native",
         CometConf.COMET_SHUFFLE_COMPRESSION_CODEC.key -> "zstd",
         CometConf.COMET_SHUFFLE_NATIVE_MAX_BUFFER_BYTES.key -> "32k",
         CometConf.COMET_BATCH_SIZE.key -> "1024",
-        CometConf.COMET_OFFHEAP_MEMORY_POOL_FRACTION.key -> "0.002",
+        // Late materialization buffers wide payloads only once, so the original 0.002
+        // fraction need not spill. This smaller share requires a spill on either sort path.
+        CometConf.COMET_OFFHEAP_MEMORY_POOL_FRACTION.key -> "0.001",
         CometConf.COMET_RESPECT_DATAFUSION_CONFIGS.key -> "true",
         "spark.comet.datafusion.execution.spill_compression" -> "zstd",
         "spark.comet.datafusion.execution.sort_spill_reservation_bytes" -> "65536",
@@ -774,11 +777,25 @@ class CometTaskMetricsSuite extends CometTestBase with AdaptiveSparkPlanHelper {
         val shuffled = sql("SELECT * FROM tbl")
           .sortWithinPartitions($"_1".desc)
           .repartition(4, $"_1")
+        val sparkRows = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+          sql("SELECT * FROM tbl")
+            .collect()
+            .map(row => (row.getInt(0), row.getString(1)))
+            .sortBy(_._1)
+        }
         val store = spark.sparkContext.statusStore
         spark.sparkContext.listenerBus.waitUntilEmpty()
         val stagesBefore = store.stageList(null).map(_.stageId).toSet
 
-        assert(shuffled.collect().length == expectedRecords)
+        val cometRows = shuffled.collect()
+        assert(cometRows.length == expectedRecords)
+        // Repartition has no output order guarantee. Compare every key and payload without
+        // weakening the separate native-plan and exact stage/SQL spill accounting assertions.
+        assert(
+          cometRows
+            .map(row => (row.getInt(0), row.getString(1)))
+            .sortBy(_._1)
+            .sameElements(sparkRows))
         spark.sparkContext.listenerBus.waitUntilEmpty()
 
         val exchange = collectFirst(shuffled.queryExecution.executedPlan) {

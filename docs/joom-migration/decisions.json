@@ -324,21 +324,12 @@
   },
   "stage_start_policy": {
     "explicit_user_approval_per_group": true,
-    "currently_authorized": ["G02"],
-    "groups_not_authorized": [
-      "G03",
-      "G04",
-      "G05",
-      "G06",
-      "G07",
-      "G08",
-      "G09",
-      "G10"
-    ],
+    "currently_authorized": ["G03"],
+    "groups_not_authorized": ["G04", "G05", "G06", "G07", "G08", "G09", "G10"],
     "reaffirmed_on": "2026-11-19",
-    "completed_groups": ["G01", "G02"],
+    "completed_groups": ["G01", "G02", "G03"],
     "active_implementation_group": null,
-    "next_group_requires_separate_approval": "G03"
+    "next_group_requires_separate_approval": "G04"
   },
   "execution_pause": {
     "status": "G01_AMD64_QUALIFICATION_PENDING_USER_REVIEW",
@@ -528,7 +519,7 @@
     ],
     "correctness": "ANSI=true; compare Spark 4.2.1 without/with Comet on identical inputs and settings, checking results AND mandatory errors. Confirm actual native execution. Do not weaken checks; fix incompatibilities or exclude only the unsafe native path through a safe, targeted fallback selected before execution.",
     "production": "Do not use this migration in production until all agreed feature work is complete and final qualification succeeds. Passing qualification is a prerequisite, not authorization to publish artifacts, deploy or use production.",
-    "stage_start": "Every next G requires separate explicit user authorization. G02 implementation was subsequently authorized in g02_authorization; G03-G10 remain closed.",
+    "stage_start": "Every next G requires separate explicit user authorization. G01-G03 are completed and accepted for integration; G04-G10 remain closed.",
     "tracking": "STATE.json#validation_backlog and STATE.json#temporary_ci_mechanisms; preserve command/suite/input/settings/native-execution evidence, status, owner and remaining work. Canceled/ignored/unrun cases never count as passed."
   },
   "g02_authorization": {
@@ -573,5 +564,27 @@
     "original_documentation_archive": "${MIGRATION_AUX_ROOT}/20261119_comet12-portable-paths/documentation-before.zip",
     "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-portable-paths/completion.json",
     "git_scope": "One new English documentation commit; preserve existing history and immutable tags. No push or further stage is requested."
+  },
+  "g03_authorization": {
+    "recorded_on": "2026-11-19",
+    "status": "APPROVED_EXPLICITLY",
+    "user_request_translation": "Push documentation commit672988395 to origin/branch-1.2 and verify the remote update. Then proceed to G03 joom/1.2-sort-spill-budget: wide-row sorting, memory, spill and output handoff to the JVM.",
+    "cards": ["D11", "D02", "D04", "D03"],
+    "base_commit": "6729883958442e865707d692f32a84e9554e4090",
+    "validation": "Local builds and targeted regressions; preserve final full agreed GHA and exact-JAR native AMD64/ARM64 qualification. No full per-group GHA.",
+    "boundaries": "Feature implementation and local coherent commits. Report for integration review; do not start G04, change main/tags, publish artifacts or use production. Portable-path and datasci exclusion rules remain unchanged.",
+    "documentation_push_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/documentation-push-verification.json",
+    "implementation_status": "COMPLETED_ACCEPTED_FOR_INTEGRATION",
+    "remaining_validation": "G03-LINUX-RELEASE and G03-WORKSPACE-CLIPPY-TOOLCHAIN remain final-qualification checks; integration is approved in g03_integration_authorization, G04 is not."
+  },
+  "g03_integration_authorization": {
+    "recorded_on": "2026-11-19",
+    "status": "APPROVED_EXPLICITLY",
+    "user_request_translation": "Push G03 to origin and merge it into branch-1.2. After the merge verify the final state and report, listing the included commits. Do not start G04.",
+    "supersedes": "Earlier G03 feature-push and integration holds only; G04-G10 remain closed.",
+    "execution": "Fold acceptance/status documentation into the second existing G03 commit, retain two substantive commits, publish the feature and fast-forward branch-1.2 with guarded Git operations. Preserve the first vendor commit, tested runtime/test sources, existing history, main and immutable release tags.",
+    "remote_scope": "github.com/joomcode/datafusion-comet: inspect refs, create the G03 feature branch and fast-forward branch-1.2; do not overwrite unexpected remote updates. No PR/full per-group GHA, artifact publication or production action.",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json",
+    "next_group_authorized": false
   }
 }

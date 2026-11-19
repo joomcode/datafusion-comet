@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-19",
-  "phase": "G02_COMPLETE_G03_REQUIRES_EXPLICIT_AUTHORIZATION",
+  "phase": "G03_COMPLETE_G04_REQUIRES_EXPLICIT_AUTHORIZATION",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -74,10 +74,15 @@
       "branch": "joom/1.2-sort-spill-budget",
       "cards": ["D02", "D03", "D04", "D11"],
       "depends_on": ["G01"],
-      "status": "NOT_STARTED",
+      "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
-      "tests": "NOT_RUN",
-      "handoff_report": null
+      "tests": "371unique native/vendor and41JVM/SQL cases passed; known pre-existing workspace lint/toolchain and final Linux/release qualification tracked.",
+      "handoff_report": "G03-report.md",
+      "base_commit": "6729883958442e865707d692f32a84e9554e4090",
+      "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03",
+      "head_ref": "refs/heads/branch-1.2",
+      "integration_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json",
+      "functional_source_previously_verified": "2241a53d252cbc168296072fb876747e764333fb"
     },
     {
       "id": "G04",
@@ -289,7 +294,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Report the G02 integration/post-merge audit and final three commit names. Await separate explicit G03 authorization; no further implementation, full per-group GHA, main/tag changes or production actions.",
+  "next_step": "Report the G03 integration and post-merge audit, including the two final commit names. Await separate explicit G04 authorization; no further implementation, main/tag changes, full per-group GHA, artifact publication or production action.",
   "qualification": "Runtime sources remain byte-identical to full Comet CI source 26590264b878fb8eae2ca439a8bcc0dfb513cb36. Prior B93 RC passed 7/7 jobs and 12/12 smoke cases per architecture. Rewritten final source must pass a fresh RC build; do not reuse B93 artifacts as RC1.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -515,16 +520,16 @@
   },
   "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-final-qualification",
   "integration_gate": {
-    "status": "G02_USER_APPROVED_ACCEPTANCE",
-    "method": "Fast-forward branch-1.2 to the consolidated three-commit G02 feature; no merge commit.",
-    "previous_base": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
-    "functional_source_previously_verified": "e0388e3bc0e5415ea2b85664b1c8cf8e3cbd7574",
-    "post_commit_gate": "This source snapshot records stage acceptance; exact local/remote refs, final tree and successful execution are recorded after commit in the integration completion receipt.",
-    "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json",
+    "status": "G03_USER_APPROVED_ACCEPTANCE",
+    "method": "Fast-forward branch-1.2 to the consolidated two-commit G03 feature; no merge commit.",
+    "previous_base": "6729883958442e865707d692f32a84e9554e4090",
+    "functional_source_previously_verified": "2241a53d252cbc168296072fb876747e764333fb",
+    "post_commit_gate": "This source snapshot records stage acceptance; actual integration, local/remote refs and the exact final tree are verified after commit in the integration receipt.",
+    "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json",
     "not_authorized": [
-      "G03-G10 implementation",
+      "G04-G10 implementation",
       "main/tag changes",
-      "new full per-group GHA",
+      "full per-group GHA",
       "artifact publication",
       "production use"
     ]
@@ -1360,6 +1365,32 @@
         "native_execution_requirement": "Assert actual native window/coalescer/FFI paths with Spark result parity; not incidental fallback.",
         "status": "PLANNED_DEPENDENT_GROUP_VALIDATION",
         "evidence_path_and_source_sha": "Shared offset utility tests and explode tests under ${MIGRATION_AUX_ROOT}/20261119_comet12-g02; future consumer SHA pending."
+      },
+      {
+        "group": "G03",
+        "feature_cards": ["D11", "D02", "D04", "D03"],
+        "native_execution_requirement": "Actual native paths, result/mandatory-error parity, no canceled/ignored case counted as passed.",
+        "status": "DEFERRED_FINAL_QUALIFICATION",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/completion.json; final migration release SHA pending.",
+        "id": "G03-LINUX-RELEASE",
+        "behavior_or_test": "Run the sort/workspace/wide/handoff/cleanup coverage on native Linux and final release-feature graph; qualify exact final JARs on native AMD64/ARM64.",
+        "required_inputs_and_settings": "Spark4.2.1/Java17/ANSI=true; same shared lock/vendor graph, full agreed final native/vendor/JVM suites and exact-JAR smoke.",
+        "reason_deferred": "User-approved per-group local validation; complete Linux/release and packaged artifact qualification after all feature groups.",
+        "owner": "Final migration qualification",
+        "intended_validation_command_or_job": "Full agreed Comet CI plus RC Build & Smoke final artifacts."
+      },
+      {
+        "group": "G03",
+        "feature_cards": ["D11", "D02", "D04", "D03"],
+        "native_execution_requirement": "Actual native paths, result/mandatory-error parity, no canceled/ignored case counted as passed.",
+        "status": "DEFERRED_FINAL_QUALIFICATION",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/completion.json; final migration release SHA pending.",
+        "id": "G03-WORKSPACE-CLIPPY-TOOLCHAIN",
+        "behavior_or_test": "Full workspace strict Clippy must pass with the final supported/reproducible toolchain; keep all CI lint checks.",
+        "required_inputs_and_settings": "Actual final Linux CI/release toolchains; cargo clippy --all-targets --workspace -- -D warnings, no diagnostic deprecation exemption.",
+        "reason_deferred": "Known pristine DF55.2 Atomic::fetch_update deprecation under local Rust1.100. User prohibited unrelated production-vendor edits solely for this warning. Strict Comet and diagnostic all-other-workspace lints pass; no CI flags changed.",
+        "owner": "Final migration toolchain/CI qualification",
+        "intended_validation_command_or_job": "Resolve toolchain compatibility consistently with release/MSRV or obtain an approved compatible upstream remedy, then run unchanged strict CI. Diagnostic -Adeprecated is not acceptance."
       }
     ],
     "final_gate": "No unresolved/unverified applicable cases. Require actual passing evidence; retain only applicability exclusions explicitly agreed with the user (such as the existing HDFS-cluster exclusion)."
@@ -1494,5 +1525,82 @@
       "production operations"
     ]
   },
-  "path_notation_ref": "PATHS.md"
+  "path_notation_ref": "PATHS.md",
+  "g03": {
+    "status": "COMPLETED_INTEGRATED",
+    "base_commit": "6729883958442e865707d692f32a84e9554e4090",
+    "branch": "joom/1.2-sort-spill-budget",
+    "cards": ["D11", "D02", "D04", "D03"],
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03",
+    "authorization_ref": "decisions.json#g03_authorization",
+    "integration_authorized": true,
+    "full_gha_run": false,
+    "progress": {
+      "vendor_port": "COMPLETED: final tag13 sort/workspace/wide-payload residuals on DataFusion55.2.0; unrelated code and the test-only legacy stream fixture are preserved.",
+      "core_and_jvm_wiring": "COMPLETED: task-scaled merge reserve, JVM-output boundary, TopK reconstruction and current cancellation/pool decorators.",
+      "native_build": "PASSED final qualified macOS ARM64 dev build,80.75seconds; earlier build timings are historical in implementation_progress_before_acceptance.",
+      "maven_targeted_status": "PASSED final41/41 in41.98seconds, no failed/canceled/ignored; native bytes match the Maven test resource.",
+      "native_test_compilation": "PASSED combined Comet/vendor unit graph and final targeted follow-ups;371unique passing cases.",
+      "additional_correctness_fix": "COMPLETED: concatenated source ArrayRefs retire before charge release; physical-lifetime positive test and intentionally failing negative control are preserved.",
+      "remaining_before_qualification": "No outstanding G03 implementation or local correctness case. Final Linux/release coverage and the pre-existing workspace lint/toolchain issue remain tracked by G03-LINUX-RELEASE and G03-WORKSPACE-CLIPPY-TOOLCHAIN.",
+      "source_retirement_negative_control": "PASSED as expected failure with only source retirement disabled: live counts[4,4] instead of[2,0]. The positive source was restored, the Range-ownership compilation correction applied, and the final positive test passed.",
+      "initial_native_memory_tests": "Historical initial17/17 pass in305.84seconds; final evidence includes all19 memory cases plus broader sort coverage.",
+      "active_spill_cleanup": "PASSED both active final-merge cancellation and earlydrop cases: reject successful batch/EOF after cancellation, bounded per-plan cleanup, zero Spark grants and no managed spill files retained.",
+      "native_build_final": "PASSED native-build-qualified.json; final native/test-resource SHA256 is65d77c561ad7b8e24ed6e225da4b398a28dcc6e7eb0171c7d044e7846e3821e5.",
+      "sort_tests": "PASSED51Comet+275vendor sort cases, zero failed/ignored. Overlapping additional selections bring unique coverage to371.",
+      "targeted_followup": "PASSED4wide-payload,4spill-manager,2legacy-stream,43JNI-lifecycle and4cancellation-wrapper cases; overlap counted once.",
+      "last_ownership_cleanup": "COMPLETED and validated: owned-column conversion and the test-only legacy wrapper preserve value/schema/lifetime semantics.",
+      "workspace_clippy": "Strict Comet all-targets/no-deps passes. Full workspace strict Clippy retains the known pristine DF55.2 Atomic::fetch_update deprecation under Rust1.100. The local diagnostic exemption is not strict CI acceptance; CI flags are unchanged.",
+      "integration_change": "Only accepted documentation consolidation and the authorized branch-1.2 fast-forward. Main, RC1, runtime/test/benchmark sources, source graph and final-qualification requirements are preserved."
+    },
+    "results": "G03-results.json",
+    "report": "G03-report.md",
+    "source_freeze_note": "Acceptance updates and integration change migration documentation only. The 28 qualified non-migration source hashes and tested native bytes remain unchanged. Original implementation proof is retained separately; post-commit integration proof records final refs/tree without a self-referencing source SHA.",
+    "completion_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json",
+    "implementation_progress_before_acceptance": {
+      "upstream_base": "Documentation push verified; feature created from exact pushed SHA.",
+      "vendor_port": "In progress: final tag13 residuals onto published55.2 baseline; preserve unrelated upstream utilities.",
+      "core_and_jvm_wiring": "In progress; keep G02 cancellation and Comet1.2 dynamic-filter/PlanMemoryPool architecture.",
+      "native_build": "PASSED local macOS ARM64 dev,97.77s; native-build.json/log under G03 auxiliary root. Native library built before JVM test invocation.",
+      "maven_targeted_status": "PASSED final41/41 on qualified native bytes, no failed/canceled/ignored.",
+      "native_test_compilation": "PASSED initial joint Comet/vendor lib test graph106.58s; original17 sortmemory cases executing serially from this pre-fix test binary.",
+      "additional_correctness_fix": "Review found finaltag chunkconcat retained original ArrayRefs after returning their reservation. Narrow source-retirement fix and physical-ownership regression added; positive/negative-control execution pending.",
+      "remaining_before_qualification": "Finish current native memory regressions, run final joint vendor/core targeted suites, positive/negative source-lifetime proof, G02 cancellation integration, lint/format/config, existing bounded benchmarks and coherent source/doc commits.",
+      "source_retirement_negative_control": "PASSED as an intentional failure: same new test with only source-retirement fix disabled observed live source counts[4,4] instead of[2,0]. Positive production source restored and SHA256 checked by driver.",
+      "initial_native_memory_tests": "PASSED17/17 from initial compiled candidate,305.84s. Final source adds physical-lifetime fix plus2active-spill cancel/drop regressions; final combined sort suites running.",
+      "active_spill_cleanup": "PASSED both new native cancellation/earlydrop cases during final spilled merge, including actual files, rejected success after cancel, bounded per-plan release and zero Spark grants. Final combined suite continues.",
+      "native_build_final": "PASSED final dev source,87.62s; maven-final-regressions now runs41 selected cases including G02 JNI kill/memory waiting/manager regressions.",
+      "sort_tests": "PASSED51Comet+275vendor sorting cases, zero failed/ignored; new source-retirement physical-lifetime test passes and oldbehavior negative control fails as expected.",
+      "targeted_followup": "PASSED4wide-payload,4spill-manager,2legacy-stream,43JNI-lifecycle and4cancellation-wrapper cases. 371unique native testnames across the final selected logs.",
+      "last_ownership_cleanup": "Completed and validated: wide-payload/spill/legacy-stream/JNI/cancellation selections pass; final nativebuild+41JVM cases pass on matching native bytes.",
+      "workspace_clippy": "StrictComet--all-targets--no-deps passes. Strictworkspace stillfails pre-existingDF55.2Atomic.fetch_update deprecation underRust1.100. Diagnostic all-other-lints with -Adeprecated passes; never count that as strictCIacceptance. No CI flags changed."
+    },
+    "integration_authorization_ref": "decisions.json#g03_integration_authorization",
+    "integration_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json",
+    "functional_source_previously_verified": "2241a53d252cbc168296072fb876747e764333fb",
+    "implementation_completion_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/completion.json"
+  },
+  "g02_integration_gate_history": {
+    "status": "G02_USER_APPROVED_ACCEPTANCE",
+    "method": "Fast-forward branch-1.2 to the consolidated three-commit G02 feature; no merge commit.",
+    "previous_base": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
+    "functional_source_previously_verified": "e0388e3bc0e5415ea2b85664b1c8cf8e3cbd7574",
+    "post_commit_gate": "This source snapshot records stage acceptance; exact local/remote refs, final tree and successful execution are recorded after commit in the integration completion receipt.",
+    "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration/completion.json",
+    "not_authorized": [
+      "G03-G10 implementation",
+      "main/tag changes",
+      "new full per-group GHA",
+      "artifact publication",
+      "production use"
+    ]
+  },
+  "g03_integration_gate_history": {
+    "status": "G03_READY_FOR_USER_REVIEW",
+    "integration_branch": "branch-1.2",
+    "feature_branch": "joom/1.2-sort-spill-budget",
+    "base_commit": "6729883958442e865707d692f32a84e9554e4090",
+    "merge_authorized": false,
+    "next_step": "Complete local G03 validation and report the feature diff. No automatic integration or G04."
+  }
 }

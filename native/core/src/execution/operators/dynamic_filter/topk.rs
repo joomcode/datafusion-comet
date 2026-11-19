@@ -92,6 +92,7 @@ impl TopKReaderFilterExec {
         SortExec::new(template.expr().clone(), input)
             .with_preserve_partitioning(template.preserve_partitioning())
             .with_fetch(template.fetch())
+            .with_spill_before_output(template.spill_before_output())
     }
 
     fn build_runtime_sort(&self) -> Result<RuntimeTopK> {

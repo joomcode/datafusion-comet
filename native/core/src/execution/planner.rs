@@ -207,6 +207,32 @@ pub struct PhysicalPlanner {
     /// Whether a boundary that would cast a timestamp's timezone label to the declared one fails
     /// instead. Test-only; see `spark.comet.testing.strictTimestampLabels.enabled`.
     strict_timestamp_labels: bool,
+    /// Sorts whose output reaches the JVM without passing a native buffering consumer.
+    jvm_output_sorts: std::collections::HashSet<u32>,
+}
+
+/// Walk only through streaming ancestors of a sort at the JVM boundary. A native
+/// sort/join/aggregate above another sort owns the memory handoff internally.
+fn jvm_output_sorts(root: &Operator) -> std::collections::HashSet<u32> {
+    let mut sorts = std::collections::HashSet::new();
+    let mut pending = vec![root];
+    while let Some(op) = pending.pop() {
+        match op.op_struct.as_ref() {
+            Some(OpStruct::Sort(_)) => {
+                sorts.insert(op.plan_id);
+            }
+            Some(
+                OpStruct::Projection(_)
+                | OpStruct::Filter(_)
+                | OpStruct::Limit(_)
+                | OpStruct::Sample(_)
+                | OpStruct::Expand(_)
+                | OpStruct::Explode(_),
+            ) => pending.extend(op.children.iter()),
+            _ => {}
+        }
+    }
+    sorts
 }
 
 impl Default for PhysicalPlanner {
@@ -229,7 +255,14 @@ impl PhysicalPlanner {
             output_stream: None,
             float_operands: FloatOperands::Normalize,
             strict_timestamp_labels: false,
+            jvm_output_sorts: std::collections::HashSet::new(),
         }
+    }
+
+    /// Mark the root of the native block whose output is returned to the JVM.
+    pub fn with_jvm_output_sorts(mut self, root: &Operator) -> Self {
+        self.jvm_output_sorts = jvm_output_sorts(root);
+        self
     }
 
     /// Load the SQL text pool from the root operator of the plan about to be planned. Must be
@@ -1805,7 +1838,8 @@ impl PhysicalPlanner {
                     LexOrdering::new(exprs?).unwrap(),
                     Arc::clone(&child.native_plan),
                 )
-                .with_fetch(fetch);
+                .with_fetch(fetch)
+                .with_spill_before_output(self.jvm_output_sorts.contains(&spark_plan.plan_id));
                 let mut sort_exec: Arc<dyn ExecutionPlan> = if sort.dynamic_filter_enabled {
                     match TopKReaderFilterExec::try_new(
                         &sort_plan,
@@ -5100,6 +5134,245 @@ mod tests {
             batches.push(batch.unwrap());
         }
         batches
+    }
+
+    fn sort_boundary_op(plan_id: u32, op_struct: OpStruct, children: Vec<Operator>) -> Operator {
+        Operator {
+            plan_id,
+            op_struct: Some(op_struct),
+            children,
+            ..Default::default()
+        }
+    }
+
+    fn sort_boundary_leaf(plan_id: u32) -> Operator {
+        let mut scan = create_scan();
+        scan.plan_id = plan_id;
+        scan
+    }
+
+    fn sort_boundary_sort(plan_id: u32, child: Operator) -> Operator {
+        sort_boundary_sort_by(plan_id, child, create_bound_reference(0))
+    }
+
+    fn sort_boundary_sort_by(plan_id: u32, child: Operator, key: Expr) -> Operator {
+        sort_boundary_op(
+            plan_id,
+            OpStruct::Sort(spark_operator::Sort {
+                sort_orders: vec![Expr {
+                    expr_struct: Some(ExprStruct::SortOrder(Box::new(
+                        spark_expression::SortOrder {
+                            child: Some(Box::new(key)),
+                            direction: spark_expression::SortDirection::Ascending as i32,
+                            null_ordering: spark_expression::NullOrdering::NullsFirst as i32,
+                        },
+                    ))),
+                    ..Default::default()
+                }],
+                // These cases exercise full sorting, not a dynamic-filter TopK wrapper.
+                dynamic_filter_enabled: false,
+                ..Default::default()
+            }),
+            vec![child],
+        )
+    }
+
+    fn sort_boundary_flags(plan: &Arc<dyn ExecutionPlan>, flags: &mut Vec<bool>) {
+        if let Some(sort) = plan.downcast_ref::<SortExec>() {
+            flags.push(sort.spill_before_output());
+        }
+        for child in plan.children() {
+            sort_boundary_flags(child, flags);
+        }
+    }
+
+    fn planned_sort_boundary_flags(root: &Operator) -> Vec<bool> {
+        let planner = PhysicalPlanner::default().with_jvm_output_sorts(root);
+        let (_, _, planned) = planner.create_plan(root, &mut vec![], 1).unwrap();
+        let mut flags = vec![];
+        sort_boundary_flags(&planned.native_plan, &mut flags);
+        flags
+    }
+
+    #[test]
+    fn jvm_output_sorts_follow_all_streaming_ancestors_and_stop_at_native_consumers() {
+        use std::collections::HashSet;
+
+        let expected = HashSet::from([1]);
+        let mut root = sort_boundary_sort(1, sort_boundary_leaf(0));
+        assert_eq!(super::jvm_output_sorts(&root), expected);
+        for (index, streaming) in [
+            OpStruct::Projection(Default::default()),
+            OpStruct::Filter(Default::default()),
+            OpStruct::Limit(Default::default()),
+            OpStruct::Sample(Default::default()),
+            OpStruct::Expand(Default::default()),
+            OpStruct::Explode(Default::default()),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            root = sort_boundary_op(index as u32 + 10, streaming, vec![root]);
+            assert_eq!(super::jvm_output_sorts(&root), expected, "{root:?}");
+        }
+
+        for consumer in [
+            OpStruct::Sort(Default::default()),
+            OpStruct::ShuffleWriter(Default::default()),
+            OpStruct::Window(Default::default()),
+            OpStruct::HashAgg(Default::default()),
+            OpStruct::ParquetWriter(Default::default()),
+            OpStruct::WindowGroupLimit(Default::default()),
+            OpStruct::SortMergeJoin(Default::default()),
+            OpStruct::HashJoin(Default::default()),
+            OpStruct::BroadcastNestedLoopJoin(Default::default()),
+        ] {
+            let is_sort = matches!(&consumer, OpStruct::Sort(_));
+            let consumer = sort_boundary_op(20, consumer, vec![root.clone()]);
+            let wrapped =
+                sort_boundary_op(21, OpStruct::Projection(Default::default()), vec![consumer]);
+            assert_eq!(
+                super::jvm_output_sorts(&wrapped),
+                if is_sort {
+                    HashSet::from([20])
+                } else {
+                    HashSet::new()
+                },
+                "{wrapped:?}"
+            );
+        }
+
+        let join = sort_boundary_op(
+            30,
+            OpStruct::SortMergeJoin(Default::default()),
+            vec![
+                sort_boundary_sort(1, sort_boundary_leaf(0)),
+                sort_boundary_sort(2, sort_boundary_leaf(3)),
+            ],
+        );
+        assert!(super::jvm_output_sorts(&join).is_empty());
+        assert!(super::jvm_output_sorts(&Operator {
+            children: vec![root],
+            ..Default::default()
+        })
+        .is_empty());
+    }
+
+    #[test]
+    fn planner_marks_only_the_sort_whose_output_reaches_the_jvm() {
+        let sort = sort_boundary_sort(1, sort_boundary_leaf(0));
+        assert_eq!(planned_sort_boundary_flags(&sort), vec![true]);
+        assert_eq!(
+            planned_sort_boundary_flags(&create_filter(sort.clone(), 3)),
+            vec![true]
+        );
+        assert_eq!(
+            planned_sort_boundary_flags(&sort_boundary_sort(2, sort.clone())),
+            vec![true, false]
+        );
+
+        // Callers that do not expose output to the JVM must opt in explicitly.
+        let (_, _, planned) = PhysicalPlanner::default()
+            .create_plan(&sort, &mut vec![], 1)
+            .unwrap();
+        let mut flags = vec![];
+        sort_boundary_flags(&planned.native_plan, &mut flags);
+        assert_eq!(flags, vec![false]);
+    }
+
+    #[test]
+    fn planner_keeps_jvm_sort_boundary_through_streaming_operators() {
+        let mut root = create_filter(sort_boundary_sort(1, sort_boundary_leaf(0)), 3);
+        for (index, streaming) in [
+            OpStruct::Projection(spark_operator::Projection {
+                project_list: vec![create_bound_reference(0)],
+            }),
+            OpStruct::Limit(spark_operator::Limit {
+                limit: 10,
+                offset: 0,
+            }),
+            OpStruct::Sample(spark_operator::Sample {
+                lower_bound: 0.0,
+                upper_bound: 1.0,
+                seed: 42,
+            }),
+            OpStruct::Expand(spark_operator::Expand {
+                project_list: vec![create_bound_reference(0)],
+                num_expr_per_project: 1,
+            }),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            root = sort_boundary_op(index as u32 + 10, streaming, vec![root]);
+            assert_eq!(planned_sort_boundary_flags(&root), vec![true], "{root:?}");
+        }
+
+        use spark_expression::data_type::{data_type_info::DatatypeStruct, DataTypeInfo, ListInfo};
+        let array_type = spark_expression::DataType {
+            type_id: 14,
+            type_info: Some(Box::new(DataTypeInfo {
+                datatype_struct: Some(DatatypeStruct::List(Box::new(ListInfo {
+                    element_type: Some(Box::new(create_proto_datatype())),
+                    contains_null: true,
+                    element_field_id: None,
+                }))),
+            })),
+        };
+        let array = Expr {
+            expr_struct: Some(Bound(spark_expression::BoundReference {
+                index: 0,
+                datatype: Some(array_type.clone()),
+            })),
+            ..Default::default()
+        };
+        let scan = sort_boundary_op(
+            0,
+            OpStruct::Scan(spark_operator::Scan {
+                fields: vec![array_type],
+                source: String::new(),
+            }),
+            vec![],
+        );
+        let explode = sort_boundary_op(
+            2,
+            OpStruct::Explode(spark_operator::Explode {
+                child: Some(array.clone()),
+                ..Default::default()
+            }),
+            vec![sort_boundary_sort_by(1, scan, array)],
+        );
+        assert_eq!(planned_sort_boundary_flags(&explode), vec![true]);
+    }
+
+    #[test]
+    fn planner_does_not_mark_sorts_under_native_aggregate_or_join_consumers() {
+        let aggregate = sort_boundary_op(
+            2,
+            OpStruct::HashAgg(spark_operator::HashAggregate {
+                grouping_exprs: vec![create_bound_reference(0)],
+                mode: spark_operator::AggregateMode::Final as i32,
+                ..Default::default()
+            }),
+            vec![sort_boundary_sort(1, sort_boundary_leaf(0))],
+        );
+        assert_eq!(planned_sort_boundary_flags(&aggregate), vec![false]);
+
+        let join = sort_boundary_op(
+            5,
+            OpStruct::HashJoin(spark_operator::HashJoin {
+                left_join_keys: vec![create_bound_reference(0)],
+                right_join_keys: vec![create_bound_reference(0)],
+                join_type: spark_operator::JoinType::Inner as i32,
+                build_side: spark_operator::BuildSide::BuildLeft as i32,
+                ..Default::default()
+            }),
+            vec![
+                sort_boundary_sort(1, sort_boundary_leaf(0)),
+                sort_boundary_sort(2, sort_boundary_leaf(3)),
+            ],
+        );
+        assert_eq!(planned_sort_boundary_flags(&join), vec![false, false]);
     }
 
     fn create_scan() -> Operator {

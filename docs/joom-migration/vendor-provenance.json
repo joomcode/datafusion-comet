@@ -755,5 +755,24 @@
     "historical_pre_pr_import_commit": "0a76d68a33f6b4bcbce9fbb412b90350c5fed80b",
     "historical_pre_pr_integration_commit": "15a466a09abf6106bbd80402e1967ba96076fbcc",
     "pr_alignment_mapping": "G01-PR-preparation.json"
+  },
+  "g03_sort_port": {
+    "source_tag": "joom-1.1-13",
+    "source_commit": "981e26dff6b64110a8b3949a0ed065523d9012e4",
+    "cards": ["D02", "D04", "D03"],
+    "base_version": "55.2.0",
+    "arrow_version": "59.3.2",
+    "origin": "Published55.2 crate already imported in G01; affected pre-existing sort/support production files match the old pristine55.1 import. Retain unrelated55.2 code; preserve the replaced ReservationStream only as a test fixture with its two upstream cases.",
+    "port_manifest": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/20261119_vendor-sort/port-manifest.json",
+    "production_adaptations": [
+      "Carry final tag13 SpillWorkspace, multipass/final merge reservation retention, shared/encoded-row accounting and wide-payload late materialization.",
+      "Preserve SortExec spill-before-output flag during reconstruction; Comet1.2 TopK wrapper adaptation is outside the vendor crate.",
+      "Additional correctness fix: drop successfully concatenated source ArrayRefs before releasing their memory charges; fallback pieces retain ownership. No algorithm/dependency/version upgrade.",
+      "WideBinaryPayload consumes owned columns instead of cloning headers, preserving retirement and avoiding an unnecessary temporary set of references."
+    ],
+    "additional_regression": "sorts::sort::late_materialize::tests::concatenation_drops_retired_sources_before_releasing_their_reservation",
+    "negative_control": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/negative-control-restoration.json",
+    "validation_state": "LOCAL_TARGETED_PASSED; detailed current results in G03-results.json, final Linux/release qualification remains required.",
+    "historical_baseline_note": "Existing pristine hashes and G01 production_algorithm_changes describe the original import, not current G03-patched bytes."
   }
 }
