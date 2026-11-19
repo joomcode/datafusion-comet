@@ -27,12 +27,14 @@ use super::metrics::ExecutionPlanMetricsSet;
 use super::metrics::{BaselineMetrics, SplitMetrics};
 use super::{ExecutionPlan, RecordBatchStream, SendableRecordBatchStream};
 use crate::displayable;
+#[cfg(test)]
 use crate::spill::get_record_batch_memory_size;
 
 use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
 use datafusion_common::{Result, exec_err};
 use datafusion_common_runtime::JoinSet;
 use datafusion_execution::TaskContext;
+#[cfg(test)]
 use datafusion_execution::memory_pool::MemoryReservation;
 
 use futures::ready;
@@ -750,12 +752,16 @@ impl RecordBatchStream for BatchSplitStream {
 /// shrinking the reservation as batches are consumed.
 /// The original reservation must have its batch sizes calculated using [`get_record_batch_memory_size`]
 /// On error, the reservation is *NOT* freed, until the stream is dropped.
+// The Joom sorter now releases shared buffers through its own output stream.
+// Keep this replaced wrapper only for its original upstream unit regressions.
+#[cfg(test)]
 pub(crate) struct ReservationStream {
     schema: SchemaRef,
     inner: SendableRecordBatchStream,
     reservation: MemoryReservation,
 }
 
+#[cfg(test)]
 impl ReservationStream {
     pub(crate) fn new(
         schema: SchemaRef,
@@ -770,6 +776,7 @@ impl ReservationStream {
     }
 }
 
+#[cfg(test)]
 impl Stream for ReservationStream {
     type Item = Result<RecordBatch>;
 
@@ -807,6 +814,7 @@ impl Stream for ReservationStream {
     }
 }
 
+#[cfg(test)]
 impl RecordBatchStream for ReservationStream {
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)

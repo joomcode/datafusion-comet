@@ -25,6 +25,11 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
+mod late_materialize;
+mod wide_payload;
+use late_materialize::LateMaterialization;
+use wide_payload::WideBinaryPayload;
+
 use crate::common::spawn_buffered;
 use crate::execution_plan::{
     Boundedness, CardinalityEffect, EmissionType, has_same_children_properties,
@@ -42,12 +47,14 @@ use crate::metrics::{
 };
 use crate::projection::{ProjectionExec, make_with_child, update_ordering};
 use crate::sorts::IncrementalSortIterator;
-use crate::sorts::streaming_merge::{SortedSpillFile, StreamingMergeBuilder};
+use crate::sorts::spill_workspace::SpillWorkspace;
+use crate::sorts::streaming_merge::{
+    SortedSpillFile, StreamingMergeBuilder, merge_uses_row_cursor,
+};
 use crate::spill::get_record_batch_memory_size;
 use crate::spill::in_progress_spill_file::InProgressSpillFile;
 use crate::spill::spill_manager::{GetSlicedSize, SpillManager};
 use crate::statistics::{ChildStats, StatisticsArgs};
-use crate::stream::ReservationStream;
 use crate::stream::{ObservedStream, RecordBatchStreamAdapter};
 use crate::topk::TopK;
 use crate::topk::TopKDynamicFilters;
@@ -59,19 +66,22 @@ use crate::{
 
 use arrow::array::{RecordBatch, RecordBatchOptions};
 use arrow::compute::{concat_batches, lexsort_to_indices, take_arrays};
-use arrow::datatypes::SchemaRef;
+use arrow::datatypes::{DataType, SchemaRef};
+use arrow::row::{RowConverter, SortField};
 use datafusion_common::config::SpillCompression;
 use datafusion_common::tree_node::TreeNodeRecursion;
+use datafusion_common::utils::memory::RecordBatchMemoryCounter;
 use datafusion_common::{
     DataFusionError, Result, assert_or_internal_err, internal_datafusion_err,
     unwrap_or_internal_err,
 };
 use datafusion_execution::TaskContext;
-use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
+use datafusion_execution::memory_pool::{MemoryConsumer, MemoryPool, MemoryReservation};
 use datafusion_execution::runtime_env::RuntimeEnv;
 use datafusion_physical_expr::LexOrdering;
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_physical_expr::expressions::{DynamicFilterPhysicalExpr, lit};
+use datafusion_physical_expr_common::utils::evaluate_expressions_to_arrays;
 
 use futures::{StreamExt, TryStreamExt};
 use log::{debug, trace};
@@ -91,6 +101,19 @@ impl ExternalSorterMetrics {
         }
     }
 }
+
+/// COMET PATCH
+const SMALL_BATCHES_TARGET_BYTES: usize = 4 << 20;
+const ROW_BYTES_SAMPLES: usize = 8;
+const ROW_BYTES_SAMPLE_ROWS: usize = 1024;
+/// COMET PATCH: the least overcommit an in-memory output merge may take when the pool
+/// refuses growth beyond its estimate. See `SpillWorkspace::allow_overcommit`.
+const OUTPUT_MERGE_OVERCOMMIT: usize = 16 << 20;
+
+/// COMET PATCH: a session config extension. A sort whose input stayed in memory but whose
+/// reservation exceeds this many bytes spills it before producing output. 0 disables.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SpillBeforeOutputThreshold(pub usize);
 
 /// Sorts an arbitrary sized, unsorted, stream of [`RecordBatch`]es to
 /// a total order. Depending on the input size and memory manager
@@ -231,6 +254,17 @@ struct ExternalSorter {
     // ========================================================================
     /// Unsorted input batches stored in the memory buffer
     in_mem_batches: Vec<RecordBatch>,
+    /// COMET PATCH: the buffers of `in_mem_batches` already reserved, so that a buffer
+    /// they share, such as the parent of zero-copy slices, is reserved once.
+    in_mem_batches_memory: RecordBatchMemoryCounter,
+    /// COMET PATCH: input batches of less than half the batch size, reserved in
+    /// `reservation`, that are concatenated into one batch of `in_mem_batches`.
+    small_batches: Vec<RecordBatch>,
+    small_batches_memory: RecordBatchMemoryCounter,
+    small_batches_reserved: usize,
+    small_batches_rows: usize,
+    small_batches_bytes: usize,
+    coalesce_small_batches: bool,
 
     /// During external sorting, in-memory intermediate data will be appended to
     /// this file incrementally. Once finished, this file will be moved to [`Self::finished_spill_files`].
@@ -264,6 +298,11 @@ struct ExternalSorter {
     /// How much memory to reserve for performing in-memory sort/merges
     /// prior to spilling.
     sort_spill_reservation_bytes: usize,
+    /// COMET PATCH
+    late_materialization: Option<LateMaterialization>,
+    late_spilled_run_bytes: usize,
+    late_merge_batch_size: usize,
+    spill_before_output_threshold: usize,
 }
 
 impl ExternalSorter {
@@ -298,9 +337,19 @@ impl ExternalSorter {
         )
         .with_compression_type(spill_compression);
 
+        let coalesce_small_batches = !schema.fields().iter().any(|field| {
+            matches!(field.data_type(), DataType::Utf8View | DataType::BinaryView)
+        });
         Ok(Self {
             schema,
             in_mem_batches: vec![],
+            in_mem_batches_memory: RecordBatchMemoryCounter::new(),
+            small_batches: vec![],
+            small_batches_memory: RecordBatchMemoryCounter::new(),
+            small_batches_reserved: 0,
+            small_batches_rows: 0,
+            small_batches_bytes: 0,
+            coalesce_small_batches,
             in_progress_spill_file: None,
             finished_spill_files: vec![],
             expr,
@@ -312,7 +361,35 @@ impl ExternalSorter {
             batch_size,
             sort_spill_reservation_bytes,
             sort_in_place_threshold_bytes,
+            late_materialization: None,
+            late_spilled_run_bytes: 0,
+            late_merge_batch_size: batch_size,
+            spill_before_output_threshold: 0,
         })
+    }
+
+    /// COMET PATCH
+    fn with_spill_before_output_threshold(mut self, threshold: usize) -> Self {
+        self.spill_before_output_threshold = threshold;
+        self
+    }
+
+    /// COMET PATCH
+    fn spills_before_output(&self) -> bool {
+        self.spill_before_output_threshold > 0
+            && !self.spilled_before()
+            && !self.in_mem_batches.is_empty()
+            && self.reservation.size() > self.spill_before_output_threshold
+            && self.runtime.disk_manager.tmp_files_enabled()
+    }
+
+    /// COMET PATCH
+    fn with_late_materialization(
+        mut self,
+        late_materialization: Option<LateMaterialization>,
+    ) -> Self {
+        self.late_materialization = late_materialization;
+        self
     }
 
     /// Appends an unsorted [`RecordBatch`] to `in_mem_batches`
@@ -324,10 +401,79 @@ impl ExternalSorter {
         }
 
         self.reserve_memory_for_merge()?;
+        // COMET PATCH
+        let sliced_size = input.get_sliced_size()?;
+        if self.coalesce_small_batches
+            && input.num_rows() * 2 <= self.batch_size
+            && sliced_size * 2 <= SMALL_BATCHES_TARGET_BYTES
+        {
+            return self.insert_small_batch(input, sliced_size).await;
+        }
         self.reserve_memory_for_batch_and_maybe_spill(&input)
             .await?;
 
         self.in_mem_batches.push(input);
+        Ok(())
+    }
+
+    /// COMET PATCH
+    async fn insert_small_batch(
+        &mut self,
+        input: RecordBatch,
+        sliced_size: usize,
+    ) -> Result<()> {
+        let mut size = Self::reserved_bytes_counted(
+            &self.late_materialization,
+            &input,
+            &mut self.small_batches_memory,
+        )?;
+        if let Err(e) = self.reservation.try_grow(size) {
+            if self.in_mem_batches.is_empty() && self.small_batches.is_empty() {
+                return Err(Self::err_with_oom_context(e));
+            }
+            self.sort_and_spill_in_mem_batches().await?;
+            size = Self::reserved_bytes_counted(
+                &self.late_materialization,
+                &input,
+                &mut self.small_batches_memory,
+            )?;
+            self.reservation
+                .try_grow(size)
+                .map_err(Self::err_with_oom_context)?;
+        }
+        self.small_batches_reserved += size;
+        self.small_batches_rows += input.num_rows();
+        self.small_batches_bytes += sliced_size;
+        self.small_batches.push(input);
+        if self.small_batches_rows >= self.batch_size
+            || self.small_batches_bytes >= SMALL_BATCHES_TARGET_BYTES
+        {
+            self.flush_small_batches()?;
+        }
+        Ok(())
+    }
+
+    /// COMET PATCH: the concatenated batch takes no more than the batches it copies,
+    /// which stay reserved until it is.
+    fn flush_small_batches(&mut self) -> Result<()> {
+        if self.small_batches.is_empty() {
+            return Ok(());
+        }
+        let mut batches = std::mem::take(&mut self.small_batches);
+        let batch = if batches.len() == 1 {
+            batches.pop().unwrap()
+        } else {
+            concat_batches(&self.schema, &batches)?
+        };
+        drop(batches);
+        self.small_batches_memory = RecordBatchMemoryCounter::new();
+        self.small_batches_rows = 0;
+        self.small_batches_bytes = 0;
+        let released = std::mem::take(&mut self.small_batches_reserved);
+        let size = self.reserved_bytes_for_batch(&batch)?;
+        self.reservation
+            .resize(self.reservation.size() - released + size);
+        self.in_mem_batches.push(batch);
         Ok(())
     }
 
@@ -345,6 +491,22 @@ impl ExternalSorter {
     /// 2. A combined streaming merge incorporating both in-memory
     ///    batches and data from spill files on disk.
     async fn sort(&mut self) -> Result<SendableRecordBatchStream> {
+        // COMET PATCH
+        self.flush_small_batches()?;
+        if self.spills_before_output() {
+            self.sort_and_spill(true).await?;
+        }
+        let mut output_merge = None;
+        if !self.spilled_before()
+            && self.in_mem_batches.len() > 1
+            && self.reservation.size() >= self.sort_in_place_threshold_bytes
+            && self.runtime.disk_manager.tmp_files_enabled()
+        {
+            output_merge = self.reserve_output_merge()?;
+            if output_merge.is_none() {
+                self.spill_in_mem_batches_in_groups().await?;
+            }
+        }
         if self.spilled_before() {
             // Sort `in_mem_batches` and spill it first. If there are many
             // `in_mem_batches` and the memory limit is almost reached, merging
@@ -360,16 +522,55 @@ impl ExternalSorter {
             // compete for pool memory. `take()` moves the bytes atomically
             // without releasing them back to the pool, so other partitions
             // cannot race to consume the freed memory.
+            // COMET PATCH: keep it, and whatever a merge pass adds, for every pass of the
+            // merge rather than only the first. See `SpillWorkspace`.
+            let headroom = self.merge_reservation.size();
+            let workspace = SpillWorkspace::new(vec![self.merge_reservation.take()]);
+            let reservation =
+                MemoryConsumer::new(self.merge_reservation.consumer().name())
+                    .register(&(Arc::clone(&workspace) as Arc<dyn MemoryPool>));
+            reservation.grow(headroom);
             StreamingMergeBuilder::new()
                 .with_sorted_spill_files(std::mem::take(&mut self.finished_spill_files))
                 .with_spill_manager(self.spill_manager.clone())
                 .with_schema(Arc::clone(&self.schema))
                 .with_expressions(&self.expr.clone())
                 .with_metrics(self.metrics.baseline.clone())
-                .with_batch_size(self.batch_size)
+                .with_batch_size(self.late_merge_batch_size)
                 .with_fetch(None)
-                .with_reservation(self.merge_reservation.take())
+                .with_reservation(reservation)
+                .with_spill_workspace(workspace)
                 .build()
+        } else if self.in_mem_batches.len() > 1
+            && self.reservation.size() >= self.sort_in_place_threshold_bytes
+        {
+            // COMET PATCH: merge inside the memory the sorter holds, and keep the merge
+            // headroom for the merge's cursors and buffers instead of returning it to the
+            // pool and asking for it again. Released run memory beyond it goes back to the
+            // pool, and growth is charged to the merge. See `SpillWorkspace`.
+            //
+            // What `reserve_output_merge` was granted toward the merge's estimate stays
+            // reserved too, so that the merge does not have to win back from Spark memory
+            // it just gave up: Spark hands it to a consumer that does not spill for others,
+            // such as the shuffle writer of a JVM sort in the same task. A small shortfall of
+            // the estimate is taken as bounded overcommit, because the merge cannot spill.
+            let buffered = self.reservation.size();
+            let headroom = self.merge_reservation.size();
+            let (needed, grant) = match output_merge {
+                Some(output_merge) => output_merge,
+                None => (0, self.merge_reservation.new_empty()),
+            };
+            let workspace = SpillWorkspace::new(vec![
+                self.merge_reservation.take(),
+                self.reservation.take(),
+                grant,
+            ]);
+            let stream =
+                self.in_mem_sort_stream_in_workspace(&workspace, buffered, true, true);
+            let reserved = MemoryPool::reserved(workspace.as_ref());
+            workspace.keep_at_most(headroom.max(needed.saturating_sub(buffered)));
+            workspace.allow_overcommit(OUTPUT_MERGE_OVERCOMMIT.max(reserved / 10));
+            stream
         } else {
             // Release the memory reserved for merge back to the pool so
             // there is some left when `in_mem_sort_stream` requests an
@@ -378,6 +579,123 @@ impl ExternalSorter {
             self.merge_reservation.free();
             self.in_mem_sort_stream(true, true)
         }
+    }
+
+    /// COMET PATCH: the memory the output merge of the buffered batches is estimated to
+    /// need, and a reservation holding what that needs beyond the sorter's reservations.
+    /// `None` if the pool cannot grant it.
+    fn reserve_output_merge(&self) -> Result<Option<(usize, MemoryReservation)>> {
+        let grant = self.merge_reservation.new_empty();
+        if self.late_materialization.is_some()
+            && LateMaterialization::applies_to(&self.in_mem_batches)
+        {
+            return Ok(Some((0, grant)));
+        }
+        let row_bytes = self.sampled_row_bytes(&self.in_mem_batches)?;
+        let needed = self
+            .in_mem_batches
+            .iter()
+            .map(|batch| self.run_merge_memory(batch, row_bytes))
+            .sum::<Result<usize>>()?;
+        let held = self.reservation.size() + self.merge_reservation.size();
+        let missing = needed.saturating_sub(held);
+        if missing > 0 && grant.try_grow(missing).is_err() {
+            return Ok(None);
+        }
+        Ok(Some((needed, grant)))
+    }
+
+    /// COMET PATCH
+    fn run_merge_memory(&self, batch: &RecordBatch, row_bytes: usize) -> Result<usize> {
+        let rows = batch.num_rows();
+        let buffers = if rows > self.batch_size { 2 } else { 1 };
+        let encoded = rows.min(self.batch_size) * buffers * row_bytes;
+        Ok(batch.get_sliced_size()? + encoded + encoded / 4)
+    }
+
+    /// COMET PATCH
+    fn sampled_row_bytes(&self, batches: &[RecordBatch]) -> Result<usize> {
+        if batches.is_empty() || !merge_uses_row_cursor(&self.expr, &self.schema) {
+            return Ok(0);
+        }
+        let fields = self
+            .expr
+            .iter()
+            .map(|sort| {
+                Ok(SortField::new_with_options(
+                    sort.expr.data_type(&self.schema)?,
+                    sort.options,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let converter = RowConverter::new(fields)?;
+        let exprs: Vec<_> = self
+            .expr
+            .iter()
+            .map(|sort| Arc::clone(&sort.expr))
+            .collect();
+        let step = batches.len().div_ceil(ROW_BYTES_SAMPLES).max(1);
+        let mut row_bytes = 0;
+        for batch in batches.iter().step_by(step) {
+            let rows = batch.num_rows().min(ROW_BYTES_SAMPLE_ROWS);
+            if rows == 0 {
+                continue;
+            }
+            let columns = evaluate_expressions_to_arrays(&exprs, &batch.slice(0, rows))?;
+            let encoded = converter.convert_columns(&columns)?;
+            row_bytes = row_bytes.max(encoded.size().div_ceil(rows));
+        }
+        Ok(row_bytes)
+    }
+
+    /// COMET PATCH
+    fn pool_can_grant(&self, bytes: usize) -> bool {
+        bytes == 0 || self.merge_reservation.new_empty().try_grow(bytes).is_ok()
+    }
+
+    /// COMET PATCH
+    async fn spill_in_mem_batches_in_groups(&mut self) -> Result<()> {
+        let mut batches = std::mem::take(&mut self.in_mem_batches);
+        let row_bytes = self.sampled_row_bytes(&batches)?;
+        let mut counter = RecordBatchMemoryCounter::new();
+        let mut reserved = batches
+            .iter()
+            .map(|batch| reserved_bytes_counting_shared_buffers(batch, &mut counter))
+            .collect::<Result<Vec<_>>>()?;
+        while !batches.is_empty() {
+            let headroom = self.merge_reservation.size();
+            let mut len = 0;
+            let mut needed = 0;
+            let mut held = 0;
+            for (batch, bytes) in batches.iter().zip(&reserved) {
+                needed += self.run_merge_memory(batch, row_bytes)?;
+                held += bytes;
+                if len > 0 && !self.pool_can_grant(needed.saturating_sub(held + headroom))
+                {
+                    break;
+                }
+                len += 1;
+            }
+            let group: Vec<RecordBatch> = batches.drain(..len).collect();
+            let bytes: usize = reserved.drain(..len).sum();
+            let bytes = if batches.is_empty() {
+                self.reservation.size()
+            } else {
+                bytes.min(self.reservation.size())
+            };
+            self.in_mem_batches = group;
+            let workspace = SpillWorkspace::for_spill(vec![
+                self.reservation.split(bytes),
+                self.merge_reservation.take(),
+            ]);
+            let result = self
+                .merge_and_spill_in_mem_batches(&workspace, bytes, true)
+                .await;
+            workspace.close();
+            result?;
+            let _ = self.reserve_memory_for_merge();
+        }
+        Ok(())
     }
 
     /// How much memory is buffered in this `ExternalSorter`?
@@ -425,7 +743,9 @@ impl ExternalSorter {
         debug!("Spilling sort data of ExternalSorter to disk whilst inserting");
 
         let batches_to_spill = std::mem::take(globally_sorted_batches);
-        self.reservation.free();
+        // COMET PATCH: keep the batches reserved until they are written, as
+        // apache/datafusion#24923 does. The reservation is released on return or error.
+        let _spill_reservation = self.reservation.take();
 
         let (in_progress_file, max_record_batch_size) =
             self.in_progress_spill_file.as_mut().ok_or_else(|| {
@@ -467,19 +787,45 @@ impl ExternalSorter {
     /// Sorts the in-memory batches and merges them into a single sorted run, then writes
     /// the result to spill files.
     async fn sort_and_spill_in_mem_batches(&mut self) -> Result<()> {
+        self.sort_and_spill(false).await
+    }
+
+    /// COMET PATCH
+    async fn sort_and_spill(&mut self, eager: bool) -> Result<()> {
+        self.flush_small_batches()?;
         assert_or_internal_err!(
             !self.in_mem_batches.is_empty(),
             "in_mem_batches must not be empty when attempting to sort and spill"
         );
 
-        // Release the memory reserved for merge back to the pool so
-        // there is some left when `in_mem_sort_stream` requests an
-        // allocation. At the end of this function, memory will be
-        // reserved again for the next spill.
-        self.merge_reservation.free();
+        // COMET PATCH: merge in the memory already held for the buffered batches and the
+        // merge instead of returning it to the pool and requesting it again, which fails
+        // once the pool cannot grant what the sorter held. See `SpillWorkspace`.
+        let buffered = self.reservation.size();
+        let workspace = SpillWorkspace::for_spill(vec![
+            self.reservation.take(),
+            self.merge_reservation.take(),
+        ]);
+        let result = self
+            .merge_and_spill_in_mem_batches(&workspace, buffered, eager)
+            .await;
+        workspace.close();
+        result?;
 
-        let mut sorted_stream = self.in_mem_sort_stream(
-            false,
+        // Reserve headroom for next sort/merge
+        self.reserve_memory_for_merge()?;
+
+        Ok(())
+    }
+
+    async fn merge_and_spill_in_mem_batches(
+        &mut self,
+        workspace: &Arc<SpillWorkspace>,
+        buffered: usize,
+        eager: bool,
+    ) -> Result<()> {
+        let mut sorted_stream = self.in_mem_sort_stream_in_workspace(
+            workspace, buffered, false,
             // No coalescing on the spill path: it raises per-run peak memory.
             false,
         )?;
@@ -494,13 +840,16 @@ impl ExternalSorter {
         // sort-preserving merge and incrementally append to spill files.
         let mut globally_sorted_batches: Vec<RecordBatch> = vec![];
 
+        let eager = eager || self.late_materialization.is_some();
         while let Some(batch) = sorted_stream.next().await {
             let batch = batch?;
             let sorted_size = get_reserved_bytes_for_record_batch(&batch)?;
-            if self.reservation.try_grow(sorted_size).is_err() {
+            if eager || self.reservation.try_grow(sorted_size).is_err() {
                 // Although the reservation is not enough, the batch is
                 // already in memory, so it's okay to combine it with previously
                 // sorted batches, and spill together.
+                // COMET PATCH: account for it in unused workspace while it is written.
+                let _loan = workspace.borrow(sorted_size);
                 globally_sorted_batches.push(batch);
                 self.consume_and_spill_append(&mut globally_sorted_batches)?; // reservation is freed in spill()
             } else {
@@ -523,10 +872,35 @@ impl ExternalSorter {
             "in_mem_batches and globally_sorted_batches should be cleared before"
         );
 
-        // Reserve headroom for next sort/merge
-        self.reserve_memory_for_merge()?;
-
         Ok(())
+    }
+
+    /// COMET PATCH: [`Self::in_mem_sort_stream`] with the `buffered` bytes of the sorter's
+    /// reservation, and the merge's, taken from `workspace`.
+    fn in_mem_sort_stream_in_workspace(
+        &mut self,
+        workspace: &Arc<SpillWorkspace>,
+        buffered: usize,
+        is_output_stream: bool,
+        coalesce_runs: bool,
+    ) -> Result<SendableRecordBatchStream> {
+        let pool = if self.late_materialization.is_some()
+            && LateMaterialization::applies_to(&self.in_mem_batches)
+        {
+            workspace.bounded()
+        } else {
+            Arc::clone(workspace) as Arc<dyn MemoryPool>
+        };
+        let runs =
+            MemoryConsumer::new(self.reservation.consumer().name()).register(&pool);
+        runs.grow(buffered);
+        let sorter_reservation = std::mem::replace(&mut self.reservation, runs);
+        let merge_reservation =
+            std::mem::replace(&mut self.merge_reservation, self.reservation.new_empty());
+        let sorted_stream = self.in_mem_sort_stream(is_output_stream, coalesce_runs);
+        self.reservation = sorter_reservation;
+        self.merge_reservation = merge_reservation;
+        sorted_stream
     }
 
     /// Consumes in_mem_batches returning a sorted stream of
@@ -594,6 +968,8 @@ impl ExternalSorter {
         is_output_stream: bool,
         coalesce_runs: bool,
     ) -> Result<SendableRecordBatchStream> {
+        // COMET PATCH: the buffered batches are consumed here.
+        self.in_mem_batches_memory = RecordBatchMemoryCounter::new();
         if self.in_mem_batches.is_empty() {
             let empty_stream =
                 Box::pin(EmptyRecordBatchStream::new(Arc::clone(&self.schema)));
@@ -603,6 +979,36 @@ impl ExternalSorter {
         // The elapsed compute timer is updated when the value is dropped.
         // There is no need for an explicit call to drop.
         let elapsed_compute = self.metrics.baseline.elapsed_compute().clone();
+
+        // COMET PATCH
+        if self.late_materialization.is_some()
+            && LateMaterialization::applies_to(&self.in_mem_batches)
+        {
+            let rows_per_batch = if is_output_stream {
+                LateMaterialization::output_rows(&self.in_mem_batches, self.batch_size)?
+            } else {
+                self.late_spilled_run_bytes =
+                    self.late_spilled_run_bytes.max(self.reservation.size());
+                let rows = LateMaterialization::spill_rows(
+                    &self.in_mem_batches,
+                    self.late_spilled_run_bytes,
+                    self.batch_size,
+                )?;
+                self.late_merge_batch_size = self.late_merge_batch_size.min(rows);
+                rows
+            };
+            let stream = LateMaterialization::sort_stream(
+                Arc::clone(&self.schema),
+                std::mem::take(&mut self.in_mem_batches),
+                self.expr.clone(),
+                rows_per_batch,
+                !is_output_stream,
+                self.reservation.take(),
+                elapsed_compute,
+            );
+            return Ok(self.observe_if_output(stream, is_output_stream));
+        }
+
         let _timer = elapsed_compute.timer();
 
         // Please pay attention that any operation inside of `in_mem_sort_stream` will
@@ -643,12 +1049,16 @@ impl ExternalSorter {
             batches
         };
 
+        // COMET PATCH: split the reservation as it was taken, a shared buffer with its
+        // first run.
+        let mut runs_memory = RecordBatchMemoryCounter::new();
         let streams = runs
             .into_iter()
             .map(|batch| {
-                let reservation = self
-                    .reservation
-                    .split(get_reserved_bytes_for_record_batch(&batch)?);
+                let size =
+                    reserved_bytes_counting_shared_buffers(&batch, &mut runs_memory)?;
+                let reservation =
+                    self.reservation.split(size.min(self.reservation.size()));
                 let input = self.sort_batch_stream(batch, reservation)?;
                 Ok(spawn_buffered(input, 1))
             })
@@ -710,9 +1120,11 @@ impl ExternalSorter {
         flush(&mut group, &mut runs, &self.schema)?;
 
         // Realign the reservation: concatenation may shift the footprint slightly.
+        // COMET PATCH: count a buffer runs share once, as the caller splits it.
+        let mut runs_memory = RecordBatchMemoryCounter::new();
         let total: usize = runs
             .iter()
-            .map(get_reserved_bytes_for_record_batch)
+            .map(|run| reserved_bytes_counting_shared_buffers(run, &mut runs_memory))
             .sum::<Result<usize>>()?;
         self.reservation
             .try_resize(total)
@@ -727,19 +1139,14 @@ impl ExternalSorter {
     /// sorted data and the target batch size.
     /// For single-batch output cases, `reservation` will be freed immediately after sorting,
     /// as the batch will be output and is expected to be reserved by the consumer of the stream.
-    /// For multi-batch output cases, `reservation` will be grown to match the actual
-    /// size of sorted output, and as each batch is output, its memory will be freed from the reservation.
+    /// For multi-batch output cases, `reservation` covers the sorted output,
+    /// releasing its memory as each batch is output.
     /// (This leads to the same behaviour, as futures are only evaluated when polled by the consumer.)
     fn sort_batch_stream(
         &self,
         batch: RecordBatch,
         reservation: MemoryReservation,
     ) -> Result<SendableRecordBatchStream> {
-        assert_eq!(
-            get_reserved_bytes_for_record_batch(&batch)?,
-            reservation.size()
-        );
-
         let schema = batch.schema();
         let expressions = self.expr.clone();
         let batch_size = self.batch_size;
@@ -750,26 +1157,31 @@ impl ExternalSorter {
             // Sort the batch immediately and get all output batches
             let sorted_batches = sort_batch_chunked(&batch, &expressions, batch_size)?;
 
-            // Resize the reservation to match the actual sorted output size.
-            // Using try_resize avoids a release-then-reacquire cycle, which
-            // matters for MemoryPool implementations where grow/shrink have
-            // non-trivial cost (e.g. JNI calls in Comet).
-            let total_sorted_size: usize = sorted_batches
+            // COMET PATCH: charge each buffer the chunks share (dictionary values, view
+            // data) once, to the last chunk holding it, since it is freed with that
+            // chunk. Ported from apache/datafusion#25800.
+            let mut counter = RecordBatchMemoryCounter::new();
+            let mut sizes: Vec<usize> = sorted_batches
                 .iter()
-                .map(get_record_batch_memory_size)
-                .sum();
+                .rev()
+                .map(|batch| counter.count_batch(batch))
+                .collect();
+            sizes.reverse();
             reservation
-                .try_resize(total_sorted_size)
+                .try_resize(counter.memory_usage())
                 .map_err(Self::err_with_oom_context)?;
 
-            // Wrap in ReservationStream to hold the reservation
-            Result::<_, DataFusionError>::Ok(Box::pin(ReservationStream::new(
+            let batches =
+                sorted_batches
+                    .into_iter()
+                    .zip(sizes)
+                    .map(move |(batch, size)| {
+                        reservation.shrink(size);
+                        Ok(batch)
+                    });
+            Result::<_, DataFusionError>::Ok(Box::pin(RecordBatchStreamAdapter::new(
                 Arc::clone(&schema),
-                Box::pin(RecordBatchStreamAdapter::new(
-                    Arc::clone(&schema),
-                    futures::stream::iter(sorted_batches.into_iter().map(Ok)),
-                )),
-                reservation,
+                futures::stream::iter(batches),
             )) as SendableRecordBatchStream)
         })
         .try_flatten();
@@ -800,21 +1212,46 @@ impl ExternalSorter {
         &mut self,
         input: &RecordBatch,
     ) -> Result<()> {
-        let size = get_reserved_bytes_for_record_batch(input)?;
+        // COMET PATCH: reserve a buffer the buffered batches share once, as
+        // apache/datafusion#22862 does for the hash join build side.
+        let size = self.reserved_bytes_for_batch(input)?;
 
         match self.reservation.try_grow(size) {
             Ok(_) => Ok(()),
             Err(e) => {
-                if self.in_mem_batches.is_empty() {
+                // COMET PATCH: or small batches.
+                if self.in_mem_batches.is_empty() && self.small_batches.is_empty() {
                     return Err(Self::err_with_oom_context(e));
                 }
 
                 // Spill and try again.
                 self.sort_and_spill_in_mem_batches().await?;
+                let size = self.reserved_bytes_for_batch(input)?;
                 self.reservation
                     .try_grow(size)
                     .map_err(Self::err_with_oom_context)
             }
+        }
+    }
+
+    /// COMET PATCH
+    fn reserved_bytes_for_batch(&mut self, input: &RecordBatch) -> Result<usize> {
+        Self::reserved_bytes_counted(
+            &self.late_materialization,
+            input,
+            &mut self.in_mem_batches_memory,
+        )
+    }
+
+    /// COMET PATCH
+    fn reserved_bytes_counted(
+        late_materialization: &Option<LateMaterialization>,
+        input: &RecordBatch,
+        counter: &mut RecordBatchMemoryCounter,
+    ) -> Result<usize> {
+        match late_materialization {
+            Some(late) => late.reserved_bytes(input, counter),
+            None => reserved_bytes_counting_shared_buffers(input, counter),
         }
     }
 
@@ -879,6 +1316,19 @@ pub(crate) fn get_reserved_bytes_for_record_batch(batch: &RecordBatch) -> Result
             sliced_size,
         )
     })
+}
+
+/// COMET PATCH: [`get_reserved_bytes_for_record_batch`] for one of several batches
+/// held together, counting only the buffers `counter` has not counted yet in full.
+fn reserved_bytes_counting_shared_buffers(
+    batch: &RecordBatch,
+    counter: &mut RecordBatchMemoryCounter,
+) -> Result<usize> {
+    let sliced_size = batch.get_sliced_size()?;
+    Ok(get_reserved_bytes_for_record_batch_size(
+        counter.count_batch(batch),
+        sliced_size,
+    ))
 }
 
 impl Debug for ExternalSorter {
@@ -949,6 +1399,7 @@ pub struct SortExec {
     /// If `fetch` is `Some`, this will also be set and a TopK operator may be used.
     /// If `fetch` is `None`, this will be `None`.
     filter: Option<Arc<RwLock<TopKDynamicFilters>>>,
+    spill_before_output: bool,
 }
 
 impl SortExec {
@@ -968,7 +1419,17 @@ impl SortExec {
             common_sort_prefix: sort_prefix,
             cache: Arc::new(cache),
             filter: None,
+            spill_before_output: false,
         }
+    }
+
+    pub fn with_spill_before_output(mut self, spill_before_output: bool) -> Self {
+        self.spill_before_output = spill_before_output;
+        self
+    }
+
+    pub fn spill_before_output(&self) -> bool {
+        self.spill_before_output
     }
 
     /// Whether this `SortExec` preserves partitioning of the children
@@ -1044,6 +1505,7 @@ impl SortExec {
             fetch: self.fetch,
             cache: Arc::clone(&self.cache),
             filter: self.filter.clone(),
+            spill_before_output: self.spill_before_output,
         }
     }
 
@@ -1425,26 +1887,90 @@ impl ExecutionPlan for SortExec {
                 )))
             }
             (false, None) => {
-                let mut sorter = ExternalSorter::new(
-                    partition,
-                    input.schema(),
-                    self.expr.clone(),
-                    context.session_config().batch_size(),
-                    execution_options.sort_spill_reservation_bytes,
-                    execution_options.sort_in_place_threshold_bytes,
-                    context.session_config().spill_compression(),
-                    &self.metrics_set,
-                    context.runtime_env(),
-                )?;
+                let expr = self.expr.clone();
+                let metrics = self.metrics_set.clone();
+                let batch_size = context.session_config().batch_size();
+                let merge_bytes = execution_options.sort_spill_reservation_bytes;
+                let in_place_bytes = execution_options.sort_in_place_threshold_bytes;
+                let spill_before_output = if self.spill_before_output {
+                    context
+                        .session_config()
+                        .get_extension::<SpillBeforeOutputThreshold>()
+                        .map_or(0, |threshold| threshold.0)
+                } else {
+                    0
+                };
+                let compression = context.session_config().spill_compression();
+                let runtime = context.runtime_env();
                 Ok(Box::pin(RecordBatchStreamAdapter::new(
                     self.schema(),
                     futures::stream::once(async move {
+                        // COMET PATCH: choose once per partition, before buffering or spilling.
+                        // Only wide non-key binary payloads use views. The public schema and
+                        // sort expressions remain unchanged; all output is materialized Binary.
+                        let first = loop {
+                            match input.next().await.transpose()? {
+                                Some(batch) if batch.num_rows() == 0 => {
+                                    continue;
+                                }
+                                batch => break batch,
+                            }
+                        };
+                        let payload = first.as_ref().and_then(|batch| {
+                            WideBinaryPayload::select(batch, &expr, input.schema())
+                        });
+                        let schema = payload
+                            .as_ref()
+                            .map(|payload| Arc::clone(payload.view_schema()))
+                            .unwrap_or_else(|| input.schema());
+                        let first = first
+                            .map(|batch| WideBinaryPayload::encode(&payload, batch))
+                            .transpose()?;
+                        let late = match &first {
+                            Some(batch) => LateMaterialization::select(batch, &expr)?,
+                            None => None,
+                        };
+                        let mut sorter = ExternalSorter::new(
+                            partition,
+                            schema,
+                            expr,
+                            batch_size,
+                            merge_bytes,
+                            in_place_bytes,
+                            compression,
+                            &metrics,
+                            runtime,
+                        )?
+                        .with_late_materialization(late)
+                        .with_spill_before_output_threshold(spill_before_output);
+                        if let Some(batch) = first {
+                            sorter.insert_batch(batch).await?;
+                        }
                         while let Some(batch) = input.next().await {
-                            let batch = batch?;
+                            let batch = WideBinaryPayload::encode(&payload, batch?)?;
                             sorter.insert_batch(batch).await?;
                         }
                         drop(input);
-                        sorter.sort().await
+                        let sorted = sorter.sort().await?;
+                        match payload {
+                            None => Ok::<_, DataFusionError>(sorted),
+                            Some(payload) => {
+                                let schema = Arc::clone(payload.original_schema());
+                                let elapsed =
+                                    sorter.metrics.baseline.elapsed_compute().clone();
+                                let output = sorted.map(move |batch| {
+                                    // Include final materialization in the sort's compute cost.
+                                    let _timer = elapsed.timer();
+                                    payload.decode(batch?)
+                                });
+                                Ok(
+                                    Box::pin(RecordBatchStreamAdapter::new(
+                                        schema, output,
+                                    ))
+                                        as SendableRecordBatchStream,
+                                )
+                            }
+                        }
                     })
                     .try_flatten(),
                 )))
@@ -1510,7 +2036,8 @@ impl ExecutionPlan for SortExec {
         Ok(Some(Arc::new(
             SortExec::new(updated_exprs, make_with_child(projection, self.input())?)
                 .with_fetch(self.fetch())
-                .with_preserve_partitioning(self.preserve_partitioning()),
+                .with_preserve_partitioning(self.preserve_partitioning())
+                .with_spill_before_output(self.spill_before_output),
         )))
     }
 
@@ -1590,7 +2117,8 @@ impl ExecutionPlan for SortExec {
         let new_sort = Arc::new(
             SortExec::new(self.expr.clone(), new_child)
                 .with_fetch(self.fetch())
-                .with_preserve_partitioning(self.preserve_partitioning()),
+                .with_preserve_partitioning(self.preserve_partitioning())
+                .with_spill_before_output(self.spill_before_output),
         ) as Arc<dyn ExecutionPlan>;
 
         Ok(FilterPushdownPropagation {
@@ -1712,6 +2240,10 @@ impl SortExec {
         Ok(Arc::new(new_sort))
     }
 }
+
+// COMET PATCH
+#[cfg(test)]
+mod comet_memory_tests;
 
 #[cfg(test)]
 mod tests {

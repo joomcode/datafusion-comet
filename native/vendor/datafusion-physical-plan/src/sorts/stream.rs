@@ -102,24 +102,53 @@ struct ReusableRows {
     // .1 is the one that is being written to
     // at end of a poll, .0 will be swapped with .1,
     inner: Vec<[Option<Arc<Rows>>; 2]>,
+    /// COMET PATCH: covers every buffer in `inner` for as long as it is kept, so a
+    /// buffer stays reserved after its cursor, which gets an empty reservation, is
+    /// dropped. Follows apache/datafusion#25372.
+    reservation: MemoryReservation,
+    /// COMET PATCH
+    kept: usize,
 }
 
 impl ReusableRows {
     // return a Rows for writing,
     // does not clone if the existing rows can be reused
     fn take_next(&mut self, stream_idx: usize) -> Result<Rows> {
-        Arc::try_unwrap(self.inner[stream_idx][1].take().unwrap()).map_err(|_| {
+        let rows = self.inner[stream_idx][1].take().unwrap();
+        self.kept -= rows.size();
+        Arc::try_unwrap(rows).map_err(|_| {
             internal_datafusion_err!(
                 "Rows from RowCursorStream is still in use by consumer"
             )
         })
     }
     // save the Rows
-    fn save(&mut self, stream_idx: usize, rows: &Arc<Rows>) {
-        self.inner[stream_idx][1] = Some(Arc::clone(rows));
+    fn save(&mut self, stream_idx: usize, rows: &Arc<Rows>) -> Result<()> {
+        self.kept += rows.size();
+        if let Some(old) = self.inner[stream_idx][1].replace(Arc::clone(rows)) {
+            self.kept -= old.size();
+        }
         // swap the current with the previous one, so that the next poll can reuse the Rows from the previous poll
         let [a, b] = &mut self.inner[stream_idx];
         mem::swap(a, b);
+        // COMET PATCH: reserve the buffer before the cursor gets it.
+        self.reservation.try_resize(self.kept)
+    }
+
+    // COMET PATCH: a finished stream keeps only the rows its last cursors still hold.
+    fn release(&mut self, stream_idx: usize) {
+        for slot in &mut self.inner[stream_idx] {
+            if slot
+                .as_ref()
+                .is_some_and(|rows| Arc::strong_count(rows) == 1)
+            {
+                self.kept -= slot.take().unwrap().size();
+            }
+        }
+        let kept = self.kept;
+        if kept < self.reservation.size() {
+            self.reservation.shrink(self.reservation.size() - kept);
+        }
     }
 }
 
@@ -167,12 +196,18 @@ impl RowCursorStream {
                 Some(Arc::new(converter.empty_rows(0, 0))),
             ]);
         }
+        let kept = rows.iter().flatten().flatten().map(|r| r.size()).sum();
+        let rows = ReusableRows {
+            inner: rows,
+            reservation: reservation.new_empty(),
+            kept,
+        };
         Ok(Self {
             converter,
             reservation,
             column_expressions: expressions.iter().map(|x| Arc::clone(&x.expr)).collect(),
             streams: FusedStreams(streams),
-            rows: ReusableRows { inner: rows },
+            rows,
         })
     }
 
@@ -193,12 +228,10 @@ impl RowCursorStream {
 
         let rows = Arc::new(rows);
 
-        self.rows.save(stream_idx, &rows);
-
-        // track the memory in the newly created Rows.
-        let rows_reservation = self.reservation.new_empty();
-        rows_reservation.try_grow(rows.size())?;
-        Ok(RowValues::new(rows, rows_reservation))
+        // COMET PATCH: `self.rows` reserves the buffer while it keeps it, which is at
+        // least as long as the cursor does, so the cursor's reservation is empty.
+        self.rows.save(stream_idx, &rows)?;
+        Ok(RowValues::new(rows, self.reservation.new_empty()))
     }
 }
 
@@ -214,7 +247,12 @@ impl PartitionedStream for RowCursorStream {
         cx: &mut Context<'_>,
         stream_idx: usize,
     ) -> Poll<Option<Self::Output>> {
-        Poll::Ready(ready!(self.streams.poll_next(cx, stream_idx)).map(|r| {
+        let polled = ready!(self.streams.poll_next(cx, stream_idx));
+        // COMET PATCH: a finished stream's rows are never reused.
+        if polled.is_none() {
+            self.rows.release(stream_idx);
+        }
+        Poll::Ready(polled.map(|r| {
             r.and_then(|batch| {
                 let cursor = self.convert_batch(&batch, stream_idx)?;
                 Ok((cursor, batch))
@@ -260,7 +298,14 @@ impl<T: CursorArray> FieldCursorStream<T> {
     fn convert_batch(&mut self, batch: &RecordBatch) -> Result<ArrayValues<T::Values>> {
         let value = self.sort.expr.evaluate(batch)?;
         let array = value.into_array(batch.num_rows())?;
-        let size_in_mem = array.get_buffer_memory_size();
+        // COMET PATCH: a column of the batch is charged with the batch, which the merge's
+        // `BatchBuilder` holds at least as long as this cursor. Reserve only a key that
+        // the sort expression computed.
+        let size_in_mem = if batch.columns().iter().any(|c| Arc::ptr_eq(c, &array)) {
+            0
+        } else {
+            array.get_buffer_memory_size()
+        };
         let array = array.as_any().downcast_ref::<T>().expect("field values");
         let array_reservation = self.reservation.new_empty();
         array_reservation.try_grow(size_in_mem)?;
@@ -539,5 +584,339 @@ mod tests {
             assert!(matches!(poll, Poll::Ready(None)));
             assert_eq!(Arc::strong_count(&hold_ref), 1);
         }
+    }
+
+    // COMET PATCH: finding 4 of apache/datafusion#25804.
+    fn two_column_streams(
+        partitions: usize,
+        batches: usize,
+    ) -> (SchemaRef, LexOrdering, Vec<SendableRecordBatchStream>) {
+        use crate::memory::MemoryStream;
+        use arrow::array::StringArray;
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("a", DataType::Int32, false),
+            Field::new("b", DataType::Utf8, false),
+        ]));
+        let streams = (0..partitions)
+            .map(|_| {
+                let batches = (0..batches)
+                    .map(|i| {
+                        let a = Int32Array::from_iter_values(
+                            (0..100).map(|r| (i * 100 + r) as i32),
+                        );
+                        let b = StringArray::from_iter_values(
+                            (0..100).map(|_| "x".repeat(50 * (i + 1))),
+                        );
+                        RecordBatch::try_new(
+                            Arc::clone(&schema),
+                            vec![Arc::new(a), Arc::new(b)],
+                        )
+                        .unwrap()
+                    })
+                    .collect();
+                Box::pin(
+                    MemoryStream::try_new(batches, Arc::clone(&schema), None).unwrap(),
+                ) as SendableRecordBatchStream
+            })
+            .collect();
+        let expressions = LexOrdering::new(vec![
+            PhysicalSortExpr::new_default(col("a", &schema).unwrap()),
+            PhysicalSortExpr::new_default(col("b", &schema).unwrap()),
+        ])
+        .unwrap();
+        (schema, expressions, streams)
+    }
+
+    /// The encoded rows `RowCursorStream` keeps for reuse after their cursor is dropped
+    /// stay reserved until it lets go of them.
+    #[test]
+    fn row_cursor_stream_reserves_the_rows_it_keeps() -> Result<()> {
+        use datafusion_execution::memory_pool::{
+            GreedyMemoryPool, MemoryConsumer, MemoryPool,
+        };
+        let (schema, expressions, streams) = two_column_streams(2, 3);
+        let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(64 * 1024 * 1024));
+        let reservation = MemoryConsumer::new("merge").register(&pool);
+        let mut stream =
+            RowCursorStream::try_new(&schema, &expressions, streams, reservation)?;
+        let kept = |stream: &RowCursorStream| -> usize {
+            stream
+                .rows
+                .inner
+                .iter()
+                .flatten()
+                .flatten()
+                .map(|rows| rows.size())
+                .sum()
+        };
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let mut poll = |stream: &mut RowCursorStream, idx: usize| match stream
+            .poll_next(&mut cx, idx)
+        {
+            Poll::Ready(Some(Ok((cursor, _)))) => Some(cursor),
+            Poll::Ready(None) => None,
+            other => panic!("unexpected poll result {other:?}"),
+        };
+
+        // The merge keeps a stream's previous cursor while it reads the next batch.
+        let first = poll(&mut stream, 0).unwrap();
+        let second = poll(&mut stream, 0).unwrap();
+        drop(first);
+        let other = poll(&mut stream, 1).unwrap();
+        assert_eq!(pool.reserved(), stream.converter.size() + kept(&stream));
+        assert_eq!(stream.rows.kept, kept(&stream));
+        drop(second);
+        drop(other);
+        assert!(kept(&stream) > 0);
+        assert_eq!(pool.reserved(), stream.converter.size() + kept(&stream));
+        assert_eq!(stream.rows.kept, kept(&stream));
+
+        // A finished stream lets go of the rows no cursor holds.
+        drop(poll(&mut stream, 0).unwrap());
+        assert!(poll(&mut stream, 0).is_none());
+        assert!(stream.rows.inner[0].iter().all(Option::is_none));
+        while let Some(cursor) = poll(&mut stream, 1) {
+            drop(cursor);
+        }
+        assert_eq!(kept(&stream), 0);
+        assert_eq!(pool.reserved(), stream.converter.size());
+        drop(stream);
+        assert_eq!(pool.reserved(), 0);
+        Ok(())
+    }
+
+    /// The count of the rows `RowCursorStream` keeps follows every reuse, replacement
+    /// and release of them, whichever cursors the merge still holds.
+    #[test]
+    fn row_cursor_stream_counts_the_rows_it_keeps() -> Result<()> {
+        use datafusion_execution::memory_pool::{
+            GreedyMemoryPool, MemoryConsumer, MemoryPool,
+        };
+        let (schema, expressions, _) = two_column_streams(0, 0);
+        let partitions = 32;
+        let streams = (0..partitions)
+            .map(|p| {
+                let (_, _, mut streams) = two_column_streams(1, p % 5);
+                streams.pop().unwrap()
+            })
+            .collect();
+        let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(1 << 30));
+        let reservation = MemoryConsumer::new("merge").register(&pool);
+        let mut stream =
+            RowCursorStream::try_new(&schema, &expressions, streams, reservation)?;
+        let kept = |stream: &RowCursorStream| -> usize {
+            stream
+                .rows
+                .inner
+                .iter()
+                .flatten()
+                .flatten()
+                .map(|rows| rows.size())
+                .sum()
+        };
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        let mut held: Vec<Option<RowValues>> = (0..partitions).map(|_| None).collect();
+        let mut finished = vec![false; partitions];
+        let mut state = 7u64;
+        while finished.iter().any(|f| !f) {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let idx = (state >> 33) as usize % partitions;
+            if (state >> 20).is_multiple_of(3) {
+                held[idx] = None;
+            }
+            match stream.poll_next(&mut cx, idx) {
+                Poll::Ready(Some(Ok((cursor, _)))) => {
+                    held[idx] = Some(cursor);
+                    assert_eq!(pool.reserved(), stream.converter.size() + kept(&stream));
+                }
+                Poll::Ready(None) => finished[idx] = true,
+                other => panic!("unexpected poll result {other:?}"),
+            }
+            assert_eq!(stream.rows.kept, kept(&stream));
+            assert!(pool.reserved() <= stream.converter.size() + kept(&stream));
+        }
+        held.clear();
+        for idx in 0..partitions {
+            assert!(matches!(stream.poll_next(&mut cx, idx), Poll::Ready(None)));
+            assert_eq!(stream.rows.kept, kept(&stream));
+        }
+        assert_eq!(stream.rows.kept, 0);
+        assert_eq!(pool.reserved(), stream.converter.size());
+        Ok(())
+    }
+
+    /// A merge of many single-row streams takes time linear in the number of streams.
+    #[tokio::test]
+    async fn merge_of_many_single_row_streams_is_linear() -> Result<()> {
+        use crate::memory::MemoryStream;
+        use crate::metrics::{BaselineMetrics, ExecutionPlanMetricsSet};
+        use crate::sorts::streaming_merge::StreamingMergeBuilder;
+        use arrow::array::StringArray;
+        use futures::TryStreamExt;
+
+        let (schema, expressions, _) = two_column_streams(0, 0);
+        let merge = |partitions: usize| {
+            let schema = Arc::clone(&schema);
+            let expressions = expressions.clone();
+            async move {
+                let streams = (0..partitions)
+                    .map(|p| {
+                        let batch = RecordBatch::try_new(
+                            Arc::clone(&schema),
+                            vec![
+                                Arc::new(Int32Array::from(vec![
+                                    (p * 7919 % partitions) as i32,
+                                ])),
+                                Arc::new(StringArray::from(vec!["x"])),
+                            ],
+                        )
+                        .unwrap();
+                        Box::pin(
+                            MemoryStream::try_new(vec![batch], Arc::clone(&schema), None)
+                                .unwrap(),
+                        ) as SendableRecordBatchStream
+                    })
+                    .collect();
+                let start = std::time::Instant::now();
+                let merged: Vec<RecordBatch> = StreamingMergeBuilder::new()
+                    .with_streams(streams)
+                    .with_schema(Arc::clone(&schema))
+                    .with_expressions(&expressions)
+                    .with_metrics(BaselineMetrics::new(
+                        &ExecutionPlanMetricsSet::new(),
+                        0,
+                    ))
+                    .with_batch_size(8192)
+                    .with_bypass_mempool()
+                    .build()?
+                    .try_collect()
+                    .await?;
+                assert_eq!(
+                    merged.iter().map(RecordBatch::num_rows).sum::<usize>(),
+                    partitions
+                );
+                Ok::<_, DataFusionError>(start.elapsed())
+            }
+        };
+        let small = merge(4_000).await?;
+        let large = merge(64_000).await?;
+        assert!(
+            large < small * 64 + std::time::Duration::from_secs(2),
+            "16 times the streams took {large:?} against {small:?}"
+        );
+        Ok(())
+    }
+
+    // COMET PATCH: finding 7 of apache/datafusion#25804.
+    #[derive(Debug)]
+    struct PeakPool {
+        inner: datafusion_execution::memory_pool::GreedyMemoryPool,
+        peak: std::sync::atomic::AtomicUsize,
+    }
+
+    impl std::fmt::Display for PeakPool {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "peak({})", self.inner)
+        }
+    }
+
+    impl datafusion_execution::memory_pool::MemoryPool for PeakPool {
+        fn name(&self) -> &str {
+            "peak"
+        }
+
+        fn grow(&self, reservation: &MemoryReservation, additional: usize) {
+            self.inner.grow(reservation, additional);
+            self.peak
+                .fetch_max(self.inner.reserved(), std::sync::atomic::Ordering::Relaxed);
+        }
+
+        fn shrink(&self, reservation: &MemoryReservation, shrink: usize) {
+            self.inner.shrink(reservation, shrink)
+        }
+
+        fn try_grow(
+            &self,
+            reservation: &MemoryReservation,
+            additional: usize,
+        ) -> Result<()> {
+            self.inner.try_grow(reservation, additional)?;
+            self.peak
+                .fetch_max(self.inner.reserved(), std::sync::atomic::Ordering::Relaxed);
+            Ok(())
+        }
+
+        fn reserved(&self) -> usize {
+            self.inner.reserved()
+        }
+    }
+
+    /// A single-column merge charges its sort key once, as part of the batch.
+    #[tokio::test]
+    async fn field_cursor_merge_counts_the_key_once() -> Result<()> {
+        use crate::memory::MemoryStream;
+        use crate::metrics::{BaselineMetrics, ExecutionPlanMetricsSet};
+        use crate::sorts::streaming_merge::StreamingMergeBuilder;
+        use arrow::array::Int64Array;
+        use datafusion_execution::memory_pool::{MemoryConsumer, MemoryPool};
+        use futures::TryStreamExt;
+
+        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, false)]));
+        let batch = |offset: i64| {
+            RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![Arc::new(Int64Array::from_iter_values(
+                    (0..10_000).map(|i| 2 * i + offset),
+                ))],
+            )
+            .unwrap()
+        };
+        let inputs = [batch(0), batch(1)];
+        let input_size: usize = inputs
+            .iter()
+            .map(crate::spill::get_record_batch_memory_size)
+            .sum();
+        let streams = inputs
+            .into_iter()
+            .map(|b| {
+                Box::pin(
+                    MemoryStream::try_new(vec![b], Arc::clone(&schema), None).unwrap(),
+                ) as SendableRecordBatchStream
+            })
+            .collect();
+        let peak = Arc::new(PeakPool {
+            inner: datafusion_execution::memory_pool::GreedyMemoryPool::new(usize::MAX),
+            peak: Default::default(),
+        });
+        let pool: Arc<dyn MemoryPool> = Arc::clone(&peak) as _;
+        let ordering =
+            LexOrdering::new(vec![PhysicalSortExpr::new_default(col("a", &schema)?)])
+                .unwrap();
+        let merged: Vec<RecordBatch> = StreamingMergeBuilder::new()
+            .with_streams(streams)
+            .with_schema(Arc::clone(&schema))
+            .with_expressions(&ordering)
+            .with_metrics(BaselineMetrics::new(&ExecutionPlanMetricsSet::new(), 0))
+            .with_batch_size(100_000)
+            .with_reservation(MemoryConsumer::new("merge").register(&pool))
+            .build()?
+            .try_collect()
+            .await?;
+        assert_eq!(
+            merged.iter().map(RecordBatch::num_rows).sum::<usize>(),
+            20_000
+        );
+        let peak = peak.peak.load(std::sync::atomic::Ordering::Relaxed);
+        // Both batches are buffered at once, and their keys are the same buffers.
+        assert!(peak >= input_size, "the batches are not accounted: {peak}");
+        assert!(
+            peak < input_size * 3 / 2,
+            "the key is counted twice: {peak} for {input_size}"
+        );
+        assert_eq!(pool.reserved(), 0);
+        Ok(())
     }
 }

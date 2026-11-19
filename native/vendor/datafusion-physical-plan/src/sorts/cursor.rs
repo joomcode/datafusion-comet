@@ -180,10 +180,12 @@ impl RowValues {
     ///
     /// Panics if the reservation is not for exactly `rows.size()`
     /// bytes or if `rows` is empty.
+    ///
+    /// COMET PATCH: the reservation may also be empty when the caller accounts for
+    /// `rows` for as long as this cursor lives.
     pub fn new(rows: Arc<Rows>, reservation: MemoryReservation) -> Self {
-        assert_eq!(
-            rows.size(),
-            reservation.size(),
+        assert!(
+            reservation.size() == 0 || reservation.size() == rows.size(),
             "memory reservation mismatch"
         );
         assert!(rows.num_rows() > 0);
