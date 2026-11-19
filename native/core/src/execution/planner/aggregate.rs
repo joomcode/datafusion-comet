@@ -26,8 +26,8 @@ use datafusion::{
     common::ScalarValue,
     functions_aggregate::{
         bit_and_or_xor::{bit_and_udaf, bit_or_udaf, bit_xor_udaf},
+        bool_and_or::{bool_and_udaf, bool_or_udaf},
         count::count_udaf,
-        first_last::{FirstValue, LastValue},
         min_max::{max_udaf, min_udaf},
         sum::sum_udaf,
     },
@@ -53,8 +53,8 @@ use datafusion_comet_proto::{
 use datafusion_comet_spark_expr::{
     ApproxPercentile, Avg, AvgDecimal, BloomFilterAgg, CometCollectList, CometCollectSet,
     Correlation, Covariance, HllPlusPlus, HllSketchAgg, HllUnionAgg, MaxMinBy, Mode, Regr,
-    RegrType, SparkBloomFilterVersion, SparkListAgg, SparkMinMax, SparkPercentile, SparkPivotFirst,
-    Stddev, SumDecimal, SumInteger, Variance,
+    RegrType, SparkBloomFilterVersion, SparkFirstLast, SparkListAgg, SparkMinMax, SparkPercentile,
+    SparkPivotFirst, Stddev, SumDecimal, SumInteger, Variance,
 };
 use jni::objects::{Global, JObject};
 
@@ -397,7 +397,7 @@ impl PhysicalPlanner {
             AggExprStruct::Min(expr) => {
                 let child = self.create_expr(expr.child.as_ref().unwrap(), Arc::clone(&schema))?;
                 let datatype = to_arrow_datatype(expr.datatype.as_ref().unwrap());
-                let func = min_max_udaf(&datatype, false);
+                let func = grouped_min_max_udaf(&datatype, false);
                 let child = Arc::new(CastExpr::new(child, datatype.clone(), None));
 
                 AggregateExprBuilder::new(func, vec![child])
@@ -411,7 +411,7 @@ impl PhysicalPlanner {
             AggExprStruct::Max(expr) => {
                 let child = self.create_expr(expr.child.as_ref().unwrap(), Arc::clone(&schema))?;
                 let datatype = to_arrow_datatype(expr.datatype.as_ref().unwrap());
-                let func = min_max_udaf(&datatype, true);
+                let func = grouped_min_max_udaf(&datatype, true);
                 let child = Arc::new(CastExpr::new(child, datatype.clone(), None));
 
                 AggregateExprBuilder::new(func, vec![child])
@@ -495,7 +495,7 @@ impl PhysicalPlanner {
             }
             AggExprStruct::First(expr) => {
                 let child = self.create_expr(expr.child.as_ref().unwrap(), Arc::clone(&schema))?;
-                let func = AggregateUDF::new_from_impl(FirstValue::new());
+                let func = AggregateUDF::new_from_impl(SparkFirstLast::first());
 
                 AggregateExprBuilder::new(Arc::new(func), vec![child])
                     .schema(schema)
@@ -507,7 +507,7 @@ impl PhysicalPlanner {
             }
             AggExprStruct::Last(expr) => {
                 let child = self.create_expr(expr.child.as_ref().unwrap(), Arc::clone(&schema))?;
-                let func = AggregateUDF::new_from_impl(LastValue::new());
+                let func = AggregateUDF::new_from_impl(SparkFirstLast::last());
 
                 AggregateExprBuilder::new(Arc::new(func), vec![child])
                     .schema(schema)
@@ -923,7 +923,7 @@ fn make_all_fields_nullable(data_type: &DataType) -> DataType {
 }
 
 /// `min` or `max` over `data_type`: Spark's version for floats, which DataFusion orders
-/// differently, and DataFusion's for every other type.
+/// differently, and DataFusion's for every other type. Keep sliding-window support.
 pub(super) fn min_max_udaf(data_type: &DataType, is_max: bool) -> Arc<AggregateUDF> {
     // Spark has only 32- and 64-bit floating-point types. Keep Float16 on DataFusion's path so
     // an internal plan using it does not reach SparkMinMax, whose accumulators reject that type.
@@ -933,6 +933,20 @@ pub(super) fn min_max_udaf(data_type: &DataType, is_max: bool) -> Arc<AggregateU
         max_udaf()
     } else {
         min_udaf()
+    }
+}
+
+/// Boolean MIN/MAX can use columnar groups accumulators in an aggregate. Do not
+/// substitute bool_and/or in windows: they lack the sliding MIN/MAX retract path.
+pub(super) fn grouped_min_max_udaf(data_type: &DataType, is_max: bool) -> Arc<AggregateUDF> {
+    if matches!(data_type, DataType::Boolean) {
+        if is_max {
+            bool_or_udaf()
+        } else {
+            bool_and_udaf()
+        }
+    } else {
+        min_max_udaf(data_type, is_max)
     }
 }
 
