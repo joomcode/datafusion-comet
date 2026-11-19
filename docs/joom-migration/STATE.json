@@ -1,6 +1,6 @@
 {
-  "updated_on": "2026-11-18T22:39:06.361313+00:00",
-  "phase": "G01_IMPLEMENTATION_COMPLETE_EXACT_SHA_RC1_GATE",
+  "updated_on": "2026-11-19",
+  "phase": "G02_COMPLETE_G03_REQUIRES_EXPLICIT_AUTHORIZATION",
   "repository": "/Users/skotlov/d/projects/datafusion-comet",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -39,9 +39,9 @@
         "P03"
       ],
       "depends_on": [],
-      "status": "IMPLEMENTATION_COMPLETE_RC1_ACCEPTANCE_GATE",
-      "head_commit": "Resolve refs/tags/joom-1.2-1-rc1^{commit} after the acceptance gate.",
-      "tests": "Full runtime CI: 127 successful jobs, 17 conditional skips, zero failures. Current source/test/lockfile equality verified. Final exact-SHA RC receipt is delivered with artifacts and referenced by the annotated tag.",
+      "status": "COMPLETED_INTEGRATED_AND_TAGGED",
+      "head_commit": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
+      "tests": "Final exact-source RC44414598266 attempt2:7 successful jobs and12/12actual smoke cases per architecture; downloaded/hash/provenance checked; post-integration audit24/24 passed. Full runtime CI evidence retained as documented.",
       "handoff_report": "G01-report.md",
       "preparation": {
         "group": "G01",
@@ -59,10 +59,15 @@
       "branch": "joom/1.2-native-runtime",
       "cards": ["I05", "I06", "J14", "J15", "J16", "J22"],
       "depends_on": ["G01"],
-      "status": "NOT_STARTED",
+      "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
-      "tests": "NOT_RUN",
-      "handoff_report": null
+      "tests": "157 native tests retained on unchanged native source/library; 93 final selected JVM/SQL cases passed, zero failed/canceled/ignored. JNI memory-wait gap closed locally with negative-control proof. Strict Clippy/format/config passed.",
+      "handoff_report": "G02-report.md",
+      "base_commit": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
+      "auxiliary_directory": "/Users/skotlov/d/temp/20261119_comet12-g02",
+      "integration_receipt": "/Users/skotlov/d/temp/20261119_comet12-g02-integration/completion.json",
+      "head_ref": "refs/heads/branch-1.2",
+      "functional_source_previously_verified": "e0388e3bc0e5415ea2b85664b1c8cf8e3cbd7574"
     },
     {
       "id": "G03",
@@ -284,7 +289,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Run RC Build & Smoke for the final rewritten feature HEAD. After both native architectures pass and artifact download verification succeeds, fast-forward branch-1.2 and create the immutable annotated joom-1.2-1-rc1 tag. The tag annotation and delivered release-qualification.json record the final run/source/JAR identities without a recursive post-build source commit. Then stop; G02 requires explicit authorization.",
+  "next_step": "Report the G02 integration/post-merge audit and final three commit names. Await separate explicit G03 authorization; no further implementation, full per-group GHA, main/tag changes or production actions.",
   "qualification": "Runtime sources remain byte-identical to full Comet CI source 26590264b878fb8eae2ca439a8bcc0dfb513cb36. Prior B93 RC passed 7/7 jobs and 12/12 smoke cases per architecture. Rewritten final source must pass a fresh RC build; do not reuse B93 artifacts as RC1.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -308,7 +313,7 @@
     "implementation_hold_preserved": true,
     "approved_feature_groups_and_release_milestones_unchanged": true
   },
-  "active_branch": "joom/1.2-dev",
+  "active_branch": "branch-1.2",
   "g01_work_directory": "/Users/skotlov/d/temp/20261117_comet12-g01",
   "upstream_base_rechecked_on": "2026-11-17",
   "upstream_base_current_sha": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -510,15 +515,18 @@
   },
   "current_qualification_directory": "/Users/skotlov/d/temp/20261117_comet12-g01-final-qualification",
   "integration_gate": {
-    "status": "USER_AUTHORIZED_G01_INTEGRATION_AND_RC1_AFTER_SUCCESSFUL_FINAL_CHECKS",
-    "integration_head_before_g01": "9691385f35e4c5bd29514dca78d2044dd20e4bed",
-    "method": "Fast-forward only, retaining the qualified source SHA; no extra merge commit.",
-    "final_identity": "Annotated refs/tags/joom-1.2-1-rc1 and delivered release-qualification.json",
+    "status": "G02_USER_APPROVED_ACCEPTANCE",
+    "method": "Fast-forward branch-1.2 to the consolidated three-commit G02 feature; no merge commit.",
+    "previous_base": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
+    "functional_source_previously_verified": "e0388e3bc0e5415ea2b85664b1c8cf8e3cbd7574",
+    "post_commit_gate": "This source snapshot records stage acceptance; exact local/remote refs, final tree and successful execution are recorded after commit in the integration completion receipt.",
+    "receipt": "/Users/skotlov/d/temp/20261119_comet12-g02-integration/completion.json",
     "not_authorized": [
-      "G02-G10",
-      "Java 21 qualification",
-      "JFrog/Nexus/Docker publication",
-      "production operations"
+      "G03-G10 implementation",
+      "main/tag changes",
+      "new full per-group GHA",
+      "artifact publication",
+      "production use"
     ]
   },
   "pr_preparation": {
@@ -1294,5 +1302,196 @@
     "external_final_receipt": "/Users/skotlov/d/temp/20261118_comet12-g01-finalization/completion.json",
     "g02_authorized": false,
     "java21_work_authorized": false
+  },
+  "current_validation_policy_ref": "decisions.json#future_migration_validation_policy",
+  "excluded_repository": "/Users/skotlov/d/projects/datasci/",
+  "validation_backlog": {
+    "scope": "Track every remaining-group check deferred, unverified or not runnable locally; this empty initial list does not certify final coverage. The complete requirements also include correctness-test-plan.txt and all feature-register acceptance criteria.",
+    "required_entry_fields": [
+      "id",
+      "group",
+      "feature_cards",
+      "behavior_or_test",
+      "required_inputs_and_settings",
+      "reason_deferred",
+      "owner",
+      "intended_validation_command_or_job",
+      "native_execution_requirement",
+      "status",
+      "evidence_path_and_source_sha"
+    ],
+    "entries": [
+      {
+        "id": "G02-LINUX-AMD64-RELEASE",
+        "group": "G02",
+        "feature_cards": ["I05", "I06", "J14", "J15", "J16", "J22"],
+        "behavior_or_test": "Run G02 suites/unit regressions on native Linux AMD64 with the final CI/release feature graph; local macOS ARM64 debug evidence is not Linux/release qualification.",
+        "required_inputs_and_settings": "Spark4.2.1/Java17/ANSI=true; full agreed final native/vendor/JVM suites; final JAR smoke on native AMD64/ARM64.",
+        "reason_deferred": "Per-user policy: local targeted checks during each group, full agreed GHA and final artifact qualification after all feature work.",
+        "owner": "Final migration qualification (G09/G10 if needed)",
+        "intended_validation_command_or_job": "Existing full Comet CI matrix plus RC Build & Smoke final artifacts.",
+        "native_execution_requirement": "Actual native execution and final loaded library/class-origin proof; no canceled/ignored case counted as passed.",
+        "status": "DEFERRED_FINAL_QUALIFICATION",
+        "evidence_path_and_source_sha": "Current local source evidence under /Users/skotlov/d/temp/20261119_comet12-g02; final qualified SHA pending."
+      },
+      {
+        "id": "G02-CANCEL-SPARK-MEMORY-WAIT",
+        "group": "G02",
+        "feature_cards": ["J15"],
+        "behavior_or_test": "Cancel a plan whose already-running poll is blocked inside Spark JNI acquireExecutionMemory; verify bounded exit and no leaked/double-returned reservations.",
+        "required_inputs_and_settings": "Deterministically saturate Spark off-heap pool using another task; interruptOnCancel=false; native producer and JVM-fed paths; restore/release held memory in test cleanup.",
+        "reason_deferred": "Originally deferred; now reproduced by a bounded negative control and closed by passing deterministic local JNI and manager regressions. Final Linux/release coverage remains tracked separately.",
+        "owner": "G02 correctness follow-up / final qualification",
+        "intended_validation_command_or_job": "Focused cancellation+CometTaskMemoryManager regression before final acceptance; add deterministic scenario if existing agreed suites do not cover it.",
+        "native_execution_requirement": "Verify native executing plan, captured Spark task context, actual blocked acquire and reservation accounting before/after cancellation.",
+        "status": "CLOSED_LOCAL_ARM64_VALIDATION",
+        "evidence_path_and_source_sha": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait/completion.json (final source SHA), tested-source-manifest.json, maven-final-regressions.log and memory-wait-negative-control.json",
+        "actual_evidence": "Both JNI paths x verified fair/greedy pools stop within two seconds with competitor memory held, TaskKilledException, no success batch/EOF, zero native/Spark reservations/live contexts; 16 manager cases cover exact grants, partial spill cleanup, nested/reused threads. Unified 93/93 pass."
+      },
+      {
+        "id": "G02-OFFSET-CONSUMERS",
+        "group": "G02",
+        "feature_cards": ["J14"],
+        "behavior_or_test": "Apply shared OffsetBudget to the Joom partition-window concat and shuffle coalescer when those missing consumers are ported; verify their combined FFI/offset behavior.",
+        "required_inputs_and_settings": "G06 windows and G07 coalescer with nested/string/map/boolean sliced arrays and synthetic offset budgets, then normal configured limits.",
+        "reason_deferred": "Those consumer implementations belong to the explicitly separate G06/G07 groups and are not implemented/authorized in G02. Shared utility and explode are validated here.",
+        "owner": "G06 and G07 integration",
+        "intended_validation_command_or_job": "Window/coalescer targeted regressions during their authorized ports; final agreed native/JVM/SQL and exact-JAR qualification.",
+        "native_execution_requirement": "Assert actual native window/coalescer/FFI paths with Spark result parity; not incidental fallback.",
+        "status": "PLANNED_DEPENDENT_GROUP_VALIDATION",
+        "evidence_path_and_source_sha": "Shared offset utility tests and explode tests under /Users/skotlov/d/temp/20261119_comet12-g02; future consumer SHA pending."
+      }
+    ],
+    "final_gate": "No unresolved/unverified applicable cases. Require actual passing evidence; retain only applicability exclusions explicitly agreed with the user (such as the existing HDFS-cluster exclusion)."
+  },
+  "temporary_ci_mechanisms": {
+    "scope": "Track every temporary CI disablement, switch or workaround introduced during remaining implementation. No CI configuration was changed by this documentation update.",
+    "required_entry_fields": [
+      "id",
+      "group",
+      "file_or_setting",
+      "purpose",
+      "owner",
+      "restore_or_remove_action",
+      "status",
+      "removal_evidence"
+    ],
+    "entries": [],
+    "final_gate": "Audit actual CI, remove all temporary mechanisms, restore normal automatic triggers and full agreed coverage, then run full final GHA and exact final-JAR AMD64/ARM64 packaged smoke. An empty list alone is not proof of restoration."
+  },
+  "production_use_allowed": false,
+  "active_implementation_group": null,
+  "local_documentation_update_pending": null,
+  "g02": {
+    "base_commit": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
+    "branch": "joom/1.2-native-runtime",
+    "source_tag": "joom-1.1-13",
+    "auxiliary_directory": "/Users/skotlov/d/temp/20261119_comet12-g02",
+    "cards": ["I05", "I06", "J14", "J15", "J16", "J22"],
+    "full_gha_run": false,
+    "base_branch_update_authorized_this_stage": true,
+    "status": "COMPLETED_INTEGRATED",
+    "progress": {
+      "source_ports": "J14 common offset budget/explode; J16 TaskContext capture; J22 fetched-block ownership; J15 cancellation registry/operator wrappers/JNI waits/shuffle/JVM loops. I05/I06 upstream implementations retained with Joom regressions.",
+      "native_cargo_check": "PASSED with cached official protoc33.5; initial Homebrew protoc dynamic dependency failed before source compilation.",
+      "native_build": "PASSED final dev-profile build; library native/target/debug/libcomet.dylib; exact SHA256 matches the Maven test-resource library.",
+      "native_common_tests": {
+        "passed": 81,
+        "failed": 0,
+        "ignored": 0,
+        "log": "/Users/skotlov/d/temp/20261119_comet12-g02/native-common-tests.log"
+      },
+      "maven_targeted_status": "PASSED 93/93 on final local source, zero failures/canceled/ignored",
+      "maven_session_id": null,
+      "native_remaining": "No outstanding local commands. Linux/release and future offset consumers remain explicitly tracked; the Spark JNI memory-wait cancellation case is closed locally.",
+      "review": "J16/J22 helper reviewed root J15 registry/planLock/no-UAF and added transparent DF55.2 optimizer hooks; upstream BatchProducer.stop synchronous drop retained.",
+      "no_full_gha": true,
+      "no_datasci_access": true,
+      "maven_targeted_initial": {
+        "passed": 60,
+        "failed": 10,
+        "canceled": 0,
+        "ignored": 0,
+        "reason": "8 failures: wrapper-unaware shuffle-writer downcast; 1 metrics fixture inspecting a sibling QueryExecution; 1 stale Spark4.2 unary-overflow message expectation. All corrected, targeted regressions retained, final unified 71/71 batch passed.",
+        "evidence": "/Users/skotlov/d/temp/20261119_comet12-g02/initial-jvm-reports.zip"
+      },
+      "native_jni_tests": {
+        "passed": 43,
+        "failed": 0,
+        "ignored": 0,
+        "log": "/Users/skotlov/d/temp/20261119_comet12-g02/native-jni-tests-final-config.log",
+        "environment": "Direct stable toolchain bin in PATH, RUSTUP_TOOLCHAIN=stable, both DYLD_LIBRARY_PATH and DYLD_FALLBACK_LIBRARY_PATH include Java17 lib/server; proxy invocation did not retain JVM runtime lookup."
+      },
+      "native_explode_tests": {
+        "passed": 22,
+        "failed": 0,
+        "ignored": 0,
+        "log": "/Users/skotlov/d/temp/20261119_comet12-g02/native-explode-tests.log"
+      },
+      "native_targeted_results": {
+        "common": 81,
+        "explode": 22,
+        "jni_lifecycle": 43,
+        "cancellable_wrapper": 4,
+        "shuffle_partition_batches": 7,
+        "total_passed": 157,
+        "failed": 0,
+        "ignored": 0,
+        "native_final_build": "PASSED native-build-final-config.log"
+      },
+      "ci_config_checks": "PASSED; new JVM suites registered on Linux/macOS; no disabled checks/triggers",
+      "native_library_sha256": "8c14dc78b946e0048d9da14993cb200821e272c13556c4ab0d547995fe278938",
+      "clippy": "PASSED strict four crates all-targets/no-deps",
+      "memory_wait_followup_log": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait/maven-final-regressions.log",
+      "negative_control": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait/memory-wait-negative-control.json",
+      "pre_integration_no_main_or_base_changes": true,
+      "integration_change": "Only the authorized branch-1.2 fast-forward; main and RC1 remain unchanged."
+    },
+    "results": "G02-results.json",
+    "report": "G02-report.md",
+    "memory_wait_followup": {
+      "authorization": "User approved closing the scenario, targeted local regressions, fold fixes into existing substantive commits, push feature and show final diff for merge approval.",
+      "base_head": "9dd53f98876f4541ac5ee99b0d06fda9826bb608",
+      "auxiliary_directory": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait",
+      "status": "CLOSED_LOCAL_ARM64_VALIDATION_ACCEPTED_FOR_INTEGRATION",
+      "integration_authorized": true,
+      "tests": "93/93 selected JVM/SQL cases, no failed/canceled/ignored; negative control reproduces blocked close in both JNI paths."
+    },
+    "performance_review": {
+      "status": "COMPLETED_LOCAL_EXPLORATORY_A_B",
+      "authorization": "User requested before/after performance comparison using existing Comet benchmarks; no branch-1.2 merge or G03.",
+      "auxiliary_directory": "/Users/skotlov/d/temp/20261119_comet12-g02-performance",
+      "source_head": "e0388e3bc0e5415ea2b85664b1c8cf8e3cbd7574",
+      "variants": "9dd manager versus final e038 manager, all other final classes/native bytes fixed.",
+      "git_mutation": false,
+      "production_source_change": false,
+      "limitations": "macOS ARM64, native debug library; direct JVM pair cost excludes JNI and constructor setup.",
+      "report": "G02-performance.md",
+      "measurement_jvms": 16,
+      "diagnostic_jvms": 2,
+      "bridge_zero_balance_ns_pair": [231.58596153846153, 249.80269230769233],
+      "bridge_two_worker_ns_pair": [445.9322497333446, 545.6832636363636],
+      "sql_result": "No reproducible SQL change established and no equivalence/small-upper-bound claim. Dev native and balanced background sandbox metrics errors limit interpretation.",
+      "runtime_code_changed": false,
+      "concurrent_scope": "Saturated shared-manager stress; default fair native path serializes in Rust, greedy permits parallel acquires.",
+      "user_accepted_conclusion_ref": "decisions.json#g02_performance_acceptance",
+      "normal_execution_expectation": "Fractional-percent/generally below1% engineering expectation for normal batches; not a production measurement or bound.",
+      "stage_disposition": "Accepted; current microbenchmark cost does not require another optimization before G02 integration."
+    },
+    "integration_receipt": "/Users/skotlov/d/temp/20261119_comet12-g02-integration/completion.json",
+    "integration_authorization_ref": "decisions.json#g02_integration_authorization",
+    "source_freeze_note": "Only migration documentation is consolidated after the verified functional candidate. Post-commit integration execution/ref/hash proof is external to avoid a self-referencing source SHA."
+  },
+  "g01_integration_gate_history": {
+    "status": "USER_AUTHORIZED_G01_INTEGRATION_AND_RC1_AFTER_SUCCESSFUL_FINAL_CHECKS",
+    "integration_head_before_g01": "9691385f35e4c5bd29514dca78d2044dd20e4bed",
+    "method": "Fast-forward only, retaining the qualified source SHA; no extra merge commit.",
+    "final_identity": "Annotated refs/tags/joom-1.2-1-rc1 and delivered release-qualification.json",
+    "not_authorized": [
+      "G02-G10",
+      "Java 21 qualification",
+      "JFrog/Nexus/Docker publication",
+      "production operations"
+    ]
   }
 }

@@ -281,7 +281,11 @@
     "Overall CI/feature/runtime/ANSI gates are not reduced. Fix or restrict a known unsafe-result path before production.",
     "If a package cannot objectively be reviewed well at this size, do not combine further merely to meet the limit; show the concrete diff and propose a split within the reserve.",
     "Do not leave C01/C02/C03/Q01 as 4 hidden extra PRs: their owners are explicitly assigned in the table.",
-    "Qualify G09 after all of G03-G08. Groups follow the main sequential order; parallel implementation is not required."
+    "Qualify G09 after all of G03-G08. Groups follow the main sequential order; parallel implementation is not required.",
+    "During each remaining G, use local builds and targeted regressions; track all unverified cases explicitly instead of running full GHA after every G.",
+    "Before final acceptance remove all temporary CI mechanisms, restore normal automatic full CI, then run the full agreed GHA and packaged smoke of the final JARs on native AMD64/ARM64.",
+    "Do not touch /Users/skotlov/d/projects/datasci/; CI edits belong only in authorized Comet feature branches and branch-1.2, with no additional main commits.",
+    "No production use until all agreed features and successful final qualification are complete; each next G requires separate explicit authorization."
   ],
   "cost_benefit": {
     "benefits": [
@@ -301,14 +305,9 @@
       "meaning": "Internal baseline build; not the complete Joom migration."
     },
     {
-      "planned_tag": "joom-1.2-1-rc2",
-      "after": "G06",
-      "meaning": "Shared runtime mechanisms/native block are ready; remaining JVM/shuffle/planner work is still incomplete."
-    },
-    {
       "planned_tag": "joom-1.2-1-rc3",
-      "after": "G09 (+G10 if needed)",
-      "meaning": "Complete candidate with known unsafe-result paths fixed/restricted."
+      "after": "All agreed G01-G09 work, G10/integration fixes if needed, and removal of all temporary CI mechanisms",
+      "meaning": "Final candidate: full agreed GHA and exact final-JAR packaged smoke on native AMD64/ARM64 after restoring normal automatic full CI. Final qualification may require further fixes/runs."
     },
     {
       "planned_tag": "joom-1.2-1",
@@ -363,8 +362,19 @@
     "reference": "PERFORMANCE.md",
     "correctness_tests_unchanged": true
   },
-  "last_updated_on": "2026-11-17",
+  "last_updated_on": "2026-11-19",
   "execution_model_ref": "decisions.json#execution_model",
   "translation_note": "Translated from Russian on 2026-11-18 without changing the approved scope, card coverage, dependencies or milestones. User quotes are English translations. Historical execution holds describe the planning snapshot; decisions.json and STATE.json control current authorization/progress.",
-  "snapshot_note": "Approved scope snapshot; original planning statuses are historical. Track implementation in STATE.json and resolve final G01 acceptance through G01-CLOSEOUT.md, the annotated RC1 tag and delivered artifact receipts. No later group is automatically authorized."
+  "snapshot_note": "Approved scope snapshot; original planning statuses are historical. Track implementation in STATE.json and resolve final G01 acceptance through G01-CLOSEOUT.md, the annotated RC1 tag and delivered artifact receipts. No later group is automatically authorized.",
+  "cancelled_milestones": [
+    {
+      "planned_tag": "joom-1.2-1-rc2",
+      "after": "G06",
+      "meaning": "Shared runtime mechanisms/native block are ready; remaining JVM/shuffle/planner work is still incomplete.",
+      "status": "CANCELLED_BY_USER_20261119",
+      "reason": "Intermediate G06 release qualification removed; do not create this planned intermediate tag."
+    }
+  ],
+  "validation_policy_ref": "decisions.json#future_migration_validation_policy",
+  "validation_policy_updated_on": "2026-11-19"
 }

@@ -17,9 +17,11 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+> **Current rules, 2026-11-19:** G01 is complete at `joom-1.2-1-rc1` (`c04d2d03c`); G02 is locally implemented/validated on joom/1.2-native-runtime and awaits review; G03-G10 remain gated. Do not touch `/Users/skotlov/d/projects/datasci/`. For each remaining group use local builds/targeted regressions and track unverified cases; focused Linux AMD64 GHA is available when needed. Do not run full GHA after every group, and G06 intermediate release qualification is removed. Before final acceptance remove all temporary CI mechanisms, restore normal automatic full CI, then run the full agreed GHA and exact final-JAR smoke on native AMD64/ARM64. No additional main commits or production use. Correctness requirements remain unchanged. See `decisions.json#future_migration_validation_policy`.
+
 > **Final source-freeze note:** G01 implementation and documentation are complete. RC1 acceptance is a post-commit gate recorded by the immutable `joom-1.2-1-rc1` tag and the delivered artifact receipts; see `G01-CLOSEOUT.md`. Earlier source SHAs, runs and pending states below are historical evidence. G02 and Java 21 work remain unauthorized.
 
-> **G01 finalization authorized:** documentation and history cleanup, followed by exact-SHA RC qualification, are in progress. Integration into `branch-1.2` and `joom-1.2-1-rc1` are conditional on successful checks. G02 and Java 21 work remain on hold.
+> **Historical G01 source-freeze status:** documentation and history cleanup, followed by exact-SHA RC qualification, are in progress. Integration into `branch-1.2` and `joom-1.2-1-rc1` are conditional on successful checks. G02 and Java 21 work remain on hold.
 
 # RC Build & Smoke
 
@@ -67,3 +69,17 @@ Qualified artifact: `rc-build-smoke-<fullSHA>`; previously qualified ID144693025
 After downloading, verify the artifact-archive SHA256, `sha256.txt`, embeddedGit/version/ELF/provenance and binding of both receipts to final JARs. The local result of the previously qualified run is `target/joom-release/gha-44388252264`. Removal and sizes are documented in `CLEANUP.md`; preserve shared caches and user checkouts.
 
 Full Comet CI for release-only commits was canceled at the user's direct instruction. Runtime/native/JVM code matches qualified 26590264b (CometCI44205897075:127success/17conditional skips); the new workflow additionally checked the release profile and final JARs. Source-tarball Apache RAT for b93d55385 passed separately. This does not constitute production GCP/performance qualification. G01 integration/tagging has subsequently been authorized conditional on finalization checks; G02 remains separately gated.
+
+## Use during the remaining migration
+
+The 2026-11-19 policy removes intermediate release qualification after G06.
+Do not run this full release workflow or full Comet CI after every G. Validate
+changes locally with builds and targeted regressions; track deferred checks and
+use focused Linux AMD64 GHA only when needed. Before final acceptance, remove
+all temporary CI mechanisms and restore normal automatic full CI, then run the
+full agreed GHA and this exact final-JAR AMD64/ARM64 qualification.
+
+The main bootstrap commit above is historical. All further CI changes belong
+in authorized feature branches and branch-1.2; do not add more commits in main.
+Artifacts remain internal candidates until all agreed work and final checks
+succeed; passing the workflow alone does not authorize production use.

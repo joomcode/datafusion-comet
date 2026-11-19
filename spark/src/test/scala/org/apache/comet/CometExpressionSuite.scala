@@ -2988,7 +2988,6 @@ class CometExpressionSuite extends CometTestBase with AdaptiveSparkPlanHelper {
   }
 
   test("unary negative integer overflow test") {
-    assume(!isSpark42Plus, "https://github.com/apache/datafusion-comet/issues/4967")
     def withAnsiMode(enabled: Boolean)(f: => Unit): Unit = {
       withSQLConf(
         SQLConf.ANSI_ENABLED.key -> enabled.toString,
@@ -2996,20 +2995,43 @@ class CometExpressionSuite extends CometTestBase with AdaptiveSparkPlanHelper {
         CometConf.COMET_EXEC_ENABLED.key -> "true")(f)
     }
 
-    // Spark 3.4/3.5 throw `_LEGACY_ERROR_TEMP_2043` ("- <sqlValue> caused overflow.") for byte and
-    // short. Spark 4.x routes them through `MathUtils.negateExact` and agrees with Comet, which
-    // always renders `SparkError::ArithmeticOverflow` with the Spark type name.
+    // Spark 4.2 reports a generic ARITHMETIC_OVERFLOW ("overflow") for negateExact.
+    // Spark 4.0/4.1 include the type name; Spark 3.4/3.5 use a legacy message for byte/short.
+    // Comet retains its type-specific message, but both engines must report the same structured
+    // Spark 4.2 condition and SQLSTATE below.
     def sparkOverflowMsg(dtype: String): String =
-      if (isSpark40Plus) s"$dtype overflow" else "caused overflow"
+      if (isSpark42Plus) "overflow"
+      else if ((dtype == "byte" || dtype == "short") && !isSpark40Plus) "caused overflow"
+      else s"$dtype overflow"
 
-    // Spark and Comet can render different overflow messages for the same operation, so assert each
-    // side's expected substring separately.
-    def checkOverflow(query: String, sparkExpected: String, cometExpected: String): Unit = {
+    // Preserve older version-specific diagnostics and require the exact structured condition,
+    // SQLSTATE and canonical message parameter on Spark 4.2.
+    def checkOverflow(
+        query: String,
+        sparkExpected: String,
+        cometExpected: String,
+        shouldFail: Boolean = true): Unit = {
       checkSparkAnswerMaybeThrows(sql(query)) match {
         case (Some(sparkException), Some(cometException)) =>
+          assert(shouldFail, s"Negating a non-minimum value should succeed: $query")
           assert(sparkException.getMessage.contains(sparkExpected))
-          assert(cometException.getMessage.contains(cometExpected))
-        case (None, None) => checkSparkAnswerAndOperator(sql(query))
+          if (!isSpark42Plus) {
+            assert(cometException.getMessage.contains(cometExpected))
+          }
+          if (isSpark42Plus) {
+            val expected = arithmeticError(sparkException)
+            val actual = arithmeticError(cometException)
+            assert(expected.getErrorClass == "ARITHMETIC_OVERFLOW")
+            // Spark 4.2 canonicalizes both its own error and the Comet-converted error.
+            assert(expected.getMessageParameters.get("message") == "overflow")
+            assert(actual.getMessageParameters.get("message") == "overflow")
+            assert(expected.getSqlState == "22003")
+            assert(actual.getErrorClass == expected.getErrorClass)
+            assert(actual.getSqlState == expected.getSqlState)
+          }
+        case (None, None) =>
+          assert(!shouldFail, s"Both engines silently accepted negating a minimum value: $query")
+          checkSparkAnswerAndOperator(sql(query))
         case (None, Some(ex)) =>
           fail("Comet threw an exception but Spark did not " + ex.getMessage)
         case (Some(_), None) =>
@@ -3038,12 +3060,12 @@ class CometExpressionSuite extends CometTestBase with AdaptiveSparkPlanHelper {
         (
           "array_test.parquet",
           Seq(Int.MaxValue, Int.MinValue).toDF("a"),
-          "integer overflow",
+          sparkOverflowMsg("integer"),
           "integer overflow"),
         (
           "long_array_test.parquet",
           Seq(Long.MaxValue, Long.MinValue).toDF("a"),
-          "long overflow",
+          sparkOverflowMsg("long"),
           "long overflow"),
         (
           "short_array_test.parquet",
@@ -3073,26 +3095,30 @@ class CometExpressionSuite extends CometTestBase with AdaptiveSparkPlanHelper {
           for (n <- Seq("2147483647", "-2147483648")) {
             checkOverflow(
               s"select -(cast(${n} as int)) FROM tbl",
+              sparkOverflowMsg("integer"),
               "integer overflow",
-              "integer overflow")
+              shouldFail = n.startsWith("-"))
           }
           for (n <- Seq("32767", "-32768")) {
             checkOverflow(
               s"select -(cast(${n} as short)) FROM tbl",
               sparkOverflowMsg("short"),
-              "short overflow")
+              "short overflow",
+              shouldFail = n.startsWith("-"))
           }
           for (n <- Seq("127", "-128")) {
             checkOverflow(
               s"select -(cast(${n} as byte)) FROM tbl",
               sparkOverflowMsg("byte"),
-              "byte overflow")
+              "byte overflow",
+              shouldFail = n.startsWith("-"))
           }
           for (n <- Seq("9223372036854775807", "-9223372036854775808")) {
             checkOverflow(
               s"select -(cast(${n} as long)) FROM tbl",
+              sparkOverflowMsg("long"),
               "long overflow",
-              "long overflow")
+              shouldFail = n.startsWith("-"))
           }
           // Float negation cannot overflow; confirm it stays native and returns the negated value.
           for (n <- Seq("3.4028235E38", "-3.4028235E38")) {

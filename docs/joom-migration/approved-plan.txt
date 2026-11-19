@@ -135,8 +135,8 @@ G01 includes a large mechanical vendor import; G04/G06/G07 may produce substanti
 
 TAGS
 joom-1.2-1-rc1; G01; Internal baseline build; not the complete Joom migration.
-joom-1.2-1-rc2; G06; Shared runtime mechanisms/native block are ready; remaining JVM/shuffle/planner work is still incomplete.
-joom-1.2-1-rc3; G09 (+G10 if needed); Complete candidate with known unsafe-result paths fixed/restricted.
+CANCELED 2026-11-19: the intermediate G06 qualification and its planned joom-1.2-1-rc2 milestone; do not create this intermediate tag.
+joom-1.2-1-rc3; all agreed changes and necessary integration fixes, after removing temporary CI mechanisms and restoring automatic full CI; full agreed GHA plus exact final-JAR AMD64/ARM64 packaged smoke. Final tag numbering otherwise unchanged.
 joom-1.2-1; Latest RC qualified; The same commit as the latest successful RC; no unverified changes.
 
 UNCHANGED DECISIONS
@@ -156,3 +156,12 @@ At that historical snapshot: do not write code until a new direct instruction. W
 
 CURRENT AUTHORIZATION NOTE 2026-11-18
 The historical code/merge/RC1 holds above are superseded for G01 only by the explicit finalization instruction in decisions.json#g01_finalization_authorization. G02-G10 remain gated. Java 21 work is on hold; artifact publication and production operations remain excluded.
+
+CURRENT VALIDATION AND REPOSITORY POLICY — 2026-11-19
+Authoritative policy: decisions.json#future_migration_validation_policy.
+Do not access /Users/skotlov/d/projects/datasci/; another chat works there.
+Do not run full GHA after every G. Use local builds/targeted regressions and explicitly track deferred/unverified cases, owners and intended final verification. Focused Linux AMD64 GHA may be used when necessary. Final coverage is not reduced.
+Remove every temporary CI disablement, switch and workaround before final acceptance; restore normal automatic full CI with all agreed coverage. Only then qualify the resulting final state with full GHA and packaged smoke of the exact final JARs on native AMD64 and ARM64. Fixes may require further runs.
+CI edits belong in authorized feature branches and branch-1.2, with no additional main commits. No intermediate qualification after G06.
+Keep ANSI=true, Spark/Comet result/error comparisons, actual native execution and safe targeted fallback; never weaken checks.
+No production use until all feature work and successful final qualification are complete; deployment still requires explicit authorization. Every next G needs separate user permission.

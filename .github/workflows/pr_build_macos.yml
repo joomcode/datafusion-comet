@@ -318,6 +318,7 @@ jobs:
               org.apache.comet.CometNativeCastSuite
               org.apache.comet.CometCastCollatedStringSuite
               org.apache.comet.CometDateTimeUtilsSuite
+              org.apache.comet.CometTimestampComparisonSuite
               org.apache.comet.CometMathExpressionSuite
               org.apache.comet.CometStringExpressionSuite
               org.apache.comet.CometBitwiseExpressionSuite

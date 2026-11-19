@@ -98,3 +98,21 @@ by completeness checks. It supersedes the earlier G01 no-merge/no-RC1 hold.
 The already authorized GitHub operations include workflow control/status/logs and
 artifact download. This does not authorize JFrog/Maven/Docker artifact publication,
 production operations, further Java 21 work or G02-G10 implementation.
+
+## Repository/CI boundary update, 2026-11-19
+
+No migration work may access /Users/skotlov/d/projects/datasci/; another chat
+works there in parallel. Further CI changes belong in authorized Comet feature
+branches and branch-1.2 only; no additional main commits. The earlier G01 main
+bootstrap permission was specific and historical. The new testing schedule in
+decisions.json#future_migration_validation_policy does not expand approved
+network hosts, artifact publication or production permissions. Each next G
+still requires separate explicit user authorization.
+
+## G02 feature push authorization (2026-11-19)
+
+The user approved `git push -u origin joom/1.2-native-runtime` to github.com/joomcode/datafusion-comet and the necessary read-only remote-ref verification, after local validation and folding the follow-up fix. This does not authorize branch-1.2/main/tag updates, creating a PR that launches full CI, artifact publication or production operations. The final source/remote SHA receipt stays under the G02 follow-up auxiliary directory.
+
+## G02 integration authorization (2026-11-19)
+
+The user's explicit G02 merge instruction supersedes the earlier branch-1.2 hold for this stage. Necessary Git operations use github.com/joomcode/datafusion-comet: inspect remote refs/feature PR metadata, update the consolidated feature with an exact force-with-lease if its published commit is rewritten, and publish branch-1.2 by fast-forward. Prefer an atomic two-ref push; never overwrite an unexpected remote update. No main or tag push, PR/CI launch, artifact publication or production operation is authorized by this step. Existing read-only GitHub API and official Apache RAT/Maven download scopes still apply.

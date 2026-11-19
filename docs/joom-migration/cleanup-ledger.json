@@ -1,6 +1,6 @@
 {
-  "updated_on": "2026-11-18T22:39:06.361313+00:00",
-  "stage": "G01_FINAL_HISTORY_AND_RC1_QUALIFICATION",
+  "updated_on": "2026-11-19",
+  "stage": "G02_LOCAL_VALIDATION_COMPLETE_PENDING_REVIEW",
   "baseline": "resource-baseline.json",
   "no_dependency_downloads_or_release_outputs_yet": false,
   "entries": [
@@ -138,6 +138,20 @@
       "cleanup_conditions": "No automatic deletion; archive and Git backup refs preserve pre-rewrite evidence.",
       "expected_release_directory_pattern": "/Users/skotlov/d/projects/datafusion-comet/target/joom-release/gha-<final-run-id>",
       "expected_additional_disk": "Approximately 190 MiB downloaded ZIP plus 410 MiB unpacked qualified artifacts; builds execute on GitHub runners."
+    },
+    {
+      "type": "g02_auxiliary_outputs",
+      "path": "/Users/skotlov/d/temp/20261119_comet12-g02",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "contains": "Pre-G02 documentation archive, source/command manifests, native/JVM build and regression logs, failed and passing report snapshots, independent reviews and final completion receipt.",
+      "preserve_until": "G02 review and final migration qualification; no automatic shared-cache deletion.",
+      "build_outputs_reused": [
+        "/Users/skotlov/d/projects/datafusion-comet/native/target",
+        "/Users/skotlov/d/projects/datafusion-comet/spark/target"
+      ],
+      "new_docker_images": false,
+      "new_release_artifacts": false
     }
   ],
   "preexisting_or_shared": {
@@ -703,5 +717,29 @@
       "auxiliary": 195040,
       "downloaded_qualified_directory": 419620
     }
+  },
+  "g02_memory_wait_followup_resources": {
+    "auxiliary_directory": "/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait",
+    "purpose": "Scoped cancellation of real JNI Spark memory waits; negative-control and final regression logs, pre-rewrite source/evidence backups, reviewed final diff and push receipt.",
+    "build_outputs": "Reuse native/target and spark/target; no new release JARs/Docker images or new cache directories.",
+    "preserve_shared_caches": true,
+    "cleanup": "Preserve through final migration acceptance; same optional exact-directory cleanup policy as parent G02 directory. No automatic cleanup."
+  },
+  "g02_performance_resources": {
+    "auxiliary_directory": "/Users/skotlov/d/temp/20261119_comet12-g02-performance",
+    "purpose": "Existing Comet/Spark Benchmark A/B: isolated old/new Java classes, standard-framework direct bridge extension, selected stock sort/join cases, diagnostics, balanced eight-JVM results.",
+    "outputs": "Compiled classes/source copies and selected test classpath under dated auxiliary directories; per-run temporary Spark data/logs/GC records. No new native build, release JAR, Docker image or production operation.",
+    "preserve": "Retain commands, class hashes, logs and report; shared caches and native/target preserved. No automatic cleanup.",
+    "status": "COMPLETED_16_MEASUREMENT_AND_2_DIAGNOSTIC_JVMS",
+    "whole_auxiliary_directory_bytes_checkpoint": 3579904,
+    "shared_native_target_changed": false
+  },
+  "g02_integration_resources": {
+    "auxiliary_directory": "/Users/skotlov/d/temp/20261119_comet12-g02-integration",
+    "purpose": "Preserve pre-consolidation docs/ref state; record accepted performance decision, three-commit tree-preserving consolidation, exact-source checks, fast-forward integration, guarded pushes and post-merge audit.",
+    "recovery_ref": "refs/joom-migration/checkpoints/20261119-g02-before-integration",
+    "new_native_build_docker_release_artifacts": false,
+    "shared_caches_preserved": true,
+    "cleanup": "Retain exact task directory and recovery ref until final migration acceptance; no automatic deletion."
   }
 }

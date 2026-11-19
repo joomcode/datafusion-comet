@@ -21,12 +21,13 @@
 -- the same Arrow type as other timestamp columns.
 -- https://github.com/apache/datafusion-comet/issues/6328
 
--- ConfigMatrix: spark.sql.session.timeZone=UTC,America/Los_Angeles,Asia/Kolkata
+-- ConfigMatrix: spark.sql.session.timeZone=UTC,Etc/UTC,America/Los_Angeles,Asia/Kolkata
+-- ConfigMatrix: spark.sql.ansi.enabled=true,false
 
 statement
 CREATE TABLE test_ts_seconds_tz(s bigint, i int, d double, ts timestamp) USING parquet
 
--- ts equals timestamp_seconds(s) except in the row for 2024-03-10, where it is an hour later
+-- Include an independent scan timestamp, negative instants, DST boundaries and nulls.
 statement
 INSERT INTO test_ts_seconds_tz VALUES
   (0, 0, 0.5, TIMESTAMP'1970-01-01 00:00:00Z'),

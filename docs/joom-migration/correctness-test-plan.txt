@@ -48,7 +48,7 @@ Boundaries
 - Do not touch or include PR#5889 for now; retain the selected base's standard fallback.
 - At the original historical snapshot, code, Git, clusters, publication and tests were not being changed/run.
 
-ADDENDUM APPROVED 2026-11-17
+HISTORICAL ADDENDUM APPROVED 2026-11-17 (validation scheduling superseded on 2026-11-19)
 - Local: fast checks of the changed area, focused regressions and diagnosis.
 - PR/GHA: full applicable native/vendor, Comet, Delta and Spark SQL suites on the required versions and SHA; inspect actual passed/skipped/canceled counts.
 - RC: a small smoke test of the actual finished release JARs. Overall correctness criteria/coverage are not reduced.
@@ -56,3 +56,15 @@ ADDENDUM APPROVED 2026-11-17
 - An HDFS cluster is not part of Joom infrastructure: four HDFS-only ignored tests are not applicable; retain generic Hadoop/GCS paths.
 - At that historical point, no separate full release pipeline was to be created. The later explicitly authorized manual RC Build & Smoke workflow is recorded in decisions.json; it does not authorize artifact publication.
 Historical code-hold statements in the original snapshot do not override later G01 authorization. The 2026-11-18 instruction authorizes G01 finalization/integration/RC1 after verification. G02 and later groups still require explicit permission. Current results, including actual ANSI execution, are recorded separately in G01-results.json and STATE.json.
+
+CURRENT VALIDATION POLICY — 2026-11-19
+This scheduling policy supersedes earlier per-group full-GHA and intermediate-RC requirements while retaining every correctness contract above.
+- During each remaining G: local builds and targeted regression checks. Record every deferred/unverified case with owner, affected feature, intended command/job, source SHA and actual evidence; unrun/canceled/ignored cases do not count as passed. Use focused Linux AMD64 GHA when necessary.
+- No intermediate release qualification after G06. Do not reduce final coverage.
+- Before final acceptance: inventory and remove every temporary CI disablement, switch and workaround; restore full CI, normal automatic triggers and the complete agreed matrix.
+- AFTER removal/restoration: full agreed native/vendor, Comet, Delta, Spark SQL and other applicable GHA; packaged smoke of the exact final JARs on native AMD64 and ARM64, with matching source/lockfile/class origins/native bytes/checksums. Verify all deferred applicable cases. Further fixes require qualification of the resulting final state and artifacts.
+- ANSI=true, identical Spark/Comet inputs/settings, result and mandatory-error parity and actual native-execution proof remain mandatory. Do not weaken assertions. Fix incompatibilities or safely select a targeted fallback before execution.
+- CI changes only in authorized feature branches and branch-1.2; no additional main commits. No access to /Users/skotlov/d/projects/datasci/.
+- No production use before all agreed features and successful final qualification. This does not grant deployment/publication permission.
+- Every next G requires separate explicit user authorization; G02 is not started by these documentation changes.
+Tracking: STATE.json#validation_backlog and STATE.json#temporary_ci_mechanisms. Authoritative decision: decisions.json#future_migration_validation_policy.

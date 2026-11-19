@@ -285,7 +285,7 @@
     "reference": "PERFORMANCE.md",
     "correctness_tests_unchanged": true
   },
-  "last_updated_on": "2026-11-17",
+  "last_updated_on": "2026-11-19",
   "execution_documentation_policy": {
     "user_quote": "All such documentation for carrying out the migration will be kept only in /Users/skotlov/d/projects/datafusion-comet/docs/joom-migration.",
     "directory": "/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration",
@@ -324,9 +324,8 @@
   },
   "stage_start_policy": {
     "explicit_user_approval_per_group": true,
-    "currently_authorized": ["G01"],
+    "currently_authorized": ["G02"],
     "groups_not_authorized": [
-      "G02",
       "G03",
       "G04",
       "G05",
@@ -335,7 +334,11 @@
       "G08",
       "G09",
       "G10"
-    ]
+    ],
+    "reaffirmed_on": "2026-11-19",
+    "completed_groups": ["G01", "G02"],
+    "active_implementation_group": null,
+    "next_group_requires_separate_approval": "G03"
   },
   "execution_pause": {
     "status": "G01_AMD64_QUALIFICATION_PENDING_USER_REVIEW",
@@ -365,7 +368,8 @@
     "status": "APPROVED_EXPLICITLY",
     "user_quote": "Before the final merge into branch-1.2, first show me what you are going to merge there.",
     "rule": "Present concrete candidate commits/tree diff, tests and artifacts. Wait for user confirmation before any branch-1.2 ref update. G02 still requires separate explicit authorization.",
-    "historical_scope_note": "Original stage-specific authorization/evidence retained. For current G01 finalization, g01_finalization_authorization supersedes earlier merge/tag holds; G02, Java 21, artifact publication and production remain unauthorized."
+    "historical_scope_note": "Original stage-specific authorization/evidence retained. For current G01 finalization, g01_finalization_authorization supersedes earlier merge/tag holds; G02, Java 21, artifact publication and production remain unauthorized.",
+    "current_g02_approval_ref": "g02_integration_authorization"
   },
   "amd64_environment_limit": {
     "user_answer": "Only the Mac is available for now; show the result with that limitation.",
@@ -374,11 +378,13 @@
   },
   "testing_distribution": {
     "status": "APPROVED_EXPLICITLY",
-    "user_quote": "Agreed. Let us record this. Above all, the final correctness checks must not suffer.",
-    "local": "Fast changed-area checks, focused regressions and failure diagnosis. Do not repeat broad GHA suites locally without a concrete reason.",
-    "pr_gha": "Full applicable native/vendor, Comet, Delta and Spark SQL suites on exact target versions/SHA. Inspect actual jobs/test outcomes, including skipped/canceled.",
-    "rc": "Small smoke of actual final release JARs; retain artifact acceptance.",
-    "correctness": "No reduction in total correctness coverage; result/error parity and native execution remain required."
+    "updated_on": "2026-11-19",
+    "policy_ref": "future_migration_validation_policy",
+    "local": "Do not run full GHA after every G. Use local builds and targeted regression tests, validate changed behavior locally, and explicitly track every deferred or unverified case for later verification.",
+    "pr_gha": "Run a focused Linux AMD64 GHA when needed; it does not replace final full qualification.",
+    "final": "After all agreed feature work and necessary integration fixes, retain the full agreed native/vendor, Comet, Delta, Spark SQL and other applicable GHA matrix. Do not reduce final coverage.",
+    "rc": "Final exact-JAR packaged smoke on native AMD64/ARM64 after temporary CI mechanisms are removed; G06 release qualification removed.",
+    "correctness": "ANSI=true; compare Spark 4.2.1 without/with Comet on identical inputs and settings, checking results AND mandatory errors. Confirm actual native execution. Do not weaken checks; fix incompatibilities or exclude only the unsafe native path through a safe, targeted fallback selected before execution."
   },
   "release_infrastructure_policy": {
     "status": "APPROVED_EXPLICITLY",
@@ -480,5 +486,81 @@
       "No JFrog/Maven/Docker artifact publication or production operations"
     ],
     "verification_required_before_integration": true
+  },
+  "naming_and_commit_granularity": {
+    "recorded_on": "2026-11-19",
+    "status": "APPROVED_EXPLICITLY",
+    "user_request_translation": [
+      "Verify that names of new commits, PRs and Git branches follow this repository's established practice, for example branch-1.1.",
+      "Avoid many small commits where possible. Create a separate commit only when there is a clear reason."
+    ],
+    "naming_rule": "Inspect actual repository and branch-1.1 examples before choosing names; follow the approved migration branch names and keep committed/PR text in English.",
+    "commit_rule": "Prefer coherent changes; separate commits only for a clear review, dependency or provenance purpose. Combine related fixes and routine checkpoints before integration without sacrificing correctness or reviewability.",
+    "local_record": "Carry this documentation-only update into the next authorized substantive change; no standalone service commit or release-tag change.",
+    "stage_gate": "G02 and later implementation still require explicit user authorization."
+  },
+  "testing_distribution_history_20261117": {
+    "status": "APPROVED_EXPLICITLY",
+    "user_quote": "Agreed. Let us record this. Above all, the final correctness checks must not suffer.",
+    "local": "Fast changed-area checks, focused regressions and failure diagnosis. Do not repeat broad GHA suites locally without a concrete reason.",
+    "pr_gha": "Full applicable native/vendor, Comet, Delta and Spark SQL suites on exact target versions/SHA. Inspect actual jobs/test outcomes, including skipped/canceled.",
+    "rc": "Small smoke of actual final release JARs; retain artifact acceptance.",
+    "correctness": "No reduction in total correctness coverage; result/error parity and native execution remain required."
+  },
+  "future_migration_validation_policy": {
+    "recorded_on": "2026-11-19",
+    "status": "APPROVED_EXPLICITLY",
+    "applies_to": "Remaining migration groups; supersedes earlier per-group full-GHA and intermediate-G06 qualification schedules. G01/RC1 historical evidence is unchanged.",
+    "repository_boundary": "Do not read, modify, build, test or perform Git operations in /Users/skotlov/d/projects/datasci/. That repository is being changed in parallel in another chat. Work stays in the Comet checkout and approved auxiliary/cache locations.",
+    "per_group": "Do not run full GHA after every G. Use local builds and targeted regression tests, validate changed behavior locally, and explicitly track every deferred or unverified case for later verification.",
+    "targeted_linux_amd64": "Run a focused Linux AMD64 GHA when needed; it does not replace final full qualification.",
+    "ci_changes": "Make CI changes in authorized feature branches and branch-1.2 only. No additional commits in main.",
+    "intermediate_g06_qualification": "REMOVED. No intermediate release qualification or RC tag is required after G06.",
+    "final_coverage": "After all agreed feature work and necessary integration fixes, retain the full agreed native/vendor, Comet, Delta, Spark SQL and other applicable GHA matrix. Do not reduce final coverage.",
+    "temporary_ci_cleanup": "Inventory every temporary migration CI disablement, switch and workaround. Remove all such temporary mechanisms before final acceptance and restore full CI with its normal automatic triggers and complete agreed coverage.",
+    "final_order": [
+      "Finish all agreed feature changes and necessary integration fixes.",
+      "Remove all temporary CI disablements, switches and workarounds; restore normal automatic full CI.",
+      "Run the full agreed GHA on the resulting final state.",
+      "Build the final release JARs and run packaged smoke on those exact bytes on native Linux AMD64 and ARM64; bind source/lockfile/class origins/native bytes and artifact checksums.",
+      "Verify every deferred case has actual passing evidence or an already explicitly agreed applicability exclusion.",
+      "If fixes are needed, repeat all qualification affected by the changes and qualify the resulting final state and final JARs before acceptance."
+    ],
+    "correctness": "ANSI=true; compare Spark 4.2.1 without/with Comet on identical inputs and settings, checking results AND mandatory errors. Confirm actual native execution. Do not weaken checks; fix incompatibilities or exclude only the unsafe native path through a safe, targeted fallback selected before execution.",
+    "production": "Do not use this migration in production until all agreed feature work is complete and final qualification succeeds. Passing qualification is a prerequisite, not authorization to publish artifacts, deploy or use production.",
+    "stage_start": "Every next G requires separate explicit user authorization. G02 implementation was subsequently authorized in g02_authorization; G03-G10 remain closed.",
+    "tracking": "STATE.json#validation_backlog and STATE.json#temporary_ci_mechanisms; preserve command/suite/input/settings/native-execution evidence, status, owner and remaining work. Canceled/ignored/unrun cases never count as passed."
+  },
+  "g02_authorization": {
+    "recorded_on": "2026-11-19",
+    "user_request_translation": "Start implementing G02 joom/1.2-native-runtime (Offsets/FFI, TaskContext, block ownership, cancellation, timestamps) according to the approved plan and new validation rules. Report after local builds and targeted regression tests.",
+    "authorized_group": "G02",
+    "scope": "I05,I06,J14,J15,J16,J22 plus G02-owned generic ANSI arithmetic/cast validation; no later feature groups.",
+    "execution": "Local feature branch and coherent implementation commits; local builds/targeted regression evidence. No full GHA, release tag, main commit, datasci access, publication or production. Report before further integration/release actions.",
+    "implementation_status": "COMPLETED_ACCEPTED_FOR_INTEGRATION"
+  },
+  "g02_memory_wait_followup_authorization": {
+    "recorded_on": "2026-11-19",
+    "user_approval": "Agreed to close the blocked-memory cancellation scenario, rerun affected local regressions, update evidence and fold the fix into its substantive commit, push the feature branch and show the final diff before merge.",
+    "remote_scope": "Push joom/1.2-native-runtime only; no branch-1.2/main/tag changes, full GHA, publication or production.",
+    "status": "IMPLEMENTED_VALIDATED_AND_ACCEPTED; integration now approved in g02_integration_authorization"
+  },
+  "g02_performance_acceptance": {
+    "recorded_on": "2026-11-19",
+    "status": "ACCEPTED_BY_USER",
+    "measured_evidence": "G02-performance.md and /Users/skotlov/d/temp/20261119_comet12-g02-performance; retain measured bridge overhead, saturated two-worker cost and inconclusive SQL results.",
+    "ordinary_execution_assessment": "For ordinary batch-oriented jobs, fractional-percent influence, generally well below 1%, is an engineering expectation based on per-call cost, per-task locks and default fair_unified serialization. This is not a measured production result, an upper bound, an SLA or a guarantee.",
+    "illustration_only": "1000 calls times about18ns extra is about0.018ms; against40ms of processing this is about0.05%. This is a scale illustration, not a job forecast.",
+    "decision": "Do not block G02 integration or complicate the cancellation mechanism solely to optimize the current microbenchmark cost. Keep correctness protection; no additional optimization is required for this stage on the current evidence.",
+    "limits": "Tiny frequent reservations, concurrent native workers within one task and greedy_unified can matter; final correctness qualification remains mandatory and production/GCP performance is not claimed."
+  },
+  "g02_integration_authorization": {
+    "recorded_on": "2026-11-19",
+    "status": "APPROVED_EXPLICITLY",
+    "user_request_translation": "Agreed. Record the performance conclusions, consolidate service changes and merge G02 into branch-1.2. Verify the final state afterwards, report the final merged commit names. Do not start G03.",
+    "supersedes": "Earlier G02 merge holds and feature-push-only limit for the authorized G02 integration.",
+    "execution_decision": "Fold documentation/service edits into the existing third substantive commit, retain three commits, integrate fast-forward only and synchronize feature/integration branches with guarded Git pushes. No main/tag/production or artifact-publication changes, no full GHA per group.",
+    "post_commit_receipt": "/Users/skotlov/d/temp/20261119_comet12-g02-integration/completion.json",
+    "next_group_authorized": false
   }
 }

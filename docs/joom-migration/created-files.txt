@@ -212,3 +212,14 @@ RC Build & Smoke additions:
 /Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/RC-BUILD-SMOKE.md
 /Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/G01-CLOSEOUT.md
 /Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/G01-HISTORY.json
+/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/G02-report.md
+/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/G02-results.json
+/Users/skotlov/d/projects/datafusion-comet/native/common/src/cancellation.rs
+/Users/skotlov/d/projects/datafusion-comet/native/common/src/offset_extents.rs
+/Users/skotlov/d/projects/datafusion-comet/native/core/src/execution/operators/cancellable.rs
+/Users/skotlov/d/projects/datafusion-comet/spark/src/test/scala/org/apache/comet/CometTimestampComparisonSuite.scala
+/Users/skotlov/d/projects/datafusion-comet/spark/src/test/scala/org/apache/comet/exec/CometOffTaskThreadSuite.scala
+/Users/skotlov/d/projects/datafusion-comet/spark/src/test/scala/org/apache/spark/sql/comet/CometNativeTaskKillSuite.scala
+/Users/skotlov/d/projects/datafusion-comet/spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometBlockStoreShuffleReaderSuite.scala
+/Users/skotlov/d/projects/datafusion-comet/spark/src/test/scala/org/apache/spark/sql/comet/CometNativeMemoryWaitSuite.scala
+/Users/skotlov/d/projects/datafusion-comet/docs/joom-migration/G02-performance.md

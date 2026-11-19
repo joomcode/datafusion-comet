@@ -17,7 +17,9 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-> **Current authorization (2026-11-18):** finish G01, finalize English documentation, consolidate service/checkpoint history, repeat exact-source RC Build & Smoke if needed, then integrate into branch-1.2 and create joom-1.2-1-rc1 after successful verification. Check completeness afterwards. Do not start G02 or do further Java 21 work. STATE.json records actual progress; decisions.json records the latest instruction.
+> **Current rules, 2026-11-19:** G01 is complete at `joom-1.2-1-rc1` (`c04d2d03c`); G02 is complete and accepted for integration into branch-1.2, including the closed JNI memory-wait cancellation case and accepted performance assessment; actual integration/remote refs are recorded in the post-commit receipt; G03-G10 remain gated. Do not touch `/Users/skotlov/d/projects/datasci/`. For each remaining group use local builds/targeted regressions and track unverified cases; focused Linux AMD64 GHA is available when needed. Do not run full GHA after every group, and G06 intermediate release qualification is removed. Before final acceptance remove all temporary CI mechanisms, restore normal automatic full CI, then run the full agreed GHA and exact final-JAR smoke on native AMD64/ARM64. No additional main commits or production use. Correctness requirements remain unchanged. See `decisions.json#future_migration_validation_policy`.
+
+> **Historical authorization (2026-11-18):** finish G01, finalize English documentation, consolidate service/checkpoint history, repeat exact-source RC Build & Smoke if needed, then integrate into branch-1.2 and create joom-1.2-1-rc1 after successful verification. Check completeness afterwards. Do not start G02 or do further Java 21 work. STATE.json records actual progress; decisions.json records the latest instruction.
 
 > **Historical G01 PR preparation:** history was aligned without changing the tree/24 documents or branch-1.2; three ANSI guards were removed for actual native AMD64 GHA execution. Only fast checks locally, full coverage in GHA. The user creates the PR using G01-PR.md. At that point: no merge/RC1/G02. See decisions.json for newer decisions.
 
@@ -27,7 +29,7 @@ under the License.
 
 > **Historical pause, 2026-11-17:** all our builds/tests were stopped at the user's request. Code saved in Git; G01 unfinished. PAUSED.md was the authoritative continuation point; no restart before explicit resume. G02 not authorized.
 
-**G01 was resumed by the user on 2026-11-17. STATE.json is the current status; PAUSED.md records the continuation point. G02 is not authorized.**
+**Historical G01 resume (2026-11-17):** STATE.json was the current status and PAUSED.md recorded that continuation point; G02 had not yet been authorized. Current decisions supersede that historical gate.
 
 # Handoff between work sessions
 
@@ -53,10 +55,10 @@ not required within the existing scope. The user does not manually allocate task
 
 ## Current phase
 
-**The user has authorized G01, implemented by the main chat in joom/1.2-dev.**
-The G01 preparation chat remains idle. Do not proceed to G02-G10 without separate
-explicit user authorization after the previous group's report. The latest G01
-finalization instruction includes integration and RC1 after successful checks.
+**G02 is complete and integrated into branch-1.2 under explicit user approval.** Final source/ref/tree proof is in `/Users/skotlov/d/temp/20261119_comet12-g02-integration/completion.json`.
+G01/RC1 remains unchanged. G02-results.json/G02-report.md and STATE.json record
+current checks and deferred cases. G03-G10 need separate explicit authorization.
+Apply the 2026-11-19 validation policy; no per-group full GHA or G06 qualification.
 
 ## Coordinator responsibilities
 
@@ -84,6 +86,14 @@ finalization instruction includes integration and RC1 after successful checks.
 - Performance using established Comet conventions, without special infrastructure.
 - Exact write scope; process documentation only in docs/joom-migration.
 - Report format; do not automatically begin the next group.
+- No access to /Users/skotlov/d/projects/datasci/; it belongs to a parallel chat.
+- Local builds/targeted regressions during each G; track every deferred case and
+  temporary CI mechanism in STATE.json. Focused Linux AMD64 GHA only if needed.
+- Before final acceptance restore normal automatic full CI and remove all
+  temporary mechanisms, then run full agreed GHA and exact final-JAR packaged
+  smoke on native AMD64/ARM64. No intermediate G06 qualification or main commits.
+- No production use before all feature work and successful final qualification;
+  final qualification is not itself deployment authorization.
 
 ## Worker report
 

@@ -120,3 +120,31 @@ rm /Users/skotlov/d/temp/20261118_comet12-g01-finalization/qualified-artifact-<r
 ```
 
 Replace `<run-id>` with the verified final run ID. Consult `completion.json` for exact paths, archive/JAR sizes and hashes. Nothing is automatically removed.
+
+## G02 local implementation and validation
+
+Auxiliary evidence and snapshots: `/Users/skotlov/d/temp/20261119_comet12-g02`.
+It contains build/test logs, earlier and final JVM reports, source hashes, reviews
+and the final local completion receipt. Preserve it through final qualification.
+
+The normal build outputs under `native/target` and `spark/target` were reused and
+updated (approximately 47 GiB and 1 GiB respectively at the local checkpoint).
+Those sizes include earlier project builds and are not all new G02 data. Shared
+Maven/Cargo/JDK caches, the user's checkouts and G01 qualified release artifacts
+were preserved. No new Docker image or release artifact was produced for G02.
+
+After the migration and after preserving final release JARs/provenance, the
+existing optional native/spark target cleanup described above also covers G02
+outputs. Do not clean those caches during remaining feature implementation
+unless the user asks; it would force substantial rebuilds. Nothing is deleted
+automatically. Exact final local sizes are recorded in the G02 completion receipt.
+
+G02 memory-wait follow-up evidence is under `/Users/skotlov/d/temp/20261119_comet12-g02/20261119_memory-wait`: positive and intentionally failing negative-control logs, JVM reports, source hashes, history-rewrite proof, final diff and push receipt. The negative-control source change is restored before the final passing build and is never committed. Reused native/spark targets and shared caches remain subject to the same preservation rules. No new Docker/release artifacts were created. Preserve this directory through final acceptance; nothing is automatically deleted.
+
+## G02 bookkeeping performance comparison
+
+Evidence/source copies/compiled classes/commands/raw logs/GC logs/results are under `/Users/skotlov/d/temp/20261119_comet12-g02-performance`. Dated run directories under its `20261119_results` contain Spark-managed temporary files. The benchmark uses the existing native dylib and cached dependencies; it created no release JAR, Docker image, production data or extra package cache. Preserve the report and raw evidence through migration acceptance. After preserving evidence, only this specifically selected task directory may be removed manually. Do not remove shared caches, source checkouts or native/target as part of this performance cleanup. Exact whole-directory sizes are in its completion.json.
+
+## G02 accepted integration
+
+Archive, service-change diff, ref snapshots, final RAT/audit and push/completion receipts: `/Users/skotlov/d/temp/20261119_comet12-g02-integration`. Recovery ref: `refs/joom-migration/checkpoints/20261119-g02-before-integration`. Preserve these together with the existing implementation/performance evidence until final migration acceptance; do not automatically delete recovery refs or shared caches. Integration creates no native build, Docker image or release JAR. Exact final auxiliary size and source identity are in completion.json.
