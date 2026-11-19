@@ -21,7 +21,11 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::vec;
 
+use super::aggregate_hash_table::common::{
+    EMIT_BYTES_PER_GROUP, column_group_key, emit_copies,
+};
 use super::order::GroupOrdering;
+use super::replay_budget::{PreparedReplay, reserve_replay_headroom};
 use super::skip_partial::SkipAggregationProbe;
 use super::{AggregateExec, format_human_display};
 use crate::aggregates::group_values::{GroupByMetrics, GroupValues, new_group_values};
@@ -32,14 +36,14 @@ use crate::aggregates::{
     max_duplicate_ordinal,
 };
 use crate::metrics::{BaselineMetrics, MetricBuilder, MetricCategory, RecordOutput};
-use crate::sorts::streaming_merge::{SortedSpillFile, StreamingMergeBuilder};
+use crate::sorts::streaming_merge::SortedSpillFile;
 use crate::spill::spill_manager::{GetSlicedSize, SpillManager};
 use crate::stream::EmptyRecordBatchStream;
 use crate::{PhysicalExpr, aggregates, metrics};
 use crate::{RecordBatchStream, SendableRecordBatchStream};
 
 use arrow::array::*;
-use arrow::datatypes::SchemaRef;
+use arrow::datatypes::{DataType, Fields, SchemaRef};
 use datafusion_common::{
     DataFusionError, Result, assert_eq_or_internal_err, assert_or_internal_err,
     internal_err, resources_datafusion_err,
@@ -56,8 +60,9 @@ use datafusion_physical_expr_common::sort_expr::LexOrdering;
 use crate::sorts::IncrementalSortIterator;
 use datafusion_common::instant::Instant;
 use datafusion_common::utils::memory::get_record_batch_memory_size;
-use futures::ready;
+use futures::future::BoxFuture;
 use futures::stream::{Stream, StreamExt};
+use futures::{FutureExt, ready};
 use log::debug;
 
 #[derive(Debug, Clone)]
@@ -72,8 +77,32 @@ pub(crate) enum ExecutionState {
     ///
     /// See "partial aggregation" discussion on [`GroupedHashAggregateStream`]
     SkippingAggregation,
+    /// Shape spill batches and obtain a joint replay/merge grant before readers open.
+    PreparingReplay,
     /// All input has been consumed and all groups have been emitted
     Done,
+}
+
+/// Evaluated once even when an offset-triggered early emit suspends a grouping set.
+/// Keeping a cursor avoids reevaluating expressions or repeating earlier grouping sets.
+struct EvaluatedInput {
+    group_by_values: Vec<Vec<ArrayRef>>,
+    input_values: Vec<Vec<ArrayRef>>,
+    filter_values: Vec<Option<ArrayRef>>,
+    next_set: usize,
+    input_rows: usize,
+}
+
+impl EvaluatedInput {
+    fn memory_size(&self) -> usize {
+        self.group_by_values
+            .iter()
+            .flatten()
+            .chain(self.input_values.iter().flatten())
+            .chain(self.filter_values.iter().flatten())
+            .map(|array| array.get_array_memory_size())
+            .sum()
+    }
 }
 
 /// This encapsulates the spilling state
@@ -281,6 +310,13 @@ pub(crate) struct GroupedHashAggregateStream {
     input_schema: SchemaRef,
     input: SendableRecordBatchStream,
     mode: AggregateMode,
+    group_key_offset_limit: usize,
+    emit_copies: Vec<bool>,
+    keys_from_rows: bool,
+    pending_input: Option<EvaluatedInput>,
+    replay_aggregate: AggregateExec,
+    replay_prepare: Option<BoxFuture<'static, Result<PreparedReplay>>>,
+    replay_reservation_floor: usize,
 
     /// Arguments to pass to each accumulator.
     ///
@@ -446,15 +482,10 @@ impl GroupedHashAggregateStream {
             AggregateMode::Partial,
         )?);
 
-        // Need to update the GROUP BY expressions to point to the correct column after schema change
-        let merging_group_by_expr = agg_group_by
-            .expr
-            .iter()
-            .enumerate()
-            .map(|(idx, (_, name))| {
-                (Arc::new(Column::new(name.as_str(), idx)) as _, name.clone())
-            })
-            .collect();
+        // Spill replay groups by every physical key, including the hidden
+        // grouping-ID column. Visible NULL keys from different grouping sets
+        // remain distinct, and the aggregate states keep their original offsets.
+        let merging_group_by = agg_group_by.as_final();
 
         let output_ordering = agg.cache.output_ordering();
 
@@ -487,7 +518,10 @@ impl GroupedHashAggregateStream {
             })
             .collect::<Vec<_>>()
             .join(", ");
-        let name = format!("GroupedHashAggregateStream[{partition}] ({agg_fn_names})");
+        let name = format!(
+            "GroupedHashAggregateStream[{partition}] ({agg_fn_names}){}",
+            super::AGGREGATE_EMIT_BUDGET_SUFFIX
+        );
         let group_ordering = GroupOrdering::try_new(&agg.input_order_mode)?;
         let oom_mode = match (agg.mode, &group_ordering) {
             // In partial aggregation mode, always prefer to emit incomplete results early.
@@ -534,7 +568,7 @@ impl GroupedHashAggregateStream {
             spill_schema,
             is_stream_merging: false,
             merging_aggregate_arguments,
-            merging_group_by: PhysicalGroupBy::new_single(merging_group_by_expr),
+            merging_group_by,
             peak_mem_used: MetricBuilder::new(&agg.metrics)
                 .peak_memory_usage("peak_mem_used", partition),
             spill_manager,
@@ -582,11 +616,45 @@ impl GroupedHashAggregateStream {
             None
         };
 
+        let emit_copies = aggregate_exprs
+            .iter()
+            .map(|expr| {
+                if agg.struct_state_output {
+                    let fields = Fields::from(expr.state_fields()?);
+                    assert_or_internal_err!(
+                        expr.field().data_type() == &DataType::Struct(fields.clone())
+                            && !expr.field().is_nullable(),
+                        "Struct-state output requires a non-null struct of the exact state fields"
+                    );
+                    // Packing primitive state arrays in a struct is zero-copy. Only
+                    // inner variable states which actually materialize need headroom.
+                    Ok(fields.iter().any(|field| emit_copies(field.data_type())))
+                } else {
+                    Ok(emit_copies(expr.field().data_type())
+                        || expr.state_fields().map_or(true, |fields| {
+                            fields.iter().any(|field| emit_copies(field.data_type()))
+                        }))
+                }
+            })
+            .collect::<Result<_>>()?;
+        let keys_from_rows = agg_group_by
+            .group_schema(&agg.input.schema())?
+            .fields()
+            .iter()
+            .any(|field| !column_group_key(field.data_type()));
+
         Ok(GroupedHashAggregateStream {
             schema: agg_schema,
             input_schema: agg.input().schema(),
             input,
             mode: agg.mode,
+            group_key_offset_limit: agg.group_key_offset_limit(),
+            emit_copies,
+            keys_from_rows,
+            pending_input: None,
+            replay_aggregate: agg.clone(),
+            replay_prepare: None,
+            replay_reservation_floor: 0,
             accumulators,
             aggregate_arguments,
             filter_expressions,
@@ -641,24 +709,38 @@ impl Stream for GroupedHashAggregateStream {
         loop {
             match &self.exec_state {
                 ExecutionState::ReadingInput => 'reading_input: {
-                    match ready!(self.input.poll_next_unpin(cx)) {
-                        // New batch to aggregate
-                        Some(Ok(batch)) => {
-                            let timer = elapsed_compute.timer();
-                            let input_rows = batch.num_rows();
-
-                            if self.mode == AggregateMode::Partial
-                                && let Some(reduction_factor) =
-                                    self.reduction_factor.as_ref()
-                            {
-                                reduction_factor.add_total(input_rows);
+                    let next = if let Some(pending) = self.pending_input.take() {
+                        Some(Ok(pending))
+                    } else {
+                        match ready!(self.input.poll_next_unpin(cx)) {
+                            Some(Ok(batch)) => {
+                                if self.mode == AggregateMode::Partial
+                                    && let Some(reduction_factor) =
+                                        self.reduction_factor.as_ref()
+                                {
+                                    reduction_factor.add_total(batch.num_rows());
+                                }
+                                Some(self.evaluate_input(&batch))
                             }
-
-                            // Do the grouping.
-                            // `group_aggregate_batch` will _not_ have updated the memory reservation yet.
-                            // The rest of the code will first try to reduce memory usage by
-                            // already emitting results.
-                            self.group_aggregate_batch(&batch)?;
+                            Some(Err(error)) => Some(Err(error)),
+                            None => None,
+                        }
+                    };
+                    match next {
+                        // New or suspended input to aggregate.
+                        Some(Ok(mut input)) => {
+                            let timer = elapsed_compute.timer();
+                            let input_rows = input.input_rows;
+                            if let Some(batch) = self.group_aggregate_input(&mut input)? {
+                                self.pending_input = Some(input);
+                                self.exec_state = ExecutionState::ProducingOutput(batch);
+                                let held = self
+                                    .retained_size()
+                                    .max(self.replay_reservation_floor);
+                                self.reservation.resize(held);
+                                timer.done();
+                                break 'reading_input;
+                            }
 
                             assert!(!self.input_done);
 
@@ -731,6 +813,34 @@ impl Stream for GroupedHashAggregateStream {
                     }
                 }
 
+                ExecutionState::PreparingReplay => {
+                    let result = ready!(
+                        self.replay_prepare
+                            .as_mut()
+                            .expect("replay preparation must exist")
+                            .poll_unpin(cx)
+                    );
+                    self.replay_prepare = None;
+                    let prepared = match result {
+                        Ok(prepared) => prepared,
+                        Err(error) => {
+                            self.exec_state = ExecutionState::Done;
+                            return Poll::Ready(Some(Err(error)));
+                        }
+                    };
+                    let (input, reservation, batch_size) = prepared.into_input(
+                        self.spill_state.spill_manager.clone(),
+                        &self.spill_state.spill_expr,
+                        self.baseline_metrics.clone(),
+                    )?;
+                    self.replay_reservation_floor = reservation.size();
+                    self.reservation = reservation;
+                    self.batch_size = self.batch_size.min(batch_size);
+                    self.input = input;
+                    self.input_done = false;
+                    self.exec_state = ExecutionState::ReadingInput;
+                }
+
                 ExecutionState::SkippingAggregation => {
                     match ready!(self.input.poll_next_unpin(cx)) {
                         Some(Ok(batch)) => {
@@ -779,6 +889,7 @@ impl Stream for GroupedHashAggregateStream {
                             // In Partial aggregation, we also need to check
                             // if we should trigger partial skipping
                             else if self.mode == AggregateMode::Partial
+                                && self.pending_input.is_none()
                                 && self.should_skip_aggregation()
                             {
                                 ExecutionState::SkippingAggregation
@@ -795,6 +906,9 @@ impl Stream for GroupedHashAggregateStream {
                         let output = batch.slice(0, size);
                         (ExecutionState::ProducingOutput(remaining), output)
                     };
+
+                    let held = self.retained_size().max(self.replay_reservation_floor);
+                    self.reservation.resize(held);
 
                     if let Some(reduction_factor) = self.reduction_factor.as_ref() {
                         reduction_factor.add_part(output_batch.num_rows());
@@ -819,8 +933,9 @@ impl Stream for GroupedHashAggregateStream {
                     }
                     // release the memory reservation since sending back output batch itself needs
                     // some memory reservation, so make some room for it.
+                    self.replay_reservation_floor = 0;
                     self.clear_all();
-                    let _ = self.update_memory_reservation();
+                    self.reservation.free();
                     return Poll::Ready(None);
                 }
             }
@@ -836,7 +951,7 @@ impl RecordBatchStream for GroupedHashAggregateStream {
 
 impl GroupedHashAggregateStream {
     /// Perform group-by aggregation for the given [`RecordBatch`].
-    fn group_aggregate_batch(&mut self, batch: &RecordBatch) -> Result<()> {
+    fn evaluate_input(&self, batch: &RecordBatch) -> Result<EvaluatedInput> {
         // Evaluate the grouping expressions
         let group_by_values = if self.spill_state.is_stream_merging {
             evaluate_group_by(&self.spill_state.merging_group_by, batch)?
@@ -872,7 +987,60 @@ impl GroupedHashAggregateStream {
             evaluate_optional(&self.filter_expressions, batch)?
         };
 
-        for group_values in &group_by_values {
+        Ok(EvaluatedInput {
+            group_by_values,
+            input_values,
+            filter_values,
+            next_set: 0,
+            input_rows: batch.num_rows(),
+        })
+    }
+
+    fn group_aggregate_input(
+        &mut self,
+        input: &mut EvaluatedInput,
+    ) -> Result<Option<RecordBatch>> {
+        while input.next_set < input.group_by_values.len() {
+            let group_values = &input.group_by_values[input.next_set];
+            if !self
+                .group_values
+                .has_offset_room(group_values, self.group_key_offset_limit)
+            {
+                if self.group_values.is_empty() {
+                    return Err(resources_datafusion_err!(
+                        "A grouped aggregate input batch exceeds its group-key offset budget"
+                    ));
+                }
+                if self.mode.output_mode() == AggregateOutputMode::Partial {
+                    let batch = self.emit(EmitTo::All, false)?;
+                    self.group_ordering.reset();
+                    self.clear_shrink(0);
+                    return Ok(batch);
+                } else if self.oom_mode == OutOfMemoryMode::Spill
+                    && !self.spill_state.is_stream_merging
+                {
+                    self.spill()?;
+                    self.clear_shrink(0);
+                    self.group_ordering.reset();
+                } else if let Some(ready) = self.group_ordering.emit_to() {
+                    // Final values may only be emitted when ordering proves them complete.
+                    if let Some(batch) = self.emit(ready, false)? {
+                        return Ok(Some(batch));
+                    }
+                } else {
+                    return Err(resources_datafusion_err!(
+                        "Ordered aggregate cannot admit another group-key batch without overflowing offsets"
+                    ));
+                }
+                if !self
+                    .group_values
+                    .has_offset_room(group_values, self.group_key_offset_limit)
+                {
+                    return Err(resources_datafusion_err!(
+                        "A grouped aggregate input batch exceeds its group-key offset budget"
+                    ));
+                }
+            }
             let groups_start_time = Instant::now();
 
             // calculate the group indices for each input row
@@ -901,8 +1069,8 @@ impl GroupedHashAggregateStream {
             let t = self
                 .accumulators
                 .iter_mut()
-                .zip(input_values.iter())
-                .zip(filter_values.iter());
+                .zip(input.input_values.iter())
+                .zip(input.filter_values.iter());
 
             for ((acc, values), opt_filter) in t {
                 let opt_filter = opt_filter.as_ref().map(|filter| filter.as_boolean());
@@ -932,9 +1100,10 @@ impl GroupedHashAggregateStream {
                     .aggregation_time
                     .add_elapsed(agg_start_time);
             }
+            input.next_set += 1;
         }
 
-        Ok(())
+        Ok(None)
     }
 
     /// Attempts to update the memory reservation. If that fails due to a
@@ -955,10 +1124,13 @@ impl GroupedHashAggregateStream {
             OutOfMemoryMode::Spill if !self.group_values.is_empty() => {
                 self.spill()?;
                 self.clear_shrink(self.batch_size);
-                self.update_memory_reservation()?;
+                self.group_ordering.reset();
+                let existing = self.retained_size();
+                self.reservation
+                    .resize(existing.max(self.replay_reservation_floor));
                 Ok(None)
             }
-            OutOfMemoryMode::EmitEarly if self.group_values.len() > 1 => {
+            OutOfMemoryMode::EmitEarly if !self.group_values.is_empty() => {
                 let n = if self.group_values.len() >= self.batch_size {
                     // Try to emit an integer multiple of batch size if possible
                     self.group_values.len() / self.batch_size * self.batch_size
@@ -974,10 +1146,67 @@ impl GroupedHashAggregateStream {
                 }
                 Err(oom)
             }
+            OutOfMemoryMode::ReportError
+                if matches!(self.group_ordering, GroupOrdering::Full(_)) =>
+            {
+                let existing = self.retained_size();
+                self.reservation
+                    .resize(existing.max(self.replay_reservation_floor));
+                self.reservation.try_resize(
+                    existing
+                        .saturating_add(self.emit_size())
+                        .max(self.replay_reservation_floor),
+                )?;
+                Ok(None)
+            }
             OutOfMemoryMode::EmitEarly
             | OutOfMemoryMode::Spill
             | OutOfMemoryMode::ReportError => Err(oom),
         }
+    }
+
+    /// Existing buffers, including suspended input and the full backing buffers of
+    /// sliced output. Handing over one slice must not release the remaining grant.
+    fn retained_size(&self) -> usize {
+        let output = match &self.exec_state {
+            ExecutionState::ProducingOutput(batch) => batch.get_array_memory_size(),
+            _ => 0,
+        };
+        self.table_size().saturating_add(output).saturating_add(
+            self.pending_input
+                .as_ref()
+                .map_or(0, EvaluatedInput::memory_size),
+        )
+    }
+
+    fn table_size(&self) -> usize {
+        self.accumulators
+            .iter()
+            .map(|x| x.size())
+            .sum::<usize>()
+            .saturating_add(self.group_values.size())
+            .saturating_add(self.group_ordering.size())
+            .saturating_add(self.current_group_indices.allocated_size())
+    }
+
+    fn emit_size(&self) -> usize {
+        let acc = self
+            .accumulators
+            .iter()
+            .zip(&self.emit_copies)
+            .filter(|(_, copies)| **copies)
+            .map(|(acc, _)| acc.size())
+            .sum::<usize>();
+        let keys = if self.keys_from_rows {
+            self.group_values.size()
+        } else {
+            0
+        };
+        if self.group_values.is_empty() || (acc == 0 && keys == 0) {
+            return 0;
+        }
+        acc.saturating_add(keys)
+            .saturating_add(self.group_values.len().saturating_mul(EMIT_BYTES_PER_GROUP))
     }
 
     fn update_memory_reservation(&mut self) -> Result<()> {
@@ -1002,8 +1231,17 @@ impl GroupedHashAggregateStream {
                 0
             };
 
-        let new_size = groups_and_acc_size + sort_headroom;
-        let reservation_result = self.reservation.try_resize(new_size);
+        let new_size = groups_and_acc_size
+            .saturating_add(sort_headroom)
+            .saturating_add(self.emit_size())
+            .saturating_add(
+                self.pending_input
+                    .as_ref()
+                    .map_or(0, EvaluatedInput::memory_size),
+            );
+        let reservation_result = self
+            .reservation
+            .try_resize(new_size.max(self.replay_reservation_floor));
 
         if reservation_result.is_ok() {
             self.spill_state
@@ -1026,6 +1264,19 @@ impl GroupedHashAggregateStream {
             return Ok(None);
         }
 
+        // The input loop reserves copied states/row keys before they are emitted.
+        // A non-spilling final path must refuse genuinely new materialization memory;
+        // infallible accounting is reserved for buffers which already exist.
+        if !spilling && self.mode.output_mode() == AggregateOutputMode::Final {
+            let existing = self.retained_size();
+            self.reservation
+                .resize(existing.max(self.reservation.size()));
+            self.reservation.try_resize(
+                existing
+                    .saturating_add(self.emit_size())
+                    .max(self.replay_reservation_floor),
+            )?;
+        }
         let timer = self.group_by_metrics.emitting_time.timer();
         let mut output = self.group_values.emit(emit_to)?;
         if let EmitTo::First(n) = emit_to {
@@ -1044,10 +1295,18 @@ impl GroupedHashAggregateStream {
         }
         drop(timer);
 
-        // emit reduces the memory usage. Ignore Err from update_memory_reservation. Even if it is
-        // over the target memory size after emission, we can emit again rather than returning Err.
-        let _ = self.update_memory_reservation();
         let batch = RecordBatch::try_new(schema, output)?;
+        // This batch already exists. Retain its backing buffers' charge while the
+        // output state slices it, or while spilling sorts/writes it. Keep the old
+        // spill grant as workspace instead of releasing and reacquiring it.
+        let materialized = self
+            .retained_size()
+            .saturating_add(batch.get_array_memory_size());
+        self.reservation.resize(if spilling {
+            materialized.max(self.reservation.size())
+        } else {
+            materialized.max(self.replay_reservation_floor)
+        });
         debug_assert!(batch.num_rows() > 0);
 
         Ok(Some(batch))
@@ -1174,7 +1433,6 @@ impl GroupedHashAggregateStream {
         // This must happen before reserving sort memory so the pool has room.
         // Use 0 to minimize allocated capacity and maximize memory available for sorting.
         self.clear_shrink(0);
-        self.update_memory_reservation()?;
 
         let batch_size_ratio = self.batch_size as f32 / emit.num_rows() as f32;
         let batch_memory = get_record_batch_memory_size(&emit);
@@ -1188,11 +1446,14 @@ impl GroupedHashAggregateStream {
             .min(batch_memory * 2);
 
         // If we can't grow even that, we have no choice but to return an error since we can't spill to disk without sorting the data first.
-        self.reservation.try_grow(sort_memory).map_err(|err| {
-            resources_datafusion_err!(
-                "Failed to reserve memory for sort during spill: {err}"
-            )
-        })?;
+        let spill_size = self.retained_size().saturating_add(sort_memory);
+        self.reservation
+            .try_resize(self.reservation.size().max(spill_size))
+            .map_err(|err| {
+                resources_datafusion_err!(
+                    "Failed to reserve memory for sort during spill: {err}"
+                )
+            })?;
 
         let sorted_iter = IncrementalSortIterator::new(
             emit,
@@ -1207,8 +1468,10 @@ impl GroupedHashAggregateStream {
                 "HashAggSpill",
             )?;
 
-        // Shrink the memory we allocated for sorting as the sorting is fully done at this point.
-        self.reservation.shrink(sort_memory);
+        // The sorted iterator has released the emitted arrays and its workspace.
+        let existing = self.retained_size();
+        self.reservation
+            .resize(existing.max(self.replay_reservation_floor));
 
         match spillfile {
             Some((spillfile, max_record_batch_memory)) => {
@@ -1284,16 +1547,27 @@ impl GroupedHashAggregateStream {
             // Mark that we're switching to stream merging mode.
             self.spill_state.is_stream_merging = true;
 
-            self.input = StreamingMergeBuilder::new()
-                .with_schema(Arc::clone(&self.spill_state.spill_schema))
-                .with_spill_manager(self.spill_state.spill_manager.clone())
-                .with_sorted_spill_files(std::mem::take(&mut self.spill_state.spills))
-                .with_expressions(&self.spill_state.spill_expr)
-                .with_metrics(self.baseline_metrics.clone())
-                .with_batch_size(self.batch_size)
-                .with_reservation(self.reservation.new_empty())
-                .build()?;
-            self.input_done = false;
+            // Acquire output headroom and a minimal merge jointly before opening
+            // readers. The async preparer can rewrite wide IPC batches in row halves
+            // under the same budget instead of starving its own downstream aggregate.
+            let aggregate = self.replay_aggregate.clone();
+            let manager = self.spill_state.spill_manager.clone();
+            let spills = std::mem::take(&mut self.spill_state.spills);
+            let reservation = self.reservation.take();
+            let batch_size = self.batch_size;
+            self.replay_prepare = Some(
+                async move {
+                    reserve_replay_headroom(
+                        &aggregate,
+                        &manager,
+                        spills,
+                        batch_size,
+                        reservation,
+                    )
+                    .await
+                }
+                .boxed(),
+            );
 
             // Reset the group values collectors.
             self.clear_all();
@@ -1318,9 +1592,7 @@ impl GroupedHashAggregateStream {
             // to ensure we don't spill the spilled data to disk again.
             self.oom_mode = OutOfMemoryMode::ReportError;
 
-            self.update_memory_reservation()?;
-
-            ExecutionState::ReadingInput
+            ExecutionState::PreparingReplay
         };
         timer.done();
         Ok(())
@@ -1406,6 +1678,104 @@ mod tests {
     use datafusion_functions_aggregate::count::count_udaf;
     use datafusion_physical_expr::aggregate::AggregateExprBuilder;
     use datafusion_physical_expr::expressions::col;
+
+    /// Flushing between grouping sets must resume the exact evaluated input rather
+    /// than dropping the unprocessed set or replaying the earlier one.
+    #[tokio::test]
+    async fn offset_flush_resumes_grouping_sets_without_replaying_input() -> Result<()> {
+        use arrow::datatypes::{Int32Type, Int64Type};
+        use datafusion_common::ScalarValue;
+        use datafusion_physical_expr::expressions::lit;
+        use std::collections::BTreeMap;
+        let names: Vec<String> = (0..4)
+            .map(|i| format!("k{i:02}-{}", "x".repeat(76)))
+            .collect();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("a", DataType::Utf8, false),
+            Field::new("b", DataType::Int32, false),
+            Field::new("v", DataType::Int64, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(StringArray::from(names.clone())),
+                Arc::new(Int32Array::from(vec![1; 4])),
+                Arc::new(Int64Array::from(vec![1; 4])),
+            ],
+        )?;
+        let input = TestMemoryExec::try_new_exec(
+            &[vec![batch.clone(), batch]],
+            Arc::clone(&schema),
+            None,
+        )?;
+        let groups = PhysicalGroupBy::new(
+            vec![
+                (col("a", &schema)?, "a".into()),
+                (col("b", &schema)?, "b".into()),
+            ],
+            vec![
+                (lit(ScalarValue::Utf8(None)), "a".into()),
+                (lit(ScalarValue::Int32(None)), "b".into()),
+            ],
+            vec![vec![false, false], vec![false, true]],
+            true,
+        );
+        let count = Arc::new(
+            AggregateExprBuilder::new(count_udaf(), vec![col("v", &schema)?])
+                .schema(Arc::clone(&schema))
+                .alias("n")
+                .build()?,
+        );
+        let mut aggregate = AggregateExec::try_new(
+            AggregateMode::Partial,
+            groups,
+            vec![count],
+            vec![None],
+            input,
+            schema,
+        )?;
+        aggregate.group_key_offset_limit = 500;
+        let mut config =
+            datafusion_execution::config::SessionConfig::new().with_batch_size(2);
+        config
+            .options_mut()
+            .execution
+            .skip_partial_aggregation_probe_ratio_threshold = 1.1;
+        let context = Arc::new(TaskContext::default().with_session_config(config));
+        let mut stream = GroupedHashAggregateStream::new(&aggregate, &context, 0)?;
+        let mut actual: BTreeMap<(String, bool), i64> = BTreeMap::new();
+        let mut batches = 0;
+        while let Some(batch) = stream.next().await {
+            let batch = batch?;
+            assert!(batch.num_rows() <= 2);
+            batches += 1;
+            let a = batch.column(0).as_string::<i32>();
+            let b = batch.column(1).as_primitive::<Int32Type>();
+            let n = batch.column(3).as_primitive::<Int64Type>();
+            for row in 0..batch.num_rows() {
+                let grouping_id = ScalarValue::try_from_array(batch.column(2), row)?;
+                assert_eq!(
+                    grouping_id,
+                    ScalarValue::UInt8(Some(u8::from(b.is_null(row))))
+                );
+                *actual
+                    .entry((a.value(row).to_owned(), b.is_null(row)))
+                    .or_default() += n.value(row);
+            }
+        }
+        drop(stream);
+        let expected = names
+            .iter()
+            .flat_map(|name| [((name.clone(), false), 2), ((name.clone(), true), 2)])
+            .collect();
+        assert_eq!(actual, expected);
+        assert!(
+            batches >= 8,
+            "offset budget must flush between grouping sets"
+        );
+        assert_eq!(context.memory_pool().reserved(), 0);
+        Ok(())
+    }
 
     // Migrated to PartialHashAggregateStream coverage in hash_stream.rs;
     // kept here for the legacy GroupedHashAggregateStream implementation.

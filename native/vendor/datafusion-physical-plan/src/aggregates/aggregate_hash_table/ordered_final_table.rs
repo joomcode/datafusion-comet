@@ -68,7 +68,7 @@ impl OrderedAggregateTable<FinalMarker> {
     pub(in crate::aggregates) fn aggregate_batch(
         &mut self,
         batch: &RecordBatch,
-    ) -> Result<()> {
+    ) -> Result<Option<RecordBatch>> {
         let evaluated_batch = self.evaluate_batch(batch)?;
         // `PhysicalGroupBy::as_final()` removes grouping sets while planning
         // final aggregation, so final ordered aggregation sees one grouping.

@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-mod common;
+pub(in crate::aggregates) mod common;
 mod common_ordered;
 mod final_table;
 mod ordered_final_table;

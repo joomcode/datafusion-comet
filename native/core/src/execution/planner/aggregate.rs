@@ -283,7 +283,11 @@ impl OperatorBuilder for HashAggBuilder {
                 filter_exprs?,
                 Arc::clone(&child.native_plan),
                 Arc::clone(&schema),
-            )?,
+            )?
+            // The wrapper evaluates to a shallow struct of its raw states. Account for
+            // copies of those states, and let ordered final drain a range once while
+            // retaining raw states for spill.
+            .with_struct_state_output(proto_mode == ProtoAggregateMode::PartialMerge),
         );
 
         let mut output = aggregate;

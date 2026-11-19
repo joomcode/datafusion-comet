@@ -48,6 +48,7 @@
 
 use crate::aggregates::group_values::multi_group_by::GroupColumn;
 use crate::aggregates::group_values::row::encode_array_if_necessary;
+use crate::aggregates::group_values::{has_offset_buffer, rows_have_offset_room};
 
 use arrow::array::{Array, ArrayRef, BooleanBufferBuilder};
 use arrow::datatypes::DataType;
@@ -288,6 +289,15 @@ impl GroupColumn for RowsGroupColumn {
 
     fn size(&self) -> usize {
         self.row_converter.size() + self.group_values.size()
+    }
+
+    fn has_offset_room(&self, array: &ArrayRef, limit: usize) -> bool {
+        !has_offset_buffer(&self.output_type)
+            || rows_have_offset_room(
+                self.group_values.size(),
+                std::slice::from_ref(array),
+                limit,
+            )
     }
 
     fn build(self: Box<Self>) -> ArrayRef {

@@ -90,6 +90,7 @@ impl AggregateHashTable<PartialMarker> {
             output_schema: Arc::clone(&self.output_schema),
             state_schema: Arc::clone(&self.state_schema),
             batch_size: self.batch_size,
+            group_key_offset_limit: self.group_key_offset_limit,
             state: AggregateHashTableState::Building(AggregateHashTableBuffer {
                 group_by: Arc::clone(&state.group_by),
                 group_values,
@@ -105,7 +106,7 @@ impl AggregateHashTable<PartialMarker> {
     pub(in crate::aggregates) fn aggregate_batch(
         &mut self,
         batch: &RecordBatch,
-    ) -> Result<()> {
+    ) -> Result<Option<RecordBatch>> {
         self.aggregate_batch_inner(batch, HashAggregateAccumulator::update_batch)
     }
 

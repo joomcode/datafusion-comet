@@ -218,12 +218,15 @@ impl PartialReduceHashAggregateStream {
                 let result = original_state.hash_table_mut().aggregate_batch(&batch);
                 timer.done();
 
-                if let Err(e) = result {
-                    return ControlFlow::Break((
-                        Poll::Ready(Some(Err(e))),
-                        original_state,
-                    ));
-                }
+                let taken = match result {
+                    Ok(taken) => taken,
+                    Err(e) => {
+                        return ControlFlow::Break((
+                            Poll::Ready(Some(Err(e))),
+                            original_state,
+                        ));
+                    }
+                };
 
                 if let Err(e) = self
                     .reservation
@@ -235,7 +238,15 @@ impl PartialReduceHashAggregateStream {
                     ));
                 }
 
-                ControlFlow::Continue(original_state)
+                match taken {
+                    Some(taken) => ControlFlow::Break((
+                        Poll::Ready(Some(
+                            Ok(taken.record_output(&self.baseline_metrics)),
+                        )),
+                        original_state,
+                    )),
+                    None => ControlFlow::Continue(original_state),
+                }
             }
             Poll::Ready(Some(Err(e))) => {
                 ControlFlow::Break((Poll::Ready(Some(Err(e))), original_state))

@@ -66,7 +66,7 @@ impl AggregateHashTable<FinalMarker> {
     pub(in crate::aggregates) fn aggregate_batch(
         &mut self,
         batch: &RecordBatch,
-    ) -> Result<()> {
+    ) -> Result<Option<RecordBatch>> {
         self.aggregate_batch_inner(batch, HashAggregateAccumulator::merge_batch)
     }
 

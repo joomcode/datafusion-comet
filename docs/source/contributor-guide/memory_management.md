@@ -413,6 +413,27 @@ unchanged. `spill_replay.rs` describes how the wrapper recognizes these requests
 on in DataFusion. [Issue #6583](https://github.com/apache/datafusion-comet/issues/6583) tracks
 removing it.
 
+The vendored aggregate streams distinguish existing replay allocations from future
+materialization headroom. Existing fully ordered state is accounted with an infallible
+resize; requests for the additional memory needed to emit variable-size states remain
+fallible. Their consumer names carry `/bounded-emit`, including sibling reservations
+used by spill merging. `SpillReplayPool` passes these requests through unchanged, so it
+cannot turn a denied future emit into overcommit. Its legacy exception remains available
+only for unmarked consumers.
+
+Hash aggregates include estimated variable-state/key materialization in their reservation
+while accumulating, emitting partial states or spilling on pressure. Ordered aggregates
+materialize a completed range once and drain its slices before reading more input. Pending
+slices retain the backing batch's memory charge. An ordered Partial may emit an unfinished
+group on pressure: repeated partial keys are merged by Final, so Partial does not advertise
+unique group keys. Such a refusal resets its retained state instead of growing it across
+future input batches. A fully ordered Final cannot spill an unfinished group; refused future
+materialization headroom remains an error. Replay reserves its state/output workspace and a
+minimal merge jointly before opening readers, reshaping oversized runs on pressure. Its IPC
+budget includes decoded Arrow buffer capacity, not just logical serialized size, and
+per-group owned variable-state headers that the IPC offsets do not represent. These
+reservations remain estimates and do not bound RSS or output retained by downstream code.
+
 ## How DataFusion consumes the pool
 
 Native operators reserve through DataFusion's `MemoryConsumer` / `MemoryReservation` API:

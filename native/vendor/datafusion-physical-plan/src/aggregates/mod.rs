@@ -191,7 +191,7 @@ use datafusion_physical_expr::aggregate::AggregateFunctionExpr;
 use datafusion_physical_expr::equivalence::ProjectionMapping;
 use datafusion_physical_expr::expressions::{Column, DynamicFilterPhysicalExpr, lit};
 use datafusion_physical_expr::{
-    ConstExpr, EquivalenceProperties, physical_exprs_contains,
+    ConstExpr, EquivalenceProperties, Partitioning, physical_exprs_contains,
 };
 use datafusion_physical_expr_common::physical_expr::{PhysicalExpr, fmt_sql};
 use datafusion_physical_expr_common::sort_expr::{
@@ -211,12 +211,24 @@ mod grouped_hash_stream;
 mod grouped_topk_stream;
 mod hash_stream;
 pub mod order;
+#[cfg(test)]
+mod ordered_drain_tests;
 mod ordered_final_stream;
 mod ordered_partial_stream;
 mod partial_reduce_stream;
+mod replay_budget;
+#[cfg(test)]
+mod replay_budget_tests;
 mod single_stream;
 mod skip_partial;
+#[cfg(test)]
+mod starved_spill_tests;
 mod topk;
+
+/// Consumer marker for aggregate streams that distinguish existing allocations from
+/// future output-materialization headroom. Pool decorators must not turn a refused
+/// fallible request by these consumers into an infallible overcommit.
+pub const AGGREGATE_EMIT_BUDGET_SUFFIX: &str = "/bounded-emit";
 
 /// Returns true if TopK aggregation data structures support the provided key and value types.
 ///
@@ -854,6 +866,12 @@ pub struct AggregateExec {
     /// We need the input schema of partial aggregate to be able to deserialize aggregate
     /// expressions from protobuf for final aggregate.
     pub input_schema: SchemaRef,
+    /// The final value of every aggregate is exactly its state packed in a non-null
+    /// struct. Allows ordered intermediate merging to drain a completed range once.
+    /// This is an explicit caller contract, not inferred from UDAF names.
+    struct_state_output: bool,
+    #[cfg(test)]
+    group_key_offset_limit: usize,
     /// Execution metrics
     metrics: ExecutionPlanMetricsSet,
     required_input_ordering: Option<OrderingRequirements>,
@@ -892,6 +910,9 @@ impl AggregateExec {
             schema: Arc::clone(&self.schema),
             input_schema: Arc::clone(&self.input_schema),
             dynamic_filter: self.dynamic_filter.clone(),
+            struct_state_output: self.struct_state_output,
+            #[cfg(test)]
+            group_key_offset_limit: self.group_key_offset_limit,
         }
     }
 
@@ -912,6 +933,9 @@ impl AggregateExec {
             schema: Arc::clone(&self.schema),
             input_schema: Arc::clone(&self.input_schema),
             dynamic_filter: self.dynamic_filter.clone(),
+            struct_state_output: self.struct_state_output,
+            #[cfg(test)]
+            group_key_offset_limit: self.group_key_offset_limit,
         }
     }
 
@@ -1028,6 +1052,7 @@ impl AggregateExec {
             Arc::clone(&schema),
             &group_expr_mapping,
             group_by.is_true_no_grouping(),
+            group_by.has_grouping_set(),
             &mode,
             &input_order_mode,
             aggr_expr.as_ref(),
@@ -1047,11 +1072,37 @@ impl AggregateExec {
             input_order_mode,
             cache: Arc::new(cache),
             dynamic_filter: None,
+            struct_state_output: false,
+            #[cfg(test)]
+            group_key_offset_limit: i32::MAX as usize,
         };
 
         exec.init_dynamic_filter();
 
         Ok(exec)
+    }
+
+    /// Declare that all final aggregate values are non-null structs containing exactly
+    /// their intermediate state fields, in order. The caller must ensure that evaluating
+    /// each aggregate is equivalent to packing its `state()` arrays without computation.
+    /// Used by Comet's intermediate-state merging wrapper. Ordinary final aggregates
+    /// must leave this disabled. The table validates the declared struct schema.
+    pub fn with_struct_state_output(mut self, enabled: bool) -> Self {
+        self.struct_state_output = enabled;
+        self
+    }
+
+    /// Production always uses Arrow's i32 extent. Unit tests reduce the threshold
+    /// to exercise the same emit/spill path without allocating multi-gigabyte arrays.
+    fn group_key_offset_limit(&self) -> usize {
+        #[cfg(test)]
+        {
+            self.group_key_offset_limit
+        }
+        #[cfg(not(test))]
+        {
+            i32::MAX as usize
+        }
     }
 
     /// Aggregation mode (full, partial)
@@ -1343,19 +1394,34 @@ impl AggregateExec {
     }
 
     /// This function creates the cache object that stores the plan properties such as schema, equivalence properties, ordering, partitioning, etc.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Grouping-set expansion must be distinguished from ordinary projection when deriving cached properties"
+    )]
     pub fn compute_properties(
         input: &Arc<dyn ExecutionPlan>,
         schema: SchemaRef,
         group_expr_mapping: &ProjectionMapping,
         is_true_no_grouping: bool,
+        has_grouping_set: bool,
         mode: &AggregateMode,
         input_order_mode: &InputOrderMode,
         aggr_exprs: &[Arc<AggregateFunctionExpr>],
     ) -> Result<PlanProperties> {
         // Construct equivalence properties:
-        let mut eq_properties = input
-            .equivalence_properties()
-            .project(group_expr_mapping, schema);
+        // Grouping-set expansion substitutes NULLs and can repeat projected keys.
+        // Input constants, equivalences and orderings are therefore not generally
+        // properties of its output. Ordinary grouping preserves the projection.
+        let mut eq_properties = if has_grouping_set {
+            EquivalenceProperties::new(schema)
+        } else {
+            input
+                .equivalence_properties()
+                .project(group_expr_mapping, schema)
+        }
+        // Input uniqueness does not survive partial emission or grouping-set
+        // expansion. Derive only the aggregate's own valid output constraint below.
+        .with_constraints(Constraints::default());
 
         // True no-group aggregates produce only one row in each output
         // partition, so aggregate outputs are constants within the partition.
@@ -1370,26 +1436,42 @@ impl AggregateExec {
             eq_properties.add_constants(new_constants)?;
         }
 
-        // Group by expression will be a distinct value after the aggregation.
-        // Add it into the constraint set.
-        let mut constraints = eq_properties.constraints().to_vec();
-        let new_constraint = Constraint::Unique(
-            group_expr_mapping
-                .iter()
-                .flat_map(|(_, target_cols)| {
-                    target_cols.iter().flat_map(|(expr, _)| {
-                        expr.downcast_ref::<Column>().map(|c| c.index())
-                    })
-                })
-                .collect(),
-        );
-        constraints.push(new_constraint);
-        eq_properties =
-            eq_properties.with_constraints(Constraints::new_unverified(constraints));
+        // Final/Single emit each physical grouping key once. Grouped Partial and
+        // PartialReduce may emit repeated keys under pressure/offset limits, so a
+        // uniqueness promise there could incorrectly satisfy secondary orderings.
+        // True global aggregates still use AggregateStream and emit at most one row.
+        if is_true_no_grouping || mode.output_mode() == AggregateOutputMode::Final {
+            let group_count = if is_true_no_grouping {
+                0
+            } else {
+                let Some(count) = eq_properties
+                    .schema()
+                    .fields()
+                    .len()
+                    .checked_sub(aggr_exprs.len())
+                else {
+                    return internal_err!(
+                        "Final aggregate schema has fewer fields than aggregate values"
+                    );
+                };
+                count
+            };
+            // The output prefix includes the hidden grouping-set ID. Projection
+            // mappings contain only explicit expressions and would omit that key.
+            let mut constraints = eq_properties.constraints().to_vec();
+            constraints.push(Constraint::Unique((0..group_count).collect()));
+            eq_properties =
+                eq_properties.with_constraints(Constraints::new_unverified(constraints));
+        }
 
         // Get output partitioning:
         let input_partitioning = input.output_partitioning().clone();
         let output_partitioning = match mode.input_mode() {
+            AggregateInputMode::Raw if has_grouping_set => {
+                // NULL substitution changes hash keys and expansion can place the
+                // same rolled-up key in several input partitions.
+                Partitioning::UnknownPartitioning(input_partitioning.partition_count())
+            }
             AggregateInputMode::Raw => {
                 // First stage aggregation will not change the output partitioning,
                 // but needs to respect aliases (e.g. mapping in the GROUP BY
@@ -2055,6 +2137,11 @@ impl ExecutionPlan for AggregateExec {
                     Arc::clone(&self.schema),
                 )?;
                 me.limit_options = self.limit_options;
+                me.struct_state_output = self.struct_state_output;
+                #[cfg(test)]
+                {
+                    me.group_key_offset_limit = self.group_key_offset_limit;
+                }
                 me.dynamic_filter.clone_from(&self.dynamic_filter);
                 Ok(Arc::new(me))
             }
@@ -2251,6 +2338,12 @@ impl ExecutionPlan for AggregateExec {
     ) -> Result<Option<datafusion_proto_models::protobuf::PhysicalPlanNode>> {
         use datafusion_proto_models::protobuf;
 
+        // The upstream protobuf cannot carry this local intermediate-state contract.
+        // Refuse serialization rather than silently dropping an execution invariant.
+        if self.struct_state_output {
+            return Ok(None);
+        }
+
         // Exhaustive destructure: adding a field to `AggregateExec` without
         // deciding how it is serialized is a compile error, not a silent
         // round-trip gap.
@@ -2261,6 +2354,9 @@ impl ExecutionPlan for AggregateExec {
             filter_expr,
             limit_options,
             input,
+            struct_state_output: _,
+            #[cfg(test)]
+                group_key_offset_limit: _,
             // Derived at construction by `create_schema` from `input_schema`,
             // `group_by`, `aggr_expr` and `mode`.
             schema: _,
@@ -7009,16 +7105,10 @@ mod tests {
         let task_ctx = new_spill_ctx(1, 500);
         let result = collect(aggr.execute(0, Arc::clone(&task_ctx))?).await;
 
-        match &result {
-            Ok(_) => panic!("Expected ResourcesExhausted error but query succeeded"),
-            Err(e) => {
-                let root = e.find_root();
-                assert!(
-                    matches!(root, DataFusionError::ResourcesExhausted(_)),
-                    "Expected ResourcesExhausted, got: {root}",
-                );
-            }
-        }
+        // The fully ordered replay accounts for its already allocated active group.
+        let batches = result?;
+        assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
+        assert_eq!(task_ctx.runtime_env().memory_pool.reserved(), 0);
 
         Ok(())
     }

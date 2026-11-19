@@ -79,7 +79,7 @@ impl OrderedAggregateTable<PartialMarker> {
     pub(in crate::aggregates) fn aggregate_batch(
         &mut self,
         batch: &RecordBatch,
-    ) -> Result<()> {
+    ) -> Result<Option<RecordBatch>> {
         let evaluated_batch = self.evaluate_batch(batch)?;
         self.aggregate_evaluated_batch(&evaluated_batch, false)
     }

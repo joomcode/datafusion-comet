@@ -32,7 +32,9 @@ use std::task::{Context, Poll};
 
 use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
-use datafusion_common::{DataFusionError, Result, internal_datafusion_err, internal_err};
+use datafusion_common::{
+    DataFusionError, Result, exec_err, internal_datafusion_err, internal_err,
+};
 use datafusion_execution::TaskContext;
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
 use datafusion_physical_expr::PhysicalSortExpr;
@@ -45,13 +47,12 @@ use super::aggregate_hash_table::{
     AggregateHashTable, FinalMarker, PartialMarker, PartialSkipMarker,
 };
 use super::group_values::GroupByMetrics;
-use super::ordered_final_stream::OrderedFinalAggregateStream;
 use super::skip_partial::SkipAggregationProbe;
 use crate::metrics::{
     BaselineMetrics, MetricBuilder, MetricCategory, RecordOutput, SpillMetrics,
 };
 use crate::sorts::IncrementalSortIterator;
-use crate::sorts::streaming_merge::{SortedSpillFile, StreamingMergeBuilder};
+use crate::sorts::streaming_merge::SortedSpillFile;
 use crate::spill::spill_manager::SpillManager;
 use crate::stream::EmptyRecordBatchStream;
 use crate::{InputOrderMode, RecordBatchStream, SendableRecordBatchStream, metrics};
@@ -355,7 +356,11 @@ impl FinalSpillContext {
         let Some(batch) = hash_table.take_state_batch()? else {
             return Ok(());
         };
+        self.spill_batch(batch)
+    }
 
+    /// Sorts and spills a batch of intermediate states taken from the table.
+    fn spill_batch(&mut self, batch: RecordBatch) -> Result<()> {
         let sorted_iter =
             IncrementalSortIterator::new(batch, self.spill_expr.clone(), self.batch_size);
         let spill_file = self
@@ -378,7 +383,7 @@ impl FinalSpillContext {
     }
 
     /// Merges every sorted run, and do the aggregate evaluation with
-    /// [`OrderedFinalAggregateStream`]
+    /// [`super::ordered_final_stream::OrderedFinalAggregateStream`]
     fn into_replay_stream(
         self,
         baseline_metrics: &BaselineMetrics,
@@ -395,32 +400,16 @@ impl FinalSpillContext {
             spills,
         } = self;
 
-        let spill_schema = Arc::clone(spill_manager.schema());
-        // The merge and replay table are two components of the same aggregate
-        // operator. Keep them under one consumer registration so a fair memory
-        // pool does not divide this operator's quota between its own phases.
-        let merge_reservation = reservation.new_empty();
-        let merged = StreamingMergeBuilder::new()
-            .with_schema(spill_schema)
-            .with_spill_manager(spill_manager)
-            .with_sorted_spill_files(spills)
-            .with_expressions(&spill_expr)
-            .with_metrics(baseline_metrics.intermediate())
-            .with_batch_size(batch_size)
-            .with_reservation(merge_reservation)
-            .build()?;
-        let replay = OrderedFinalAggregateStream::new_with_input_and_metrics(
-            &final_agg,
-            &context,
+        Ok(super::replay_budget::ReplayInput {
+            aggregate: final_agg,
+            context,
             partition,
-            merged,
-            &InputOrderMode::Sorted,
-            baseline_metrics.clone(),
-            group_by_metrics,
-            None,
-            reservation,
-        )?;
-        Ok(Box::pin(replay))
+            batch_size,
+            spill_expr,
+            spill_manager,
+            spills,
+        }
+        .into_stream(baseline_metrics, group_by_metrics, reservation))
     }
 }
 
@@ -578,8 +567,22 @@ impl PartialHashAggregateStream {
                 let result = hash_table.aggregate_batch(&batch);
                 timer.done();
 
-                if let Err(e) = result {
-                    return Self::break_with_err(e);
+                match result {
+                    Ok(None) => {}
+                    Ok(Some(taken)) => {
+                        // COMET PATCH: the taken batch is memory this stream holds until
+                        // it has emitted it.
+                        self.reservation.resize(
+                            hash_table.memory_size() + taken.get_array_memory_size(),
+                        );
+                        return ControlFlow::Continue(
+                            PartialHashAggregateState::EmittingOnMemoryPressure {
+                                hash_table,
+                                remaining_groups: taken,
+                            },
+                        );
+                    }
+                    Err(e) => return Self::break_with_err(e),
                 }
 
                 // --------------------------------
@@ -640,8 +643,13 @@ impl PartialHashAggregateStream {
                 // -------------------------------------------------
                 // Step 4: Larger-than-memory execution (early emit)
                 // -------------------------------------------------
+                // COMET PATCH: reserve what materializing the table will take along with
+                // the table, so that the emit below, or the one at the end of the input,
+                // runs in memory the pool granted.
                 let timer = elapsed_compute.timer();
-                let resize_result = self.reservation.try_resize(hash_table.memory_size());
+                let resize_result = self
+                    .reservation
+                    .try_resize(hash_table.memory_size() + hash_table.emit_size());
                 timer.done();
                 match resize_result {
                     Ok(()) => {}
@@ -654,12 +662,14 @@ impl PartialHashAggregateStream {
 
                         // Emitting clears the aggregate table and releases its
                         // accumulated memory. Update the reservation accordingly.
-                        let resize_result =
-                            self.reservation.try_resize(hash_table.memory_size());
-
-                        if let Err(e) = resize_result {
-                            return Self::break_with_err(e);
-                        }
+                        // COMET PATCH: the materialized states stay reserved until they
+                        // are emitted. They are allocated already, so record them with the
+                        // infallible `resize`.
+                        let emitting = match &state_batch_result {
+                            Ok(Some(batch)) => batch.get_array_memory_size(),
+                            _ => 0,
+                        };
+                        self.reservation.resize(hash_table.memory_size() + emitting);
 
                         let materialized_group_states = match state_batch_result {
                             Ok(Some(batch)) => batch,
@@ -727,6 +737,8 @@ impl PartialHashAggregateStream {
 
         let (output_batch, next_state) = if batch.num_rows() <= self.batch_size {
             // Last batch to output, go back to `ReadingInput`
+            // COMET PATCH: the materialized states are handed over.
+            self.reservation.resize(hash_table.memory_size());
             (
                 batch,
                 PartialHashAggregateState::ReadingInput { hash_table },
@@ -780,7 +792,9 @@ impl PartialHashAggregateStream {
 
         match result {
             Ok(Some(batch)) => {
-                let _ = self.reservation.try_resize(hash_table.memory_size());
+                // COMET PATCH: record what the materialized output holds. It is allocated
+                // already, so a refusal would only leave it untracked.
+                self.reservation.resize(hash_table.memory_size());
                 self.reduction_factor.add_part(batch.num_rows());
                 debug_assert!(batch.num_rows() > 0);
                 let next_state = if hash_table.is_done() {
@@ -1047,10 +1061,12 @@ impl FinalHashAggregateStream {
             None
         };
 
-        let reservation =
-            MemoryConsumer::new(format!("FinalHashAggregateStream[{partition}]"))
-                .with_can_spill(can_spill)
-                .register(context.memory_pool());
+        let reservation = MemoryConsumer::new(format!(
+            "FinalHashAggregateStream[{partition}]{}",
+            super::AGGREGATE_EMIT_BUDGET_SUFFIX
+        ))
+        .with_can_spill(can_spill)
+        .register(context.memory_pool());
 
         Ok(Self {
             schema,
@@ -1102,7 +1118,8 @@ impl FinalHashAggregateStream {
         hash_table: &AggregateHashTable<FinalMarker>,
         spill_context: Option<&FinalSpillContext>,
     ) -> usize {
-        let table_size = hash_table.memory_size();
+        // COMET PATCH: with what materializing the table takes, see `emit_size`.
+        let table_size = hash_table.memory_size() + hash_table.emit_size();
         if spill_context.is_some() {
             // Count extra space needed for in-memory sorting and spilling. Only
             // count memory for indices, the payload will be materialize incrementally
@@ -1129,7 +1146,7 @@ impl FinalHashAggregateStream {
     ) -> FinalHashAggregateStateTransition {
         let FinalHashAggregateState::ReadingInput {
             mut hash_table,
-            spill_context,
+            mut spill_context,
         } = original_state
         else {
             return Self::break_with_internal_err(
@@ -1148,7 +1165,17 @@ impl FinalHashAggregateStream {
             Poll::Ready(Some(Ok(batch))) => {
                 let elapsed_compute = self.baseline_metrics.elapsed_compute().clone();
                 let timer = elapsed_compute.timer();
-                let result = hash_table.aggregate_batch(&batch);
+                let result = hash_table.aggregate_batch(&batch).and_then(|taken| {
+                    match (taken, spill_context.as_deref_mut()) {
+                        (None, _) => Ok(()),
+                        (Some(taken), Some(spill_context)) => {
+                            spill_context.spill_batch(taken)
+                        }
+                        (Some(_), None) => exec_err!(
+                            "Final hash aggregate cannot spill group keys that overflow 32-bit offsets because temporary files are not enabled in the DiskManager"
+                        ),
+                    }
+                });
                 timer.done();
 
                 if let Err(e) = result {
@@ -1281,9 +1308,21 @@ impl FinalHashAggregateStream {
 
         // Spilling shrinks the aggregate table and releases its accumulated
         // memory. Update the reservation accordingly.
-        if let Err(e) = self.reservation.try_resize(hash_table.memory_size()) {
-            result =
-                Err(e.context("Decreasing allocation after spilling should succeed"));
+        // COMET PATCH: the emptied table still holds its group values' and accumulators'
+        // initial buffers, a few KiB for a string key. When the pool refused this
+        // aggregate its first reservation, the reservation is below that, so the resize
+        // grows it and fails for the reason the table spilled. That memory is already
+        // allocated and no longer grows with the input, so record it with the infallible
+        // `resize` and carry on: the next batch that does not fit spills again. A table
+        // that still has groups keeps DataFusion's error.
+        let remaining = hash_table.memory_size();
+        if let Err(e) = self.reservation.try_resize(remaining) {
+            if hash_table.building_group_count() == 0 {
+                self.reservation.resize(remaining);
+            } else {
+                result =
+                    Err(e.context("Decreasing allocation after spilling should succeed"));
+            }
         }
 
         timer.done();
@@ -1409,10 +1448,9 @@ impl FinalHashAggregateStream {
                     }
                     FinalHashAggregateState::Done
                 } else {
-                    if let Err(e) = self.reservation.try_resize(hash_table.memory_size())
-                    {
-                        return Self::break_with_err(e);
-                    }
+                    // COMET PATCH: the materialized output is allocated already. Record
+                    // it; refusing it cannot free anything.
+                    self.reservation.resize(hash_table.memory_size());
                     FinalHashAggregateState::ProducingOutput { hash_table }
                 };
 

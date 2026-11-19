@@ -3139,6 +3139,7 @@ fn needs_fields_coercion(sig: &TypeSignature) -> bool {
 
 #[cfg(test)]
 mod tests {
+    mod aggregate_regressions;
     mod empty_native_scan;
     mod multi_store_scan;
 

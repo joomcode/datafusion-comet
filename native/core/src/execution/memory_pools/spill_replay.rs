@@ -48,6 +48,11 @@
 //! leaves the replay room when the merge picks its files. The #6254 tests in `CometAggregateSuite`
 //! fail without this on DataFusion 55.1, and its PartialMerge read-back test for #6857 fails
 //! without it on 55.2, so they show whether the replay still needs it.
+//!
+//! The vendored aggregate streams now account for existing replay allocations with
+//! infallible resize, then request future emit headroom separately. Their consumer names
+//! carry `AGGREGATE_EMIT_BUDGET_SUFFIX`: never turn those future refusals into overcommit.
+//! Retain this wrapper for the older, unmarked consumer contract only.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -179,9 +184,10 @@ pub(super) fn unwrap_spill_replay(pool: &Arc<dyn MemoryPool>) -> Option<&Arc<dyn
 /// Whether `consumer` belongs to a final or single aggregate, whose spill replay can't spill.
 fn is_final_aggregate(consumer: &MemoryConsumer) -> bool {
     let name = consumer.name();
-    name.starts_with("FinalHashAggregateStream[")
-        || name.starts_with("OrderedFinalAggregateStream[")
-        || name.starts_with("SingleHashAggregateStream[")
+    !name.ends_with(datafusion::physical_plan::aggregates::AGGREGATE_EMIT_BUDGET_SUFFIX)
+        && (name.starts_with("FinalHashAggregateStream[")
+            || name.starts_with("OrderedFinalAggregateStream[")
+            || name.starts_with("SingleHashAggregateStream["))
 }
 
 #[cfg(test)]
@@ -245,6 +251,48 @@ mod tests {
             drop(replay);
             assert_eq!(pool.reserved(), 0, "{name}");
             assert_eq!(fake.held(), 0, "{name}");
+        }
+    }
+
+    #[test]
+    fn bounded_emit_requests_do_not_overcommit_future_memory_during_replay() {
+        let suffix = datafusion::physical_plan::aggregates::AGGREGATE_EMIT_BUDGET_SUFFIX;
+        for (index, stream) in [
+            "FinalHashAggregateStream[0]",
+            "SingleHashAggregateStream[0]",
+            "OrderedFinalAggregateStream[0]",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for (name, pool, fake) in
+                each_pool_type([-49400 - index as i64 * 2, -49401 - index as i64 * 2])
+            {
+                let consumer = format!("{stream}{suffix}");
+                let merge = MemoryConsumer::new(consumer).register(&pool);
+                let output = merge.new_empty();
+                merge.try_grow(90).unwrap();
+                assert!(
+                    output.try_grow(30).is_err(),
+                    "{name}: future output must be refused"
+                );
+                assert_eq!(pool.reserved(), 90);
+                assert_eq!(fake.held(), 90);
+                assert_eq!(overcommit(&pool), 0);
+
+                // Already allocated replay memory still has to be recorded. This
+                // explicit infallible call is distinct from a future emit request.
+                output.grow(30);
+                assert_eq!(pool.reserved(), 120);
+                assert_eq!(fake.held(), 100);
+                assert_eq!(overcommit(&pool), 20);
+                assert!(output.try_grow(1).is_err());
+                drop(output);
+                drop(merge);
+                assert_eq!(pool.reserved(), 0);
+                assert_eq!(fake.held(), 0);
+                assert_eq!(overcommit(&pool), 0);
+            }
         }
     }
 

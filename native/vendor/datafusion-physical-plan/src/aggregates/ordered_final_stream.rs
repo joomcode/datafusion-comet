@@ -23,7 +23,7 @@ use std::task::{Context, Poll};
 
 use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
-use datafusion_common::{DataFusionError, Result, internal_err};
+use datafusion_common::{DataFusionError, Result, internal_err, resources_err};
 use datafusion_execution::TaskContext;
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
 use datafusion_physical_expr::PhysicalSortExpr;
@@ -37,7 +37,7 @@ use super::group_values::GroupByMetrics;
 use crate::aggregates::AggregateMode;
 use crate::metrics::{BaselineMetrics, RecordOutput, SpillMetrics};
 use crate::sorts::IncrementalSortIterator;
-use crate::sorts::streaming_merge::{SortedSpillFile, StreamingMergeBuilder};
+use crate::sorts::streaming_merge::SortedSpillFile;
 use crate::spill::spill_manager::SpillManager;
 use crate::stream::EmptyRecordBatchStream;
 use crate::{InputOrderMode, RecordBatchStream, SendableRecordBatchStream};
@@ -67,6 +67,12 @@ pub(crate) struct OrderedFinalAggregateStream {
     reservation: MemoryReservation,
     baseline_metrics: BaselineMetrics,
     state: Option<OrderedFinalAggregateState>,
+    /// COMET PATCH: the group keys are fully ordered, so the table holds only the groups
+    /// the last batch may continue.
+    fully_ordered: bool,
+    /// Workspace actually granted before a spill merge chose its buffers. Retain
+    /// it until replay completes, so another consumer cannot steal future emit space.
+    replay_reservation_floor: usize,
 }
 
 /// Spill configuration and accumulated runs for partially ordered final
@@ -191,6 +197,10 @@ impl OrderedFinalSpillContext {
             return Ok(());
         };
 
+        self.spill_batch(batch)
+    }
+
+    fn spill_batch(&mut self, batch: RecordBatch) -> Result<()> {
         let sorted_iter =
             IncrementalSortIterator::new(batch, self.spill_expr.clone(), self.batch_size);
         let spill_file = self
@@ -229,32 +239,16 @@ impl OrderedFinalSpillContext {
             spills,
         } = self;
 
-        let spill_schema = Arc::clone(spill_manager.schema());
-        // The merge and replay table are two components of the same aggregate
-        // operator. Keep them under one consumer registration so a fair memory
-        // pool does not divide this operator's quota between its own phases.
-        let merge_reservation = reservation.new_empty();
-        let merged = StreamingMergeBuilder::new()
-            .with_schema(spill_schema)
-            .with_spill_manager(spill_manager)
-            .with_sorted_spill_files(spills)
-            .with_expressions(&spill_expr)
-            .with_metrics(baseline_metrics.intermediate())
-            .with_batch_size(batch_size)
-            .with_reservation(merge_reservation)
-            .build()?;
-        let replay = OrderedFinalAggregateStream::new_with_input_and_metrics(
-            &agg,
-            &context,
+        Ok(super::replay_budget::ReplayInput {
+            aggregate: agg,
+            context,
             partition,
-            merged,
-            &InputOrderMode::Sorted,
-            baseline_metrics.clone(),
-            group_by_metrics,
-            None,
-            reservation,
-        )?;
-        Ok(Box::pin(replay))
+            batch_size,
+            spill_expr,
+            spill_manager,
+            spills,
+        }
+        .into_stream(baseline_metrics, group_by_metrics, reservation))
     }
 }
 
@@ -284,15 +278,17 @@ impl OrderedFinalAggregateStream {
         let baseline_metrics = BaselineMetrics::new(&agg.metrics, partition);
         let group_by_metrics = GroupByMetrics::new(&agg.metrics, partition);
         let spill_metrics = SpillMetrics::new(&agg.metrics, partition);
-        let reservation =
-            MemoryConsumer::new(format!("OrderedFinalAggregateStream[{partition}]"))
-                // HACK: Technically, fully ordered aggregate is a non-spillable
-                // consumer, since it uses bounded memory. There is a known race
-                // condition bug, and we set it to spillable to let it have larger
-                // memory budget to suppress the bug.
-                // Bug issue: https://github.com/apache/datafusion/issues/17334
-                .with_can_spill(true)
-                .register(context.memory_pool());
+        let reservation = MemoryConsumer::new(format!(
+            "OrderedFinalAggregateStream[{partition}]{}",
+            super::AGGREGATE_EMIT_BUDGET_SUFFIX
+        ))
+        // HACK: Technically, fully ordered aggregate is a non-spillable
+        // consumer, since it uses bounded memory. There is a known race
+        // condition bug, and we set it to spillable to let it have larger
+        // memory budget to suppress the bug.
+        // Bug issue: https://github.com/apache/datafusion/issues/17334
+        .with_can_spill(true)
+        .register(context.memory_pool());
         Self::new_with_input_and_metrics(
             agg,
             context,
@@ -361,6 +357,7 @@ impl OrderedFinalAggregateStream {
             input_order_mode,
             group_by_metrics,
         )?;
+        let replay_reservation_floor = reservation.size();
         Ok(Self {
             schema,
             input,
@@ -370,6 +367,8 @@ impl OrderedFinalAggregateStream {
                 table,
                 spill_context,
             }),
+            fully_ordered: *input_order_mode == InputOrderMode::Sorted,
+            replay_reservation_floor,
         })
     }
 
@@ -390,7 +389,7 @@ impl OrderedFinalAggregateStream {
         table: &OrderedAggregateTable<FinalMarker>,
         spill_context: Option<&OrderedFinalSpillContext>,
     ) -> usize {
-        let table_size = table.memory_size();
+        let table_size = table.memory_size().saturating_add(table.emit_size());
         if spill_context.is_some() {
             // See `OrderedFinalAggregateStream` comments for how is it estimated
             table_size.saturating_add(table.num_groups().saturating_mul(size_of::<u32>()))
@@ -412,13 +411,50 @@ impl OrderedFinalAggregateStream {
     ) -> OrderedFinalAggregateStateTransition {
         let OrderedFinalAggregateState::ReadingInput {
             mut table,
-            spill_context,
+            mut spill_context,
         } = original_state
         else {
             return Self::break_with_internal_err(
                 "Ordered final aggregate stream expected ReadingInput state",
             );
         };
+
+        // Drain every completed group, including ordinary final values, before
+        // reading another batch. Once a run spilled, only replay may finalize keys.
+        if !spill_context
+            .as_ref()
+            .is_some_and(|spill| spill.has_spills())
+        {
+            match table.next_output_batch() {
+                Ok(Some(batch)) => {
+                    // Keep the already granted materialization workspace for every
+                    // remaining completed group, rather than releasing/reacquiring it.
+                    self.reservation.resize(
+                        self.reservation.size().max(
+                            table
+                                .memory_size()
+                                .saturating_add(batch.get_array_memory_size()),
+                        ),
+                    );
+                    return ControlFlow::Break((
+                        Poll::Ready(Some(
+                            Ok(batch.record_output(&self.baseline_metrics)),
+                        )),
+                        OrderedFinalAggregateState::ReadingInput {
+                            table,
+                            spill_context,
+                        },
+                    ));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return ControlFlow::Break((
+                        Poll::Ready(Some(Err(error))),
+                        OrderedFinalAggregateState::Done,
+                    ));
+                }
+            }
+        }
 
         match self.input.poll_next_unpin(cx) {
             Poll::Pending => ControlFlow::Break((
@@ -431,7 +467,15 @@ impl OrderedFinalAggregateStream {
             Poll::Ready(Some(Ok(batch))) => {
                 let elapsed_compute = self.baseline_metrics.elapsed_compute().clone();
                 let timer = elapsed_compute.timer();
-                let result = table.aggregate_batch(&batch);
+                let result = table.aggregate_batch(&batch).and_then(|taken| {
+                    match (taken, spill_context.as_deref_mut()) {
+                        (None, _) => Ok(()),
+                        (Some(batch), Some(spill)) => spill.spill_batch(batch),
+                        (Some(_), None) => resources_err!(
+                            "Ordered final aggregate group-key offsets exhausted without spill support"
+                        ),
+                    }
+                });
                 timer.done();
 
                 if let Err(e) = result {
@@ -446,15 +490,47 @@ impl OrderedFinalAggregateStream {
 
                 // Check memory reservation, and potentially spill.
                 let timer = elapsed_compute.timer();
-                let resize_result =
-                    self.reservation
-                        .try_resize(Self::reservation_size_for_table(
-                            &table,
-                            spill_context.as_deref(),
-                        ));
+                let size =
+                    Self::reservation_size_for_table(&table, spill_context.as_deref())
+                        .max(self.replay_reservation_floor);
+                let resize_result = self.reservation.try_resize(size);
                 timer.done();
                 match resize_result {
                     Ok(()) => {}
+                    // COMET PATCH: a fully ordered table cannot spill and holds only memory
+                    // already allocated for the groups the last batch may continue. Record
+                    // it: Comet carries the shortfall as overcommit and refuses the next
+                    // fallible request, such as the native shuffle writer's, until repaid.
+                    Err(DataFusionError::ResourcesExhausted(_))
+                        if spill_context.is_none() && self.fully_ordered =>
+                    {
+                        self.reservation.resize(
+                            table.memory_size().max(self.replay_reservation_floor),
+                        );
+                        // Existing buffers are accounted infallibly. Additional output
+                        // materialization is a new allocation and must actually fit.
+                        if table.emit_size() > 0
+                            && let Err(error) = self.reservation.try_resize(size)
+                        {
+                            let error = match error {
+                                DataFusionError::ResourcesExhausted(message) => {
+                                    DataFusionError::ResourcesExhausted(format!(
+                                        "{message}; ordered final emit minimum: input_rows={}, groups={}, retained={}, emit={}, replay_floor={}",
+                                        batch.num_rows(),
+                                        table.num_groups(),
+                                        table.memory_size(),
+                                        table.emit_size(),
+                                        self.replay_reservation_floor
+                                    ))
+                                }
+                                error => error,
+                            };
+                            return ControlFlow::Break((
+                                Poll::Ready(Some(Err(error))),
+                                OrderedFinalAggregateState::Done,
+                            ));
+                        }
+                    }
                     Err(e @ DataFusionError::ResourcesExhausted(_)) => {
                         let Some(spill_context) = spill_context else {
                             // `None` means spilling is not supported, see comments
@@ -503,18 +579,13 @@ impl OrderedFinalAggregateStream {
                     // Some finalized groups can be emitted. Yield them, then
                     // continue aggregating input in the current state.
                     Ok(Some(batch)) => {
-                        if let Err(e) =
-                            self.reservation
-                                .try_resize(Self::reservation_size_for_table(
-                                    &table,
-                                    spill_context.as_deref(),
-                                ))
-                        {
-                            return ControlFlow::Break((
-                                Poll::Ready(Some(Err(e))),
-                                OrderedFinalAggregateState::Done,
-                            ));
-                        }
+                        self.reservation.resize(
+                            self.reservation.size().max(
+                                table
+                                    .memory_size()
+                                    .saturating_add(batch.get_array_memory_size()),
+                            ),
+                        );
                         let next_state = OrderedFinalAggregateState::ReadingInput {
                             table,
                             spill_context,
@@ -607,9 +678,21 @@ impl OrderedFinalAggregateStream {
 
         // Spilling shrinks the aggregate table and releases its accumulated
         // memory. Update the reservation accordingly.
-        if let Err(e) = self.reservation.try_resize(table.memory_size()) {
-            result =
-                Err(e.context("Decreasing allocation after spilling should succeed"));
+        // COMET PATCH: the emptied table still holds its group values' and accumulators'
+        // initial buffers, a few KiB for a string key. When the pool refused this
+        // aggregate its first reservation, the reservation is below that, so the resize
+        // grows it and fails for the reason the table spilled. That memory is already
+        // allocated and no longer grows with the input, so record it with the infallible
+        // `resize` and carry on: the next batch that does not fit spills again. A table
+        // that still has groups keeps DataFusion's error.
+        let remaining = table.memory_size();
+        if let Err(e) = self.reservation.try_resize(remaining) {
+            if table.is_empty() {
+                self.reservation.resize(remaining);
+            } else {
+                result =
+                    Err(e.context("Decreasing allocation after spilling should succeed"));
+            }
         }
 
         timer.done();
@@ -753,12 +836,15 @@ impl OrderedFinalAggregateStream {
                     }
                     OrderedFinalAggregateState::Done
                 } else {
-                    if let Err(e) = self.reservation.try_resize(table.memory_size()) {
-                        return ControlFlow::Break((
-                            Poll::Ready(Some(Err(e))),
-                            OrderedFinalAggregateState::ProducingOutput { table },
-                        ));
-                    }
+                    // Retain the previously granted emit workspace until this
+                    // completed range is fully materialized, including variable states.
+                    self.reservation.resize(
+                        self.reservation.size().max(
+                            table
+                                .memory_size()
+                                .saturating_add(batch.get_array_memory_size()),
+                        ),
+                    );
                     OrderedFinalAggregateState::ProducingOutput { table }
                 };
 

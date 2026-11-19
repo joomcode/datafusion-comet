@@ -29,7 +29,6 @@ use futures::stream::{Stream, StreamExt};
 use super::AggregateExec;
 use super::aggregate_hash_table::{OrderedAggregateTable, PartialMarker};
 use crate::aggregates::AggregateMode;
-use crate::aggregates::order::GroupOrdering;
 use crate::metrics::{BaselineMetrics, MetricBuilder, SpillMetrics};
 use crate::stream::{EmptyRecordBatchStream, ObservedStream, RecordBatchStreamAdapter};
 use crate::{InputOrderMode, SendableRecordBatchStream, metrics};
@@ -81,8 +80,9 @@ use crate::{InputOrderMode, SendableRecordBatchStream, metrics};
 /// only the current group remains active after completed groups are emitted, and
 /// memory usage does not grow with the total number of groups.
 ///
-/// If a memory reservation nevertheless fails, the stream returns the error
-/// directly, indicating an unexpected behavior.
+/// If a reservation is refused, partial states, including the current incomplete
+/// group, may be emitted early. The final aggregate merges repeated keys, so this
+/// preserves the same ordered state semantics without requiring a disk spill.
 ///
 /// ## Partially ordered case
 ///
@@ -147,10 +147,8 @@ impl OrderedPartialAggregateStream {
         )?;
         let reservation =
             MemoryConsumer::new(format!("OrderedPartialAggregateStream[{partition}]"))
-                .with_can_spill(matches!(
-                    table.group_ordering(),
-                    GroupOrdering::Partial(_)
-                ))
+                // Partial states may be emitted early for any input ordering.
+                .with_can_spill(true)
                 .register(context.memory_pool());
 
         Ok(Self {
@@ -248,65 +246,82 @@ impl OrderedPartialAggregateStream {
             self.reduction_factor.add_total(input_rows);
 
             let timer = elapsed_compute.timer();
+            let taken = table.aggregate_batch(&batch)?;
+            drop(timer);
+            if let Some(taken) = taken {
+                self.reservation.resize(
+                    self.reservation.size().max(
+                        table
+                            .memory_size()
+                            .saturating_add(taken.get_array_memory_size()),
+                    ),
+                );
+                self.reduction_factor.add_part(taken.num_rows());
+                emitter.emit(taken).await;
+                // The current input batch was aggregated after taking the old keys.
+                // Check its future emit budget too, including when this is the last input.
+            }
 
-            table.aggregate_batch(&batch)?;
-
-            // Check memory reservation. See function comments for details.
             if let Some(batch) = self.resize_or_take_state_batch(table)? {
                 self.reduction_factor.add_part(batch.num_rows());
-                drop(timer);
                 emitter.emit(batch).await;
                 continue;
             }
 
-            let Some(batch) = table.next_output_batch()? else {
-                // Can't do early emit, continue aggregating.
-                continue;
-            };
-
-            self.reduction_factor.add_part(batch.num_rows());
-            self.reservation.try_resize(table.memory_size())?;
-
-            drop(timer);
-            emitter.emit(batch).await;
+            while let Some(batch) = table.next_output_batch()? {
+                self.reduction_factor.add_part(batch.num_rows());
+                self.reservation.resize(
+                    self.reservation.size().max(
+                        table
+                            .memory_size()
+                            .saturating_add(batch.get_array_memory_size()),
+                    ),
+                );
+                emitter.emit(batch).await;
+            }
         }
 
         Ok(())
     }
 
-    /// Update the memory reservation, and:
-    /// - If memory reservation succeed, returns `Ok(None)`
-    /// - If memory reservation failed,
-    ///     - If input is partially ordered, materialize all the output, and
-    ///       directly send them to the final aggregation stage.
-    ///       Returns `Ok(Some(batch))`
-    ///     - If input is fully ordered, directly return error. It's not
-    ///       expected to use more than constant memory.
-    ///       Returns `Err(..)`
+    /// Reserve retained state and its emit workspace. On a refused reservation,
+    /// materialize every partial state and reset the table, for either full or
+    /// prefix ordering. Partial output may repeat an active key: its downstream
+    /// final stage merges those states in input order.
     ///
-    /// # Implementation Note
-    /// Incrementally output it after the blocked state management is ready, keep
-    /// it simple for now.
-    ///
-    /// Issue: <https://github.com/apache/datafusion/issues/7065>
+    /// The previous successful grant covered the old table and its emit workspace.
+    /// After one new input batch, refusal can therefore add at most that input
+    /// quantum's state/materialization before resetting. Account the resulting
+    /// allocated output until handover; do not retain an ever-growing active group.
     fn resize_or_take_state_batch(
         &mut self,
         table: &mut OrderedAggregateTable<PartialMarker>,
     ) -> Result<Option<RecordBatch>> {
-        let oom = match self.reservation.try_resize(table.memory_size()) {
+        let oom = match self
+            .reservation
+            .try_resize(table.memory_size().saturating_add(table.emit_size()))
+        {
             Ok(()) => return Ok(None),
             Err(e @ DataFusionError::ResourcesExhausted(_)) => e,
             Err(e) => return Err(e),
         };
 
-        if matches!(table.group_ordering(), GroupOrdering::Full(_)) {
-            return Err(oom);
+        if table.is_empty() {
+            // An empty input batch may leave only constructor buffers. They already
+            // exist and need no future materialization, so a refused first charge
+            // must not turn an empty partial aggregate into a task failure.
+            self.reservation.resize(table.memory_size());
+            return Ok(None);
         }
 
         let Some(batch) = table.take_state_batch()? else {
             return Err(oom);
         };
-        self.reservation.try_resize(table.memory_size())?;
+        self.reservation.resize(
+            table
+                .memory_size()
+                .saturating_add(batch.get_array_memory_size()),
+        );
         Ok(Some(batch))
     }
 
@@ -339,7 +354,13 @@ impl OrderedPartialAggregateStream {
                 return Ok(());
             }
 
-            self.reservation.try_resize(table.memory_size())?;
+            self.reservation.resize(
+                self.reservation.size().max(
+                    table
+                        .memory_size()
+                        .saturating_add(batch.get_array_memory_size()),
+                ),
+            );
 
             timer.done();
             emitter.emit(batch).await;

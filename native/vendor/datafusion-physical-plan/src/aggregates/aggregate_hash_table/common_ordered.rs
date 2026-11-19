@@ -21,7 +21,9 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use arrow::datatypes::SchemaRef;
+use arrow::array::{ArrayRef, StructArray};
+use arrow::compute::concat_batches;
+use arrow::datatypes::{DataType, Fields, SchemaRef};
 use arrow::record_batch::RecordBatch;
 use datafusion_common::Result;
 use datafusion_common::assert_or_internal_err;
@@ -38,7 +40,10 @@ use crate::aggregates::{
     evaluate_group_by,
 };
 
-use super::common::{AggregateAccumulator, EvaluatedAggregateBatch};
+use super::common::{
+    AggregateAccumulator, EMIT_BYTES_PER_GROUP, EvaluatedAggregateBatch,
+    MaterializedAggregateOutput, column_group_key,
+};
 
 /// Aggregate table shared by the ordered partial and final paths.
 ///
@@ -87,6 +92,7 @@ pub(in crate::aggregates) struct OrderedAggregateTable<OrderedAggrMode> {
 
     /// Maximum rows per emitted output batch, from config `batch_size`.
     pub(super) batch_size: usize,
+    group_key_offset_limit: usize,
 
     /// Grouping and accumulator-specific timing metrics.
     pub(super) group_by_metrics: GroupByMetrics,
@@ -94,6 +100,11 @@ pub(in crate::aggregates) struct OrderedAggregateTable<OrderedAggrMode> {
     /// Group keys, ordering state, and accumulator states.
     pub(super) buffer: OrderedAggregateTableBuffer,
 
+    pending: Option<MaterializedAggregateOutput>,
+
+    /// State field groups for a final wrapper whose value packs its exact state.
+    /// Pending batches keep the raw state schema, making pressure-driven spilling safe.
+    struct_state_fields: Option<Vec<Fields>>,
     _mode: PhantomData<OrderedAggrMode>,
 }
 
@@ -167,14 +178,31 @@ impl<AggrMode> OrderedAggregateTable<AggrMode> {
                     arguments,
                     filter,
                     accumulator,
+                    agg.struct_state_output,
                 ))
             })
             .collect::<Result<_>>()?;
+
+        let struct_state_fields = if agg.struct_state_output {
+            let fields = agg.aggr_expr.iter().map(|expr| {
+                let fields = Fields::from(expr.state_fields()?);
+                assert_or_internal_err!(
+                    expr.field().data_type() == &DataType::Struct(fields.clone())
+                        && !expr.field().is_nullable(),
+                    "Struct-state output requires a non-null struct of the exact state fields"
+                );
+                Ok(fields)
+            }).collect::<Result<Vec<_>>>()?;
+            Some(fields)
+        } else {
+            None
+        };
 
         Ok(Self {
             output_schema,
             state_schema,
             batch_size,
+            group_key_offset_limit: agg.group_key_offset_limit(),
             group_by_metrics,
             buffer: OrderedAggregateTableBuffer {
                 group_by: Arc::clone(&agg.group_by),
@@ -183,6 +211,8 @@ impl<AggrMode> OrderedAggregateTable<AggrMode> {
                 group_indices: vec![],
                 accumulators,
             },
+            pending: None,
+            struct_state_fields,
             _mode: PhantomData,
         })
     }
@@ -223,19 +253,25 @@ impl<AggrMode> OrderedAggregateTable<AggrMode> {
         self.buffer.group_ordering.input_done();
     }
 
-    /// Returns the ordering state used to decide how memory pressure is handled.
-    pub(in crate::aggregates) fn group_ordering(&self) -> &GroupOrdering {
-        &self.buffer.group_ordering
-    }
-
     /// Number of groups currently buffered.
     pub(in crate::aggregates) fn num_groups(&self) -> usize {
         self.buffer.group_values.len()
     }
 
+    /// Completed materialized output must be drained before pulling more input,
+    /// preventing retained ranges from being combined/copied during later pressure.
+    #[cfg(test)]
+    pub(in crate::aggregates) fn has_pending_output(&self) -> bool {
+        self.pending.is_some()
+    }
+
     /// Check if there is zero groups accumulated so far.
     pub(in crate::aggregates) fn is_empty(&self) -> bool {
         self.num_groups() == 0
+            && self
+                .pending
+                .as_ref()
+                .is_none_or(MaterializedAggregateOutput::is_exhausted)
     }
 
     /// All internal buffer's memory size.
@@ -248,6 +284,43 @@ impl<AggrMode> OrderedAggregateTable<AggrMode> {
             + self.buffer.group_values.size()
             + self.buffer.group_ordering.size()
             + self.buffer.group_indices.allocated_size()
+            + self
+                .pending
+                .as_ref()
+                .map_or(0, MaterializedAggregateOutput::memory_size)
+    }
+
+    /// Extra materialization headroom, separate from retained table/pending buffers.
+    /// Packed state structs are conservatively treated as copying, preserving all
+    /// variable/nested inner states without depending on a specific wrapper UDAF.
+    pub(in crate::aggregates) fn emit_size(&self) -> usize {
+        let groups = self.buffer.group_values.len();
+        if groups == 0 {
+            return 0;
+        }
+        let accumulators = self
+            .buffer
+            .accumulators
+            .iter()
+            .map(AggregateAccumulator::emit_size)
+            .sum::<usize>();
+        let keys = if self
+            .state_schema
+            .fields()
+            .iter()
+            .take(self.buffer.group_by.num_group_exprs())
+            .any(|field| !column_group_key(field.data_type()))
+        {
+            self.buffer.group_values.size()
+        } else {
+            0
+        };
+        if accumulators == 0 && keys == 0 {
+            return 0;
+        }
+        accumulators
+            .saturating_add(keys)
+            .saturating_add(groups.saturating_mul(EMIT_BYTES_PER_GROUP))
     }
 
     pub(in crate::aggregates) fn group_by_metrics(&self) -> GroupByMetrics {
@@ -264,8 +337,15 @@ impl<AggrMode> OrderedAggregateTable<AggrMode> {
     pub(in crate::aggregates) fn take_state_batch(
         &mut self,
     ) -> Result<Option<RecordBatch>> {
+        let rest = match self.pending.take().and_then(|mut p| p.take_rest()) {
+            Some(rest) => Some(RecordBatch::try_new(
+                Arc::clone(&self.state_schema),
+                rest.columns().to_vec(),
+            )?),
+            None => None,
+        };
         if self.buffer.group_values.is_empty() {
-            return Ok(None);
+            return Ok(rest);
         }
 
         let mut output = self.buffer.group_values.emit(EmitTo::All)?;
@@ -275,6 +355,10 @@ impl<AggrMode> OrderedAggregateTable<AggrMode> {
 
         let batch = RecordBatch::try_new(Arc::clone(&self.state_schema), output)?;
         debug_assert!(batch.num_rows() > 0);
+        let batch = match rest {
+            Some(rest) => concat_batches(&self.state_schema, &[rest, batch])?,
+            None => batch,
+        };
 
         // `emit(EmitTo::All)` resets accumulator state. Explicitly shrink the
         // key/index buffers too so the memory reservation can be released
@@ -285,6 +369,35 @@ impl<AggrMode> OrderedAggregateTable<AggrMode> {
         self.buffer.group_ordering.reset();
 
         Ok(Some(batch))
+    }
+
+    /// The pending range always stores raw state. Packing a returned slice is zero-copy,
+    /// while taking it for spill can continue to use the exact intermediate schema.
+    fn pack_state_output(
+        &self,
+        batch: RecordBatch,
+        is_final: bool,
+    ) -> Result<RecordBatch> {
+        let Some(fields) = self.struct_state_fields.as_ref().filter(|_| is_final) else {
+            return Ok(batch);
+        };
+        let num_keys = self.buffer.group_by.num_group_exprs();
+        let mut columns = batch.columns()[..num_keys].to_vec();
+        let mut start = num_keys;
+        for fields in fields {
+            let end = start + fields.len();
+            let state: Vec<ArrayRef> = batch.columns()[start..end].to_vec();
+            columns.push(Arc::new(StructArray::try_new(fields.clone(), state, None)?));
+            start = end;
+        }
+        assert_or_internal_err!(
+            start == batch.num_columns(),
+            "Unexpected state column count"
+        );
+        Ok(RecordBatch::try_new(
+            Arc::clone(&self.output_schema),
+            columns,
+        )?)
     }
 
     /// Returns the [`EmitTo`], clamped to the specified batch size
@@ -316,7 +429,17 @@ impl<AggrMode> OrderedAggregateTable<AggrMode> {
         &mut self,
         evaluated_batch: &EvaluatedAggregateBatch,
         is_final: bool,
-    ) -> Result<()> {
+    ) -> Result<Option<RecordBatch>> {
+        let taken = if !self.buffer.group_values.is_empty()
+            && !evaluated_batch.grouping_set_args.iter().all(|keys| {
+                self.buffer
+                    .group_values
+                    .has_offset_room(keys, self.group_key_offset_limit)
+            }) {
+            self.take_state_batch()?
+        } else {
+            None
+        };
         for group_values in &evaluated_batch.grouping_set_args {
             let starting_num_groups = self.buffer.group_values.len();
             self.buffer
@@ -355,7 +478,7 @@ impl<AggrMode> OrderedAggregateTable<AggrMode> {
             drop(timer);
         }
 
-        Ok(())
+        Ok(taken)
     }
 
     /// Emits groups allowed by `GroupOrdering`, leaving only the current
@@ -371,6 +494,13 @@ impl<AggrMode> OrderedAggregateTable<AggrMode> {
         &mut self,
         is_final: bool,
     ) -> Result<Option<RecordBatch>> {
+        if let Some(pending) = &mut self.pending {
+            if let Some(batch) = pending.next_batch(self.batch_size) {
+                return self.pack_state_output(batch, is_final).map(Some);
+            }
+            self.pending = None;
+        }
+
         if self.buffer.group_values.is_empty() {
             return Ok(None);
         }
@@ -378,6 +508,35 @@ impl<AggrMode> OrderedAggregateTable<AggrMode> {
         let Some(emit_to) = self.buffer.group_ordering.emit_to() else {
             return Ok(None);
         };
+
+        let ready = match emit_to {
+            EmitTo::First(n) => n,
+            EmitTo::All => self.buffer.group_values.len(),
+        };
+        if (!is_final || self.struct_state_fields.is_some()) && ready > self.batch_size {
+            let timer = self.group_by_metrics.emitting_time.timer();
+            let mut output = self.buffer.group_values.emit(emit_to)?;
+            if let EmitTo::First(n) = emit_to {
+                self.buffer.group_ordering.remove_groups(n);
+            }
+            for acc in &mut self.buffer.accumulators {
+                output.extend(acc.state(emit_to)?);
+            }
+            drop(timer);
+            let schema = if is_final {
+                &self.state_schema
+            } else {
+                &self.output_schema
+            };
+            let batch = RecordBatch::try_new(Arc::clone(schema), output)?;
+            let mut pending = MaterializedAggregateOutput::new(batch);
+            let first = pending.next_batch(self.batch_size);
+            self.pending = Some(pending);
+            return first
+                .map(|batch| self.pack_state_output(batch, is_final))
+                .transpose();
+        }
+
         let (emit_to, should_remove_groups) =
             self.clamp_emit_to(self.buffer.group_values.len(), emit_to);
 
@@ -406,5 +565,132 @@ impl<AggrMode> OrderedAggregateTable<AggrMode> {
         debug_assert!(batch.num_rows() > 0);
 
         Ok(Some(batch))
+    }
+}
+
+#[cfg(test)]
+mod comet_tests {
+    use super::*;
+    use crate::ExecutionPlan;
+    use crate::aggregates::aggregate_hash_table::PartialMarker;
+    use crate::test::TestMemoryExec;
+    use arrow::array::{Int64Array, StringArray};
+    use arrow::datatypes::{Field, Schema};
+    use datafusion_functions_aggregate::count::count_udaf;
+    use datafusion_physical_expr::{
+        LexOrdering, PhysicalSortExpr, aggregate::AggregateExprBuilder, expressions::col,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingKeys {
+        inner: Box<dyn GroupValues>,
+        emits: Arc<AtomicUsize>,
+    }
+    impl GroupValues for CountingKeys {
+        fn intern(&mut self, cols: &[ArrayRef], groups: &mut Vec<usize>) -> Result<()> {
+            self.inner.intern(cols, groups)
+        }
+        fn size(&self) -> usize {
+            self.inner.size()
+        }
+        fn is_empty(&self) -> bool {
+            self.inner.is_empty()
+        }
+        fn len(&self) -> usize {
+            self.inner.len()
+        }
+        fn emit(&mut self, emit_to: EmitTo) -> Result<Vec<ArrayRef>> {
+            self.emits.fetch_add(1, Ordering::SeqCst);
+            self.inner.emit(emit_to)
+        }
+        fn clear_shrink(&mut self, num_rows: usize) {
+            self.inner.clear_shrink(num_rows)
+        }
+        fn has_offset_room(&self, cols: &[ArrayRef], limit: usize) -> bool {
+            self.inner.has_offset_room(cols, limit)
+        }
+    }
+
+    #[test]
+    fn completed_ordered_range_is_materialized_once_and_pending_is_accounted()
+    -> Result<()> {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("prefix", DataType::Int64, false),
+            Field::new("key", DataType::Utf8, false),
+            Field::new("value", DataType::Int64, false),
+        ]));
+        let rows = 8192;
+        let batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(Int64Array::from(vec![0; rows])),
+                Arc::new(StringArray::from_iter_values(
+                    (0..rows).map(|i| format!("key-{i}")),
+                )),
+                Arc::new(Int64Array::from(vec![1; rows])),
+            ],
+        )?;
+        let order = LexOrdering::new(vec![PhysicalSortExpr::new_default(col(
+            "prefix", &schema,
+        )?)])
+        .unwrap();
+        let input =
+            TestMemoryExec::try_new(&[vec![batch.clone()]], Arc::clone(&schema), None)?
+                .try_with_sort_information(vec![order])?;
+        let input: Arc<dyn ExecutionPlan> =
+            Arc::new(TestMemoryExec::update_cache(&Arc::new(input)));
+        let group_by = PhysicalGroupBy::new_single(vec![
+            (col("prefix", &schema)?, "prefix".into()),
+            (col("key", &schema)?, "key".into()),
+        ]);
+        let count = Arc::new(
+            AggregateExprBuilder::new(count_udaf(), vec![col("value", &schema)?])
+                .schema(Arc::clone(&schema))
+                .alias("count_value")
+                .build()?,
+        );
+        let agg = AggregateExec::try_new(
+            AggregateMode::Partial,
+            group_by,
+            vec![count],
+            vec![None],
+            input,
+            Arc::clone(&schema),
+        )?;
+        let mut table =
+            OrderedAggregateTable::<PartialMarker>::new(&agg, 0, agg.schema(), 256)?;
+        assert!(table.aggregate_batch(&batch)?.is_none());
+        let emits = Arc::new(AtomicUsize::new(0));
+        let inner = std::mem::replace(
+            &mut table.buffer.group_values,
+            new_group_values(
+                Arc::new(Schema::new(schema.fields()[..2].to_vec())),
+                &GroupOrdering::None,
+            )?,
+        );
+        table.buffer.group_values = Box::new(CountingKeys {
+            inner,
+            emits: Arc::clone(&emits),
+        });
+        table.input_done();
+        let first = table.next_output_batch()?.unwrap();
+        assert_eq!(first.num_rows(), 256);
+        assert_eq!(emits.load(Ordering::SeqCst), 1);
+        assert!(table.has_pending_output());
+        assert!(!table.is_empty());
+        assert!(table.memory_size() >= first.get_array_memory_size());
+        let mut actual = first.num_rows();
+        while let Some(batch) = table.next_output_batch()? {
+            actual += batch.num_rows();
+        }
+        assert_eq!(actual, rows);
+        assert_eq!(
+            emits.load(Ordering::SeqCst),
+            1,
+            "one key materialization for the entire range"
+        );
+        assert!(table.is_empty());
+        assert!(!table.has_pending_output());
+        Ok(())
     }
 }
