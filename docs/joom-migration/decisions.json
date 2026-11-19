@@ -630,9 +630,44 @@
   },
   "g04_implementation_findings": {
     "status": "IMPLEMENTATION_DETAILS_WITHIN_APPROVED_SCOPE_NOT_NEW_USER_APPROVAL",
-    "ordering": "Preserve ordering by default; optimize only below proven unordered shuffle and for count/nonfloating min/max. Negative control returned successfully wrong SORT BY rows. Retain ANSI/error and order-sensitive behavior.",
+    "ordering": "Preserve ordering by default; omit only below proven unordered shuffle through deterministic projects/filters, for count/nonfloating min/max with deterministic arguments/filters/results. Independent review exposed and fixed wrong seeded-filter/generated-ID row associations. Retain ANSI/error and order-sensitive behavior.",
     "memory": "Adapt replay/output budgets and recoverable orderedPartial emission atop selected upstream design; no higher test limits or weaker checks.",
     "properties": "No Partial uniqueness; Final uniqueness includes GID; discard grouping-set NULL-invalidated input properties.",
     "stage_gate": "Local targeted validation only; review before integration; no G05/full per-group GHA."
+  },
+  "g04_independent_semantics_review": {
+    "recorded_on": "2026-11-19",
+    "status": "USER_REQUESTED_REVIEW_COMPLETED_WITHIN_G04_SCOPE",
+    "request_translation": "Independently verify that the new tests are not tailored to our implementation and really check original Spark semantics, especially successful completion with incorrect results. Do not merge G04.",
+    "findings_and_fixes": [
+      "Unique tie payloads distinguish extremal from nonextremal rows; assert cardinality/unique group keys before toMap.",
+      "Native ordered drain checks every count and the complete input-derived key set.",
+      "Native grouping sets check complete keys, NULL validity, hiddenGID and counts.",
+      "Spill regression requires PartialMerge-specific spilling rather than a sum over all aggregate nodes.",
+      "Input-derived SQL expected rows independently check grouping sets/NULL collisions and ordered FIRST/LAST.",
+      "Spark BloomFilter exact bytes match fully native and both mixed engine directions; former planning cancellations now execute using qualified Spark4.2 function identifiers."
+    ],
+    "production_fix": "Cross only deterministic Project/Filter expressions and require deterministic aggregate expressions/filters/results before omitting a grouping sort. Preserve native ordered aggregation otherwise.",
+    "report": "G04-independent-semantics.md",
+    "scope_boundary": "Local G04 correctness review/fix and targeted tests only. No G04 merge/push, full GHA, G05, main/tag changes, publication or production use."
+  },
+  "g04_integration_authorization": {
+    "recorded_on": "2026-11-20",
+    "status": "APPROVED_EXPLICITLY",
+    "user_request_translation": "Push G04 to origin and merge it into branch-1.2. After the merge verify the final state and report, listing the included commits. Do not start G05.",
+    "supersedes": "Prior G04 feature-push and integration holds only; G05-G10 remain closed.",
+    "execution": "Fold acceptance documentation into the last existing G04 commit. Preserve the first four commits and the exact qualified non-migration tree. Push the feature and fast-forward branch-1.2 with no extra merge commit; do not overwrite unexpected remote changes.",
+    "base_commit": "af05c94e7e5c669f36e783f65e5d5f2d35d328ce",
+    "functional_source_previously_verified": "36a8e7b7907d6a3aa2f517b447fe57d4f2448f28",
+    "remote_scope": "github.com/joomcode/datafusion-comet: inspect refs, create joom/1.2-native-aggregates and fast-forward branch-1.2. No new PR or full per-group GHA.",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g04-integration/completion.json",
+    "boundaries": [
+      "G05-G10 implementation",
+      "main/tag changes",
+      "full per-group GHA",
+      "artifact publication",
+      "production use",
+      "datasci access"
+    ]
   }
 }

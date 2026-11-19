@@ -27,8 +27,9 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.{CometListenerBusUtils, SparkConf, SparkThrowable}
 import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
 import org.apache.spark.sql.{Column, CometTestBase, DataFrame, QueryTest, Row}
-import org.apache.spark.sql.catalyst.expressions.{Cast, Literal, SortOrder}
-import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateMode, CollectSet, Corr, Final, Partial, PartialMerge, RegrR2}
+import org.apache.spark.sql.catalyst.FunctionIdentifier
+import org.apache.spark.sql.catalyst.expressions.{Cast, Expression, ExpressionInfo, Literal, SortOrder}
+import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateMode, BloomFilterAggregate, CollectSet, Corr, Final, Partial, PartialMerge, RegrR2}
 import org.apache.spark.sql.catalyst.optimizer.EliminateSorts
 import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, RangePartitioning}
 import org.apache.spark.sql.comet.{CometBaseAggregateExec, CometBroadcastHashJoinExec, CometFilterExec, CometHashAggregateExec, CometNativeExec, CometProjectExec, CometSortAggregateExec, CometSortExec, CometSortMergeJoinExec}
@@ -4702,15 +4703,25 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
   }
 
   test("G04 max_by and min_by over a string value pick one of the values tied on the ordering") {
-    val rows = (0 until 400).map(i => (i % 4, s"v${i % 7}", if (i % 3 == 0) 10 else i % 3))
+    val rows = (0 until 400).map(i => (i % 4, s"v$i", if (i % 3 == 0) 10 else i % 3))
     withSQLConf(SQLConf.ANSI_ENABLED.key -> "true", SQLConf.SHUFFLE_PARTITIONS.key -> "3") {
       withParquetTable(rows, "by_ties") {
         for ((fn, tiedOrd) <- Seq("max_by" -> 10, "min_by" -> 1)) {
           val df = sql(s"SELECT _1, $fn(_2, _3) FROM by_ties GROUP BY _1")
-          val result = df.collect().map(r => r.getInt(0) -> r.getString(1)).toMap
+          val output = df.collect().toSeq
           assert(nativeAggregates(df.queryExecution.executedPlan).nonEmpty)
           val allowed = rows.filter(_._3 == tiedOrd).groupBy(_._1).map { case (k, v) =>
             k -> v.map(_._2).toSet
+          }
+          assert(
+            output.size == allowed.size,
+            s"$fn emitted an incorrect number of groups: $output")
+          assert(output.map(_.getInt(0)).distinct.size == output.size, s"$fn repeated a group")
+          val result = output.map(r => r.getInt(0) -> r.getString(1)).toMap
+          // Unique row payloads make extremal and nonextremal candidates disjoint.
+          rows.groupBy(_._1).foreach { case (k, group) =>
+            val nonextremal = group.filter(_._3 != tiedOrd).map(_._2).toSet
+            assert(allowed(k).intersect(nonextremal).isEmpty)
           }
           assert(result.keySet == allowed.keySet, s"$fn: $result")
           result.foreach { case (k, v) => assert(allowed(k).contains(v), s"$fn group $k: $v") }
@@ -4755,7 +4766,9 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
     withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
       val reference = sql(query)
       val rows = reference.collect().toSeq
-      result = Some((rows, stripAQEPlan(reference.queryExecution.executedPlan)))
+      val plan = stripAQEPlan(reference.queryExecution.executedPlan)
+      assert(nativeAggregates(plan).isEmpty, s"The reference must use Spark aggregates:\n$plan")
+      result = Some((rows, plan))
     }
     result.get
   }
@@ -5006,6 +5019,181 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
           }
         }
       }
+    }
+  }
+
+  for (aqe <- Seq("false", "true"); observer <- Seq("filter", "project", "aggregate result")) {
+    test(s"G04 independent Spark oracle for order-observing $observer (AQE=$aqe)") {
+      withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe,
+        SQLConf.SHUFFLE_PARTITIONS.key -> "1") {
+        withTempPath { dir =>
+          val rows = (0 until 64).map(i => ((i * 37) % 64, s"value-$i"))
+          rows.toDF("k", "v").coalesce(1).write.parquet(dir.getCanonicalPath)
+          withParquetTable(dir.getCanonicalPath, "g04_observers") {
+            val grouped = "SELECT k, max(v) AS m FROM g04_observers GROUP BY k SORT BY k"
+            val query = observer match {
+              case "filter" =>
+                s"SELECT /*+ REPARTITION(2, m) */ k, m FROM ($grouped) a " +
+                  "WHERE rand(42L) < 0.5"
+              case "project" =>
+                s"SELECT /*+ REPARTITION(2, m) */ k, m, " +
+                  s"monotonically_increasing_id() AS row_id FROM ($grouped) a"
+              case "aggregate result" =>
+                "SELECT /*+ REPARTITION(2, m) */ k, max(v) AS m, rand(42L) AS r " +
+                  "FROM g04_observers GROUP BY k"
+            }
+            val (expected, sparkPlan) = orderedSparkResult(query)
+            assert(sortAggregates(sparkPlan).nonEmpty, sparkPlan)
+            val df = sql(query)
+            val actual = df.collect().toSeq
+            val plan = df.queryExecution.executedPlan
+            assert(nativeAggregates(plan).nonEmpty, plan)
+            val finals = collect(plan) {
+              case aggregate: CometSortAggregateExec if aggregate.modes == Seq(Final) => aggregate
+            }
+            assert(finals.nonEmpty && finals.forall(_.preservesGroupingOrder), plan)
+            // The outer shuffle destroys row order, but not key/value associations or duplicates.
+            assert(
+              actual.sortBy(_.getInt(0)) == expected.sortBy(_.getInt(0)),
+              s"$observer changed Spark row associations: $actual, expected $expected\n$plan")
+          }
+        }
+      }
+    }
+  }
+
+  for (aqe <- Seq("false", "true")) {
+    test(s"G04 independent Spark oracle for grouping sets and NULL collisions (AQE=$aqe)") {
+      withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe,
+        SQLConf.SHUFFLE_PARTITIONS.key -> "2") {
+        val rows: Seq[(Int, Integer, Integer)] =
+          Seq((1, null, 10), (1, null, 20), (1, 2, 5), (2, null, null))
+        withParquetTable(rows, "g04_grouping_oracle") {
+          val query = "SELECT _1 AS a, _2 AS b, grouping_id(_1, _2) AS gid, " +
+            "count(*) AS n, count(_3) AS nv, sum(_3) AS s, min(_3) AS lo, max(_3) AS hi, " +
+            "count(DISTINCT _3) AS nd FROM g04_grouping_oracle " +
+            "GROUP BY GROUPING SETS ((_1, _2), (_1), ()) " +
+            "ORDER BY a NULLS FIRST, b NULLS FIRST, gid"
+          // Derived directly from the four input rows, including separate real/rolled-up NULLs.
+          val known = Seq(
+            Row(null, null, 3L, 4L, 3L, 35L, 5, 20, 3L),
+            Row(1, null, 0L, 2L, 2L, 30L, 10, 20, 2L),
+            Row(1, null, 1L, 3L, 3L, 35L, 5, 20, 3L),
+            Row(1, 2, 0L, 1L, 1L, 5L, 5, 5, 1L),
+            Row(2, null, 0L, 1L, 0L, null, null, null, 0L),
+            Row(2, null, 1L, 1L, 0L, null, null, null, 0L))
+          val (expected, _) = orderedSparkResult(query)
+          assert(expected == known, s"Spark disagrees with the input-derived oracle: $expected")
+          val df = sql(query)
+          val actual = df.collect().toSeq
+          assert(actual == known, s"Incorrect values, groups or multiplicities: $actual")
+          assert(nativeAggregates(df.queryExecution.executedPlan).exists(_.modes.contains(Final)))
+        }
+      }
+    }
+
+    test(s"G04 independent Spark oracle for ordered FIRST LAST NULL semantics (AQE=$aqe)") {
+      withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe,
+        SQLConf.SHUFFLE_PARTITIONS.key -> "1") {
+        withTempPath { dir =>
+          val rows: Seq[(Int, Int, String)] = Seq(
+            (1, 0, null),
+            (1, 1, "z"),
+            (1, 2, "a"),
+            (1, 3, null),
+            (2, 4, null),
+            (2, 5, null),
+            (3, 6, ""),
+            (3, 7, "é"))
+          rows.toDF("k", "id", "v").coalesce(1).write.parquet(dir.getCanonicalPath)
+          withParquetTable(dir.getCanonicalPath, "g04_first_last_oracle") {
+            val query = "SELECT k, first(v), last(v), first(v, true), last(v, true), " +
+              "min(v), max(v), count(*), count(v) FROM " +
+              "(SELECT * FROM g04_first_last_oracle DISTRIBUTE BY k SORT BY k, id) " +
+              "GROUP BY k ORDER BY k"
+            val known = Seq(
+              Row(1, null, null, "z", "a", "a", "z", 4L, 2L),
+              Row(2, null, null, null, null, null, null, 2L, 0L),
+              Row(3, "", "é", "", "é", "", "é", 2L, 2L))
+            val (expected, _) = orderedSparkResult(query)
+            assert(expected == known, s"Spark disagrees with ordered NULL semantics: $expected")
+            val df = sql(query)
+            val actual = df.collect().toSeq
+            assert(actual == known, s"Incorrect ordered FIRST/LAST values: $actual")
+            assert(nativeAggregates(df.queryExecution.executedPlan).exists(_.modes == Seq(Final)))
+          }
+        }
+      }
+    }
+  }
+
+  test("G04 independent Spark oracle for BloomFilter native and mixed buffers") {
+    val function = if (isSpark42Plus) {
+      new FunctionIdentifier("g04_bloom", Some("builtin"), Some("system"))
+    } else {
+      new FunctionIdentifier("g04_bloom")
+    }
+    spark.sessionState.functionRegistry.registerFunction(
+      function,
+      new ExpressionInfo(classOf[BloomFilterAggregate].getName, "g04_bloom"),
+      (children: Seq[Expression]) =>
+        new BloomFilterAggregate(children.head, children(1), children(2)))
+    try {
+      withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+        SQLConf.FILES_OPEN_COST_IN_BYTES.key -> (128L * 1024 * 1024).toString,
+        CometConf.COMET_SHUFFLE_ENABLED.key -> "true",
+        CometConf.COMET_SHUFFLE_MODE.key -> "jvm") {
+        withTempPath { dir =>
+          val rows: Seq[(java.lang.Long, Int)] = Seq(
+            (1L, 0),
+            (2L, 0),
+            (1L, 0),
+            (null, 0),
+            (Long.MinValue, 1),
+            (Long.MaxValue, 1),
+            (-1L, 1))
+          rows.toDF("v", "g").repartition(2).write.parquet(dir.getCanonicalPath)
+          withParquetTable(dir.getCanonicalPath, "g04_bloom_oracle") {
+            withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+              assert(spark.table("g04_bloom_oracle").rdd.getNumPartitions == 2)
+            }
+            for ((partial, last) <- Seq(("true", "true"), ("true", "false"), ("false", "true"))) {
+              withSQLConf(
+                CometConf.COMET_ENABLE_PARTIAL_HASH_AGGREGATE.key -> partial,
+                CometConf.COMET_ENABLE_FINAL_HASH_AGGREGATE.key -> last) {
+                val query = "SELECT g, g04_bloom(v, 32L, 256L) AS bf " +
+                  "FROM g04_bloom_oracle GROUP BY g"
+                val (expected, _) = orderedSparkResult(query)
+                val df = sql(query)
+                val actual = df.collect().toSeq.sortBy(_.getInt(0))
+                val reference = expected.sortBy(_.getInt(0))
+                assert(actual.size == 2 && reference.size == 2)
+                actual.zip(reference).foreach { case (a, b) =>
+                  assert(a.getInt(0) == b.getInt(0))
+                  assert(
+                    java.util.Arrays.equals(a.getAs[Array[Byte]](1), b.getAs[Array[Byte]](1)))
+                }
+                val plan = df.queryExecution.executedPlan
+                val nativeModes = nativeAggregates(plan).flatMap(_.modes).toSet
+                assert(nativeModes.contains(Partial) == partial.toBoolean, plan)
+                assert(nativeModes.contains(Final) == last.toBoolean, plan)
+                val sparkAggregates = collect(plan) { case a: BaseAggregateExec => a }
+                assert(sparkAggregates.nonEmpty == (partial != last), plan)
+              }
+            }
+          }
+        }
+      }
+    } finally {
+      spark.sessionState.functionRegistry.dropFunction(function)
     }
   }
 

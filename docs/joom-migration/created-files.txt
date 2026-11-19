@@ -243,3 +243,7 @@ G04 durable results (2026-11-19):
 docs/joom-migration/G04-report.md
 docs/joom-migration/G04-results.json
 Source/test inventory: G04-results.json#source_files_sha256. Auxiliary/ref inventory: ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json.
+
+G04 independent semantics review (2026-11-19):
+docs/joom-migration/G04-independent-semantics.md
+Auxiliary evidence: ${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics.

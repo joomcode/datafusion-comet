@@ -22,7 +22,7 @@ use std::fmt::{Debug, Formatter};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
-use arrow::array::{Int64Array, RecordBatch, StringArray, UInt32Array};
+use arrow::array::{Array, Int64Array, RecordBatch, StringArray, UInt32Array};
 use arrow::compute::{
     SortColumn, SortOptions, concat_batches, lexsort_to_indices, take_record_batch,
 };
@@ -1066,6 +1066,39 @@ async fn grouping_sets_do_not_inherit_unique_keys_constants_or_ordering() -> Res
             .filter(|&row| keys.value(row) == 1)
             .count(),
         2
+    );
+    let counts = output
+        .column(3)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap();
+    let mut actual = std::collections::BTreeMap::new();
+    for row in 0..output.num_rows() {
+        assert!(!keys.is_null(row) && !counts.is_null(row));
+        assert_eq!(
+            ScalarValue::try_from_array(output.column(1), row)?,
+            ScalarValue::Utf8(None),
+            "both the source NULL and rolled-up NULL must remain NULL"
+        );
+        let gid = match ScalarValue::try_from_array(output.column(2), row)? {
+            ScalarValue::UInt8(Some(gid @ (0 | 1))) => gid,
+            other => panic!("unexpected grouping ID {other:?}"),
+        };
+        assert!(
+            actual
+                .insert((keys.value(row), gid), counts.value(row))
+                .is_none(),
+            "a complete physical grouping key must occur exactly once"
+        );
+    }
+    assert_eq!(
+        actual,
+        std::collections::BTreeMap::from([
+            ((1, 0), 1),
+            ((1, 1), 1),
+            ((2, 0), 1),
+            ((2, 1), 1)
+        ])
     );
     Ok(())
 }

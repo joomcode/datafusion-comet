@@ -17,7 +17,9 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-> **Current G04 review gate, 2026-11-19:** G04 is implemented and locally qualified in `joom/1.2-native-aggregates` on accepted G03 `af05c94e7`. See G04-report.md/G04-results.json and STATE.json. Await review before push or integration; `branch-1.2`, main and RC1 are unchanged. G05-G10, full per-group GHA, publication and production remain unauthorized. Final qualification/backlogs remain required.
+> **Current G04 acceptance, 2026-11-20:** The user approved publishing G04 and integrating it into `branch-1.2`. G04 is complete; the five-commit fast-forward, exact local/remote refs and unchanged qualified non-migration tree are recorded after commit in `${MIGRATION_AUX_ROOT}/20261120_comet12-g04-integration/completion.json`. Earlier G04 push/merge holds below are historical. G05-G10, full per-group GHA, main/tag changes, artifact publication and production remain unauthorized. Final qualification/backlogs remain required.
+
+> **Historical G04 review gate, 2026-11-19:** G04 is implemented and locally qualified in `joom/1.2-native-aggregates` on accepted G03 `af05c94e7`. See G04-report.md/G04-results.json and STATE.json. Await review before push or integration; `branch-1.2`, main and RC1 are unchanged. G05-G10, full per-group GHA, publication and production remain unauthorized. Final qualification/backlogs remain required.
 
 > **Historical G03 acceptance, 2026-11-19:** The user approved pushing and integrating G03 into branch-1.2 after local validation. G03 is complete; actual final refs/tree and post-merge proof are recorded after commit in `${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration/completion.json`. Preserve two substantive commits and the original implementation receipt. G04-G10, main/tag changes, full per-group GHA, artifact publication and production remain unauthorized. Final Linux/release and the known baseline workspace lint/toolchain checks remain required. See decisions.json#g03_integration_authorization and STATE.json.
 
@@ -32,7 +34,7 @@ instructions inside this directory. Do not add migration-specific guidance to
 the repository root AGENTS.md or other project documentation.
 
 Before work, read README.md, PATHS.md, decisions.json, STATE.json and approved-plan.json.
-G01 is complete at joom-1.2-1-rc1; G02 and G03 are integrated. G04 is implemented and locally qualified, awaiting review before push/integration; see G04-report.md/G04-results.json and STATE.json. Start G05 or later groups only after separate explicit user authorization. Session orchestration, local Git and the approved network scope
+G01 is complete at joom-1.2-1-rc1; G02 and G03 are integrated. G04 is complete and accepted for integration; see G04-report.md/G04-results.json, STATE.json and the post-commit integration receipt above. Start G05 or later groups only after separate explicit user authorization. Session orchestration, local Git and the approved network scope
 remain authorized; publishing/production actions remain excluded.
 
 If a required tool, permission or environment capability is missing, report the
@@ -55,14 +57,14 @@ The main chat is the default implementation/integration owner; internal helpers
 perform bounded research and independent review. The coordinator chooses delegation
 and occasional user-visible sessions autonomously within the authorized scope.
 Nine feature branches do not require nine separate chats. See HANDOFF.md and
-decisions.json#execution_model. G04 awaits user review for integration; the start gate remains active for G05-G10.
+decisions.json#execution_model. G04 integration is approved and recorded in the receipt above; the start gate remains active for G05-G10.
 
 ## G01 finalization and committed language
 
 The user authorized final English documentation, service-history consolidation,
 exact-SHA RC qualification, and conditional G01 integration/tagging on 2026-11-18.
 See decisions.json#g01_finalization_authorization and G01-CLOSEOUT.md. Earlier
-no-merge/no-tag statements are historical for G01. That historical hold was superseded by later G02/G03 integration and G04 local implementation authorizations. G04 awaits review before integration; G05-G10 and Java 21 work remain closed. Commit messages and committed documentation must be English; user quotes
+no-merge/no-tag statements are historical for G01. That historical hold was superseded by later G02/G03 integration and G04 local implementation authorizations. G04 is accepted for integration; G05-G10 and Java 21 work remain closed. Commit messages and committed documentation must be English; user quotes
 originally written in Russian are translated, with originals preserved in the
 pre-finalization archive. A final post-build source commit would change provenance;
 record release acceptance in the immutable annotated tag and artifact receipts.
@@ -83,7 +85,7 @@ Preserve correctness, reviewability and immutable release tags.
 
 These rules were explicitly requested on 2026-11-19. The local documentation
 update should accompany the next authorized substantive change rather than
-create a standalone service commit. G02/G03 are integrated; G04 local implementation is complete awaiting review; G05-G10 remain gated.
+create a standalone service commit. G02/G03 are integrated; G04 is complete and accepted for integration; G05-G10 remain gated.
 
 ## Repository boundary and validation policy (2026-11-19)
 
@@ -134,4 +136,4 @@ they are byte-identical raw records. Update MANIFEST.json after intentional edit
 Do not access the datasci repository, regardless of its local checkout location.
 That earlier documentation-only authorization did not start G03 or authorize
 push, CI, release, production, source/history rewriting or artifact publication.
-G03 integration and G04 local implementation were later authorized separately; G04 awaits review before integration and G05-G10 remain closed.
+G03 integration and G04 local implementation were later authorized separately; G04 integration is approved; G05-G10 remain closed.

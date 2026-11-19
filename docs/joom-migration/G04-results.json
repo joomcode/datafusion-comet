@@ -450,7 +450,7 @@
   "deferred": [
     "Final full agreed Linux CI/release-feature graph and exact final-JAR native AMD64/ARM64 smoke",
     "25 full fuzz cases require explicit JVM property; default full GHA alone is insufficient",
-    "Two upstream BloomFilter cancellations and two ignored metrics tests need final verification/disposition",
+    "Two inherited ignored metric tests need final verification/disposition; BloomFilter planning/runtime now pass locally",
     "Final Linux strict workspace Clippy with the approved source-local exception and unchanged CI flags"
   ],
   "spill_fixture_adaptation": {
@@ -482,5 +482,79 @@
     "runtime_code_unchanged": true,
     "historical_test_and_library_receipts_preserved": true,
     "runtime_tests_not_repeated_for_lint_only_annotations": true
+  },
+  "independent_semantics_review": {
+    "status": "PASSED_LOCAL_TARGETED_AFTER_CORRECTNESS_FIX",
+    "baseline_commit": "5133f0ab7396fe90a669e6a94f497c6dab0bee91",
+    "user_request_translation": "Independently verify that the new tests are not tailored to our implementation and really check original Spark semantics, especially successful completion with incorrect results. Do not merge G04.",
+    "report": "G04-independent-semantics.md",
+    "evidence_root": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics",
+    "oracle": "Original Apache Spark4.2.1 runtime revision617618396087429b5627a86ce933bb0f5d6645cb. Fresh Comet-off queries with identical inputs/settings and no native reference aggregates; loaded critical classes resolve only to cached Central runtime jars.",
+    "actual_runtime_bug": "The G04 unused-sort proof crossed nondeterministic projects/filters and ignored aggregate result expressions. Before the fix four of six observer cases returned incorrect key sets or key/value associations without failing.",
+    "fix": "Cross only deterministic Project/Filter expressions and require deterministic aggregate expressions/filters/results before omitting a grouping sort. Preserve native ordered aggregation otherwise.",
+    "test_oracle_repairs": [
+      "Unique tie payloads distinguish extremal from nonextremal rows; assert cardinality/unique group keys before toMap.",
+      "Native ordered drain checks every count and the complete input-derived key set.",
+      "Native grouping sets check complete keys, NULL validity, hiddenGID and counts.",
+      "Spill regression requires PartialMerge-specific spilling rather than a sum over all aggregate nodes.",
+      "Input-derived SQL expected rows independently check grouping sets/NULL collisions and ordered FIRST/LAST.",
+      "Spark BloomFilter exact bytes match fully native and both mixed engine directions; former planning cancellations now execute using qualified Spark4.2 function identifiers."
+    ],
+    "current_test_results": {
+      "native_unique_passed": 239,
+      "native_failed": 0,
+      "native_ignored": 0,
+      "native_affected_null_case_rechecked": true,
+      "jvm_sql_passed": 53,
+      "jvm_sql_failed": 0,
+      "jvm_canceled_opt_in_full_fuzz": 25,
+      "jvm_ignored_in_this_selection": 0,
+      "inherited_metric_ignores_still_pending": 2,
+      "strict_workspace_clippy": "PASSED -D warnings with only the previously approved source-local exception"
+    },
+    "commands": {
+      "order-observer-before-fix": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/order-observer-before-fix.json",
+      "order-observer-after-fix": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/order-observer-after-fix.json",
+      "independent-native-oracles": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/independent-native-oracles.json",
+      "native-nulls-final": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/native-nulls-final.json",
+      "sql-semantic-final": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/sql-semantic-final.json",
+      "strict-workspace-clippy-final": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/strict-workspace-clippy-final.json"
+    },
+    "independent_reviews": [
+      "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/sql-review.json",
+      "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/native-review.json",
+      "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/harness-review.json",
+      "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/sql-fix-review.json",
+      "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/native-fix-review.json",
+      "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/harness-fix-review.json"
+    ],
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/final-source-manifest.json",
+    "final_changed_source_sha256": {
+      "native/vendor/datafusion-physical-plan/src/aggregates/ordered_drain_tests.rs": "3644e7176d1e6b95d1b1bb7048275b959eaf3f44dae523d3e54159a1abe45ec4",
+      "native/vendor/datafusion-physical-plan/src/aggregates/starved_spill_tests.rs": "8bb0b9f327baa468b28e954999510a6383f3898ece48068bbf9abe427e009d73",
+      "spark/src/main/scala/org/apache/comet/rules/CometExecRule.scala": "2f2c02eeb1103f31deb29120e98f151fe0201fbf7566eaa35d4a045e76589f61",
+      "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "c5d8696520acf6bb05e478b8ea6540c44c9e2fe9fa48e11e031c2e89caf750d5",
+      "spark/src/test/scala/org/apache/comet/exec/CometFirstLastBoolAggFuzzSuite.scala": "cf0f78dfe497875dee5f78e289a8ddf5560d6295dbe57ff2c06c47ed78053252",
+      "spark/src/test/scala/org/apache/comet/rules/CometExecRuleSuite.scala": "1f762f528e6ba3231f7c136c05ce1a556e210881851015dadf1f48f178832b40"
+    },
+    "limits": "Local macOS ARM64/Java17/ANSI=true targeted evidence. Original test/qualification receipts remain historical. No universal equivalence or production acceptance is claimed. Final full agreed Linux CI, opt-in full fuzz, metric-test disposition, and exact final-JAR AMD64/ARM64 qualification remain mandatory.",
+    "stage_gates": {
+      "merge_authorized": false,
+      "push_performed": false,
+      "full_gha_started": false,
+      "g05_started": false,
+      "production_use_allowed": false
+    },
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/completion.json"
+  },
+  "initial_qualification_note": "Top-level native/JVM/source/library receipts describe the original G04 checkpoint. The latest additional correctness fix and validation are recorded in independent_semantics_review; the initial canceled BloomFilter names are historical, not remaining current cancellations.",
+  "integration_acceptance": {
+    "date": "2026-11-20",
+    "authorization_ref": "decisions.json#g04_integration_authorization",
+    "functional_source_previously_verified": "36a8e7b7907d6a3aa2f517b447fe57d4f2448f28",
+    "source_changes_for_acceptance": "Migration documentation only; all qualified non-migration bytes preserved.",
+    "method": "Publish feature and fast-forward branch-1.2 without extra merge/service commits.",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g04-integration/completion.json",
+    "next_group_authorized": false
   }
 }

@@ -17,7 +17,9 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-> **Current G04 continuation checkpoint, 2026-11-19:** Implementation and local targeted validation are complete; see G04-report.md/G04-results.json and `${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json`. Memory, Partial metadata and ordering failures were corrected; regressions pass without higher budgets or weaker checks. Await user review: no push, merge, full GHA, G05 or protected-ref changes. Preserve historical checkpoints below.
+> **Current G04 acceptance, 2026-11-20:** G04 is complete and accepted for publication/integration into branch-1.2. Exact final local/remote refs, five commits and qualified-source preservation are recorded after integration in `${MIGRATION_AUX_ROOT}/20261120_comet12-g04-integration/completion.json`. G05 requires separate explicit authorization. Earlier G04 push/merge holds below are historical; final qualification remains required.
+
+> **Historical G04 continuation checkpoint, 2026-11-19:** Implementation and local targeted validation are complete; see G04-report.md/G04-results.json and `${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json`. Memory, Partial metadata and ordering failures were corrected; regressions pass without higher budgets or weaker checks. Await user review: no push, merge, full GHA, G05 or protected-ref changes. Preserve historical checkpoints below.
 
 > **Final source-freeze note:** G01 implementation and documentation are complete. RC1 acceptance is a post-commit gate recorded by the immutable `joom-1.2-1-rc1` tag and the delivered artifact receipts; see `G01-CLOSEOUT.md`. Earlier source SHAs, runs and pending states below are historical evidence. G02 and Java 21 work remain unauthorized.
 

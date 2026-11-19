@@ -1,6 +1,6 @@
 {
-  "updated_on": "2026-11-19",
-  "stage": "G04_LOCAL_VALIDATION_COMPLETE",
+  "updated_on": "2026-11-20",
+  "stage": "G04_ACCEPTED_INTEGRATION",
   "baseline": "resource-baseline.json",
   "no_dependency_downloads_or_release_outputs_yet": false,
   "entries": [
@@ -167,6 +167,23 @@
       "shared": false,
       "contains": "Local strict workspace Clippy and formatting receipts, exact lint-only source diff and protected-ref verification. No downloads or release artifacts.",
       "preserve_until": "Final migration acceptance and user cleanup decision"
+    },
+    {
+      "type": "g04_independent_semantics_audit",
+      "path": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "contains": "Independent source reviews, Spark-derived oracle specifications, targeted regression and negative-control receipts, protected-ref/source preservation checks. No release artifacts or production operations.",
+      "preserve_until": "Final migration acceptance and user cleanup decision"
+    },
+    {
+      "type": "g04_integration_evidence",
+      "path": "${MIGRATION_AUX_ROOT}/20261120_comet12-g04-integration",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "contains": "Before/after refs, qualified-tree/doc preservation checks, remote push receipts and final integration proof; no new builds or downloads.",
+      "backup_ref": "refs/joom-migration/backups/g04-before-integration-20261120",
+      "preserve_until": "Final migration acceptance and explicit user cleanup decision"
     }
   ],
   "preexisting_or_shared": {

@@ -772,12 +772,14 @@ case class CometExecRule(session: SparkSession, queryStagePrep: Boolean = false)
       case unary if unary.children.size == 1 => provider(unary.children.head)
       case _ => None
     }
-    // A plain shuffle destroys input order. Only projects/filters are crossed here: neither
-    // observes row order, unlike a limit/window/aggregate, and no binary operator is inferred.
+    // A plain shuffle destroys input order, but earlier expressions can observe it. Cross only
+    // deterministic projects/filters: seeded random filters and generated IDs associate values
+    // with input rows even when their consumer does not require an ordering.
     def unusedProvider(node: SparkPlan): Option[SortAggregateExec] = node match {
       case aggregate: SortAggregateExec => Some(aggregate)
       case unary @ (_: ProjectExec | _: FilterExec | _: CometProjectExec | _: CometFilterExec)
-          if unary.children.size == 1 && unary.requiredChildOrdering.forall(_.isEmpty) =>
+          if unary.children.size == 1 && unary.requiredChildOrdering.forall(_.isEmpty) &&
+            unary.expressions.forall(_.deterministic) =>
         unusedProvider(unary.children.head)
       case _ => None
     }
@@ -821,8 +823,9 @@ case class CometExecRule(session: SparkSession, queryStagePrep: Boolean = false)
     val orderProvenUnused =
       aggregate.getTagValue(CometExecRule.SORT_AGGREGATE_ORDER_UNUSED_TAG).isDefined
     if (!orderProvenUnused || orderConsumed ||
+      !aggregate.resultExpressions.forall(_.deterministic) ||
       !aggregate.aggregateExpressions.forall(e =>
-        orderInsensitiveAggregate(e.aggregateFunction))) {
+        e.deterministic && orderInsensitiveAggregate(e.aggregateFunction))) {
       // Preserve upstream streaming and restore-sort behavior for order-sensitive aggregates.
       aggregate.unsetTagValue(CometExecRule.UNORDERED_SORT_AGGREGATE_TAG)
       return convertToComet(aggregate, CometSortAggregateExec).getOrElse(aggregate)

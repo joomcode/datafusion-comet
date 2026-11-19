@@ -30,6 +30,7 @@ import scala.util.Random
 import org.apache.commons.io.FileUtils
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{CometTestBase, Row}
+import org.apache.spark.sql.catalyst.expressions.aggregate.PartialMerge
 import org.apache.spark.sql.comet.{CometBaseAggregateExec, CometHashAggregateExec}
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
@@ -435,7 +436,11 @@ class CometFirstLastBoolAggFuzzSuite extends CometTestBase with AdaptiveSparkPla
     case other => String.valueOf(other)
   }
 
-  private case class CaseResult(native: Boolean, aggSpills: Long, inputPartitions: Int)
+  private case class CaseResult(
+      native: Boolean,
+      aggSpills: Long,
+      partialMergeSpills: Long,
+      inputPartitions: Int)
 
   private def aggregatesNative(plan: SparkPlan): Boolean = {
     val comet = collect(plan) { case a: CometBaseAggregateExec => a }
@@ -497,6 +502,10 @@ class CometFirstLastBoolAggFuzzSuite extends CometTestBase with AdaptiveSparkPla
         .map(_.value)
         .sum
 
+      val partialMergeSpills = collect(plan) {
+        case a: CometBaseAggregateExec if a.modes.contains(PartialMerge) => a
+      }.flatMap(_.metrics.get("spill_count")).map(_.value).sum
+
       def keyed(rows: Seq[Row], what: String): Map[Any, Row] = {
         val m = rows.groupBy(r => norm(Row.fromSeq(r.toSeq.take(nk))))
         val dups = m.filter(_._2.size > 1)
@@ -542,7 +551,7 @@ class CometFirstLastBoolAggFuzzSuite extends CometTestBase with AdaptiveSparkPla
           s"$ctx ${errors.size} mismatches, first ones:\n" +
             errors.take(25).mkString("\n") + s"\nquery: $query\nplan:\n$plan")
       }
-      CaseResult(native, aggSpills, inputPartitions)
+      CaseResult(native, aggSpills, partialMergeSpills, inputPartitions)
     }
   }
 
@@ -704,6 +713,7 @@ class CometFirstLastBoolAggFuzzSuite extends CometTestBase with AdaptiveSparkPla
     val r =
       runCase("distinct_one", ds, multiSpill, Seq("k1"), singleDistinctAggs, expectNative = true)
     assert(r.aggSpills > 0, s"[seed=$seed] the aggregate did not spill")
+    assert(r.partialMergeSpills > 0, s"[seed=$seed] the PartialMerge aggregate did not spill")
   }
 
   // ---------------------------------------------------------------- full matrix

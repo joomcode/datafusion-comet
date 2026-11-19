@@ -1571,8 +1571,12 @@ class CometExecRuleSuite extends CometTestBase {
   }
 
   test("CometExecRule should allow BloomFilter mixed Comet partial and Spark final") {
-    assume(!isSpark42Plus, "https://github.com/apache/datafusion-comet/issues/4968")
-    val funcId = new FunctionIdentifier("bloom_filter_agg")
+    // Spark's function registry requires a fully qualified temporary identifier in 4.2+.
+    val funcId = if (isSpark42Plus) {
+      new FunctionIdentifier("bloom_filter_agg", Some("session"), Some("system"))
+    } else {
+      new FunctionIdentifier("bloom_filter_agg")
+    }
     spark.sessionState.functionRegistry.registerFunction(
       funcId,
       new ExpressionInfo(classOf[BloomFilterAggregate].getName, "bloom_filter_agg"),
@@ -1610,8 +1614,12 @@ class CometExecRuleSuite extends CometTestBase {
   }
 
   test("CometExecRule should allow BloomFilter mixed Spark partial and Comet final") {
-    assume(!isSpark42Plus, "https://github.com/apache/datafusion-comet/issues/4968")
-    val funcId = new FunctionIdentifier("bloom_filter_agg")
+    // Spark's function registry requires a fully qualified temporary identifier in 4.2+.
+    val funcId = if (isSpark42Plus) {
+      new FunctionIdentifier("bloom_filter_agg", Some("session"), Some("system"))
+    } else {
+      new FunctionIdentifier("bloom_filter_agg")
+    }
     spark.sessionState.functionRegistry.registerFunction(
       funcId,
       new ExpressionInfo(classOf[BloomFilterAggregate].getName, "bloom_filter_agg"),

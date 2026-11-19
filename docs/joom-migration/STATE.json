@@ -1,6 +1,6 @@
 {
-  "updated_on": "2026-11-19",
-  "phase": "G04_LOCAL_VALIDATION_COMPLETE_AWAITING_USER_REVIEW",
+  "updated_on": "2026-11-20",
+  "phase": "G04_COMPLETED_INTEGRATED_G05_AWAITING_AUTHORIZATION",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -101,12 +101,14 @@
         "N09"
       ],
       "depends_on": ["G01"],
-      "status": "IMPLEMENTED_LOCAL_TARGETED_VALIDATION_PASSED_AWAITING_USER_REVIEW",
+      "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
-      "tests": "559 native checks; 330 JVM passed, 27 canceled/2 ignored tracked; local ARM64 only",
+      "tests": "Initial checkpoint:559native/330JVM. Independent fix:239native/53JVM. MixedBloom recheck:3/3. Cohorts overlap; do not sum. Final qualification still requires25full-fuzz cases,2metric dispositions and Linux/release coverage.",
       "handoff_report": "G04-report.md",
       "base_commit": "af05c94e7e5c669f36e783f65e5d5f2d35d328ce",
-      "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04"
+      "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04",
+      "completion_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g04-integration/completion.json",
+      "functional_source_previously_verified": "36a8e7b7907d6a3aa2f517b447fe57d4f2448f28"
     },
     {
       "id": "G05",
@@ -296,7 +298,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Report G04 and await explicit integration instruction; no push/merge, G05 or full GHA.",
+  "next_step": "G04 accepted and integrated; await separate explicit user authorization before G05. Final agreed Linux/full-fuzz/metric/release qualification remains required; no production use.",
   "qualification": "G04 local targeted ARM64/dev checks passed; see G04-results.json. Final full Linux/release/JAR qualification remains pending; G01 RC1 is historical evidence only.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -320,7 +322,7 @@
     "implementation_hold_preserved": true,
     "approved_feature_groups_and_release_milestones_unchanged": true
   },
-  "active_branch": "joom/1.2-native-aggregates",
+  "active_branch": "branch-1.2",
   "g01_work_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01",
   "upstream_base_rechecked_on": "2026-11-17",
   "upstream_base_current_sha": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -523,16 +525,18 @@
   "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04",
   "integration_gate": {
     "group": "G04",
-    "status": "AWAITING_USER_REVIEW",
+    "status": "G04_USER_APPROVED_ACCEPTANCE",
     "base_commit": "af05c94e7e5c669f36e783f65e5d5f2d35d328ce",
-    "merge_authorized": false,
-    "push_authorized": false,
+    "merge_authorized": true,
+    "push_authorized": true,
+    "method": "Fast-forward; preserve five substantive commits and qualified non-migration source tree. Fold acceptance documentation into the final commit.",
+    "actual_result_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g04-integration/completion.json",
+    "post_commit_gate": "This snapshot records acceptance. Exact final commit/tree/local and remote refs are verified after integration in the external completion receipt.",
     "not_authorized": [
-      "G04 push or merge before user review",
       "G05-G10",
       "full per-group GHA",
       "main/tag changes",
-      "publication",
+      "artifact publication",
       "production"
     ]
   },
@@ -1469,14 +1473,20 @@
           "N08",
           "N09"
         ],
-        "behavior_or_test": "Execute or explicitly resolve2Spark4.2 mixedBloom planning cancellations and2ignored metric tests; guards are not evidence of incompatibility.",
+        "behavior_or_test": "Execute or explicitly resolve the two inherited ignored aggregate-metric tests. The two mixed BloomFilter planning tests now pass locally, and exact Spark/native bytes pass in all three engine combinations.",
         "required_inputs_and_settings": "Spark4.2.1/ANSI=true/Java17; final root lock/vendor and agreed CI/release graph.",
         "reason_deferred": "Approved local targeted per-group checks; complete final qualification remains required.",
         "owner": "Final migration qualification",
-        "intended_validation_command_or_job": "Inspect issue#4968 guards and metrics ignores; run applicable scenarios without suppressing correctness failures, or obtain explicit applicability disposition.",
+        "intended_validation_command_or_job": "Resolve the two inherited metric ignores during final qualification. Repeat the passing BloomFilter planning/runtime cases in final CI; do not count ignored cases as passed.",
         "native_execution_requirement": "Compare results and mandatory errors; confirm actual native paths and exact loaded artifacts where applicable. Canceled/ignored never count as passed.",
-        "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "G04-results.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json; final release SHA pending."
+        "status": "BLOOM_PLANNING_AND_RUNTIME_PASSED_METRIC_CASES_PENDING",
+        "evidence_path_and_source_sha": "G04-results.json#independent_semantics_review; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/sql-semantic-final.json",
+        "history_before_independent_review": {
+          "behavior_or_test": "Execute or explicitly resolve2Spark4.2 mixedBloom planning cancellations and2ignored metric tests; guards are not evidence of incompatibility.",
+          "intended_validation_command_or_job": "Inspect issue#4968 guards and metrics ignores; run applicable scenarios without suppressing correctness failures, or obtain explicit applicability disposition.",
+          "status": "DEFERRED_FINAL_QUALIFICATION",
+          "evidence_path_and_source_sha": "G04-results.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json; final release SHA pending."
+        }
       }
     ],
     "final_gate": "No unresolved/unverified applicable cases. Require actual passing evidence; retain only applicability exclusions explicitly agreed with the user (such as the existing HDFS-cluster exclusion)."
@@ -1497,7 +1507,7 @@
     "final_gate": "Audit actual CI, remove all temporary mechanisms, restore normal automatic triggers and full agreed coverage, then run full final GHA and exact final-JAR AMD64/ARM64 packaged smoke. An empty list alone is not proof of restoration."
   },
   "production_use_allowed": false,
-  "active_implementation_group": "G04",
+  "active_implementation_group": null,
   "local_documentation_update_pending": null,
   "g02": {
     "base_commit": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
@@ -1690,12 +1700,12 @@
     "next_step": "Complete local G03 validation and report the feature diff. No automatic integration or G04."
   },
   "g04": {
-    "status": "IMPLEMENTED_LOCAL_TARGETED_VALIDATION_PASSED_AWAITING_USER_REVIEW",
+    "status": "COMPLETED_INTEGRATED",
     "base": "af05c94e7e5c669f36e783f65e5d5f2d35d328ce",
     "branch": "joom/1.2-native-aggregates",
     "evidence": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04",
     "authorization_ref": "decisions.json#g04_authorization",
-    "merge_allowed": false,
+    "merge_allowed": true,
     "full_gha_allowed": false,
     "implementation_cards": [
       "D06",
@@ -1719,7 +1729,7 @@
     "blocking_local_case": {
       "status": "CLOSED_LOCALLY",
       "evidence": "G04-results.json",
-      "summary": "Replay/Partial/offset/drain/property and ordering regressions pass at unchanged budgets; negative control proves wrong-row hazard."
+      "summary": "Closed locally: independent audit reproduced four silently wrong observer queries, fixed nondeterministic ordering guards, and verified53JVM/SQL plus239native checks. The same six observer cases match original Spark with AQE false/true. Final qualification remains required."
     },
     "initial_memory_failure_history": {
       "status": "MAIN_MEMORY_FIX_PASSED_FINAL_DECODE_REFINEMENT_IN_PROGRESS",
@@ -1733,7 +1743,7 @@
     "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json",
     "runtime_library_sha256": "d999c11f45ab64a6b2aec77dfeedd75815ea0c88a962cc33fc9de8e86d2eb150",
     "source_manifest": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04/final-source-manifest.json",
-    "source_freeze_note": "The original 49-file qualification manifest and completion receipt remain historical. A subsequent user-approved lint-only annotation changes only topk/mod.rs; removing the exact attributes reproduces the original file bytes. Runtime algorithms/tests/CI flags remain unchanged. See the follow-up source proof and strict Clippy receipt; no new runtime-library or release-JAR qualification is claimed.",
+    "source_freeze_note": "G04 acceptance updates migration documentation only relative to qualified36a8e7b79. All non-migration production/test/benchmark/dependency/CI bytes are preserved. The original qualification and independent audit receipts remain historical; exact final commits/tree and successful local/remote fast-forward are recorded after commit in the integration completion receipt.",
     "pre_clippy_exception_source_freeze_note": "The 49 qualified non-migration file hashes remain unchanged after validation. Coherent local commits and protected refs/tree are recorded externally in completion.json to avoid self-referential commit hashes.",
     "clippy_exception_follow_up": {
       "decision_ref": "decisions.json#vendor_lint_policy",
@@ -1742,7 +1752,78 @@
       "receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/strict-workspace-clippy-final.json",
       "runtime_preservation_proof": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/lint-only-source-proof.json",
       "final_linux_ci_still_required": true
-    }
+    },
+    "independent_semantics_review": {
+      "status": "PASSED_LOCAL_TARGETED_AFTER_CORRECTNESS_FIX",
+      "baseline_commit": "5133f0ab7396fe90a669e6a94f497c6dab0bee91",
+      "user_request_translation": "Independently verify that the new tests are not tailored to our implementation and really check original Spark semantics, especially successful completion with incorrect results. Do not merge G04.",
+      "report": "G04-independent-semantics.md",
+      "evidence_root": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics",
+      "oracle": "Original Apache Spark4.2.1 runtime revision617618396087429b5627a86ce933bb0f5d6645cb. Fresh Comet-off queries with identical inputs/settings and no native reference aggregates; loaded critical classes resolve only to cached Central runtime jars.",
+      "actual_runtime_bug": "The G04 unused-sort proof crossed nondeterministic projects/filters and ignored aggregate result expressions. Before the fix four of six observer cases returned incorrect key sets or key/value associations without failing.",
+      "fix": "Cross only deterministic Project/Filter expressions and require deterministic aggregate expressions/filters/results before omitting a grouping sort. Preserve native ordered aggregation otherwise.",
+      "test_oracle_repairs": [
+        "Unique tie payloads distinguish extremal from nonextremal rows; assert cardinality/unique group keys before toMap.",
+        "Native ordered drain checks every count and the complete input-derived key set.",
+        "Native grouping sets check complete keys, NULL validity, hiddenGID and counts.",
+        "Spill regression requires PartialMerge-specific spilling rather than a sum over all aggregate nodes.",
+        "Input-derived SQL expected rows independently check grouping sets/NULL collisions and ordered FIRST/LAST.",
+        "Spark BloomFilter exact bytes match fully native and both mixed engine directions; former planning cancellations now execute using qualified Spark4.2 function identifiers."
+      ],
+      "current_test_results": {
+        "native_unique_passed": 239,
+        "native_failed": 0,
+        "native_ignored": 0,
+        "native_affected_null_case_rechecked": true,
+        "jvm_sql_passed": 53,
+        "jvm_sql_failed": 0,
+        "jvm_canceled_opt_in_full_fuzz": 25,
+        "jvm_ignored_in_this_selection": 0,
+        "inherited_metric_ignores_still_pending": 2,
+        "strict_workspace_clippy": "PASSED -D warnings with only the previously approved source-local exception"
+      },
+      "commands": {
+        "order-observer-before-fix": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/order-observer-before-fix.json",
+        "order-observer-after-fix": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/order-observer-after-fix.json",
+        "independent-native-oracles": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/independent-native-oracles.json",
+        "native-nulls-final": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/native-nulls-final.json",
+        "sql-semantic-final": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/sql-semantic-final.json",
+        "strict-workspace-clippy-final": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/strict-workspace-clippy-final.json"
+      },
+      "independent_reviews": [
+        "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/sql-review.json",
+        "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/native-review.json",
+        "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/harness-review.json",
+        "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/sql-fix-review.json",
+        "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/native-fix-review.json",
+        "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/harness-fix-review.json"
+      ],
+      "source_manifest": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/final-source-manifest.json",
+      "final_changed_source_sha256": {
+        "native/vendor/datafusion-physical-plan/src/aggregates/ordered_drain_tests.rs": "3644e7176d1e6b95d1b1bb7048275b959eaf3f44dae523d3e54159a1abe45ec4",
+        "native/vendor/datafusion-physical-plan/src/aggregates/starved_spill_tests.rs": "8bb0b9f327baa468b28e954999510a6383f3898ece48068bbf9abe427e009d73",
+        "spark/src/main/scala/org/apache/comet/rules/CometExecRule.scala": "2f2c02eeb1103f31deb29120e98f151fe0201fbf7566eaa35d4a045e76589f61",
+        "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "c5d8696520acf6bb05e478b8ea6540c44c9e2fe9fa48e11e031c2e89caf750d5",
+        "spark/src/test/scala/org/apache/comet/exec/CometFirstLastBoolAggFuzzSuite.scala": "cf0f78dfe497875dee5f78e289a8ddf5560d6295dbe57ff2c06c47ed78053252",
+        "spark/src/test/scala/org/apache/comet/rules/CometExecRuleSuite.scala": "1f762f528e6ba3231f7c136c05ce1a556e210881851015dadf1f48f178832b40"
+      },
+      "limits": "Local macOS ARM64/Java17/ANSI=true targeted evidence. Original test/qualification receipts remain historical. No universal equivalence or production acceptance is claimed. Final full agreed Linux CI, opt-in full fuzz, metric-test disposition, and exact final-JAR AMD64/ARM64 qualification remain mandatory.",
+      "stage_gates": {
+        "merge_authorized": false,
+        "push_performed": false,
+        "full_gha_started": false,
+        "g05_started": false,
+        "production_use_allowed": false
+      },
+      "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/completion.json"
+    },
+    "source_freeze_history": [
+      "The original 49-file qualification manifest and completion receipt remain historical. A subsequent user-approved lint-only annotation changes only topk/mod.rs; removing the exact attributes reproduces the original file bytes. Runtime algorithms/tests/CI flags remain unchanged. See the follow-up source proof and strict Clippy receipt; no new runtime-library or release-JAR qualification is claimed.",
+      "Original G04 and lint-only receipts remain historical. The independent review then changed CometExecRule ordering guards and six production/test source files overall; current source hashes and targeted validation are in G04-results.json#independent_semantics_review and its external manifest. Rust production algorithms are unchanged. No release-artifact requalification or integration is claimed."
+    ],
+    "latest_post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g04-integration/completion.json",
+    "integration_authorization_ref": "decisions.json#g04_integration_authorization",
+    "functional_source_previously_verified": "36a8e7b7907d6a3aa2f517b447fe57d4f2448f28"
   },
   "g01_qualification_summary_historical": "Runtime sources remain byte-identical to full Comet CI source 26590264b878fb8eae2ca439a8bcc0dfb513cb36. Prior B93 RC passed 7/7 jobs and 12/12 smoke cases per architecture. Rewritten final source must pass a fresh RC build; do not reuse B93 artifacts as RC1.",
   "g03_accepted_integration_gate_history": {
@@ -1760,5 +1841,28 @@
       "production use"
     ]
   },
-  "historical_g01_qualification_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-final-qualification"
+  "historical_g01_qualification_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01-final-qualification",
+  "g04_accepted_integration_gate_history": {
+    "status": "G04_USER_APPROVED_ACCEPTANCE",
+    "method": "Fast-forward branch-1.2 to the five-commit G04 feature; no merge commit.",
+    "previous_base": "af05c94e7e5c669f36e783f65e5d5f2d35d328ce",
+    "functional_source_previously_verified": "36a8e7b7907d6a3aa2f517b447fe57d4f2448f28",
+    "receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g04-integration/completion.json",
+    "next_group_authorized": false
+  },
+  "g04_review_gate_history": {
+    "group": "G04",
+    "status": "AWAITING_USER_REVIEW",
+    "base_commit": "af05c94e7e5c669f36e783f65e5d5f2d35d328ce",
+    "merge_authorized": false,
+    "push_authorized": false,
+    "not_authorized": [
+      "G04 push or merge before user review",
+      "G05-G10",
+      "full per-group GHA",
+      "main/tag changes",
+      "publication",
+      "production"
+    ]
+  }
 }

@@ -183,7 +183,14 @@ async fn run(
             .downcast_ref::<Int64Array>()
             .unwrap();
         for i in 0..batch.num_rows() {
-            groups.insert((p.value(i).to_string(), s.value(i).to_string()));
+            assert!(!p.is_null(i) && !s.is_null(i) && !c.is_null(i));
+            // The fixture has exactly one non-null input per full key. A correct
+            // total alone would allow one key's count 0 to hide another's count 2.
+            assert_eq!(c.value(i), 1, "incorrect count for an individual key");
+            assert!(
+                groups.insert((p.value(i).to_string(), s.value(i).to_string())),
+                "a unique fixture key was emitted more than once"
+            );
             total_count += c.value(i);
         }
     }
@@ -193,6 +200,19 @@ async fn run(
         total_count,
         rows,
     })
+}
+
+fn expected_groups(prefixes: &[&str], rows: usize) -> HashSet<(String, String)> {
+    // The fixture permutes the ranks; derive the complete key set directly,
+    // without executing any aggregation as an oracle.
+    prefixes
+        .iter()
+        .enumerate()
+        .flat_map(|(i, prefix)| {
+            (0..rows)
+                .map(move |rank| (prefix.to_string(), format!("ranking-{i}-{rank:012}")))
+        })
+        .collect()
 }
 
 fn is_ordered_partial(stream: &StreamType) -> bool {
@@ -239,6 +259,7 @@ async fn ordered_partial_aggregate_drains_a_huge_ordered_range_in_linear_time()
     assert_eq!(sorted.groups.len(), rows);
     assert_eq!(sorted.total_count, rows as i64);
     assert_eq!(sorted.groups, unsorted.groups);
+    assert_eq!(sorted.groups, expected_groups(&["x"], rows));
     assert!(
         sorted.elapsed < unsorted.elapsed * 5 + Duration::from_millis(500),
         "ordered {:?}, unordered {:?}",
@@ -270,6 +291,11 @@ async fn ordered_partial_aggregate_keeps_drained_groups_when_memory_runs_out()
 
     assert_eq!(constrained.total_count, 4 * rows as i64);
     assert_eq!(constrained.groups.len(), 4 * rows);
+    assert_eq!(constrained.rows, 4 * rows);
+    assert_eq!(
+        constrained.groups,
+        expected_groups(&["a", "b", "c", "d"], rows)
+    );
     assert_eq!(pool.reserved(), 0);
     Ok(())
 }
