@@ -25,8 +25,9 @@ import java.nio.charset.StandardCharsets
 import scala.jdk.CollectionConverters._
 
 import org.apache.arrow.c.CDataDictionaryProvider
-import org.apache.arrow.memory.BufferAllocator
+import org.apache.arrow.memory.{ArrowBuf, BufferAllocator}
 import org.apache.arrow.vector.{BaseLargeVariableWidthVector, BitVectorHelper, IntVector, LargeVarBinaryVector, LargeVarCharVector, ValueVector, VarBinaryVector, VarCharVector, VariableWidthFieldVector}
+import org.apache.arrow.vector.complex.ListVector
 import org.apache.arrow.vector.dictionary.{Dictionary, DictionaryProvider}
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode
 import org.apache.arrow.vector.types.pojo.{ArrowType, DictionaryEncoding, Field, FieldType}
@@ -534,4 +535,151 @@ class UtilsSuite extends CometTestBase {
       full.close()
     }
   }
+
+  test("coalesceBroadcastBatches rebases the offsets of batches sliced from one batch") {
+    val numRows = 12
+    val sliceLength = 4
+    val strings = (0 until numRows).map(i => s"value_$i")
+    val lists = (0 until numRows).map(i => (0 to i % 3).map(_ + i))
+
+    val parentStrings = new VarCharVector("s", CometArrowAllocator)
+    parentStrings.allocateNew()
+    strings.zipWithIndex.foreach { case (v, i) => parentStrings.setSafe(i, v.getBytes("UTF-8")) }
+    parentStrings.setValueCount(numRows)
+
+    val parentLists = ListVector.empty("l", CometArrowAllocator)
+    val writer = parentLists.getWriter
+    lists.zipWithIndex.foreach { case (values, i) =>
+      writer.setPosition(i)
+      writer.startList()
+      values.foreach(writer.integer().writeInt(_))
+      writer.endList()
+    }
+    parentLists.setValueCount(numRows)
+    val parentElements = parentLists.getDataVector.asInstanceOf[IntVector]
+
+    def allValid(length: Int): ArrowBuf = {
+      val validity = CometArrowAllocator.buffer(((length + 7) / 8).toLong)
+      (0 until length).foreach(i => BitVectorHelper.setBit(validity, i.toLong))
+      validity
+    }
+
+    def sliceOffsets(offsets: ArrowBuf, start: Int, length: Int): ArrowBuf =
+      offsets.slice(start.toLong * 4, (length + 1).toLong * 4)
+
+    val starts = 0 until numRows by sliceLength
+    val sliced = starts.map { start =>
+      val validity = allValid(sliceLength)
+      val stringSlice = new VarCharVector("s", CometArrowAllocator)
+      stringSlice.loadFieldBuffers(
+        new ArrowFieldNode(sliceLength, 0),
+        java.util.Arrays.asList(
+          validity,
+          sliceOffsets(parentStrings.getOffsetBuffer, start, sliceLength),
+          parentStrings.getDataBuffer))
+
+      val listSlice = ListVector.empty("l", CometArrowAllocator)
+      listSlice.addOrGetVector[IntVector](FieldType.nullable(new ArrowType.Int(32, true)))
+      listSlice.loadFieldBuffers(
+        new ArrowFieldNode(sliceLength, 0),
+        java.util.Arrays
+          .asList(validity, sliceOffsets(parentLists.getOffsetBuffer, start, sliceLength)))
+      val elementCount = parentElements.getValueCount
+      val elementValidity = allValid(elementCount)
+      listSlice.getDataVector.loadFieldBuffers(
+        new ArrowFieldNode(elementCount, 0),
+        java.util.Arrays.asList(elementValidity, parentElements.getDataBuffer))
+      elementValidity.close()
+      validity.close()
+      (stringSlice, listSlice)
+    }
+
+    try {
+      assert(sliced(1)._1.getOffsetBuffer.getInt(0) > 0)
+      assert(sliced(1)._2.getOffsetBuffer.getInt(0) > 0)
+      val batches = sliced.map { case (stringSlice, listSlice) =>
+        val provider = new CDataDictionaryProvider
+        new ColumnarBatch(
+          Array[ColumnVector](
+            CometVector.getVector(stringSlice, provider),
+            CometVector.getVector(listSlice, provider)),
+          sliceLength)
+      }
+      val bufs = Utils.serializeBatches(batches.iterator).map(_._2).toSeq.iterator
+      val (coalesced, batchCount, totalRows) = Utils.coalesceBroadcastBatches(bufs)
+      assert(batchCount == starts.size)
+      assert(totalRows == numRows)
+
+      val got = coalesced.iterator.flatMap { b =>
+        Utils.decodeBatches(b, "test").flatMap { out =>
+          (0 until out.numRows()).map { i =>
+            (out.column(0).getUTF8String(i).toString, out.column(1).getArray(i).toIntArray.toSeq)
+          }
+        }
+      }.toSeq
+      assert(got == strings.zip(lists))
+    } finally {
+      sliced.foreach { case (stringSlice, listSlice) =>
+        stringSlice.close()
+        listSlice.close()
+      }
+      parentLists.close()
+      parentStrings.close()
+    }
+  }
+
+  test("coalesceBroadcastBatches preserves raw sliced binary bytes and nulls") {
+    val allocator =
+      CometArrowAllocator.newChildAllocator("raw-sliced-broadcast", 0, Long.MaxValue)
+    val values = (0 until 24).map { i =>
+      if (i % 5 == 0) null
+      else if (i % 7 == 0) Array.emptyByteArray
+      else Array[Byte](0, -1, -128, i.toByte)
+    }
+    val parent = new VarBinaryVector("payload", allocator)
+    parent.allocateNew()
+    values.zipWithIndex.foreach {
+      case (null, i) => parent.setNull(i)
+      case (bytes, i) => parent.setSafe(i, bytes)
+    }
+    parent.setValueCount(values.size)
+    val slices = Seq(8, 16).map { start =>
+      val vector = new VarBinaryVector("payload", allocator)
+      vector.loadFieldBuffers(
+        new ArrowFieldNode(8, values.slice(start, start + 8).count(_ == null)),
+        Seq(
+          parent.getValidityBuffer.slice(start / 8L, 1),
+          parent.getOffsetBuffer.slice(start * 4L, 9 * 4L),
+          parent.getDataBuffer).asJava)
+      assert(vector.getOffsetBuffer.getInt(0) > 0)
+      vector
+    }
+    var buffers = Seq.empty[ChunkedByteBuffer]
+    try {
+      val batches = slices.map(v => new ColumnarBatch(Array(cometVector(v)), 8))
+      val serialized = Utils.serializeBatches(batches.iterator).map(_._2).toList
+      buffers = serialized
+      val (coalesced, count, total) = Utils.coalesceBroadcastBatches(serialized.iterator)
+      buffers = (buffers ++ coalesced).distinct
+      assert(count == 2)
+      assert(total == 16)
+      val decoded = coalesced.iterator.flatMap(Utils.decodeBatches(_, "raw-slice-test"))
+      val actual = decoded.flatMap { batch =>
+        (0 until batch.numRows()).map { i =>
+          if (batch.column(0).isNullAt(i)) null else batch.column(0).getBinary(i)
+        }
+      }.toVector
+      assert(actual.size == 16)
+      actual.zip(values.drop(8)).foreach { case (got, expected) =>
+        assert(java.util.Arrays.equals(got, expected))
+      }
+    } finally {
+      buffers.foreach(_.dispose())
+      slices.foreach(_.close())
+      parent.close()
+      assert(allocator.getAllocatedMemory == 0)
+      allocator.close()
+    }
+  }
+
 }

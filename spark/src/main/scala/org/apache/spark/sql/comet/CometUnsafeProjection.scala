@@ -55,9 +55,16 @@ private[comet] object CometUnsafeProjection
 
   /** A projection of rows with the columns of `output` to UnsafeRows. */
   def create(output: Seq[Attribute]): UnsafeProjection =
-    createObject(output.zipWithIndex.map { case (attr, ordinal) =>
+    createFromReferences(output.zipWithIndex.map { case (attr, ordinal) =>
       BoundReference(ordinal, attr.dataType, attr.nullable)
     })
+
+  /** Physical bound columns for an immediate copy, including Binary's borrowed-byte layout. */
+  private[comet] def createFromReferences(columns: Seq[BoundReference]): UnsafeProjection = {
+    // The layout cache's key omits ordinals because each input column is copied in order.
+    require(columns.indices.forall(i => columns(i).ordinal == i))
+    createObject(columns)
+  }
 
   override protected def createCodeGeneratedObject(
       columns: Seq[BoundReference]): UnsafeProjection =

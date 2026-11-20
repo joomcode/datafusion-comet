@@ -35,9 +35,9 @@ import org.apache.spark.sql.catalyst.expressions.{And, Ascending, AttributeRefer
 import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, BuildRight, BuildSide}
 import org.apache.spark.sql.catalyst.plans.{Inner, LeftOuter, LeftSemi}
 import org.apache.spark.sql.catalyst.plans.logical.Join
-import org.apache.spark.sql.comet.{CometBroadcastExchangeExec, CometBroadcastHashJoinExec, CometBroadcastNestedLoopJoinExec, CometFilterExec, CometHashJoinExec, CometNativeScanExec, CometProjectExec, CometRangeExec, CometSampleExec, CometSortExec, CometSortMergeJoinExec, CometSparkToColumnarExec, CometUnionExec, CometWindowExec}
+import org.apache.spark.sql.comet.{CometBroadcastExchangeExec, CometBroadcastHashJoinExec, CometBroadcastNestedLoopJoinExec, CometColumnarToRowExec, CometFilterExec, CometHashJoinExec, CometNativeScanExec, CometProjectExec, CometRangeExec, CometSampleExec, CometSortExec, CometSortMergeJoinExec, CometSparkToColumnarExec, CometUnionExec, CometWindowExec}
 import org.apache.spark.sql.execution.{ColumnarToRowTransition, InputAdapter, LocalTableScanExec, SortExec, SparkPlan, WholeStageCodegenExec}
-import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AQEShuffleReadExec, QueryStageExec}
+import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AQEShuffleReadExec, BroadcastQueryStageExec, QueryStageExec}
 import org.apache.spark.sql.execution.aggregate.SortAggregateExec
 import org.apache.spark.sql.execution.datasources.SchemaColumnConvertNotSupportedException
 import org.apache.spark.sql.execution.exchange.{ReusedExchangeExec, ShuffleExchangeLike}
@@ -3313,4 +3313,131 @@ class CometJoinSuite extends CometTestBase {
       }
     }
   }
+
+  for (maxFields <- Seq("3", "100")) {
+    test(
+      "a Spark broadcast hash join over a skewed join reads a Comet broadcast stage " +
+        s"(codegen.maxFields=$maxFields)") {
+      withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
+        CometConf.COMET_NATIVE_COLUMNAR_TO_ROW_ENABLED.key -> "false",
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
+        SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+        SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+        SQLConf.COALESCE_PARTITIONS_ENABLED.key -> "false",
+        SQLConf.SHUFFLE_PARTITIONS.key -> "4",
+        SQLConf.SKEW_JOIN_ENABLED.key -> "true",
+        SQLConf.ADAPTIVE_FORCE_OPTIMIZE_SKEWED_JOIN.key -> "true",
+        SQLConf.SKEW_JOIN_SKEWED_PARTITION_FACTOR.key -> "2",
+        SQLConf.SKEW_JOIN_SKEWED_PARTITION_THRESHOLD.key -> "100",
+        SQLConf.ADVISORY_PARTITION_SIZE_IN_BYTES.key -> "100",
+        SQLConf.WHOLESTAGE_MAX_NUM_FIELDS.key -> maxFields) {
+        withParquetTable(
+          (0 until 4000).map(i => (if (i % 10 < 8) 0 else i % 50, i % 10, i)),
+          "skew_f") {
+          withParquetTable((0 until 500).map(i => (i % 50, i)), "skew_g") {
+            withParquetTable((0 until 10).map(i => (i, s"name_$i")), "skew_d") {
+              val query =
+                """SELECT /*+ BROADCAST(d), MERGE(f, g) */ f._1, f._2, f._3, g._2, d._2
+                  |FROM skew_f f JOIN skew_g g ON f._1 = g._1
+                  |LEFT JOIN skew_d d ON f._2 = d._1
+                  |DISTRIBUTE BY f._3""".stripMargin
+              val (_, plan) = checkSparkAnswer(sql(query))
+              val skewed = collect(plan) { case j: SortMergeJoinExec if j.isSkewJoin => j }
+              assert(skewed.nonEmpty, s"expected a skewed Spark sort-merge join:\n$plan")
+              val sparkBroadcastJoins = collect(plan) { case j: BroadcastHashJoinExec => j }
+              assert(sparkBroadcastJoins.size == 1, s"plan:\n$plan")
+              val build = sparkBroadcastJoins.head.right
+              val readsCometBroadcast = build.collectFirst { case c: CometColumnarToRowExec =>
+                c.child match {
+                  case InputAdapter(stage) => stage
+                  case stage => stage
+                }
+              }
+              assert(
+                readsCometBroadcast.exists(_.isInstanceOf[BroadcastQueryStageExec]),
+                s"expected the join to read a Comet broadcast stage:\n$plan")
+              assert(!build.isInstanceOf[WholeStageCodegenExec], s"plan:\n$plan")
+            }
+          }
+        }
+      }
+    }
+  }
+
+  test("Broadcast coalescing keeps the values of build batches sliced from one native batch") {
+    withSQLConf(
+      SQLConf.ANSI_ENABLED.key -> "true",
+      SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+      SQLConf.SHUFFLE_PARTITIONS.key -> "1") {
+      withParquetTable((0 until 20000).map(i => (i, s"key_$i")), "sliced_build_src") {
+        withParquetTable((0 until 20000).map(i => (s"key_$i", i)), "sliced_probe") {
+          val query =
+            """SELECT /*+ BROADCAST(b) */ p._2, b.k
+              |FROM sliced_probe p
+              |JOIN (SELECT DISTINCT _2 AS k FROM sliced_build_src) b ON p._1 = b.k
+              |""".stripMargin
+          val (_, cometPlan) = checkSparkAnswerAndOperator(
+            sql(query),
+            Seq(classOf[CometBroadcastExchangeExec], classOf[CometBroadcastHashJoinExec]))
+          assert(sql(query).count() == 20000)
+
+          val broadcast = collect(cometPlan) { case b: CometBroadcastExchangeExec => b }.head
+          assert(broadcast.metrics("numCoalescedBatches").value > 1L)
+          assert(broadcast.metrics("numCoalescedRows").value == 20000L)
+        }
+      }
+    }
+  }
+
+  test("columnar-to-row keeps direct, reused and staged Comet broadcasts out of codegen") {
+    val attributes = Seq(AttributeReference("key", IntegerType, nullable = false)())
+    val local = LocalTableScanExec(attributes, Seq.empty, None)
+    val columnar = CometSparkToColumnarExec(local)
+    val broadcast = CometBroadcastExchangeExec(
+      columnar,
+      attributes,
+      org.apache.spark.sql.catalyst.plans.physical.IdentityBroadcastMode,
+      columnar)
+    val reused = ReusedExchangeExec(attributes, broadcast)
+    val staged = BroadcastQueryStageExec(0, broadcast, broadcast.canonicalized)
+    val reusedStage = BroadcastQueryStageExec(1, reused, reused.canonicalized)
+    Seq(broadcast, reused, staged, reusedStage).foreach { build =>
+      assert(!CometColumnarToRowExec(build).supportCodegen, s"build=$build")
+    }
+    assert(CometColumnarToRowExec(columnar).supportCodegen)
+  }
+
+  for (adaptive <- Seq(false, true)) {
+    test(
+      s"sliced broadcasts retain raw binary and nested rows with exchange reuse: AQE=$adaptive") {
+      withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> adaptive.toString,
+        SQLConf.EXCHANGE_REUSE_ENABLED.key -> "true",
+        SQLConf.SHUFFLE_PARTITIONS.key -> "2",
+        CometConf.COMET_BATCH_SIZE.key -> "64") {
+        val rows = (0 until 2048).map { i =>
+          val raw = if (i % 11 == 0) null else Array[Byte](0, -1, -128, i.toByte)
+          val nested = if (i % 13 == 0) null else Seq(s"value-$i", null, "")
+          (i, raw, nested)
+        }
+        withParquetTable(rows, "g07_sliced_broadcast") {
+          val query = """WITH d AS (SELECT DISTINCT * FROM g07_sliced_broadcast)
+            |SELECT /*+ BROADCAST(a), BROADCAST(b) */ p._1, a._2, a._3, b._2, b._3
+            |FROM g07_sliced_broadcast p
+            |JOIN d a ON p._1 = a._1 JOIN d b ON p._1 = b._1""".stripMargin
+          val (_, plan) = checkSparkAnswerAndOperator(
+            sql(query),
+            Seq(classOf[CometBroadcastExchangeExec], classOf[CometBroadcastHashJoinExec]),
+            classOf[ReusedExchangeExec])
+          val reusedBroadcasts = collect(plan) {
+            case e: ReusedExchangeExec if e.child.isInstanceOf[CometBroadcastExchangeExec] => e
+          }
+          assert(reusedBroadcasts.nonEmpty, s"expected actual Comet broadcast reuse: $plan")
+        }
+      }
+    }
+  }
+
 }
