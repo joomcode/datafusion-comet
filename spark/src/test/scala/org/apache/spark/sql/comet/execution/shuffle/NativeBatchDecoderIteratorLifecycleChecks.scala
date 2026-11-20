@@ -607,4 +607,191 @@ private[shuffle] object NativeBatchDecoderIteratorLifecycleChecks {
       }
     }
   }
+
+  private final class TrackingCoalescer(
+      pushFailure: Option[Throwable] = None,
+      releaseFailure: Option[Throwable] = None)
+      extends Native {
+    var creates = 0
+    var pushes = 0
+    var exports = 0
+    var releases = 0
+    private var pending = 0L
+    private var ready = 0L
+    val handle = 73L
+
+    override def createShuffleReadCoalescer(rows: Int, bytes: Long): Long = {
+      assert(rows == 3 && bytes == 1024)
+      creates += 1
+      handle
+    }
+
+    override def pushShuffleBlock(
+        state: Long,
+        buffer: ByteBuffer,
+        length: Int,
+        fields: Int,
+        tracing: Boolean): Boolean = {
+      assert(state == handle && releases == 0 && fields == 0)
+      assert(ready == 0)
+      pushes += 1
+      if (pushes == 2) pushFailure.foreach(throw _)
+      pending += 1
+      if (pending == 3) {
+        ready = pending
+        pending = 0
+      }
+      ready != 0
+    }
+
+    override def finishShuffleRead(state: Long): Boolean = {
+      assert(state == handle && releases == 0)
+      if (ready == 0) {
+        ready = pending
+        pending = 0
+      }
+      ready != 0
+    }
+
+    override def exportShuffleBatch(
+        state: Long,
+        arrays: Array[Long],
+        schemas: Array[Long]): Long = {
+      assert(state == handle && releases == 0 && ready > 0)
+      exports += 1
+      val rows = ready
+      ready = 0
+      rows
+    }
+
+    override def releaseShuffleReadCoalescer(state: Long): Unit = {
+      assert(state == handle)
+      releases += 1
+      releaseFailure.foreach(throw _)
+    }
+  }
+
+  private def withCoalescer(
+      frames: Int,
+      pushFailure: Option[Throwable] = None,
+      releaseFailure: Option[Throwable] = None,
+      batchFailure: Option[Throwable] = None,
+      inputFailure: Option[Throwable] = None)(
+      check: (
+          NativeBatchDecoderIterator,
+          TrackingCoalescer,
+          scala.collection.mutable.ArrayBuffer[TrackingBatch],
+          () => Int) => Unit): Unit = {
+    var closes = 0
+    val input = new ByteArrayInputStream(Array.fill(frames)(frame).flatten) {
+      override def close(): Unit = {
+        closes += 1
+        super.close()
+        inputFailure.foreach(throw _)
+      }
+    }
+    val native = new TrackingCoalescer(pushFailure, releaseFailure)
+    val produced = scala.collection.mutable.ArrayBuffer.empty[TrackingBatch]
+    val util = new NativeUtil {
+      override def getNextBatch(
+          columns: Int,
+          decode: (Array[Long], Array[Long]) => Long): Option[ColumnarBatch] = {
+        assert(columns == 0)
+        val rows = decode(Array.emptyLongArray, Array.emptyLongArray)
+        assert(rows > 0)
+        val batch = new TrackingBatch(batchFailure)
+        batch.setNumRows(rows.toInt)
+        produced += batch
+        Some(batch)
+      }
+    }
+    val decoder = NativeBatchDecoderIterator(
+      input,
+      new SQLMetric("nsTiming", 0L),
+      native,
+      util,
+      tracingEnabled = false,
+      coalesceRows = 3,
+      coalesceMaxBytes = 1024L)
+    try check(decoder, native, produced, () => closes)
+    finally {
+      decoder.close()
+      util.close()
+    }
+  }
+
+  def coalescerClosesPrefetchedAndDeliveredBatchesOnce(): Unit = {
+    Seq(false, true).foreach { deliver =>
+      withCoalescer(4) { (decoder, native, batches, closes) =>
+        assert(decoder.hasNext)
+        assert(decoder.hasNext, "repeated lookahead must not consume or decode again")
+        assert(native.creates == 1 && native.pushes == 3 && native.exports == 1)
+        assert(batches.size == 1 && batches.head.closeCalls == 0)
+        if (deliver) assert(decoder.next() eq batches.head)
+        decoder.close()
+        decoder.close()
+        assert(!decoder.hasNext)
+        assert(batches.head.closeCalls == 1)
+        assert(native.releases == 1 && closes() == 1)
+      }
+    }
+  }
+
+  def coalescerFlushesTailBeforeEofAndReleasesEveryOwner(): Unit = {
+    withCoalescer(4) { (decoder, native, batches, closes) =>
+      assert(decoder.next().numRows() == 3)
+      assert(decoder.next().numRows() == 1)
+      assert(!decoder.hasNext)
+      assert(!decoder.hasNext)
+      assert(batches.map(_.closeCalls).toSeq == Seq(1, 1))
+      assert(native.pushes == 4 && native.exports == 2 && native.releases == 1)
+      assert(closes() == 1)
+    }
+  }
+
+  def coalescerDecodeFailureDoesNotBecomeSuccessfulEof(): Unit = {
+    val expected = new IOException("corrupt second shuffle frame")
+    withCoalescer(4, pushFailure = Some(expected)) { (decoder, native, batches, closes) =>
+      val caught =
+        try {
+          decoder.hasNext
+          throw new AssertionError("Decode failure became success/EOF")
+        } catch { case failure: IOException => failure }
+      assert(caught eq expected)
+      assert(batches.isEmpty && native.exports == 0)
+      decoder.close()
+      assert(native.releases == 1 && closes() == 1)
+    }
+  }
+
+  def coalescerCleanupPreservesFailuresAndDoesNotReleaseTwice(): Unit = {
+    val first = new IOException("batch close failed")
+    val state = new IOException("coalescer close failed")
+    val input = new IOException("input close failed")
+    withCoalescer(
+      3,
+      releaseFailure = Some(state),
+      batchFailure = Some(first),
+      inputFailure = Some(input)) { (decoder, native, batches, closes) =>
+      assert(decoder.hasNext)
+      val caught =
+        try {
+          decoder.close()
+          throw new AssertionError("Expected cleanup failure")
+        } catch { case failure: IOException => failure }
+      assert(caught eq first)
+      assert(caught.getSuppressed.toSeq == Seq(state, input))
+      decoder.close()
+      assert(native.releases == 1 && batches.head.closeCalls == 1 && closes() == 1)
+    }
+  }
+
+  def coalescerIsNotAllocatedWhenAnUnusedIteratorCloses(): Unit = {
+    withCoalescer(3) { (decoder, native, batches, closes) =>
+      decoder.close()
+      assert(native.creates == 0 && native.releases == 0)
+      assert(batches.isEmpty && closes() == 1)
+    }
+  }
+
 }

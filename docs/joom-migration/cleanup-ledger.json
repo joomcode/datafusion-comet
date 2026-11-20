@@ -200,6 +200,14 @@
       "shared": false,
       "contains": "Port proposals, independent window/Spark semantic review, local build/test/existing benchmark receipts, source manifests and cleanup identities.",
       "preserve_until": "Final migration acceptance and user cleanup decision"
+    },
+    {
+      "type": "g07_auxiliary_outputs",
+      "path": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "contains": "Source proposals/reviews/parity manifests, local build/targeted test/existing benchmark logs and qualification receipts.",
+      "preserve_until": "Final migration acceptance and user cleanup decision"
     }
   ],
   "preexisting_or_shared": {
@@ -884,5 +892,31 @@
     "source_preservation": "refs/joom-migration/g06-qualified retains2aeca4df3; initial implementation evidence and receipts preserved.",
     "build_policy": "Documentation-only acceptance; no native/JVM rebuild, release artifact or new Docker image. Cached tools and ordinary RAT check may use standard temporary output.",
     "preservation": "Keep through final migration acceptance; no automatic deletion of records, recovery refs or shared caches."
+  },
+  "g07_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07",
+    "contains": "Initial documentation archive, all source proposals/reviews/parity audits, positive/negative logs, runtime/source manifests, benchmark results and final local completion receipt.",
+    "reused_outputs": [
+      "native/target",
+      "spark/target",
+      "common/target",
+      "native/target/criterion",
+      "target/criterion"
+    ],
+    "measured_sizes_kib": {
+      "native_target": 74567792,
+      "spark_target": 1681192,
+      "auxiliary_directory": 9136
+    },
+    "attribution": "Whole reused directory sizes, not G07-only growth. Debug dylib/classes/protobuf and libtest/benchmark outputs regenerated; no new Docker image, toolchain, package installation or release artifact. Maven/Cargo commands used offline caches. Standard final RAT may download its pinned official jar as before.",
+    "preservation": "Keep evidence and source snapshots through final migration acceptance/user cleanup decision. No automatic deletion of records, original checkouts or shared caches.",
+    "cleanup_guide": "CLEANUP.md; exact post-commit sizes in completion receipt."
+  },
+  "g07_integration_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07-integration",
+    "contains": "Qualified documentation archive, independent review, pre-integration refs/source snapshot, acceptance preservation proof, static/license logs and actual local/remote completion receipt.",
+    "source_preservation": "refs/joom-migration/g07-qualified preserves62e9ffd7a and the original implementation evidence.",
+    "build_policy": "Documentation-only closeout; no native/JVM rebuild, release artifact or new Docker image. Standard pinned RAT may use its normal temporary directory/download.",
+    "preservation": "Keep through final migration acceptance; no automatic deletion of evidence, refs or shared caches."
   }
 }

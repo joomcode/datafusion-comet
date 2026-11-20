@@ -22,9 +22,9 @@ use std::sync::Arc;
 use crate::bloom_filter::spark_bloom_filter;
 use crate::bloom_filter::spark_bloom_filter::{SparkBloomFilter, SparkBloomFilterVersion};
 
-use arrow::array::ArrayRef;
 use arrow::array::BinaryArray;
 use arrow::array::StringArray;
+use arrow::array::{Array, ArrayRef};
 use datafusion::common::{downcast_value, ScalarValue};
 use datafusion::error::{DataFusionError, Result};
 use datafusion::logical_expr::function::{AccumulatorArgs, StateFieldsArgs};
@@ -190,9 +190,13 @@ impl Accumulator for SparkBloomFilter {
             "Expect one element in 'states' but found {}",
             states.len()
         );
-        assert_eq!(states[0].len(), 1);
         let state_sv = downcast_value!(states[0], BinaryArray);
-        self.merge_filter(state_sv.value_data())
+        for row in 0..state_sv.len() {
+            if state_sv.is_valid(row) {
+                self.merge_filter(state_sv.value(row))?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -230,5 +234,125 @@ mod tests {
         let num_hash = spark_bloom_filter::optimal_num_hash_functions(100, num_bits);
         let acc = SparkBloomFilter::new(SparkBloomFilterVersion::V1, num_hash, num_bits, 0);
         assert!(acc.size() >= num_bits as usize / 8);
+    }
+
+    #[test]
+    fn merge_batch_merges_every_partial_state_of_a_batch() {
+        let num_bits = 1024;
+        let num_hash = spark_bloom_filter::optimal_num_hash_functions(100, num_bits);
+        let filter = || SparkBloomFilter::new(SparkBloomFilterVersion::V1, num_hash, num_bits, 0);
+        let state = |values: &[i64]| {
+            let mut acc = filter();
+            for v in values {
+                acc.put_long(*v);
+            }
+            match acc.state().unwrap().remove(0) {
+                ScalarValue::Binary(Some(bytes)) => bytes,
+                other => panic!("unexpected state {other:?}"),
+            }
+        };
+        let (a, b) = (state(&[1, 2]), state(&[42]));
+
+        let mut separately = filter();
+        for s in [&a, &b] {
+            let one: ArrayRef = Arc::new(BinaryArray::from(vec![Some(s.as_slice())]));
+            separately.merge_batch(&[one]).unwrap();
+        }
+        let mut together = filter();
+        let all: ArrayRef = Arc::new(BinaryArray::from(vec![
+            Some(a.as_slice()),
+            None,
+            Some(b.as_slice()),
+        ]));
+        together.merge_batch(&[all]).unwrap();
+
+        assert_eq!(together.evaluate().unwrap(), separately.evaluate().unwrap());
+        assert_ne!(together.evaluate().unwrap(), filter().evaluate().unwrap());
+    }
+
+    fn merge_test_filter(version: SparkBloomFilterVersion) -> SparkBloomFilter {
+        let num_bits = 1024;
+        let num_hash = spark_bloom_filter::optimal_num_hash_functions(100, num_bits);
+        SparkBloomFilter::new(version, num_hash, num_bits, 0)
+    }
+
+    #[test]
+    fn merge_batch_uses_the_sliced_row_instead_of_the_prefix_value_buffer() {
+        for version in [SparkBloomFilterVersion::V1, SparkBloomFilterVersion::V2] {
+            let mut prefix = merge_test_filter(version);
+            prefix.put_long(987654321);
+            let mut expected = merge_test_filter(version);
+            expected.put_long(42);
+            let prefix_bytes = prefix.state_as_bytes();
+            let expected_bytes = expected.state_as_bytes();
+            assert_ne!(
+                prefix_bytes, expected_bytes,
+                "fixture must distinguish the prefix"
+            );
+            let values = BinaryArray::from(vec![
+                Some(prefix_bytes.as_slice()),
+                Some(expected_bytes.as_slice()),
+                Some(prefix_bytes.as_slice()),
+            ]);
+            let sliced: ArrayRef = Arc::new(values.slice(1, 1));
+            let mut actual = merge_test_filter(version);
+            actual.merge_batch(&[sliced]).unwrap();
+            assert_eq!(actual.evaluate().unwrap(), expected.evaluate().unwrap());
+        }
+    }
+
+    #[test]
+    fn merge_batch_handles_multiple_sliced_states_nulls_and_empty_input_for_both_versions() {
+        for version in [SparkBloomFilterVersion::V1, SparkBloomFilterVersion::V2] {
+            let state = |values: &[i64]| {
+                let mut filter = merge_test_filter(version);
+                for value in values {
+                    filter.put_long(*value);
+                }
+                filter.state_as_bytes()
+            };
+            let prefix = state(&[987654321]);
+            let a = state(&[1, 2]);
+            let b = state(&[42, i64::MIN, i64::MAX]);
+            let source = BinaryArray::from(vec![
+                Some(prefix.as_slice()),
+                Some(a.as_slice()),
+                None,
+                Some(b.as_slice()),
+                Some(prefix.as_slice()),
+            ]);
+            let mut actual = merge_test_filter(version);
+            actual.merge_batch(&[Arc::new(source.slice(1, 3))]).unwrap();
+            let mut expected = merge_test_filter(version);
+            for value in [1, 2, 42, i64::MIN, i64::MAX] {
+                expected.put_long(value);
+            }
+            assert_eq!(actual.evaluate().unwrap(), expected.evaluate().unwrap());
+            let nonempty = actual.evaluate().unwrap();
+            let empty: ArrayRef = Arc::new(BinaryArray::from(Vec::<Option<&[u8]>>::new()));
+            let nulls: ArrayRef = Arc::new(BinaryArray::from(vec![None::<&[u8]>, None]));
+            actual.merge_batch(std::slice::from_ref(&empty)).unwrap();
+            actual.merge_batch(std::slice::from_ref(&nulls)).unwrap();
+            assert_eq!(actual.evaluate().unwrap(), nonempty);
+            let mut untouched = merge_test_filter(version);
+            untouched.merge_batch(&[empty]).unwrap();
+            untouched.merge_batch(&[nulls]).unwrap();
+            assert_eq!(untouched.evaluate().unwrap(), ScalarValue::Binary(None));
+        }
+    }
+
+    #[test]
+    fn merge_batch_propagates_a_later_incompatible_state_error() {
+        let mut first = merge_test_filter(SparkBloomFilterVersion::V2);
+        first.put_long(42);
+        let good = first.state_as_bytes();
+        let bad = merge_test_filter(SparkBloomFilterVersion::V1).state_as_bytes();
+        let input: ArrayRef = Arc::new(BinaryArray::from(vec![
+            Some(good.as_slice()),
+            Some(bad.as_slice()),
+        ]));
+        let mut actual = merge_test_filter(SparkBloomFilterVersion::V2);
+        let error = actual.merge_batch(&[input]).unwrap_err().to_string();
+        assert!(error.contains("version mismatch"), "{error}");
     }
 }

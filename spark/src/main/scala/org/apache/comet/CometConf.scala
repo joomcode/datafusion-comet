@@ -622,6 +622,32 @@ object CometConf extends ShimCometConf {
       .booleanConf
       .createWithDefault(true)
 
+  val COMET_SHUFFLE_READ_COALESCE_ENABLED: ConfigEntry[Boolean] =
+    conf("spark.comet.shuffle.read.coalesce.enabled")
+      .category(CATEGORY_SHUFFLE)
+      .doc(
+        "When enabled, a Comet shuffle reader joins the small blocks it decodes into batches " +
+          "of spark.comet.batchSize rows before passing them on, both to JVM consumers and to " +
+          "native operators reading the shuffle directly. A map task writes one block per " +
+          "reduce partition, so with many partitions and wide rows a block holds a few rows " +
+          "and the per-batch cost of every column dominates the read.")
+      .booleanConf
+      .createWithDefault(true)
+
+  val COMET_SHUFFLE_READ_COALESCE_MAX_BYTES: ConfigEntry[Long] =
+    conf("spark.comet.shuffle.read.coalesce.maxBytes")
+      .category(CATEGORY_SHUFFLE)
+      .doc(
+        "Upper bound on the column data of one batch joined by the Comet shuffle reader when " +
+          "spark.comet.shuffle.read.coalesce.enabled is set. The reader passes a batch on once " +
+          "it reaches spark.comet.batchSize rows or this many bytes, whichever comes first, " +
+          "and a block larger than the bound passes through as it is. The joined batch is not " +
+          "tracked by the memory pool, so with wide rows (large binary or nested values) a " +
+          "row-only bound can hold gigabytes per task. 0 disables the byte bound.")
+      .bytesConf(ByteUnit.BYTE)
+      .checkValue(_ >= 0, "Must be >= 0.")
+      .createWithDefault(64L * 1024 * 1024)
+
   val COMET_SHUFFLE_DIRECT_READ_ENABLED: ConfigEntry[Boolean] =
     conf("spark.comet.shuffle.directRead.enabled")
       .withAlternative(s"$COMET_EXEC_CONFIG_PREFIX.shuffle.directRead.enabled")

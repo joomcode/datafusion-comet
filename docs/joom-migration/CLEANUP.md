@@ -224,3 +224,27 @@ the original qualified commit. Preserve this evidence and original G06 logs
 through final acceptance; nothing is automatically deleted. Integration creates
 no runtime build, release JAR or Docker image. Final auxiliary size and exact
 local/remote source identities are in this directory's completion.json.
+
+## G07 local outputs
+
+Keep `${MIGRATION_AUX_ROOT}/20261120_comet12-g07` through final migration acceptance.
+It contains source/review snapshots, positive and negative logs, library/source
+checksums, incomplete optional benchmark evidence and the completion receipt.
+Builds reused `native/target`, `spark/target`, `common/target`,
+`native/target/criterion` and `target/criterion`; no G07 release artifacts, Docker
+images or new toolchains were created. See `cleanup-ledger.json#g07_resources`
+and the completion receipt for measured whole-directory sizes.
+
+After saving accepted artifacts/evidence and explicitly choosing cleanup, the
+existing guarded build-output cleanup commands in this guide apply. Do not delete
+shared Maven/Cargo/SDKMAN caches or source checkouts merely because G07 used them.
+No cleanup is performed automatically, including the task auxiliary directory.
+
+## G07 accepted integration
+
+`${MIGRATION_AUX_ROOT}/20261120_comet12-g07-integration` retains the qualified
+documentation archive, pre-integration refs/source snapshot, independent audit,
+static/license logs, preservation proof and exact publication/completion receipt.
+`refs/joom-migration/g07-qualified` retains the original qualified commit.
+Preserve this evidence through final acceptance; no automatic cleanup is performed.
+No new runtime build, release JAR or Docker image is created by integration.

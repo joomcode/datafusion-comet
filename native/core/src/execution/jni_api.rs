@@ -130,7 +130,8 @@ use crate::execution::memory_pools::{
 };
 use crate::execution::operators::{ScanExec, ShuffleScanExec};
 use crate::execution::shuffle::{
-    decode_remote_shuffle_batch, read_ipc_compressed, CompressionCodec, ShuffleWriterExec,
+    decode_remote_shuffle_batch, read_ipc_compressed, CompressionCodec, ShuffleReadCoalescer,
+    ShuffleWriterExec,
 };
 use crate::execution::spark_plan::SparkPlan;
 use crate::execution::spill_dirs::plan_disk_manager;
@@ -373,6 +374,40 @@ fn memory_usage() -> MemoryUsage {
         pools: snapshot.all_pools.len(),
         plans: snapshot.plans,
     }
+}
+
+/// Opt-in measurements at unreserved decode/FFI boundaries. The shared-buffer counter counts
+/// a common IPC body once rather than once per column.
+pub(crate) fn log_batch_memory(boundary: &str, batch: &RecordBatch) {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let enabled =
+        *ENABLED.get_or_init(|| std::env::var("COMET_DEBUG_BATCH_MEMORY").as_deref() == Ok("1"));
+    if let Some(message) = batch_memory_log_message(enabled, boundary, batch, memory_usage) {
+        info!("{message}");
+    }
+}
+
+fn batch_memory_log_message(
+    enabled: bool,
+    boundary: &str,
+    batch: &RecordBatch,
+    usage: impl FnOnce() -> MemoryUsage,
+) -> Option<String> {
+    if !enabled {
+        return None;
+    }
+    let bytes =
+        datafusion::common::utils::memory::RecordBatchMemoryCounter::new().count_batch(batch);
+    if bytes < 16 * 1024 * 1024 {
+        return None;
+    }
+    let usage = usage();
+    Some(format!(
+        "Comet batch memory: boundary={boundary} rows={} bytes={bytes} allocated={} reserved={}",
+        batch.num_rows(),
+        usage.native_allocated,
+        usage.pools_reserved
+    ))
 }
 
 fn parse_usize_env_var(name: &str) -> Option<usize> {
@@ -1306,6 +1341,7 @@ unsafe fn export_batch(
     validate: bool,
 ) -> CometResult<i64> {
     let num_cols = array_addrs.len();
+    log_batch_memory("ffi_output", &output_batch);
 
     let output_schema = output_batch.schema();
     let results = output_batch.columns();
@@ -2372,7 +2408,185 @@ unsafe fn decode_shuffle_block(
     } else {
         read_ipc_compressed(block)?
     };
+    log_batch_memory("shuffle_decode_jvm", &batch);
     export_batch(array_addrs, schema_addrs, batch, false)
+}
+
+struct ShuffleReadState {
+    coalescer: ShuffleReadCoalescer,
+    ready: Option<RecordBatch>,
+    // A shuffle iterator has a fixed output width. Check headers before a flush can export an
+    // older buffered batch using the next block's advertised width.
+    input_columns: Option<usize>,
+}
+
+impl ShuffleReadState {
+    fn push_block(&mut self, block: &[u8], header_columns: usize) -> CometResult<bool> {
+        if self.ready.is_some() {
+            return Err(CometError::Internal(
+                "Shuffle read coalescer has an unexported batch".to_owned(),
+            ));
+        }
+        let batch = read_ipc_compressed(block)?;
+        if batch.num_columns() != header_columns {
+            return Err(CometError::Internal(format!(
+                "Shuffle block header field count mismatch: header={header_columns}, IPC={}",
+                batch.num_columns()
+            )));
+        }
+        if let Some(expected) = self.input_columns {
+            if header_columns != expected {
+                return Err(CometError::Internal(format!(
+                    "Shuffle block field count changed from {expected} to {header_columns}"
+                )));
+            }
+        } else {
+            self.input_columns = Some(header_columns);
+        }
+        self.ready = self.coalescer.push(batch)?;
+        Ok(self.ready.is_some())
+    }
+
+    fn finish(&mut self) -> CometResult<bool> {
+        if self.ready.is_none() {
+            self.ready = self.coalescer.finish()?;
+        }
+        Ok(self.ready.is_some())
+    }
+
+    /// # Safety
+    /// Output addresses must satisfy export_batch's contract.
+    unsafe fn export(&mut self, arrays: &[i64], schemas: &[i64]) -> CometResult<i64> {
+        if let Some(batch) = &self.ready {
+            if arrays.len() != batch.num_columns() || schemas.len() != batch.num_columns() {
+                return Err(CometError::Internal(format!(
+                    "Coalesced shuffle output address count mismatch: columns={}, arrays={}, schemas={}",
+                    batch.num_columns(), arrays.len(), schemas.len()
+                )));
+            }
+        }
+        match self.ready.take() {
+            Some(batch) => {
+                log_batch_memory("shuffle_decode_jvm", &batch);
+                unsafe { export_batch(arrays, schemas, batch, false) }
+            }
+            None => Ok(-1),
+        }
+    }
+}
+
+/// # Safety
+/// The nonzero handle must identify a live, exclusively borrowed ShuffleReadState.
+unsafe fn shuffle_read_state<'a>(handle: jlong) -> CometResult<&'a mut ShuffleReadState> {
+    unsafe { (handle as *mut ShuffleReadState).as_mut() }
+        .ok_or_else(|| CometError::Internal("Shuffle read coalescer is not initialized".to_owned()))
+}
+
+fn checked_shuffle_block_length(length: jint, capacity: usize) -> CometResult<usize> {
+    let length = usize::try_from(length)
+        .map_err(|_| CometError::Internal("Negative shuffle block length".to_owned()))?;
+    if length == 0 || length > capacity {
+        return Err(CometError::Internal(format!(
+            "Shuffle block length {length} is outside direct buffer capacity {capacity}"
+        )));
+    }
+    Ok(length)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_apache_comet_Native_createShuffleReadCoalescer(
+    e: EnvUnowned,
+    _class: JClass,
+    batch_size: jint,
+    max_bytes: jlong,
+) -> jlong {
+    try_unwrap_or_throw(&e, |_| {
+        let state = ShuffleReadState {
+            coalescer: ShuffleReadCoalescer::new(
+                batch_size.max(1) as usize,
+                crate::execution::shuffle::coalesce_max_bytes(max_bytes.max(0) as u64),
+            ),
+            ready: None,
+            input_columns: None,
+        };
+        Ok(Box::into_raw(Box::new(state)) as jlong)
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// A nonzero handle must have been returned by createShuffleReadCoalescer and not released.
+/// No concurrent operation may use it; the JVM iterator serializes push/export/release.
+pub unsafe extern "system" fn Java_org_apache_comet_Native_releaseShuffleReadCoalescer(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) {
+    try_unwrap_or_throw(&e, |_| {
+        if handle != 0 {
+            drop(unsafe { Box::from_raw(handle as *mut ShuffleReadState) });
+        }
+        Ok(())
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The direct buffer must be valid for length bytes. The handle must be live and exclusively
+/// borrowed for this call. Decoded Arrow bodies own their buffers independently of this input.
+pub unsafe extern "system" fn Java_org_apache_comet_Native_pushShuffleBlock(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    byte_buffer: JByteBuffer,
+    length: jint,
+    field_count: jint,
+    tracing_enabled: jboolean,
+) -> jboolean {
+    try_unwrap_or_throw(&e, |env| {
+        with_trace("pushShuffleBlock", tracing_enabled != JNI_FALSE, || {
+            let state = unsafe { shuffle_read_state(handle) }?;
+            let capacity = env.get_direct_buffer_capacity(&byte_buffer)?;
+            let length = checked_shuffle_block_length(length, capacity)?;
+            let field_count = usize::try_from(field_count)
+                .map_err(|_| CometError::Internal("Negative shuffle field count".to_owned()))?;
+            let raw_pointer = env.get_direct_buffer_address(&byte_buffer)?;
+            let slice = unsafe { std::slice::from_raw_parts(raw_pointer, length) };
+            Ok(state.push_block(slice, field_count)? as jboolean)
+        })
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The handle must be live and exclusively borrowed for this call.
+pub unsafe extern "system" fn Java_org_apache_comet_Native_finishShuffleRead(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) -> jboolean {
+    try_unwrap_or_throw(&e, |_| {
+        let state = unsafe { shuffle_read_state(handle) }?;
+        Ok(state.finish()? as jboolean)
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The handle must be live and exclusively borrowed. Output addresses must satisfy export_batch.
+pub unsafe extern "system" fn Java_org_apache_comet_Native_exportShuffleBatch(
+    e: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    array_addrs: JLongArray,
+    schema_addrs: JLongArray,
+) -> jlong {
+    try_unwrap_or_throw(&e, |env| {
+        let state = unsafe { shuffle_read_state(handle) }?;
+        let arrays = unsafe { array_addrs.get_elements(env, ReleaseMode::NoCopyBack)? };
+        let schemas = unsafe { schema_addrs.get_elements(env, ReleaseMode::NoCopyBack)? };
+        unsafe { state.export(&arrays, &schemas) }
+    })
 }
 
 #[no_mangle]
@@ -4602,5 +4816,176 @@ mod tests {
             "{error}"
         );
         release_plan(exec_context, &mut |_| Ok(())).unwrap();
+    }
+
+    #[test]
+    fn shuffle_read_state_preserves_ready_rows_and_rejects_decode_errors() {
+        let mut state = ShuffleReadState {
+            coalescer: ShuffleReadCoalescer::new(4, usize::MAX),
+            ready: None,
+            input_columns: None,
+        };
+        let batch = RecordBatch::try_new_with_options(
+            Arc::new(Schema::empty()),
+            vec![],
+            &arrow::record_batch::RecordBatchOptions::new().with_row_count(Some(3)),
+        )
+        .unwrap();
+        let block = shuffle_block(&batch);
+        assert!(!state.push_block(&block, 0).unwrap());
+        assert!(state.push_block(&block, 0).unwrap());
+        assert_eq!(state.ready.as_ref().unwrap().num_rows(), 6);
+        assert!(state
+            .push_block(&block, 0)
+            .unwrap_err()
+            .to_string()
+            .contains("unexported"));
+        assert!(state.finish().unwrap());
+        assert_eq!(unsafe { state.export(&[], &[]) }.unwrap(), 6);
+        assert_eq!(unsafe { state.export(&[], &[]) }.unwrap(), -1);
+        assert!(!state.finish().unwrap());
+
+        assert!(!state.push_block(&block, 0).unwrap());
+        assert!(state.push_block(b"corrupt IPC block", 0).is_err());
+        assert_eq!(state.coalescer.buffered_rows(), 3);
+        assert!(
+            state.ready.is_none(),
+            "malformed input became a partial successful result"
+        );
+    }
+
+    #[test]
+    fn shuffle_read_state_checks_headers_and_addresses_before_exporting_an_old_batch() {
+        let batch = int_batch();
+        let block = shuffle_block(&batch);
+        let bytes = batch.column(0).to_data().get_slice_memory_size().unwrap();
+        let mut state = ShuffleReadState {
+            coalescer: ShuffleReadCoalescer::new(100, 2 * bytes - 1),
+            ready: None,
+            input_columns: None,
+        };
+        let error = state.push_block(&block, 0).unwrap_err().to_string();
+        assert!(error.contains("header field count mismatch"), "{error}");
+        assert_eq!(state.coalescer.buffered_rows(), 0);
+        assert!(!state.push_block(&block, 1).unwrap());
+        let empty = RecordBatch::try_new_with_options(
+            Arc::new(Schema::empty()),
+            vec![],
+            &arrow::record_batch::RecordBatchOptions::new().with_row_count(Some(3)),
+        )
+        .unwrap();
+        let error = state
+            .push_block(&shuffle_block(&empty), 0)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("field count changed"), "{error}");
+        assert_eq!(state.coalescer.buffered_rows(), batch.num_rows());
+        assert!(state.ready.is_none());
+
+        // A valid second block flushes the first block at the byte bound while retaining the
+        // second block. Wrong address counts fail before any pointer is read or batch taken.
+        assert!(state.push_block(&block, 1).unwrap());
+        assert_eq!(state.ready.as_ref().unwrap(), &batch);
+        assert!(unsafe { state.export(&[], &[]) }
+            .unwrap_err()
+            .to_string()
+            .contains("address count mismatch"));
+        assert!(unsafe { state.export(&[0], &[]) }
+            .unwrap_err()
+            .to_string()
+            .contains("address count mismatch"));
+        assert_eq!(state.ready.as_ref().unwrap(), &batch);
+        fn export_one(state: &mut ShuffleReadState) -> (i64, ArrayRef) {
+            let mut array = Box::new(FFI_ArrowArray::empty());
+            let mut schema = Box::new(FFI_ArrowSchema::empty());
+            let rows = unsafe {
+                state.export(
+                    &[array.as_mut() as *mut FFI_ArrowArray as i64],
+                    &[schema.as_mut() as *mut FFI_ArrowSchema as i64],
+                )
+            }
+            .unwrap();
+            let data = unsafe { from_ffi(*array, &schema) }.unwrap();
+            (rows, arrow::array::make_array(data))
+        }
+        let (rows, actual) = export_one(&mut state);
+        assert_eq!(rows, batch.num_rows() as i64);
+        assert_eq!(actual.as_ref(), batch.column(0).as_ref());
+        assert!(state.finish().unwrap());
+        let (rows, actual) = export_one(&mut state);
+        assert_eq!(rows, batch.num_rows() as i64);
+        assert_eq!(actual.as_ref(), batch.column(0).as_ref());
+        assert!(!state.finish().unwrap());
+    }
+
+    #[test]
+    fn shuffle_read_direct_buffer_length_is_checked_before_creating_a_slice() {
+        assert!(checked_shuffle_block_length(-1, 8).is_err());
+        assert!(checked_shuffle_block_length(0, 8).is_err());
+        assert!(checked_shuffle_block_length(9, 8).is_err());
+        assert_eq!(checked_shuffle_block_length(8, 8).unwrap(), 8);
+        assert_eq!(checked_shuffle_block_length(4, 8).unwrap(), 4);
+    }
+
+    #[test]
+    fn shuffle_read_state_drop_releases_buffered_arrays() {
+        let array: ArrayRef = Arc::new(Int32Array::from(vec![1, 2]));
+        let weak = Arc::downgrade(&array);
+        let batch = RecordBatch::try_from_iter([("id", array)]).unwrap();
+        let mut state = ShuffleReadState {
+            coalescer: ShuffleReadCoalescer::new(100, usize::MAX),
+            ready: None,
+            input_columns: None,
+        };
+        assert!(state.coalescer.push(batch).unwrap().is_none());
+        assert!(weak.upgrade().is_some());
+        drop(state);
+        assert!(
+            weak.upgrade().is_none(),
+            "decoder state retained a buffered array"
+        );
+    }
+
+    #[test]
+    fn batch_memory_diagnostics_are_opt_in_thresholded_and_count_shared_buffers_once() {
+        let small = int_batch();
+        assert!(
+            batch_memory_log_message(false, "disabled", &small, || panic!(
+                "disabled log sampled memory"
+            ))
+            .is_none()
+        );
+        assert!(batch_memory_log_message(true, "small", &small, || panic!(
+            "small batch sampled memory"
+        ))
+        .is_none());
+        let rows = 4 * 1024 * 1024;
+        let values = arrow::buffer::Buffer::from_vec(vec![7_i32; rows]);
+        let array: ArrayRef = Arc::new(Int32Array::new(
+            arrow::buffer::ScalarBuffer::new(values, 0, rows),
+            None,
+        ));
+        let batch = RecordBatch::try_from_iter([("a", Arc::clone(&array)), ("b", array)]).unwrap();
+        let bytes =
+            datafusion::common::utils::memory::RecordBatchMemoryCounter::new().count_batch(&batch);
+        assert_eq!(
+            bytes,
+            rows * 4,
+            "a shared allocation was charged once per column"
+        );
+        let log = batch_memory_log_message(true, "shuffle_decode_native", &batch, || MemoryUsage {
+            native_allocated: 30,
+            pools_reserved: 10,
+            pools: 1,
+            plans: 1,
+        })
+        .unwrap();
+        assert_eq!(log, format!("Comet batch memory: boundary=shuffle_decode_native rows={rows} bytes={bytes} allocated=30 reserved=10"));
+        assert!(
+            batch_memory_log_message(false, "disabled", &batch, || panic!(
+                "disabled large batch sampled memory"
+            ))
+            .is_none()
+        );
     }
 }

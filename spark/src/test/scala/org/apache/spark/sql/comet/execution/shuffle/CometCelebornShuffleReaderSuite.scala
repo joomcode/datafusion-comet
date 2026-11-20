@@ -1724,4 +1724,35 @@ class CometCelebornShuffleReaderSuite extends CometTestBase {
   test("decoder rejects a missing remote schema before consuming or reporting persisted data") {
     NativeBatchDecoderIteratorLifecycleChecks.rejectsRemoteStreamsWithoutExpectedSchema()
   }
+
+  test("G07 coalescer closes prefetched and delivered batches once") {
+    NativeBatchDecoderIteratorLifecycleChecks.coalescerClosesPrefetchedAndDeliveredBatchesOnce()
+  }
+
+  test("G07 coalescer flushes tail rows before EOF and releases every owner") {
+    NativeBatchDecoderIteratorLifecycleChecks.coalescerFlushesTailBeforeEofAndReleasesEveryOwner()
+  }
+
+  test("G07 coalescer propagates decode failure without successful EOF") {
+    NativeBatchDecoderIteratorLifecycleChecks.coalescerDecodeFailureDoesNotBecomeSuccessfulEof()
+  }
+
+  test("G07 coalescer preserves cleanup failures and never double releases") {
+    NativeBatchDecoderIteratorLifecycleChecks
+      .coalescerCleanupPreservesFailuresAndDoesNotReleaseTwice()
+  }
+
+  test("G07 coalescer does not allocate state for an unused iterator") {
+    NativeBatchDecoderIteratorLifecycleChecks.coalescerIsNotAllocatedWhenAnUnusedIteratorCloses()
+  }
+
+  test("G07 coalescer waits for active creation decode and Arrow import") {
+    NativeBatchDecoderIteratorConcurrencyChecks.coalescerCloseWaitsForActiveNativeAndImport()
+  }
+
+  test("G07 coalescer unblocks a closed transport before native allocation") {
+    NativeBatchDecoderIteratorConcurrencyChecks
+      .coalescerCloseUnblocksTransportBeforeAllocatingNativeState()
+  }
+
 }

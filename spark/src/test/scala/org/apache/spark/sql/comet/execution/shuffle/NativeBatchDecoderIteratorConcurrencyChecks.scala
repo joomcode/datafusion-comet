@@ -381,4 +381,123 @@ private[shuffle] object NativeBatchDecoderIteratorConcurrencyChecks {
     assert(importCalls.get() == 0)
     assert(!decoder.hasNext)
   }
+
+  def coalescerCloseWaitsForActiveNativeAndImport(): Unit = {
+    Seq(CreateDecoder, DecodeBlock, ImportBatch).foreach { stage =>
+      val entered = new CountDownLatch(1)
+      val proceed = new CountDownLatch(1)
+      def pauseAt(current: DecodeStage): Unit = {
+        if (stage == current) {
+          entered.countDown()
+          await(proceed)
+        }
+      }
+      val batch = new TrackingBatch
+      val closes = new AtomicInteger()
+      val releases = new AtomicInteger()
+      val input = new ByteArrayInputStream(frame) {
+        override def close(): Unit = { closes.incrementAndGet(); super.close() }
+      }
+      val native = new Native {
+        override def createShuffleReadCoalescer(rows: Int, bytes: Long): Long = {
+          pauseAt(CreateDecoder)
+          assert(releases.get() == 0)
+          73L
+        }
+        override def pushShuffleBlock(
+            state: Long,
+            bytes: ByteBuffer,
+            length: Int,
+            fields: Int,
+            tracing: Boolean): Boolean = {
+          pauseAt(DecodeBlock)
+          assert(releases.get() == 0)
+          true
+        }
+        override def exportShuffleBatch(
+            state: Long,
+            arrays: Array[Long],
+            schemas: Array[Long]): Long = { assert(releases.get() == 0); 1L }
+        override def releaseShuffleReadCoalescer(state: Long): Unit = {
+          assert(state == 73L)
+          releases.incrementAndGet()
+        }
+      }
+      val util = new NativeUtil {
+        override def getNextBatch(
+            columns: Int,
+            decode: (Array[Long], Array[Long]) => Long): Option[ColumnarBatch] = {
+          assert(decode(Array.emptyLongArray, Array.emptyLongArray) == 1L)
+          pauseAt(ImportBatch)
+          assert(releases.get() == 0 && batch.closeCalls.get() == 0)
+          Some(batch)
+        }
+      }
+      val decoder = NativeBatchDecoderIterator(
+        input,
+        new SQLMetric("nsTiming", 0L),
+        native,
+        util,
+        tracingEnabled = false,
+        coalesceRows = 3)
+      val consumer = new Worker("coalesced shuffle read")({ decoder.hasNext; () })
+      var closer: Option[Worker] = None
+      try {
+        await(entered)
+        val cleanup = new Worker("coalesced shuffle cleanup")({ decoder.close() })
+        closer = Some(cleanup)
+        awaitBlocked(cleanup)
+        assert(releases.get() == 0 && batch.closeCalls.get() == 0 && closes.get() == 0)
+      } finally {
+        proceed.countDown()
+        try join(Seq(consumer) ++ closer)
+        finally { decoder.close(); util.close() }
+      }
+      assert(releases.get() == 1 && batch.closeCalls.get() == 1 && closes.get() == 1)
+      assert(!decoder.hasNext)
+    }
+  }
+
+  def coalescerCloseUnblocksTransportBeforeAllocatingNativeState(): Unit = {
+    val reading = new CountDownLatch(1)
+    val closed = new CountDownLatch(1)
+    val closes = new AtomicInteger()
+    val creates = new AtomicInteger()
+    val input = new ByteArrayInputStream(frame) {
+      override def read(bytes: Array[Byte], offset: Int, length: Int): Int = {
+        if (available() == 4) { reading.countDown(); await(closed) }
+        super.read(bytes, offset, length)
+      }
+      override def close(): Unit = { closes.incrementAndGet(); closed.countDown(); super.close() }
+    }
+    val native = new Native {
+      override def createShuffleReadCoalescer(rows: Int, bytes: Long): Long = {
+        creates.incrementAndGet()
+        throw new AssertionError("Closed transport returned a block that was decoded")
+      }
+    }
+    val decoder = NativeBatchDecoderIterator(
+      input,
+      new SQLMetric("nsTiming", 0L),
+      native,
+      null,
+      tracingEnabled = false,
+      coalesceRows = 3)
+    val consumer = new Worker("coalesced blocked transport")({ assert(!decoder.hasNext) })
+    var closer: Option[Worker] = None
+    try {
+      await(reading)
+      val cleanup = new Worker("coalesced transport cleanup")({ decoder.close() })
+      closer = Some(cleanup)
+      await(cleanup.finished)
+      await(consumer.finished)
+    } finally {
+      closed.countDown()
+      try join(Seq(consumer) ++ closer)
+      finally decoder.close()
+    }
+    assert(closes.get() == 1 && creates.get() == 0)
+    assert(!decoder.hasNext)
+  }
+
 }

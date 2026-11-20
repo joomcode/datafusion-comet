@@ -3052,7 +3052,11 @@ class CometExecSuite extends CometTestBase {
     withParquetTable((0 until 5).map(i => (i, i + 1)), "t1") {
       withParquetTable((0 until 5).map(i => (i, i + 1)), "t2") {
         val df = sql("SELECT /*+ SHUFFLE_HASH(t1) */ * FROM t1 INNER JOIN t2 ON t1._1 = t2._1")
-        df.collect()
+        // This fixture checks the original one-batch-per-block metric counts. The coalesced
+        // read paths and their exact results/batching are covered in CometShuffleReadCoalesceSuite.
+        withSQLConf(CometConf.COMET_SHUFFLE_READ_COALESCE_ENABLED.key -> "false") {
+          df.collect()
+        }
 
         val metrics = find(df.queryExecution.executedPlan) {
           case _: CometHashJoinExec => true
@@ -5841,6 +5845,57 @@ class CometExecSuite extends CometTestBase {
           messages.exists(m =>
             m.contains("It is possible the underlying files have been updated")),
           s"Expected readCurrentFileNotFoundError for a missing file, but got:\n  $chain")
+      }
+    }
+  }
+
+  test("pooled columnar-to-row projections stay correct across schemas and self-joins") {
+    withSQLConf(
+      SQLConf.ANSI_ENABLED.key -> "true",
+      SQLConf.WHOLESTAGE_CODEGEN_ENABLED.key -> "false",
+      SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+      SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+      CometConf.COMET_EXEC_SORT_MERGE_JOIN_ENABLED.key -> "false") {
+      withParquetTable((0 until 200).map(i => (i % 17, s"v$i", i.toLong * 3)), "t") {
+        for (_ <- 0 until 2) {
+          checkSparkAnswer(sql("SELECT a._1, a._2, b._3 FROM t a JOIN t b ON a._1 = b._1"))
+          checkSparkAnswer(sql("SELECT _2, _1 FROM t WHERE _1 > 3"))
+          checkSparkAnswer(sql("SELECT _3, named_struct('k', _1, 's', _2) FROM t"))
+        }
+      }
+    }
+  }
+
+  for (wholeStage <- Seq("true", "false")) {
+    test(
+      s"sort wide binary payload preserves values across the native boundary codegen=$wholeStage") {
+      // Disable Parquet dictionary encoding so the wide Binary sort path is exercised.
+      // Nulls and distinct payloads catch a view retaining the wrong backing buffer.
+      withTempDir { dir =>
+        val path = new Path(dir.toURI.toString, "wide-sort").toString
+        val rows = (0 until 384).map { i =>
+          val payload = if (i % 7 == 0) null else Array.fill[Byte](8192)((i % 251).toByte)
+          (i, payload)
+        }
+        spark
+          .createDataFrame(rows)
+          .coalesce(1)
+          .write
+          .option("parquet.enable.dictionary", "false")
+          .parquet(path)
+        withSQLConf(
+          SQLConf.ANSI_ENABLED.key -> "true",
+          SQLConf.WHOLESTAGE_CODEGEN_ENABLED.key -> wholeStage,
+          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+          CometConf.COMET_NATIVE_COLUMNAR_TO_ROW_ENABLED.key -> "false",
+          CometConf.COMET_BATCH_SIZE.key -> "32",
+          "spark.comet.exec.sort.enabled" -> "true",
+          "spark.comet.exec.transitionRevert.enabled" -> "false") {
+          val query = spark.read.parquet(path).sortWithinPartitions($"_1".desc)
+          checkSparkAnswerAndOperator(
+            query,
+            Seq(classOf[CometSortExec], classOf[CometColumnarToRowExec]))
+        }
       }
     }
   }

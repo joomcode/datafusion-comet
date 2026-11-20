@@ -44,7 +44,7 @@ JVM shuffle (`CometColumnarExchange`) is used instead of native shuffle (`CometE
 
 2. **Child plan is not a Comet native operator**: When the child plan is a Spark row-based operator
    (not a `CometPlan`), JVM shuffle is used, since native shuffle requires columnar input from
-   Comet operators. The exception is `spark.comet.convert.shuffleInput.enabled`, which converts
+   Comet operators. In `auto` mode, `spark.comet.convert.shuffleInput.enabled` can convert
    the child's rows to Arrow with `CometSparkToColumnarExec` so that native shuffle can take the
    shuffle instead. See [When Native Shuffle is Used](native_shuffle.md#when-native-shuffle-is-used).
 
@@ -187,12 +187,26 @@ Selection logic in `CometShuffleManager.shouldBypassMergeSort()`:
 6. For bypass writer: partition files are concatenated into final output
 7. For sort writer: spill files are merged
 
+`SortedRowEncoder` is shared by the single-partition and sorted-spill entry points. When a
+string/binary dictionary is not useful, it can reuse the dictionary's values buffer as a plain
+array only if every non-NULL key names a distinct non-NULL value in insertion order. Repeated or
+reordered keys, unused values and NULL dictionary values retain the ordinary Arrow cast. The
+result keeps its own reference to the values buffer when builders reset for the next batch.
+
 ### Read Path
 
-1. `CometBlockStoreShuffleReader.read()` creates `ShuffleBlockFetcherIterator`
-2. For each block, `NativeBatchDecoderIterator` reads the IPC stream
-3. Native code (`Native.decodeShuffleBlock()`) decompresses and decodes to Arrow arrays
-4. Arrow FFI imports arrays as `ColumnarBatch`
+1. `CometBlockStoreShuffleReader.read()` creates `ShuffleBlockFetcherIterator`.
+2. With read coalescing enabled, one `NativeBatchDecoderIterator` consumes the concatenated local
+   block streams. Native `ShuffleReadCoalescer` combines small decoded blocks before export.
+   With coalescing disabled, each stream uses the original per-block decoder.
+3. Native code decompresses and decodes the IPC data into independently owned Arrow arrays.
+4. Arrow FFI imports a ready batch as `ColumnarBatch`. The iterator releases prefetched and
+   delivered batches and the native coalescer on close, including error and task-completion paths.
+
+The row target is `spark.comet.batchSize`; the byte target defaults to 64 MiB, and a single
+byte-oversized block passes through unchanged. The target is not a Spark memory-pool reservation
+or a process-memory limit. See [Read Coalescing](native_shuffle.md#read-coalescing) for offset
+limits, ownership and configuration. Celeborn's JVM reader remains blockwise.
 
 This is the path taken when the consumer is a Spark operator. When a Comet native operator consumes
 the shuffle output and `spark.comet.shuffle.directRead.enabled` is set, steps 2 through 4 are skipped:
@@ -219,7 +233,15 @@ writes the same Arrow IPC block format as native shuffle, so direct read applies
   `spark.comet.shuffle.jvm.batchSize` capped at `spark.comet.batchSize`.
   `CometShuffleExternalSorter` spills at `spark.comet.shuffle.jvm.spillThreshold` alone, which
   defaults to `Int.MaxValue`, so on the sort path that trigger is effectively off by default.
-- `CometDiskBlockWriter` coordinates spilling across all partition writers (largest first)
+- `CometDiskBlockWriter` coordinates spilling across all partition writers (largest first).
+- The sort-based writer registers an `OwnerSpill` callback with its allocator so a different
+  consumer in the same task can release the writer's buffered memory. The callback runs only on
+  the owner's thread while the sorter is idle and open; it declines self, reentrant and concurrent
+  requests. A failed spill poisons the sorter so later insertions or final output cannot silently
+  continue from partially written state. Cleanup detaches the callback.
+- After a spill, `SpillSorter.reset()` frees and discards Spark's in-memory sorter and clears
+  its cached pointer-array reference. Replacement allocation is deferred to the next insertion, outside the
+  memory-manager callback, to avoid recursive acquisition during spill.
 - The bypass writer's partition writers each hold a page as soon as they buffer a row. Each one
   starts a batch on a 64 KiB page and doubles each further page, up to Spark's page size
   (`spark.buffer.pageSize`, capped at 128 MB). Spark sizes its page so that a task fits only 16 to
@@ -236,3 +258,5 @@ writes the same Arrow IPC block format as native shuffle, so direct read applies
 | `spark.comet.shuffle.compression.codec`                    | Compression codec, `lz4` by default                                                           |
 | `spark.comet.shuffle.compression.offsetsAsLengths.enabled` | Store offsets as lengths in zstd blocks without dictionary-encoded columns, `true` by default |
 | `spark.comet.shuffle.directRead.enabled`                   | Decode blocks natively on read, `true` by default                                             |
+| `spark.comet.shuffle.read.coalesce.enabled`                | Join small decoded local blocks, `true` by default                                            |
+| `spark.comet.shuffle.read.coalesce.maxBytes`               | Column-data target for joined batches, 64 MiB by default; `0` disables the byte target        |

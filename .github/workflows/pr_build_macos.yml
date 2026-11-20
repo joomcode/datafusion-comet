@@ -193,6 +193,7 @@ jobs:
               org.apache.comet.exec.CometNativeColumnarToRowSuite
               org.apache.comet.exec.CometDirectColumnarToRowSuite
               org.apache.comet.exec.CometNativeShuffleSuite
+              org.apache.comet.exec.CometShuffleReadCoalesceSuite
               org.apache.comet.exec.CometShuffleInputConversionSuite
               org.apache.comet.shuffle.CelebornShufflePartitionPusherSuite
               org.apache.spark.sql.comet.execution.shuffle.CometCelebornShuffleManagerSuite
@@ -208,12 +209,14 @@ jobs:
               org.apache.spark.sql.comet.execution.shuffle.CometBlockStoreShuffleReaderSuite
               org.apache.spark.sql.comet.execution.shuffle.CometNativePositionalRoundRobinSuite
               org.apache.spark.sql.comet.execution.shuffle.CometDiskBlockWriterSuite
+              org.apache.spark.sql.comet.execution.shuffle.CometShuffleWriterSemanticsSuite
               org.apache.comet.exec.CometShuffleEncryptionSuite
               org.apache.comet.exec.CometShuffleManagerSuite
               org.apache.comet.exec.DisableAQECometShuffleSuite
               org.apache.spark.shuffle.comet.CometUnboundedShuffleMemoryAllocatorSuite
               org.apache.spark.shuffle.comet.CometUnifiedShuffleMemoryAllocatorSuite
               org.apache.spark.shuffle.sort.SpillSorterSuite
+              org.apache.spark.shuffle.sort.CometShuffleExternalSorterSpillSuite
           - name: "exec"
             value: |
               org.apache.comet.exec.CometAggregateSuite
@@ -279,6 +282,7 @@ jobs:
               org.apache.spark.sql.comet.CometTPCDSV2_7_PlanStabilitySuite
               org.apache.spark.sql.comet.CometTaskMetricsSuite
               org.apache.spark.sql.comet.CometUnsafeProjectionSuite
+              org.apache.spark.sql.comet.CometBatchRowProjectionSuite
               org.apache.spark.sql.comet.CometDppFallbackRepro3949Suite
               org.apache.spark.sql.comet.CometShuffleFallbackStickinessSuite
               org.apache.spark.sql.comet.PlanDataInjectorSuite
@@ -289,6 +293,7 @@ jobs:
               org.apache.spark.sql.comet.CometScanWithPlanDataSuite
               org.apache.spark.sql.comet.util.UtilsSuite
               org.apache.spark.sql.comet.CometBroadcastValueSuite
+              org.apache.spark.sql.comet.CometBroadcastKryoPayloadSuite
               org.apache.comet.vector.NativeUtilSuite
               org.apache.comet.vector.CometVectorUtilsSuite
               org.apache.comet.udf.CometUdfBridgeSuite

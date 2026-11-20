@@ -346,6 +346,31 @@ object CometShuffleExchangeExec
     with CometTypeShim
     with SQLConfHelper {
 
+  override def convert(
+      op: ShuffleExchangeExec,
+      builder: OperatorOuterClass.Operator.Builder,
+      childOp: OperatorOuterClass.Operator*): Option[OperatorOuterClass.Operator] = {
+    super.convert(op, builder, childOp: _*).map { input =>
+      // Choose the input representation on the initial planning pass too. A native parent
+      // may retain this sink across AQE, so the later stage refresh alone cannot repair it.
+      if (CometConf.COMET_SHUFFLE_DIRECT_READ_ENABLED.get(op.conf)) {
+        val scan = input.getScan
+        input.toBuilder
+          .clearScan()
+          .setShuffleScan(
+            OperatorOuterClass.ShuffleScan
+              .newBuilder()
+              .setSource(scan.getSource)
+              .addAllFields(scan.getFieldsList)
+              .setCoalesceBatches(CometConf.COMET_SHUFFLE_READ_COALESCE_ENABLED.get(op.conf))
+              .setCoalesceMaxBytes(CometConf.COMET_SHUFFLE_READ_COALESCE_MAX_BYTES.get(op.conf)))
+          .build()
+      } else {
+        input
+      }
+    }
+  }
+
   override def getSupportLevel(op: ShuffleExchangeExec): SupportLevel = {
     if (shuffleSupported(op).isDefined) Compatible() else Unsupported()
   }

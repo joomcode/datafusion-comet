@@ -52,7 +52,7 @@ Native shuffle (`CometExchange`) is selected when all of the following condition
 1. **Shuffle mode allows native**: `spark.comet.shuffle.mode` is `native` or `auto`.
 
 2. **Child plan is a Comet native operator**: The child must be a `CometPlan` that produces
-   columnar output. Row-based Spark operators require JVM shuffle, unless
+   columnar output. Row-based Spark operators require JVM shuffle, unless mode is `auto` and
    `spark.comet.convert.shuffleInput.enabled` is set. Then a shuffle that JVM shuffle would take
    uses native shuffle instead, provided native shuffle supports the partitioning and the
    columns, and a `CometSparkToColumnarExec` converts the child's rows to Arrow for it. A shuffle
@@ -211,18 +211,18 @@ read time. See [Direct Read](#direct-read-shufflescan) below for how the choice 
 1. `CometBlockStoreShuffleReader.readAsRawStream()` concatenates the fetched block streams and
    skips decoding entirely.
 2. `CometShuffleBlockIterator` hands native one compressed block at a time.
-3. The native `ShuffleScanExec` decodes each block with `read_ipc_compressed` and feeds the
-   resulting `RecordBatch` straight into the plan. No Arrow FFI export or import happens.
+3. The native `ShuffleScanExec` decodes each block with `read_ipc_compressed`, reconciles its
+   schema, and optionally joins small blocks with `ShuffleReadCoalescer` before passing them to
+   the plan. No Arrow FFI export or import happens.
 
 **JVM decode**, used when direct read does not apply:
 
 1. `CometBlockStoreShuffleReader` fetches shuffle blocks via `ShuffleBlockFetcherIterator`.
 
-2. For each block, `NativeBatchDecoderIterator`:
-   - Reads the 8-byte compressed length header
-   - Reads the 8-byte field count header
-   - Reads the compressed IPC data
-   - Calls `Native.decodeShuffleBlock()` via JNI
+2. `NativeBatchDecoderIterator` reads the 8-byte compressed length, 8-byte field count and
+   compressed IPC data. With read coalescing enabled, one iterator consumes the concatenated local
+   block streams and calls `Native.pushShuffleBlock()` before exporting a ready coalesced batch.
+   With coalescing disabled, each block is decoded with `Native.decodeShuffleBlock()`.
 
 3. Native code decompresses and deserializes the Arrow IPC stream.
 
@@ -236,6 +236,10 @@ defaults to `true` and requires `spark.comet.shuffle.enabled`. It applies to bot
 JVM columnar shuffle, because both write the same Arrow IPC block format.
 
 ### How the path is selected
+
+`CometShuffleExchangeExec.convert` selects `ShuffleScan` on the initial planning pass when direct
+read is enabled. It captures the direct-read and coalescing settings from the exchange's `SQLConf`,
+so an initial native parent does not retain a regular `Scan` until AQE creates a shuffle stage.
 
 `CometExchangeSink.shouldUseShuffleScan` (`spark/src/main/scala/org/apache/comet/serde/operator/CometSink.scala`)
 decides during plan serialization. When direct read is enabled and the sink's input is a Comet shuffle
@@ -298,6 +302,35 @@ Celeborn reuses the same expected-schema contract from the JVM side. `CometCeleb
 builds a `ShuffleScan` message from the dependency's output attributes and passes it to
 `NativeBatchDecoderIterator`, so remote logical types are validated before Arrow import and an
 unsupported type fails before any shuffle resource is acquired.
+
+## Read Coalescing
+
+`spark.comet.shuffle.read.coalesce.enabled` defaults to `true`. Both local JVM decode and native
+`ShuffleScanExec` can combine small decoded blocks before handing them to their consumer. The
+row target is `spark.comet.batchSize`; the column-data target is
+`spark.comet.shuffle.read.coalesce.maxBytes`, which defaults to 64 MiB. Setting the latter to `0`
+disables the byte target. The coalescer keeps row order and flushes the final partial batch at EOF.
+It also flushes before a schema change, a nested 32-bit Arrow offset limit, or the JVM signed-Int
+row-count limit would be exceeded. A single batch exceeding that row-count limit is rejected.
+A single byte-oversized block passes through unchanged.
+
+The byte setting is a concatenation target, not a process-memory limit. Pending decoded batches
+and their concatenated output may coexist, and these allocations are not reserved against the
+Spark memory pool. Individual blocks can already exceed the target before coalescing starts.
+
+The JVM coalescer validates each frame's field count against its decoded IPC schema and the
+iterator's fixed width before buffering it. Export validates output-address counts against the
+ready batch. The decoded Arrow bodies own their memory independently of the transport's reused
+`DirectByteBuffer`. Transport reads stay outside the iterator's ownership monitor so task cleanup
+can close blocked input; native state and ready batches are released under that monitor.
+
+Celeborn's JVM reader retains validated block-by-block decoding. Native direct reads can coalesce
+after each block has passed the existing remote validation and failure-reporting path.
+
+For diagnosis, set `COMET_DEBUG_BATCH_MEMORY=1` before starting the executor. It enables native
+logs at shuffle-decode and FFI-output boundaries for batches of at least 16 MiB, including
+shared-buffer-aware bytes and native allocated/reserved counters. Normal execution leaves this
+logging disabled.
 
 ## Partitioning
 
@@ -484,6 +517,11 @@ The `MultiPartitionShuffleRepartitioner` holds:
   pressure as the only trigger.
 - `scratch`, reusable buffers for partition ID computation.
 
+For a row-indexed output chunk, `RowIterator` gathers from only the buffered batches that chunk
+references and remaps its indices into that subset. Nested array types are aligned to the writer's
+schema without copying their value buffers; incompatible types retain the ordinary validation
+path. The run-based positional path keeps its existing slice-and-concatenate behavior.
+
 The spill file is owned by `PartitionedSpill` in `writers/local/spill.rs`. It holds one DataFusion
 `SpillFile`, created lazily on the first spill and shared by every output partition, and tracks per
 partition the byte ranges holding that partition's blocks in write order. A partial write sets a
@@ -512,6 +550,8 @@ independently compressed, allowing parallel decompression during reads.
 | `spark.comet.shuffle.enabled`                                             | `true`  | Enable Comet shuffle                                                          |
 | `spark.comet.shuffle.mode`                                                | `auto`  | Shuffle mode: `native`, `jvm`, or `auto`                                      |
 | `spark.comet.shuffle.directRead.enabled`                                  | `true`  | Decode shuffle blocks in native code, bypassing Arrow FFI                     |
+| `spark.comet.shuffle.read.coalesce.enabled`                               | `true`  | Join small decoded blocks before passing them to the consumer                 |
+| `spark.comet.shuffle.read.coalesce.maxBytes`                              | `64MiB` | Column-data target for joined batches; `0` disables the byte target           |
 | `spark.comet.shuffle.compression.codec`                                   | `lz4`   | Compression codec                                                             |
 | `spark.comet.shuffle.compression.zstd.level`                              | `1`     | Zstd compression level                                                        |
 | `spark.comet.shuffle.compression.offsetsAsLengths.enabled`                | `true`  | Store offsets as lengths in zstd blocks                                       |

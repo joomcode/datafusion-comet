@@ -1,0 +1,827 @@
+{
+  "date": "2026-11-20",
+  "group": "G07",
+  "cards": [
+    "J08",
+    "J09",
+    "J10",
+    "J11",
+    "J12",
+    "J13",
+    "J21",
+    "J23",
+    "J24",
+    "J25",
+    "J26",
+    "J27"
+  ],
+  "status": "PASSED_LOCAL_TARGETED_AWAITING_USER_REVIEW",
+  "branch": "joom/1.2-shuffle-and-c2r",
+  "base_commit": "0028887b3b040807c44c44731e862c02012e75b8",
+  "source_tag": "joom-1.1-13",
+  "source_commit": "981e26dff6b64110a8b3949a0ed065523d9012e4",
+  "upstream_base": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
+  "original_spark": {
+    "tag": "v4.2.1",
+    "commit": "617618396087429b5627a86ce933bb0f5d6645cb",
+    "runtime": "Official cached Maven Spark4.2.1 artifacts; original Spark execution with Comet disabled is the SQL oracle."
+  },
+  "datafusion": "55.2.0; existing accepted vendor unchanged by G07",
+  "arrow": "59.3.2",
+  "source_manifest": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/final-source-manifest.json",
+  "source_sha256": {
+    ".github/workflows/pr_build_linux.yml": "11a4e90e142451a30e1fdd7b7232db59c3e901bf9041017d9e53f78d358885c2",
+    ".github/workflows/pr_build_macos.yml": "08de6a829b867dc4eaef54bb42ca5be98187560ce2619b51e45221470abb14fb",
+    "docs/source/contributor-guide/jvm_shuffle.md": "70362bb9560811151793c8058212a7b86bcca23dac362788c59fabe35f0c6183",
+    "docs/source/contributor-guide/native_shuffle.md": "06f9af4e2bcd6b63e8d158ee5e61698e6db23062e06713a27eb2c349ae640916",
+    "native/core/src/execution/jni_api.rs": "c54d8640968ae0134c162bf028f15ea874ac5581ee3adb772786cff868f21028",
+    "native/core/src/execution/operators/shuffle_scan.rs": "b112b568e8b0976e53c22198c19abc219414685d2d48f57b858ba1ddbd638265",
+    "native/core/src/execution/planner/shuffle.rs": "80bc57e1fd8ab002c75638dbf6f179f79eef2935b7294696fe4ec6a55bb4b54f",
+    "native/proto/src/proto/operator.proto": "8ca0cfe56a1f3d0e4f6c15e8b67b878348e54136ff483c1bbfe4ea87343f8782",
+    "native/shuffle/benches/row_columnar.rs": "80abe05e7792ecfa3a8715a2874482b1e5bba955ec1bdaf0cdf7261fb6d011f8",
+    "native/shuffle/src/lib.rs": "2b1293377f73da4eca9cc162c7eb9d6619314f79309e59b6f7e45b26b29dccf5",
+    "native/shuffle/src/partitioners/partitioned_batch_iterator.rs": "198dde4b1691a752b80216588f75e584829b24c26c3aa807357cbbe3d51d5651",
+    "native/shuffle/src/read_coalescer.rs": "2758cd4c05e6a491a49ca75f5db3cb6c215391462e537f45a8eaefe465855c9b",
+    "native/shuffle/src/shuffle_writer.rs": "bc43b1d4af66ce5dbfbbbc22274eccf333e7dd096d12a36d52c93495b421d0d4",
+    "native/shuffle/src/spark_unsafe/row.rs": "a1e712d61184601f05d87d9bec8ef35b4b615b058c16d22a0d13f3ad44836ef3",
+    "native/shuffle/src/type_align.rs": "ca79d1a5c763d0a5f09c89ab13ef12615a0660716afa3f361608cff15f8b7255",
+    "native/spark-expr/src/bloom_filter/bloom_filter_agg.rs": "ba06bab1d9a5afed1c5748ad1f5036fdc1f97ad725b53b557b3b5e1ae3167ad3",
+    "spark/src/main/java/org/apache/spark/shuffle/comet/CometShuffleMemoryAllocatorTrait.java": "61a585d37b72e8129546d8280b05c52d263e267b2915869a23d44735d1c9f345",
+    "spark/src/main/java/org/apache/spark/shuffle/comet/CometUnifiedShuffleMemoryAllocator.java": "87edea3993a7adfd20d0feb106af59bc532f392f5281dac1e776580d32f386fa",
+    "spark/src/main/java/org/apache/spark/shuffle/sort/CometShuffleExternalSorter.java": "c0d6d35baab89dd7613c75962ccef58caa84518b4c9ba6749ea15ab0786665d1",
+    "spark/src/main/java/org/apache/spark/shuffle/sort/SpillSorter.java": "349e98f3f7567d47524b8d84e1a0efeaa528ac036a5c182dcdcb68483d78e041",
+    "spark/src/main/scala/org/apache/comet/CometConf.scala": "2bb1ff6ef7fe3e5f59f2d95aaa2d7481e02fa00c82a3b4ca6eb4ad7aa2079f7c",
+    "spark/src/main/scala/org/apache/comet/Native.scala": "edc0d9fd2cc0ef127ae2748f6cf567fbf3de763da2bf0fea1197b80277c0102e",
+    "spark/src/main/scala/org/apache/comet/serde/operator/CometSink.scala": "a049d9181873d770f803d91065fe4954a597ee46d0ad87b0251d1e121f5cb21c",
+    "spark/src/main/scala/org/apache/spark/sql/comet/CometColumnarToRowExec.scala": "80010ac5260b981acbff4059d71a8f60ea2823bc612412b3098042cdd7fce719",
+    "spark/src/main/scala/org/apache/spark/sql/comet/CometUnsafeProjection.scala": "2c02ad35a52f90c90b7fc5036db12fccb90357f07f1414e6a1272d436e749e4d",
+    "spark/src/main/scala/org/apache/spark/sql/comet/execution/shuffle/CometBlockStoreShuffleReader.scala": "def1d2dc87b5d49af5dbc670dee6e4480ea19ccf7c37de85cf30fb8d3ac41eba",
+    "spark/src/main/scala/org/apache/spark/sql/comet/execution/shuffle/CometShuffleExchangeExec.scala": "21cace024b15e22e0e452222db63e28facf212d12bfde715e4bfad27c1ef6259",
+    "spark/src/main/scala/org/apache/spark/sql/comet/execution/shuffle/CometShuffleReader.scala": "931cc26800a1028924903efd35680b7cf74a13ddec93b6d1a6f3f5c03ab0868b",
+    "spark/src/main/scala/org/apache/spark/sql/comet/execution/shuffle/NativeBatchDecoderIterator.scala": "0f972348cf505054e904d7f1b545c1ea209d0535d7de2122b4010fb656253cf7",
+    "spark/src/main/scala/org/apache/spark/sql/comet/operators.scala": "a600e0c2661912ff9584d6f1458efd32a80e855c0b9083f572252f6715257b9a",
+    "spark/src/test/java/org/apache/spark/sql/benchmark/CometBinaryRowCopyBenchmark.java": "62381e82c0e63f94f6140082fb43dcfc4c397ff719237cc572a3e9f91d036e45",
+    "spark/src/test/scala/org/apache/comet/CometConfSuite.scala": "dc5bc984cd24e00596d4174975c07db78e09d50adfc7b3863cd2d14b36963839",
+    "spark/src/test/scala/org/apache/comet/exec/CometExecSuite.scala": "c67b1e4da30381e6ad8ec1dc3c726eba039ee72d5d02ac049bd80924694eecfb",
+    "spark/src/test/scala/org/apache/comet/exec/CometJoinSuite.scala": "9672f6f69374a562e63dcbb6e0368cb5834d65981f765099a6decbd78fa4618f",
+    "spark/src/test/scala/org/apache/comet/exec/CometNativeShuffleSuite.scala": "d70dde56a67a8661e6043220452a0691f6fa76e790cdc237496dd001bffd8e6c",
+    "spark/src/test/scala/org/apache/comet/exec/CometShuffleReadCoalesceSuite.scala": "b89e23df8544935bd0a8e12aa954c256b80d5b9a4ca8627b260f581ad137e1ca",
+    "spark/src/test/scala/org/apache/spark/shuffle/sort/CometShuffleExternalSorterSpillSuite.scala": "adafeabea496bace5552c760942cc9384e49180738f82dc88fe3997eeffe850a",
+    "spark/src/test/scala/org/apache/spark/shuffle/sort/SpillSorterSuite.scala": "ee21006a1549cc247f8f1a62a5219156042179313caca2258794c38f2f88669a",
+    "spark/src/test/scala/org/apache/spark/sql/benchmark/CometWideShuffleReadBenchmark.scala": "c09edb3a0aff20e1cd34be745fd9f4674378ca37a9f501d33290a83696e8e1cb",
+    "spark/src/test/scala/org/apache/spark/sql/comet/CometBatchRowProjectionSuite.scala": "c30700157560d58b6467be7e3ce7e7d6ad42c9b7e0845b9f5ecbc3d42c9a8d63",
+    "spark/src/test/scala/org/apache/spark/sql/comet/CometBroadcastKryoPayloadSuite.scala": "cdb07904d29b2d67f8f1c2f1fc6a5d4c16e9a224716b8b3a76734dec0ce7b152",
+    "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometCelebornShuffleReaderSuite.scala": "2d6a697ee5081ec8e7ef21e68dbf3cbc5fcd0bf4604ede239d01e00d1a6d9c33",
+    "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometShuffleWriterSemanticsSuite.scala": "4c7d7ad408de8c497872d33aac8a242c0f67fc49d0151d0916ce922591afbba9",
+    "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/NativeBatchDecoderIteratorConcurrencyChecks.scala": "927a342f6bfdff673f06a73c230a90fc8e59ade06649c5c23d81015a3cbf8030",
+    "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/NativeBatchDecoderIteratorLifecycleChecks.scala": "f26422b76916f532ab5c32b7de8afe8b881cae1fe46afc4b8f86add3d0b38ff6",
+    "spark/src/test/scala/org/apache/spark/sql/comet/util/UtilsSuite.scala": "4736406321f5e306938d472d9cc5d52d0e35f3b1fd6004eca191c1e543fa7df8"
+  },
+  "native_library": {
+    "path": "native/target/debug/libcomet.dylib",
+    "sha256": "2e98929472f2e593bd0c758b29618166e56bf6f249faaa9072fc4cad0c3acd4f",
+    "bundled_path": "spark/target/classes/org/apache/comet/darwin/aarch64/libcomet.dylib",
+    "bundled_sha256": "2e98929472f2e593bd0c758b29618166e56bf6f249faaa9072fc4cad0c3acd4f",
+    "bytes": 441759472,
+    "architecture": "macOS ARM64",
+    "profile": "dev",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/final-source-manifest.json",
+    "build_receipt": {
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--offline",
+        "-j4",
+        "--manifest-path",
+        "native/Cargo.toml",
+        "-p",
+        "datafusion-comet"
+      ],
+      "started_unix": 1795210687.144947,
+      "finished_unix": 1795210694.8910139,
+      "exit_code": 0,
+      "elapsed_seconds": 7.75,
+      "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/native-build-qualified.log",
+      "log_sha256": "65c750360cc241ccfe6add190321999945f98be6f14f9f8c1535be1f5c0d5052"
+    },
+    "release_artifact": false
+  },
+  "implementation": {
+    "J08": "Borrow plain Arrow Binary/LargeBinary byte spans only while copying into owned UnsafeRows; keep dictionary/fixed/nested/mixed-vector fallback and both upstream direct converters.",
+    "J09": "Bounded schema/config-keyed projection-instance pool above upstream generated-class cache. Register completion before exposing a lazy iterator; never pool a late acquisition or an oversized retained buffer.",
+    "J10": "Reuse unique insertion-ordered non-NULL dictionary values when falling back to plain String/Binary; reject repeated/reordered/unused/NULL dictionary values and preserve reference ownership.",
+    "J11": "Owner-thread-only idle writer spill callback, busy/closed/reentrancy guards; allocation-free portable reset and pointer restoration before pending-row copy; terminal poison after any failed spill, detached callback and partial-file cleanup.",
+    "J12": "Shared row/byte/nested-offset coalescer for local JVM and native direct readers; stable IPC/header widths, JNI bounds and export-count guards, signed-Int row ceiling, exact EOF/lifetime handling. Restore all-row/slice-aware Bloom merge required by multirow partial states.",
+    "J13": "Gather only referenced batches on row-indexed native writer chunks; preserve run/round-robin paths and align compatible nested metadata/types without changing values.",
+    "J21": "Keep upstream earlier sliced-broadcast offset normalization; restore old regressions and add raw binary/nested/AQE/reused-exchange coverage.",
+    "J23": "Serialize ShuffleScan at initial planning as well as current AQE stage refresh; retain protobuf-driven JVM dispatch, reuse and DPP handling.",
+    "J24": "Keep upstream effective JVM batch cap and session-conf capture. Restore small-positive512 check and exercise effective1/17 limits through actual sorted writers.",
+    "J25": "Disable ordinary C2R codegen over direct/reused/staged Comet broadcast; preserve native C2R guards. Current skew/broadcast regressions pass; original cost-model toggle matrix belongs to G09 once that implementation exists.",
+    "J26": "Opt-in >=16MiB shared-buffer-aware native decode/FFI logging; disabled mode does not sample registry/memory counters.",
+    "J27": "Restore default-Kryo tests, including actual CometBroadcastValue payload wrapper. Final shaded Linux release-JAR qualification remains required."
+  },
+  "source_provenance": {
+    "J24": {
+      "old_commits": ["ea38aad51"],
+      "approved_action": "Use the upstream small-batch/effective JVM shuffle batch cap; preserve our checks."
+    },
+    "J21": {
+      "old_commits": ["d913126f8"],
+      "approved_action": "Use upstream sliced-broadcast offset normalization; retain Joom regressions and add missing fixes if behavior is lost."
+    },
+    "J26": {
+      "old_commits": ["ca6b963f0"],
+      "approved_action": "Port as an existing opt-in diagnostic contract; may combine with the coalescer PR."
+    },
+    "J10": {
+      "old_commits": ["d9ea39240"],
+      "approved_action": "Port unique_dictionary_to_plain into the shared builder_to_array in new row.rs. Preserve guards: non-null dictionary values and keys unique in insertion order; otherwise use ordinary cast. Verify both new writer caller paths. This preserves the Joom specialization; any benefit over Arrow59.3.2 requires benchmarks and is not proven by reading Comet."
+    },
+    "J11": {
+      "old_commits": ["b65fdbe01"],
+      "approved_action": "Adapt to Spark4.2.1 MemoryConsumer and the new allocator retry lifecycle."
+    },
+    "J13": {
+      "old_commits": ["94abcc0fc"],
+      "approved_action": "Adapt the local writer path while preserving new remote/local/round-robin contracts."
+    },
+    "J23": {
+      "old_commits": ["4956d831b"],
+      "approved_action": "Adapt Joom4956d831b: the initial ShuffleExchangeExec conversion handler must immediately emit ShuffleScan for directRead=true and retain ordinary Scan for false. Preserve the new upstream refreshStaleShuffleScans and its AQE/DPP restrictions. Select the input stream by serialized proto, not independently from current configuration."
+    },
+    "J12": {
+      "old_commits": ["2d30872c8", "192bad884"],
+      "approved_action": "Port native/JVM/proto/JNI sides in one coherent PR."
+    },
+    "J08": {
+      "old_commits": ["c0b0448c7", "3d99265f0"],
+      "approved_action": "Adapt on top of CometUnsafeProjection/new C2R path while retaining ordinary fallback."
+    },
+    "J09": {
+      "old_commits": ["9560d4a8e", "8e065270a"],
+      "approved_action": "Preserve the Joom projection-instance pool on top of upstream generated-class caching, respecting lifetime/bounds guards. A partial class cache alone does not replace the pool; simplify only with demonstrated equivalence under the approved rule."
+    },
+    "J25": {
+      "old_commits": ["3adfb1ecc"],
+      "approved_action": "Port the targeted supportCodegen=false guard for C2R whose child is CometBroadcastExchangeExec, BroadcastQueryStageExec or ReusedExchangeExec above it; retain new CometBroadcastValue/IdentityBroadcastMode copying and both C2R converters. Port the original regression with a wide Spark join/narrow broadcast build side."
+    },
+    "J27": {
+      "old_commits": ["a52c1685f"],
+      "approved_action": "Port/adapt the suite into the new CI target and link it with broadcast/C2R/cards."
+    }
+  },
+  "validation": {
+    "native_unique_passed": 292,
+    "native_cohorts": {
+      "full_shuffle_crate": 223,
+      "core_shuffle": 35,
+      "batch_memory_diagnostic": 1,
+      "spark_expr_bloom": 33
+    },
+    "jvm_unique_latest_passed": 266,
+    "jvm_inventory": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/jvm-test-inventory.json",
+    "jvm_cohorts": {
+      "config_baseline": 22,
+      "c2r_projection_broadcast_utils": 48,
+      "read_direct_AQE_DPP_reuse_lifecycle": {
+        "executions": 108,
+        "unique_names": 100
+      },
+      "writer_spill_allocators_context_direct_C2R": 62,
+      "broadcast_and_C2R_SQL": "33 passed in34-case cohort; the one wrapper-fixture failure is superseded by both corrected AQE reuse cases. Individual exact entries in inventory.",
+      "corrected_reuse_and_original_HashJoin_metric": "3 passed; writer path-check failure superseded by next dedicated suite.",
+      "final_exact_sorted_JVM_writer": {
+        "tests": 1,
+        "combinations": 32,
+        "oracle": "Complete Spark-disabled rows/schema, identical duplicate multiplicity, raw binary, nested Boolean/struct NULLs, signed zero/NaN; actual sorted writer handle, native sort and serialized direct/coalescer input flags."
+      }
+    },
+    "bloom_sql": {
+      "test_cases": 1,
+      "combinations": 24,
+      "oracle": "Exact complete Spark4.2.1 serialized Bloom bytes across native/JVM writers, direct/coalescing on/off, fully native and both mixed partial/final directions; all eight map states including all-NULL partition. Actual native modes/writer/input flags required."
+    },
+    "no_remaining_failed_or_canceled_or_ignored_selected_case": true,
+    "count_rule": "Unique (suite,name) registrations across retained cohorts; repeated or repaired runs are not summed. Prior partial-cohort failures are retained and explicitly superseded. Native and JVM counts are separate.",
+    "positive_receipts": [
+      {
+        "command": [
+          "./mvnw",
+          "-o",
+          "-B",
+          "-Pspark-4.2",
+          "-Dtest=none",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
+          "-Dsuites=org.apache.comet.CometConfSuite",
+          "spotless:apply",
+          "test"
+        ],
+        "started_unix": 1795208494.0955148,
+        "finished_unix": 1795208517.239813,
+        "exit_code": 0,
+        "elapsed_seconds": 23.14,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/upstream-equivalent-config-baseline.log",
+        "log_sha256": "986698d08a9a929a36cbddab0049ff6440773f554b7b3e8172a05277df476c76"
+      },
+      {
+        "command": [
+          "./mvnw",
+          "-o",
+          "-B",
+          "-Pspark-4.2",
+          "-Dtest=none",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
+          "-Dsuites=org.apache.spark.sql.comet.CometBatchRowProjectionSuite,org.apache.spark.sql.comet.CometUnsafeProjectionSuite,org.apache.comet.DirectColumnarToRowConverterSuite,org.apache.spark.sql.comet.CometBroadcastKryoPayloadSuite,org.apache.spark.sql.comet.util.UtilsSuite",
+          "spotless:apply",
+          "test"
+        ],
+        "started_unix": 1795209556.689367,
+        "finished_unix": 1795209588.876462,
+        "exit_code": 0,
+        "elapsed_seconds": 32.19,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/c2r-broadcast-initial.log",
+        "log_sha256": "c0570a91ad9158d2314d02ef3d8e724ea266e32bea6d6c191b213a891d9d8355"
+      },
+      {
+        "command": [
+          "./mvnw",
+          "-o",
+          "-B",
+          "-Pspark-4.2",
+          "-Dtest=none",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
+          "-Dsuites=org.apache.comet.exec.CometShuffleReadCoalesceSuite,org.apache.comet.exec.CometNativeShuffleSuite G07,org.apache.comet.exec.CometNativeShuffleSuite ShuffleScan,org.apache.comet.exec.CometNativeShuffleSuite shuffle direct read,org.apache.spark.sql.comet.execution.shuffle.CometCelebornShuffleReaderSuite",
+          "test"
+        ],
+        "started_unix": 1795210707.832046,
+        "finished_unix": 1795210761.19843,
+        "exit_code": 0,
+        "elapsed_seconds": 53.37,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/read-runtime-qualified.log",
+        "log_sha256": "e76f2af670755796a4d21d7565e5e5ba17515179e9e23c95d7badd827875419a"
+      },
+      {
+        "command": [
+          "./mvnw",
+          "-o",
+          "-B",
+          "-Pspark-4.2",
+          "-Dtest=none",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
+          "-Dsuites=org.apache.spark.shuffle.sort.CometShuffleExternalSorterSpillSuite,org.apache.spark.shuffle.sort.SpillSorterSuite,org.apache.spark.shuffle.comet.CometUnifiedShuffleMemoryAllocatorSuite,org.apache.spark.shuffle.comet.CometUnboundedShuffleMemoryAllocatorSuite,org.apache.spark.sql.comet.execution.shuffle.CometDiskBlockWriterSuite,org.apache.spark.sql.comet.execution.shuffle.CometShuffleWriterSemanticsSuite,org.apache.spark.CometTaskMemoryManagerSuite,org.apache.comet.exec.CometDirectColumnarToRowSuite,org.apache.comet.exec.CometNativeColumnarToRowSuite rows from earlier batches",
+          "spotless:apply",
+          "test"
+        ],
+        "started_unix": 1795210781.8689768,
+        "finished_unix": 1795210818.947687,
+        "exit_code": 0,
+        "elapsed_seconds": 37.08,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/writer-runtime-qualified.log",
+        "log_sha256": "a46d54b2ff440d8e77f902bcccb97279d3c0d5327abd7effe847459b8ff2336a"
+      },
+      {
+        "command": [
+          "./mvnw",
+          "-o",
+          "-B",
+          "-Pspark-4.2",
+          "-Dtest=none",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
+          "-Dsuites=org.apache.spark.sql.comet.execution.shuffle.CometShuffleWriterSemanticsSuite",
+          "spotless:apply",
+          "test"
+        ],
+        "started_unix": 1795211175.14527,
+        "finished_unix": 1795211205.4884632,
+        "exit_code": 0,
+        "elapsed_seconds": 30.34,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/writer-direct-coalescer-qualified.log",
+        "log_sha256": "847fb893703fd30171d63580f43fa2dd5d62fb61bfc8e9f068424e4bafa76275"
+      },
+      {
+        "command": [
+          "${COMET_ROOT}/native/target/debug/build/datafusion-comet-shuffle/259bb166acb11c60/out/datafusion_comet_shuffle-259bb166acb11c60",
+          "--test-threads=1"
+        ],
+        "started_unix": 1795209591.353503,
+        "finished_unix": 1795209672.896148,
+        "exit_code": 0,
+        "elapsed_seconds": 81.54,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/native-shuffle-initial.log",
+        "log_sha256": "6c1a8800a545a32062fb103438ef56972a9d9ae86d725f088f1c082cb9929cba"
+      },
+      {
+        "command": [
+          "native/target/debug/build/datafusion-comet/17c2f89b433b4036/out/comet-17c2f89b433b4036",
+          "shuffle"
+        ],
+        "started_unix": 1795210542.7060428,
+        "finished_unix": 1795210549.786409,
+        "exit_code": 0,
+        "elapsed_seconds": 7.08,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/native-core-shuffle-final.log",
+        "log_sha256": "d7383f8ed41f6a9ce8566a95fdbe6df588b5997a69eda3104f823c8530b42047"
+      },
+      {
+        "command": [
+          "native/target/debug/build/datafusion-comet/17c2f89b433b4036/out/comet-17c2f89b433b4036",
+          "batch_memory"
+        ],
+        "started_unix": 1795210543.885503,
+        "finished_unix": 1795210549.1971462,
+        "exit_code": 0,
+        "elapsed_seconds": 5.31,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/native-batch-memory-final.log",
+        "log_sha256": "7b6deeacd68635c70ca2b27473fa2c4ee938eb9bf996957c3f96f8de4039934a"
+      },
+      {
+        "command": [
+          "native/target/debug/build/datafusion-comet-spark-expr/b9111cd2504f361f/out/datafusion_comet_spark_expr-b9111cd2504f361f",
+          "bloom_filter"
+        ],
+        "started_unix": 1795210554.962673,
+        "finished_unix": 1795210561.597316,
+        "exit_code": 0,
+        "elapsed_seconds": 6.63,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/native-bloom-final.log",
+        "log_sha256": "2f2b56e7b1c0b305f01671dd8fc6dd6383ce2fb60e4bdd79d7b10aaccfb5d76c"
+      },
+      {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "--offline",
+          "-j4",
+          "--manifest-path",
+          "native/Cargo.toml",
+          "-p",
+          "datafusion-comet"
+        ],
+        "started_unix": 1795210687.144947,
+        "finished_unix": 1795210694.8910139,
+        "exit_code": 0,
+        "elapsed_seconds": 7.75,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/native-build-qualified.log",
+        "log_sha256": "65c750360cc241ccfe6add190321999945f98be6f14f9f8c1535be1f5c0d5052"
+      },
+      {
+        "command": [
+          "cargo",
+          "clippy",
+          "--locked",
+          "--offline",
+          "-j4",
+          "--manifest-path",
+          "native/Cargo.toml",
+          "--workspace",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "started_unix": 1795210650.465662,
+        "finished_unix": 1795210655.879515,
+        "exit_code": 0,
+        "elapsed_seconds": 5.41,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/clippy-qualified.log",
+        "log_sha256": "361621224697a2ffd93741b266902bb2ea306f6bcf2e21fa173890b10d82dad9"
+      },
+      {
+        "command": [
+          "cargo",
+          "fmt",
+          "--manifest-path",
+          "native/Cargo.toml",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "started_unix": 1795211311.732393,
+        "finished_unix": 1795211314.4284658,
+        "exit_code": 0,
+        "elapsed_seconds": 2.7,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/rust-format-check.log",
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "command": ["python3", "dev/ci/check-suites.py"],
+        "started_unix": 1795210800.48342,
+        "finished_unix": 1795210805.743192,
+        "exit_code": 0,
+        "elapsed_seconds": 5.26,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/ci-suite-registry.log",
+        "log_sha256": "ff081b2e49636852124cad2e700e276ec15c0e8f0e74722ee6231c6edcce00a6"
+      },
+      {
+        "command": ["python3", "dev/ci/check-ci-config.py"],
+        "started_unix": 1795210801.670343,
+        "finished_unix": 1795210801.799988,
+        "exit_code": 0,
+        "elapsed_seconds": 0.13,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/ci-config.log",
+        "log_sha256": "372685a7c59297cf2e6c26748c3357a2745d09ac5aaba9d12044c39313a4aa39"
+      }
+    ]
+  },
+  "negative_controls": {
+    "source_temporaries": {
+      "results": [
+        {
+          "case": "Restore exact base merge_batch only",
+          "exit_code": 101,
+          "expected_failure_observed": true,
+          "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/negative-bloom-prefix.log"
+        },
+        {
+          "case": "Disable only terminal failure check; keep safe cleanup/poison metadata",
+          "exit_code": 1,
+          "expected_failure_observed": true,
+          "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/negative-poison-continuation.log"
+        }
+      ],
+      "all_temporary_source_changes_restored": true,
+      "restored_sha256": {
+        "native/spark-expr/src/bloom_filter/bloom_filter_agg.rs": "a8c89d9db0a0bbf5864aec83a3c54dd922715fdfdf51d9fbd5195b40993488bf",
+        "spark/src/main/java/org/apache/spark/shuffle/sort/CometShuffleExternalSorter.java": "c0d6d35baab89dd7613c75962ccef58caa84518b4c9ba6749ea15ab0786665d1"
+      }
+    },
+    "sql_pre_fix_native_library": {
+      "sha256": "f11fc5c47ec23e90ac422461e7172d412e0416d0f99c06966b9b0e81805c6926",
+      "jvm_decode": {
+        "command": [
+          "./mvnw",
+          "-o",
+          "-B",
+          "-Pspark-4.2",
+          "-Dtest=none",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
+          "-Dsuites=org.apache.comet.exec.CometShuffleReadCoalesceSuite BloomFilter",
+          "spotless:apply",
+          "test"
+        ],
+        "started_unix": 1795210599.99974,
+        "finished_unix": 1795210632.0549371,
+        "exit_code": 1,
+        "elapsed_seconds": 32.06,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/negative-bloom-sql-verified-path.log",
+        "log_sha256": "f3dce67102b4bd38c9b9aaae7099d5fdbeca3e1ca94de1f566f32c8846bc3131"
+      },
+      "native_direct": {
+        "command": [
+          "./mvnw",
+          "-o",
+          "-B",
+          "-Pspark-4.2",
+          "-Dtest=none",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
+          "-Dsuites=org.apache.comet.exec.CometShuffleReadCoalesceSuite BloomFilter",
+          "spotless:apply",
+          "test"
+        ],
+        "started_unix": 1795210649.287492,
+        "finished_unix": 1795210679.679679,
+        "exit_code": 1,
+        "elapsed_seconds": 30.39,
+        "log": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/negative-bloom-sql-native-direct.log",
+        "log_sha256": "84681664ffcd19fa039cd72cebca88c6d8eb02e377e9b931c81175edba53a72a"
+      },
+      "expected_signature": "Old Bloom merge assertion left8 right1 from actual native execution; same test on final library passes all24 combinations.",
+      "first_attempt_not_a_negative_control": "negative-bloom-sql-prefixed-library failed a mixed-path setup assertion before reaching Bloom; corrected to auto+explicit row-input bridge and actual writer assertion."
+    }
+  },
+  "performance": {
+    "dictionary": {
+      "profile": "dev",
+      "mode": "Criterion --quick; diagnostic, not release throughput",
+      "before_ms": {
+        "plain": 9.0696,
+        "dictionary_fallback": 41.625
+      },
+      "after_ms": {
+        "plain": 8.6473,
+        "dictionary_fallback": 40.071
+      },
+      "criterion_significance": "p=0.08; no statistically significant change in either case"
+    },
+    "binary_copy": {
+      "source": "Unchanged CometBinaryRowCopyBenchmark from joom-1.1-13",
+      "scope": "Borrowed bytes vs getBinary+copy mechanism; does not measure instance-pool benefit or end-to-end jobs",
+      "rows": [
+        {
+          "width_bytes": 32,
+          "mode": "getBinary_then_write",
+          "iterations": 1000000,
+          "median_ns_per_row": 11.977,
+          "median_alloc_bytes_per_row": 43.5
+        },
+        {
+          "width_bytes": 32,
+          "mode": "borrowed_bytes_then_write",
+          "iterations": 1000000,
+          "median_ns_per_row": 10.988,
+          "median_alloc_bytes_per_row": 45.0
+        },
+        {
+          "width_bytes": 4096,
+          "mode": "getBinary_then_write",
+          "iterations": 32768,
+          "median_ns_per_row": 203.609,
+          "median_alloc_bytes_per_row": 3663.0
+        },
+        {
+          "width_bytes": 4096,
+          "mode": "borrowed_bytes_then_write",
+          "iterations": 32768,
+          "median_ns_per_row": 69.457,
+          "median_alloc_bytes_per_row": 45.0
+        },
+        {
+          "width_bytes": 196608,
+          "mode": "getBinary_then_write",
+          "iterations": 2048,
+          "median_ns_per_row": 8102.885,
+          "median_alloc_bytes_per_row": 175119.0
+        },
+        {
+          "width_bytes": 196608,
+          "mode": "borrowed_bytes_then_write",
+          "iterations": 2048,
+          "median_ns_per_row": 3190.165,
+          "median_alloc_bytes_per_row": 45.0
+        }
+      ]
+    },
+    "wide_read": {
+      "status": "ALL_MEASURED_ITERATIONS_COMPLETED_FINAL_REPORT_BLOCKED_BY_SANDBOX_SYSCTL",
+      "source": "Unchanged CometWideShuffleReadBenchmark from joom-1.1-13",
+      "parameters": [
+        "widths=64",
+        "leaves=1048576",
+        "maps=8",
+        "parts=32",
+        "queries=shufproj",
+        "modes=comet,coalesce,jvmread,jvmreadcoalesce"
+      ],
+      "limitations": "macOS ARM64 debug dylib;2GiBheap;benchmark original onheapunbounded settings; no final SparkBenchmark table because CPU-brand sysctl denied. Raw times are diagnostics only; this run is not a passed benchmark command.",
+      "cases": {
+        "comet": {
+          "samples": [
+            {
+              "wall_ms": 4219,
+              "reduce_task_ms": 1044
+            },
+            {
+              "wall_ms": 337,
+              "reduce_task_ms": 429
+            },
+            {
+              "wall_ms": 312,
+              "reduce_task_ms": 376
+            },
+            {
+              "wall_ms": 302,
+              "reduce_task_ms": 352
+            },
+            {
+              "wall_ms": 302,
+              "reduce_task_ms": 367
+            }
+          ],
+          "measured_iterations": 4,
+          "measured_raw_wall_ms": [
+            {
+              "wall_ms": 337,
+              "reduce_task_ms": 429
+            },
+            {
+              "wall_ms": 312,
+              "reduce_task_ms": 376
+            },
+            {
+              "wall_ms": 302,
+              "reduce_task_ms": 352
+            },
+            {
+              "wall_ms": 302,
+              "reduce_task_ms": 367
+            }
+          ],
+          "median_wall_ms": 307.0
+        },
+        "coalesce": {
+          "samples": [
+            {
+              "wall_ms": 407,
+              "reduce_task_ms": 375
+            },
+            {
+              "wall_ms": 323,
+              "reduce_task_ms": 300
+            },
+            {
+              "wall_ms": 289,
+              "reduce_task_ms": 265
+            },
+            {
+              "wall_ms": 271,
+              "reduce_task_ms": 262
+            },
+            {
+              "wall_ms": 276,
+              "reduce_task_ms": 262
+            },
+            {
+              "wall_ms": 263,
+              "reduce_task_ms": 254
+            },
+            {
+              "wall_ms": 250,
+              "reduce_task_ms": 229
+            }
+          ],
+          "measured_iterations": 4,
+          "measured_raw_wall_ms": [
+            {
+              "wall_ms": 271,
+              "reduce_task_ms": 262
+            },
+            {
+              "wall_ms": 276,
+              "reduce_task_ms": 262
+            },
+            {
+              "wall_ms": 263,
+              "reduce_task_ms": 254
+            },
+            {
+              "wall_ms": 250,
+              "reduce_task_ms": 229
+            }
+          ],
+          "median_wall_ms": 267.0
+        },
+        "jvmread": {
+          "samples": [
+            {
+              "wall_ms": 393,
+              "reduce_task_ms": 777
+            },
+            {
+              "wall_ms": 318,
+              "reduce_task_ms": 496
+            },
+            {
+              "wall_ms": 317,
+              "reduce_task_ms": 492
+            },
+            {
+              "wall_ms": 310,
+              "reduce_task_ms": 469
+            },
+            {
+              "wall_ms": 315,
+              "reduce_task_ms": 486
+            },
+            {
+              "wall_ms": 304,
+              "reduce_task_ms": 463
+            },
+            {
+              "wall_ms": 300,
+              "reduce_task_ms": 458
+            }
+          ],
+          "measured_iterations": 4,
+          "measured_raw_wall_ms": [
+            {
+              "wall_ms": 310,
+              "reduce_task_ms": 469
+            },
+            {
+              "wall_ms": 315,
+              "reduce_task_ms": 486
+            },
+            {
+              "wall_ms": 304,
+              "reduce_task_ms": 463
+            },
+            {
+              "wall_ms": 300,
+              "reduce_task_ms": 458
+            }
+          ],
+          "median_wall_ms": 307.0
+        },
+        "jvmreadcoalesce": {
+          "samples": [
+            {
+              "wall_ms": 256,
+              "reduce_task_ms": 259
+            },
+            {
+              "wall_ms": 249,
+              "reduce_task_ms": 258
+            },
+            {
+              "wall_ms": 248,
+              "reduce_task_ms": 263
+            },
+            {
+              "wall_ms": 253,
+              "reduce_task_ms": 264
+            },
+            {
+              "wall_ms": 248,
+              "reduce_task_ms": 255
+            },
+            {
+              "wall_ms": 247,
+              "reduce_task_ms": 253
+            },
+            {
+              "wall_ms": 245,
+              "reduce_task_ms": 253
+            },
+            {
+              "wall_ms": 248,
+              "reduce_task_ms": 249
+            },
+            {
+              "wall_ms": 245,
+              "reduce_task_ms": 241
+            }
+          ],
+          "measured_iterations": 5,
+          "measured_raw_wall_ms": [
+            {
+              "wall_ms": 248,
+              "reduce_task_ms": 255
+            },
+            {
+              "wall_ms": 247,
+              "reduce_task_ms": 253
+            },
+            {
+              "wall_ms": 245,
+              "reduce_task_ms": 253
+            },
+            {
+              "wall_ms": 248,
+              "reduce_task_ms": 249
+            },
+            {
+              "wall_ms": 245,
+              "reduce_task_ms": 241
+            }
+          ],
+          "median_wall_ms": 247
+        }
+      }
+    }
+  },
+  "retained_limits": [
+    "64MiB is a coalescing target, not a Spark-pool reservation or RSS bound; pending and concat arrays can overlap; one byte-oversized block passes unchanged. Individually nonrepresentable signed-Int row count is rejected.",
+    "Projection pool retains original caps:64schemas, min(CPUs,64)instances per schema/config key,<=1MiBbuffer each. No claim of a measured independent instance-pool benefit.",
+    "Celeborn JVM decoding remains validated blockwise; native direct remote decoding can coalesce only after original validation/error-classification.",
+    "Local debug macOS ARM64/Java17 checks do not replace final Linux/CI/release/exact-JAR qualification."
+  ],
+  "failed_intermediate_attempts": [
+    "Initial C2R proposal footer/import/enum/LocalTableScan signature compile errors repaired; all affected tests pass.",
+    "Initial native test Arc equality compile errors repaired to compare ArrayData; no production semantic change.",
+    "One early C2R test used stale G06 native library missing new JNI; superseded by matching fresh G07 library and48passing tests.",
+    "Strict Clippy initially found cloned-ref and useless-vec test lint errors; fixed without new lint exemptions; strict workspace/all-targets now passes.",
+    "Mixed Bloom native-only-mode fixture could not admit Spark Partial; test now requests auto conversion and asserts actual native writer, retaining all24cases.",
+    "Reused broadcast fixture correctly encountered ReusedExchange; allow only the expected wrapper in generic checker and assert actual reused CometBroadcastExchange, preserving exact Spark output/native join assertions.",
+    "Original combined writer fixture ORDER BY added an intervening Spark range exchange; strengthened path assertions exposed this coverage gap. Local SORT BY plus deterministic full-row comparison now proves all32actual native/JVM read paths.",
+    "Optional wide-read benchmark finished all timed cases but standard final report failed on sandbox CPU-brand sysctl; preserved as incomplete performance command, not a correctness pass."
+  ],
+  "reviews": [
+    "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/20261120_c2r-proposal/parity-review.json",
+    "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/20261120_read-proposal/read-parity-review.json",
+    "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/20261120_read-proposal/read-regression-inventory.json",
+    "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/20261120_j11-independent-review/independent-review.json",
+    "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/20261120_j11-independent-review/final-review.json",
+    "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/20261120_j11-independent-review/oracle-test-quality-review.json",
+    "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/20261120_final-writer-review/final-review.json",
+    "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/20261120_final-writer-review/portable-reset-source-proof.json"
+  ],
+  "deferred": ["G07-LINUX-RELEASE", "G07-G09-BROADCAST-COST-MATRIX"],
+  "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/completion.json",
+  "push_performed": false,
+  "merge_authorized": false,
+  "full_gha_started": false,
+  "g08_started": false,
+  "production_use_allowed": false,
+  "integration_acceptance": {
+    "date": "2026-11-20",
+    "authorization_ref": "decisions.json#g07_integration_authorization",
+    "functional_source_previously_verified": "62e9ffd7a573eecf573d0713ff7a4b7640ed417a",
+    "changes": "Acceptance documentation only; every qualified non-migration source/test/CI/runtime-reference byte preserved.",
+    "method": "Three substantive commits; acceptance folded into third, fast-forward with no merge/service commit.",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07-integration/completion.json",
+    "next_group_authorized": false
+  },
+  "initial_review_gate_note": "Top-level push/merge flags describe initial local qualification. integration_acceptance and its external receipt record later user-approved publication/integration."
+}

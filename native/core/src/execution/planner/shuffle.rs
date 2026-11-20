@@ -273,7 +273,14 @@ impl OperatorBuilder for ShuffleScanBuilder {
             Some(inputs.remove(0))
         };
 
-        let shuffle_scan = ShuffleScanExec::new(exec_context_id, input_source, data_types)?;
+        let coalesce = scan.coalesce_batches.then(|| {
+            (
+                planner.session_ctx.copied_config().batch_size(),
+                crate::execution::shuffle::coalesce_max_bytes(scan.coalesce_max_bytes),
+            )
+        });
+        let shuffle_scan =
+            ShuffleScanExec::new(exec_context_id, input_source, data_types, coalesce)?;
 
         Ok((
             vec![],

@@ -267,3 +267,18 @@ spark/src/test/scala/org/apache/comet/exec/CometPartitionAggregateWindowSuite.sc
 spark/src/test/scala/org/apache/comet/exec/CometWindowSemanticsSuite.scala
 docs/joom-migration/G06-results.json
 Source hashes: G06-results.json#source_sha256. Auxiliary evidence and final local commit/tree/ref receipt: ${MIGRATION_AUX_ROOT}/20261120_comet12-g06/completion.json.
+
+G07 shuffle/C2R implementation and local qualification (2026-11-20):
+native/shuffle/src/read_coalescer.rs
+native/shuffle/src/type_align.rs
+spark/src/test/java/org/apache/spark/sql/benchmark/CometBinaryRowCopyBenchmark.java
+spark/src/test/scala/org/apache/comet/exec/CometShuffleReadCoalesceSuite.scala
+spark/src/test/scala/org/apache/spark/shuffle/sort/CometShuffleExternalSorterSpillSuite.scala
+spark/src/test/scala/org/apache/spark/sql/benchmark/CometWideShuffleReadBenchmark.scala
+spark/src/test/scala/org/apache/spark/sql/comet/CometBatchRowProjectionSuite.scala
+spark/src/test/scala/org/apache/spark/sql/comet/CometBroadcastKryoPayloadSuite.scala
+spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometShuffleWriterSemanticsSuite.scala
+docs/joom-migration/G07-report.md
+docs/joom-migration/G07-results.json
+docs/joom-migration/G07-performance.md
+Source/auxiliary inventory: G07-results.json and ${MIGRATION_AUX_ROOT}/20261120_comet12-g07/completion.json.

@@ -141,3 +141,15 @@ substantive commit; preserve all qualified code/tests. Do not create a PR or lau
 full per-group CI, update main/tags, publish release artifacts, access production
 or datasci, or start G07. Existing read-only GitHub and official RAT/Maven scopes
 remain unchanged. Actual integration evidence is separate from initial validation.
+
+## G07 accepted integration (2026-11-20)
+
+The user explicitly authorized publishing `joom/1.2-shuffle-and-c2r` to origin
+and integrating it into `branch-1.2`, followed by exact remote verification.
+Read and update only these refs on github.com/joomcode/datafusion-comet; prefer
+an atomic two-ref push with exact expected leases and reject unexpected changes.
+Keep all qualified code/tests unchanged; fold acceptance documentation into the
+third substantive commit and fast-forward locally. Do not create a PR, start
+full per-group CI, update main/tags, publish release artifacts, access production
+or datasci, or begin G08. Existing approved read-only GitHub and official
+RAT/Maven scopes persist. Final verification is retained in the integration receipt.

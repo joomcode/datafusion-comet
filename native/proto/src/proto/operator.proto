@@ -140,6 +140,9 @@ message ShuffleScan {
   repeated spark.spark_expression.DataType fields = 1;
   // Informational label for debug output (e.g., "CometShuffleExchangeExec [id=5]")
   string source = 2;
+  bool coalesce_batches = 3;
+  // Joined-batch target only. An individual larger block passes through unchanged; 0 disables.
+  uint64 coalesce_max_bytes = 4;
 }
 
 // Common data shared by all partitions in split mode (sent once at planning)

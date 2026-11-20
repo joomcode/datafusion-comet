@@ -327,9 +327,9 @@
     "currently_authorized": [],
     "groups_not_authorized": ["G07", "G08", "G09", "G10"],
     "reaffirmed_on": "2026-11-20",
-    "completed_groups": ["G01", "G02", "G03", "G04", "G05", "G06"],
+    "completed_groups": ["G01", "G02", "G03", "G04", "G05", "G06", "G07"],
     "active_implementation_group": null,
-    "next_group_requires_separate_approval": "G07",
+    "next_group_requires_separate_approval": "G08",
     "before_g06_final_checkpoint": {
       "explicit_user_approval_per_group": true,
       "currently_authorized": ["G03"],
@@ -781,6 +781,52 @@
       "full per-group GHA",
       "main/tag updates",
       "release/publication",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g07_authorization": {
+    "recorded_on": "2026-11-20",
+    "status": "APPROVED_EXPLICITLY",
+    "request_translation": "Start G07 joom/1.2-shuffle-and-c2r (C2R/pooling/broadcast, writers, spill callback, direct read and coalescer) under the approved plan. Report after local builds and targeted tests before merge. Do not run full GHA or start G08.",
+    "base_commit": "0028887b3b040807c44c44731e862c02012e75b8",
+    "cards": [
+      "J08",
+      "J09",
+      "J10",
+      "J11",
+      "J12",
+      "J13",
+      "J21",
+      "J23",
+      "J24",
+      "J25",
+      "J26",
+      "J27"
+    ],
+    "excluded": [
+      "push/merge before review",
+      "G08-G10",
+      "full per-group GHA",
+      "main/tag updates",
+      "release/publication",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g07_integration_authorization": {
+    "date": "2026-11-20",
+    "status": "APPROVED_EXPLICITLY",
+    "request_translation": "Push G07 to origin and merge into branch-1.2. After the merge verify the final state and report all included commits. Do not proceed to G08.",
+    "qualified_source_previously_verified": "62e9ffd7a573eecf573d0713ff7a4b7640ed417a",
+    "method": "Keep three substantive commits; fold acceptance documentation into the third and fast-forward with no extra merge/service commit.",
+    "scope": "Read remote refs, guarded atomic feature/base publication, local fast-forward and exact local/remote/source/document verification.",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07-integration/completion.json",
+    "excluded": [
+      "G08-G10",
+      "full per-group GHA",
+      "main/tag changes",
+      "release publication",
       "production",
       "datasci access"
     ]

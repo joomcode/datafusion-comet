@@ -42,7 +42,7 @@ import org.apache.spark.sql.catalyst.expressions.AttributeReference
 import org.apache.spark.sql.catalyst.expressions.aggregate.Final
 import org.apache.spark.sql.catalyst.plans.logical.LocalRelation
 import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
-import org.apache.spark.sql.comet.{CometCollectLimitExec, CometExec, CometHashAggregateExec, CometLocalTableScanExec, CometMetricNode, CometNativeExec, CometNativeScanExec, CometScanWrapper, CometSparkToColumnarExec, CometTakeOrderedAndProjectExec}
+import org.apache.spark.sql.comet.{CometCollectLimitExec, CometExec, CometHashAggregateExec, CometLocalTableScanExec, CometMetricNode, CometNativeExec, CometNativeScanExec, CometScanWrapper, CometSortExec, CometSparkToColumnarExec, CometTakeOrderedAndProjectExec}
 import org.apache.spark.sql.comet.execution.arrow.{CometArrowStream, CometNativeArrowSource}
 import org.apache.spark.sql.comet.execution.shuffle.{CometColumnarShuffle, CometNativeShuffle, CometShuffleExchangeExec}
 import org.apache.spark.sql.execution.{FileSourceScanExec, LocalTableScanExec, SparkPlan}
@@ -1684,6 +1684,45 @@ class CometNativeShuffleSuite extends CometTestBase with AdaptiveSparkPlanHelper
     }
   }
 
+  for {
+    mode <- Seq("jvm", "native")
+    aqe <- Seq(false, true)
+    direct <- Seq(false, true)
+  } {
+    test(
+      s"G07 shuffle direct read retains initial sort input: mode=$mode aqe=$aqe direct=$direct") {
+      withSQLConf(
+        CometConf.COMET_SHUFFLE_MODE.key -> mode,
+        CometConf.COMET_SHUFFLE_DIRECT_READ_ENABLED.key -> direct.toString,
+        "spark.sql.adaptive.enabled" -> aqe.toString,
+        "spark.sql.adaptive.coalescePartitions.enabled" -> "true",
+        "spark.sql.shuffle.partitions" -> "4") {
+        val data = (0 until 256).map { i =>
+          (i, i % 7, if (i % 11 == 0) null else Array.fill[Byte](8192)((i % 13).toByte))
+        }
+        withParquetTable(data, "direct_sort_input") {
+          val df = sql("SELECT * FROM direct_sort_input")
+            .repartition(col("_2"))
+            .sortWithinPartitions(col("_1"))
+          def assertDirectSortInputs(plan: SparkPlan): Unit = {
+            val sorts = collect(plan) { case sort: CometSortExec => sort }
+            assert(sorts.nonEmpty, plan.treeString)
+            sorts.foreach { sort =>
+              val scans = sort.nativeOp.getChildrenList
+              assert(scans.size() == 1, sort.nativeOp.toString)
+              assert(scans.get(0).hasShuffleScan == direct, sort.nativeOp.toString)
+            }
+          }
+          // Check before the action: AdaptiveSparkPlanExec mutates its executedPlan, so saving
+          // its reference and inspecting it after execution does not prove initial conversion.
+          assertDirectSortInputs(df.queryExecution.executedPlan)
+          val (_, finalPlan) = checkSparkAnswer(df)
+          assertDirectSortInputs(finalPlan)
+        }
+      }
+    }
+  }
+
   test("shuffle direct read produces same results as FFI path") {
     Seq(true, false).foreach { directRead =>
       withSQLConf(CometConf.COMET_SHUFFLE_DIRECT_READ_ENABLED.key -> directRead.toString) {
@@ -1796,7 +1835,7 @@ class CometNativeShuffleSuite extends CometTestBase with AdaptiveSparkPlanHelper
       .groupBy((col("id") % 997).as("k"))
       .agg(sum("id"), count("id"))
 
-  test("final aggregate reads its shuffle through ShuffleScan only under AQE") {
+  test("final aggregate reads its shuffle through ShuffleScan on initial and AQE planning") {
     // The coalesced case takes the stage's ShuffleScan before AQE puts the coalesced read
     // between them, and the ShuffleScan then reads the partitions that the read specifies.
     // (confs, whether the plan is adaptive, the block that reads the shuffle)
@@ -1811,7 +1850,7 @@ class CometNativeShuffleSuite extends CometTestBase with AdaptiveSparkPlanHelper
       (
         Seq(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false"),
         false,
-        Seq("CometShuffleExchangeExec" -> "SCAN")))
+        Seq("CometShuffleExchangeExec" -> "SHUFFLE_SCAN")))
     cases.foreach { case (confs, isAdaptive, expected) =>
       withClue(s"$confs: ") {
         withSQLConf(confs: _*) {
