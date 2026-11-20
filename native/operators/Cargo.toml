@@ -37,6 +37,7 @@ futures = { workspace = true }
 parking_lot = "0.12.5"
 
 [dev-dependencies]
+rand = { workspace = true }
 criterion = { version = "0.7", features = ["async", "async_tokio", "async_std"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
@@ -50,4 +51,8 @@ harness = false
 
 [[bench]]
 name = "window"
+harness = false
+
+[[bench]]
+name = "sorted_window"
 harness = false

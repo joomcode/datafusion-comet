@@ -26,6 +26,10 @@ pub enum SparkError {
     )]
     MalformedVariant,
 
+    /// Spark rejects oversized window partitions before its Int-indexed frame evaluation.
+    #[error("[WINDOW_FUNCTION_PARTITION_SIZE_EXCEEDS_LIMIT] Window partition has {num_rows} rows, exceeding the limit of 2147483647 rows.")]
+    WindowPartitionSizeExceedsLimit { num_rows: u64 },
+
     // This list was generated from the Spark code. Many of the exceptions are not yet used by Comet
     #[error("[CAST_INVALID_INPUT] The value '{value}' of the type \"{from_type}\" cannot be cast to \"{to_type}\" \
         because it is malformed. Correct the value as per the syntax, or change its target type. \
@@ -350,6 +354,7 @@ impl SparkError {
     pub(crate) fn error_type_name(&self) -> &'static str {
         match self {
             SparkError::MalformedVariant => "MalformedVariant",
+            SparkError::WindowPartitionSizeExceedsLimit { .. } => "WindowPartitionSizeExceedsLimit",
             SparkError::CastInvalidValue { .. } => "CastInvalidValue",
             SparkError::InvalidInputInCastToDatetime { .. } => "InvalidInputInCastToDatetime",
             SparkError::NumericValueOutOfRange { .. } => "NumericValueOutOfRange",
@@ -413,6 +418,9 @@ impl SparkError {
     /// Extract parameters as JSON value
     pub(crate) fn params_as_json(&self) -> serde_json::Value {
         match self {
+            SparkError::WindowPartitionSizeExceedsLimit { num_rows } => {
+                serde_json::json!({"numRows": num_rows.to_string()})
+            }
             SparkError::CastInvalidValue {
                 value,
                 from_type,
@@ -778,7 +786,8 @@ impl SparkError {
             }
 
             // FileNotFound - will be converted to SparkFileNotFoundException by the shim
-            SparkError::FileNotFound { .. } => "org/apache/spark/SparkException",
+            SparkError::FileNotFound { .. }
+            | SparkError::WindowPartitionSizeExceedsLimit { .. } => "org/apache/spark/SparkException",
 
             // DuplicateFieldCaseInsensitive - converted to SparkRuntimeException by the shim
             SparkError::DuplicateFieldCaseInsensitive { .. } => {
@@ -820,6 +829,9 @@ impl SparkError {
     pub(crate) fn error_class(&self) -> Option<&'static str> {
         match self {
             SparkError::MalformedVariant => Some("MALFORMED_VARIANT"),
+            SparkError::WindowPartitionSizeExceedsLimit { .. } => {
+                Some("WINDOW_FUNCTION_PARTITION_SIZE_EXCEEDS_LIMIT")
+            }
             // Cast errors
             SparkError::CastInvalidValue { .. } => Some("CAST_INVALID_INPUT"),
             SparkError::InvalidInputInCastToDatetime { .. } => Some("CAST_INVALID_INPUT"),
@@ -1044,6 +1056,21 @@ impl From<SparkError> for DataFusionError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_partition_limit_error_preserves_count_and_spark_class() {
+        let error = SparkError::WindowPartitionSizeExceedsLimit {
+            num_rows: i32::MAX as u64 + 1,
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&error.to_json()).unwrap();
+        assert_eq!(parsed["errorType"], "WindowPartitionSizeExceedsLimit");
+        assert_eq!(
+            parsed["errorClass"],
+            "WINDOW_FUNCTION_PARTITION_SIZE_EXCEEDS_LIMIT"
+        );
+        assert_eq!(parsed["params"]["numRows"], "2147483648");
+        assert_eq!(error.exception_class(), "org/apache/spark/SparkException");
+    }
 
     #[test]
     fn repeated_parquet_field_error_preserves_raw_identifiers() {
