@@ -518,3 +518,11 @@ harness = false
 [[bench]]
 name = "first_last"
 harness = false
+
+[[bench]]
+name = "smj_interval_filter"
+harness = false
+
+[[bench]]
+name = "smj_streamed_filter"
+harness = false

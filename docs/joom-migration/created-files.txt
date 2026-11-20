@@ -247,3 +247,12 @@ Source/test inventory: G04-results.json#source_files_sha256. Auxiliary/ref inven
 G04 independent semantics review (2026-11-19):
 docs/joom-migration/G04-independent-semantics.md
 Auxiliary evidence: ${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics.
+
+G05 implementation and durable results (2026-11-20):
+docs/joom-migration/G05-report.md
+docs/joom-migration/G05-results.json
+native/spark-expr/benches/smj_interval_filter.rs
+native/spark-expr/benches/smj_streamed_filter.rs
+spark/src/test/scala/org/apache/comet/exec/CometSmjJoinFilterAnsiSuite.scala
+spark/src/test/scala/org/apache/comet/exec/CometSmjJoinFilterFuzzSuite.scala
+Source/test inventory: G05-results.json#source_sha256. Auxiliary evidence and actual local commit/ref/tree receipt: ${MIGRATION_AUX_ROOT}/20261120_comet12-g05/completion.json.

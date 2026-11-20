@@ -32,12 +32,14 @@ use datafusion::{
     config::ConfigOptions,
     physical_expr::{
         expressions::{CastExpr, Column},
+        utils::collect_columns,
         LexOrdering, PhysicalExpr,
     },
     physical_plan::{
         filter::FilterExec,
         joins::{
-            utils::JoinFilter, HashJoinExec, NestedLoopJoinExec, PartitionMode, SortMergeJoinExec,
+            utils::JoinFilter, HashJoinExec, NestedLoopJoinExec, PartitionMode, PrecomputeSafeExpr,
+            SortMergeJoinExec,
         },
         projection::ProjectionExec,
         ChildrenPropertiesMode, ExecutionPlan, ExecutionPlanProperties, ReplaceChildrenOptions,
@@ -201,6 +203,51 @@ impl OperatorBuilder for HashJoinBuilder {
 /// Builder for `SortMergeJoin`.
 pub struct SortMergeJoinBuilder;
 
+/// Annotate only maximal one-side subtrees whose extra evaluation is known to preserve Spark
+/// semantics. The vendor does not depend on Comet's physical expression types. Place these
+/// assertions immediately before constructing SMJ; rewrites drop them rather than lend a proof
+/// to a different expression.
+fn mark_safe_join_filter(filter: JoinFilter) -> datafusion::common::Result<JoinFilter> {
+    let expression = Arc::clone(filter.expression())
+        .transform_down(|expression| {
+            if expression.is::<Column>() {
+                return Ok(Transformed::no(expression));
+            }
+            let columns = collect_columns(&expression);
+            let Some(side) = columns
+                .iter()
+                .next()
+                .and_then(|c| filter.column_indices().get(c.index()))
+                .map(|c| c.side)
+            else {
+                return Ok(Transformed::no(expression));
+            };
+            let one_side = columns.iter().all(|c| {
+                filter
+                    .column_indices()
+                    .get(c.index())
+                    .is_some_and(|c| c.side == side)
+            });
+            if one_side
+                && datafusion_comet_spark_expr::can_evaluate_eagerly(&expression, filter.schema())
+            {
+                Ok(Transformed::new(
+                    Arc::new(PrecomputeSafeExpr::new(expression)) as Arc<dyn PhysicalExpr>,
+                    true,
+                    TreeNodeRecursion::Jump,
+                ))
+            } else {
+                Ok(Transformed::no(expression))
+            }
+        })?
+        .data;
+    Ok(JoinFilter::new(
+        expression,
+        filter.column_indices().to_vec(),
+        Arc::clone(filter.schema()),
+    ))
+}
+
 impl OperatorBuilder for SortMergeJoinBuilder {
     fn build(
         &self,
@@ -252,11 +299,15 @@ impl OperatorBuilder for SortMergeJoinBuilder {
             })
             .collect::<Result<Vec<_>, ExecutionError>>()?;
 
+        let join_filter = join_params
+            .join_filter
+            .map(mark_safe_join_filter)
+            .transpose()?;
         let join = Arc::new(SortMergeJoinExec::try_new(
             Arc::clone(&left),
             Arc::clone(&right),
             join_on,
-            join_params.join_filter,
+            join_filter,
             join_params.join_type,
             sort_options,
             // null doesn't equal to null in Spark join key. If the join key is
@@ -810,6 +861,104 @@ fn rewrite_physical_expr(
 mod tests {
     use super::*;
     use datafusion_comet_proto::{spark_expression, spark_operator};
+
+    #[test]
+    fn join_filter_hoists_only_proven_safe_comet_casts() -> datafusion::common::Result<()> {
+        use datafusion::common::JoinSide;
+        use datafusion::logical_expr::Operator;
+        use datafusion::physical_expr::expressions::BinaryExpr;
+        use datafusion::physical_plan::joins::utils::ColumnIndex;
+        use datafusion_comet_spark_expr::{Cast, EvalMode, SparkCastOptions};
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("left", DataType::Int64, true),
+            Field::new("right", DataType::Utf8, true),
+        ]));
+        for mode in [EvalMode::Legacy, EvalMode::Ansi] {
+            let parse: Arc<dyn PhysicalExpr> = Arc::new(Cast::new(
+                Arc::new(Column::new("right", 1)),
+                DataType::Int64,
+                SparkCastOptions::new(mode, "UTC"),
+                None,
+                None,
+            ));
+            let expression: Arc<dyn PhysicalExpr> = Arc::new(BinaryExpr::new(
+                Arc::new(Column::new("left", 0)),
+                Operator::Gt,
+                parse,
+            ));
+            let original_display = expression.to_string();
+            let filter = mark_safe_join_filter(JoinFilter::new(
+                expression,
+                vec![
+                    ColumnIndex {
+                        index: 0,
+                        side: JoinSide::Left,
+                    },
+                    ColumnIndex {
+                        index: 0,
+                        side: JoinSide::Right,
+                    },
+                ],
+                Arc::clone(&schema),
+            ))?;
+            let mut marks = 0;
+            filter.expression().apply(|expr| {
+                marks += usize::from(expr.is::<PrecomputeSafeExpr>());
+                Ok(TreeNodeRecursion::Continue)
+            })?;
+            assert_eq!(marks, usize::from(mode == EvalMode::Legacy));
+            assert_eq!(filter.expression().to_string(), original_display);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn join_filter_does_not_hoist_nondeterministic_expressions() -> datafusion::common::Result<()> {
+        use datafusion::common::JoinSide;
+        use datafusion::logical_expr::Operator;
+        use datafusion::physical_expr::expressions::BinaryExpr;
+        use datafusion::physical_plan::joins::utils::ColumnIndex;
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("left", DataType::Float64, false),
+            Field::new("right", DataType::Float64, false),
+        ]));
+        let random: Arc<dyn PhysicalExpr> =
+            Arc::new(datafusion_comet_spark_expr::RandExpr::new(42));
+        let value = Arc::new(BinaryExpr::new(
+            random,
+            Operator::Plus,
+            Arc::new(Column::new("left", 0)),
+        ));
+        let expression: Arc<dyn PhysicalExpr> = Arc::new(BinaryExpr::new(
+            value,
+            Operator::Gt,
+            Arc::new(Column::new("right", 1)),
+        ));
+        let filter = mark_safe_join_filter(JoinFilter::new(
+            expression,
+            vec![
+                ColumnIndex {
+                    index: 0,
+                    side: JoinSide::Left,
+                },
+                ColumnIndex {
+                    index: 0,
+                    side: JoinSide::Right,
+                },
+            ],
+            schema,
+        ))?;
+        let mut marks = 0;
+        filter.expression().apply(|expr| {
+            marks += usize::from(expr.is::<PrecomputeSafeExpr>());
+            Ok(TreeNodeRecursion::Continue)
+        })?;
+        assert_eq!(
+            marks, 0,
+            "an unknown/stateful expression must not inherit eager safety"
+        );
+        Ok(())
+    }
 
     fn column() -> Expr {
         Expr {

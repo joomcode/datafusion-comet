@@ -669,5 +669,55 @@
       "production use",
       "datasci access"
     ]
+  },
+  "g05_authorization": {
+    "recorded_on": "2026-11-20",
+    "status": "APPROVED_EXPLICITLY",
+    "request_translation": "Start G05 joom/1.2-smj-filter: filter before payload, outer-join correctness, hoisting and ANSI guards, under the approved plan. Report after local builds/targeted regressions before merge. Do not run full GHA or start G06.",
+    "base_commit": "a89fea10ed661a9e76ba2cd3bdbd3a78b5b3aec8",
+    "cards": ["D05"],
+    "scope": "Port the complete safe block from joom-1.1-13 onto current DataFusion55.2, retaining upstream fixes and validating against original Spark4.2.1, ANSI=true.",
+    "excluded": [
+      "merge before user review",
+      "push without explicit review instruction",
+      "G06-G10",
+      "full per-group GHA",
+      "main/tag changes",
+      "artifact publication",
+      "production use",
+      "datasci access"
+    ]
+  },
+  "g05_correctness_implementation": {
+    "date": "2026-11-20",
+    "status": "TECHNICAL_SAFETY_ADAPTATIONS_WITHIN_APPROVED_D05",
+    "source": "Approved ANSI/correctness policy and G05 implementation authorization.",
+    "rules": [
+      "Positive eager-safety proof instead of relying on missing throwable/volatility metadata.",
+      "Targeted Spark SMJ fallback for unproven AND/OR RHS until G08 native lazy semantics is established.",
+      "Fix constant zero-column and synthetic outer-pair residual semantics; no assertion weakening.",
+      "Preserve tag13 cache accounting limitations explicitly; no pool redesign."
+    ],
+    "report": "G05-report.md",
+    "gates": "Local qualification only; await user approval for push/integration. No full GHA/G06/main/tag/publication/production/datasci work."
+  },
+  "g05_integration_authorization": {
+    "recorded_on": "2026-11-20",
+    "status": "APPROVED_EXPLICITLY",
+    "user_request_translation": "Push G05 to origin and merge it into branch-1.2. After the merge verify the final state and report, listing the included commits. Do not start G06.",
+    "supersedes": "Prior G05 feature-push/integration holds only; G06-G10 remain closed.",
+    "execution": "Fold acceptance documentation into the last existing G05 commit. Preserve the first commit and the exact qualified non-migration tree. Push feature and fast-forward branch-1.2 without an extra merge/service commit; never overwrite unexpected remote changes.",
+    "base_commit": "a89fea10ed661a9e76ba2cd3bdbd3a78b5b3aec8",
+    "functional_source_previously_verified": "5448f369ab6bdf9607a6f80ea46d013e4bff99bc",
+    "remote_scope": "github.com/joomcode/datafusion-comet: inspect refs, create joom/1.2-smj-filter and fast-forward branch-1.2. No new PR/full per-group GHA.",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05-integration/completion.json",
+    "boundaries": [
+      "G06-G10 implementation",
+      "main/tag changes",
+      "full per-group GHA",
+      "artifact publication",
+      "production use",
+      "datasci access"
+    ]
   }
 }

@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-20",
-  "phase": "G04_COMPLETED_INTEGRATED_G05_AWAITING_AUTHORIZATION",
+  "phase": "G05_COMPLETED_INTEGRATED",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -115,10 +115,16 @@
       "branch": "joom/1.2-smj-filter",
       "cards": ["D05"],
       "depends_on": ["G01"],
-      "status": "NOT_STARTED",
+      "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
-      "tests": "NOT_RUN",
-      "handoff_report": null
+      "tests": "88unique native/39JVM passed;23 opt-in full fuzz canceled and explicitly tracked; no remaining failed qualified case.",
+      "handoff_report": "G05-report.md",
+      "base_commit": "a89fea10ed661a9e76ba2cd3bdbd3a78b5b3aec8",
+      "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05",
+      "completion_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05-integration/completion.json",
+      "head_ref": "refs/heads/branch-1.2",
+      "functional_source_previously_verified": "5448f369ab6bdf9607a6f80ea46d013e4bff99bc",
+      "implementation_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05/completion.json"
     },
     {
       "id": "G06",
@@ -298,8 +304,8 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "G04 accepted and integrated; await separate explicit user authorization before G05. Final agreed Linux/full-fuzz/metric/release qualification remains required; no production use.",
-  "qualification": "G04 local targeted ARM64/dev checks passed; see G04-results.json. Final full Linux/release/JAR qualification remains pending; G01 RC1 is historical evidence only.",
+  "next_step": "G05 accepted for integration; post-commit receipt records actual local/remote refs and unchanged qualified source. Wait for explicit G06 authorization.",
+  "qualification": "G05 local targeted ARM64/dev checks passed; all qualified source bytes preserved for integration. Final full-fuzz/Linux/release/JAR backlog remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
   "execution_model": {
@@ -524,20 +530,19 @@
   },
   "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04",
   "integration_gate": {
-    "group": "G04",
-    "status": "G04_USER_APPROVED_ACCEPTANCE",
-    "base_commit": "af05c94e7e5c669f36e783f65e5d5f2d35d328ce",
+    "group": "G05",
+    "status": "ACCEPTED_FOR_VERIFIED_FAST_FORWARD_INTEGRATION",
     "merge_authorized": true,
     "push_authorized": true,
-    "method": "Fast-forward; preserve five substantive commits and qualified non-migration source tree. Fold acceptance documentation into the final commit.",
-    "actual_result_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g04-integration/completion.json",
-    "post_commit_gate": "This snapshot records acceptance. Exact final commit/tree/local and remote refs are verified after integration in the external completion receipt.",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05-integration/completion.json",
+    "next_group_authorized": false,
     "not_authorized": [
-      "G05-G10",
+      "G06-G10",
       "full per-group GHA",
       "main/tag changes",
-      "artifact publication",
-      "production"
+      "publication",
+      "production",
+      "datasci access"
     ]
   },
   "pr_preparation": {
@@ -1487,6 +1492,32 @@
           "status": "DEFERRED_FINAL_QUALIFICATION",
           "evidence_path_and_source_sha": "G04-results.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json; final release SHA pending."
         }
+      },
+      {
+        "id": "G05-LINUX-RELEASE",
+        "group": "G05",
+        "feature_cards": ["D05"],
+        "behavior_or_test": "Validate G05 on final full agreed Linux CI/release graph and exact final-JAR AMD64/ARM64 smoke.",
+        "required_inputs_and_settings": "Original Spark 4.2.1/ANSI=true plus preserved Legacy fuzz settings; final shared lock/vendor/release graph.",
+        "reason_deferred": "Approved local-targeted per-group policy; final complete qualification mandatory.",
+        "owner": "Final migration qualification",
+        "intended_validation_command_or_job": "Final full agreed Comet CI plus RC Build & Smoke.",
+        "native_execution_requirement": "Complete rows/multiplicities and mandatory errors, actual native or explicitly safe fallback, real spill where required; canceled/ignored not passes.",
+        "status": "DEFERRED_FINAL_QUALIFICATION",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05/final-source-manifest.json"
+      },
+      {
+        "id": "G05-FULL-FUZZ",
+        "group": "G05",
+        "feature_cards": ["D05"],
+        "behavior_or_test": "Execute all23 full SMJ fuzz cases plus10 default cases; none canceled. Full suite4869query comparisons.",
+        "required_inputs_and_settings": "Original Spark 4.2.1/ANSI=true plus preserved Legacy fuzz settings; final shared lock/vendor/release graph.",
+        "reason_deferred": "Approved local-targeted per-group policy; final complete qualification mandatory.",
+        "owner": "Final migration qualification",
+        "intended_validation_command_or_job": "Deliver comet.test.smjFuzz.full=true to forked JVM; run CometSmjJoinFilterFuzzSuite and verify all full: cases execute.",
+        "native_execution_requirement": "Complete rows/multiplicities and mandatory errors, actual native or explicitly safe fallback, real spill where required; canceled/ignored not passes.",
+        "status": "DEFERRED_FINAL_QUALIFICATION",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05/final-source-manifest.json"
       }
     ],
     "final_gate": "No unresolved/unverified applicable cases. Require actual passing evidence; retain only applicability exclusions explicitly agreed with the user (such as the existing HDFS-cluster exclusion)."
@@ -1508,7 +1539,7 @@
   },
   "production_use_allowed": false,
   "active_implementation_group": null,
-  "local_documentation_update_pending": null,
+  "local_documentation_update_pending": false,
   "g02": {
     "base_commit": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
     "branch": "joom/1.2-native-runtime",
@@ -1859,6 +1890,38 @@
     "not_authorized": [
       "G04 push or merge before user review",
       "G05-G10",
+      "full per-group GHA",
+      "main/tag changes",
+      "publication",
+      "production"
+    ]
+  },
+  "g05": {
+    "status": "COMPLETED_INTEGRATED",
+    "branch": "joom/1.2-smj-filter",
+    "base": "a89fea10ed661a9e76ba2cd3bdbd3a78b5b3aec8",
+    "authorization_ref": "decisions.json#g05_authorization",
+    "evidence": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05",
+    "merge_allowed": true,
+    "full_gha_allowed": false,
+    "report": "G05-report.md",
+    "results": "G05-results.json",
+    "qualification": "PASSED_LOCAL_TARGETED_WITH_EXPLICIT_FINAL_BACKLOG",
+    "completion_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05/completion.json",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05/final-source-manifest.json",
+    "g08_follow_up": "Keep join-only unsafe AND/OR fallback until genuine native lazy evaluation passes mixed/NULL/mandatory-error controls. Do not remove it just because hoisting is safe.",
+    "integration_authorization_ref": "decisions.json#g05_integration_authorization",
+    "functional_source_previously_verified": "5448f369ab6bdf9607a6f80ea46d013e4bff99bc",
+    "integration_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05-integration/completion.json"
+  },
+  "g05_review_gate_history": {
+    "group": "G05",
+    "status": "AWAITING_USER_G05_REVIEW",
+    "base_commit": "a89fea10ed661a9e76ba2cd3bdbd3a78b5b3aec8",
+    "merge_authorized": false,
+    "push_authorized": false,
+    "not_authorized": [
+      "G06-G10",
       "full per-group GHA",
       "main/tag changes",
       "publication",

@@ -22,3 +22,13 @@ mod null_short_circuit;
 pub use case_when::{coerce_to_common_type, create_case_when, create_if_expr, CaseWhenExpr};
 pub use if_expr::IfExpr;
 pub use null_short_circuit::NullShortCircuit;
+
+/// Whether an expression may be evaluated on rows Spark would skip without changing its value,
+/// advancing state or introducing a SQL error. Unknown expression classes are not accepted.
+/// SMJ uses this affirmative proof before caching one-side join-filter subexpressions.
+pub fn can_evaluate_eagerly(
+    expr: &std::sync::Arc<dyn datafusion::physical_expr::PhysicalExpr>,
+    input_schema: &arrow::datatypes::Schema,
+) -> bool {
+    case_when::cannot_fail(expr, input_schema)
+}

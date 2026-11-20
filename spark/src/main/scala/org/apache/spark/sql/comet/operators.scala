@@ -30,7 +30,7 @@ import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{Ascending, Attribute, AttributeSeq, AttributeSet, CodegenObjectFactoryMode, Expression, ExpressionSet, Generator, LeafExpression, Literal, NamedExpression, SortOrder, XXH64}
+import org.apache.spark.sql.catalyst.expressions.{Add, Alias, And, Ascending, Attribute, AttributeSeq, AttributeSet, BinaryComparison, BoundReference, CaseWhen, Cast, CodegenObjectFactoryMode, EvalMode, Expression, ExpressionSet, Generator, If, IsNotNull, IsNull, LeafExpression, Literal, Multiply, NamedExpression, Not, Or, SortOrder, Subtract, XXH64}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, AggregateMode, Average, CollectList, CollectSet, Final, ImperativeAggregate, Mode, Partial, PartialMerge, Percentile, Sum}
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
 import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, BuildRight, BuildSide}
@@ -48,7 +48,7 @@ import org.apache.spark.sql.execution.exchange.ReusedExchangeExec
 import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, BroadcastNestedLoopJoinExec, HashJoin, ShuffledHashJoinExec, SortMergeJoinExec}
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.types.{ArrayType, BinaryType, BooleanType, ByteType, DataType, DateType, DecimalType, DoubleType, FloatType, IntegerType, LongType, MapType, ShortType, StringType, StructField, StructType, TimestampNTZType, TimestampType}
+import org.apache.spark.sql.types.{ArrayType, BinaryType, BooleanType, ByteType, DataType, DateType, DecimalType, DoubleType, FloatType, IntegerType, LongType, MapType, NullType, ShortType, StringType, StructField, StructType, TimestampNTZType, TimestampType}
 import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.spark.unsafe.Platform
 import org.apache.spark.util.SerializableConfiguration
@@ -3586,6 +3586,65 @@ case class CometBroadcastHashJoinExec(
 }
 
 object CometSortMergeJoinExec extends CometOperatorSerde[SortMergeJoinExec] {
+  // DataFusion may evaluate an AND/OR right operand on rows Spark skips. Until the native
+  // boolean implementation preserves Spark's row-level short circuit, keep only those join
+  // conditions whose skipped expressions are positively known to be safe. Expression.throwable
+  // is insufficient: Spark's ANSI casts/arithmetic do not all override its default value.
+  private def mayEvaluateFilterEagerly(expr: Expression): Boolean = {
+    def primitive(dt: DataType): Boolean = dt match {
+      case BooleanType | ByteType | ShortType | IntegerType | LongType | FloatType | DoubleType |
+          BinaryType | DateType | TimestampType | TimestampNTZType =>
+        true
+      case _: StringType | _: DecimalType => true
+      case _ => false
+    }
+    def wrappingNumber(dt: DataType): Boolean = dt match {
+      case ByteType | ShortType | IntegerType | LongType | FloatType | DoubleType => true
+      case _ => false
+    }
+    def safeCast(cast: Cast): Boolean = {
+      val from = cast.child.dataType
+      val to = cast.dataType
+      val widening = (from, to) match {
+        case (ByteType, ShortType | IntegerType | LongType | FloatType | DoubleType) => true
+        case (ShortType, IntegerType | LongType | FloatType | DoubleType) => true
+        case (IntegerType, LongType | FloatType | DoubleType) => true
+        case (LongType, FloatType | DoubleType) => true
+        case (FloatType, DoubleType) => true
+        case _ => false
+      }
+      val nullableIntegerParse =
+        cast.evalMode != EvalMode.ANSI && from.isInstanceOf[StringType] &&
+          Seq(ByteType, ShortType, IntegerType, LongType).contains(to)
+      from == to || from == NullType || widening || nullableIntegerParse
+    }
+    val nodeIsSafe = expr match {
+      case _: Attribute | _: BoundReference | _: Literal => true
+      case _: Alias | _: IsNull | _: IsNotNull | _: Not | _: And | _: Or | _: If | _: CaseWhen =>
+        true
+      case comparison: BinaryComparison =>
+        comparison.left.dataType == comparison.right.dataType && primitive(
+          comparison.left.dataType)
+      case cast: Cast => safeCast(cast)
+      case add: Add => add.evalMode == EvalMode.LEGACY && wrappingNumber(add.dataType)
+      case subtract: Subtract =>
+        subtract.evalMode == EvalMode.LEGACY && wrappingNumber(subtract.dataType)
+      case multiply: Multiply =>
+        multiply.evalMode == EvalMode.LEGACY && wrappingNumber(multiply.dataType)
+      // Unknown functions, UDFs, checked arithmetic, division and temporal parsing are not proof
+      // of eager safety, even if Catalyst does not mark them throwable.
+      case _ => false
+    }
+    expr.deterministic && nodeIsSafe && expr.children.forall(mayEvaluateFilterEagerly)
+  }
+
+  private def needsSparkBooleanEvaluation(condition: Expression): Boolean =
+    condition.exists {
+      case and: And => !mayEvaluateFilterEagerly(and.right)
+      case or: Or => !mayEvaluateFilterEagerly(or.right)
+      case _ => false
+    }
+
   override def enabledConfig: Option[ConfigEntry[Boolean]] = Some(
     CometConf.COMET_EXEC_SORT_MERGE_JOIN_ENABLED)
 
@@ -3618,6 +3677,11 @@ object CometSortMergeJoinExec extends CometOperatorSerde[SortMergeJoinExec] {
       withFallbackReason(
         join,
         s"${CometConf.COMET_EXEC_SORT_MERGE_JOIN_WITH_JOIN_FILTER_ENABLED.key} is not enabled")
+      return None
+    }
+
+    if (join.condition.exists(needsSparkBooleanEvaluation)) {
+      withFallbackReason(join, "Join condition requires Spark's short-circuit evaluation")
       return None
     }
 

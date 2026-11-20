@@ -17,6 +17,12 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+> **Current G05 acceptance, 2026-11-20:** The user approved publishing G05 and integrating it into `branch-1.2`. Actual fast-forward/local/remote/tree verification is recorded after commit in `${MIGRATION_AUX_ROOT}/20261120_comet12-g05-integration/completion.json`. The qualified non-migration source is unchanged from `5448f369a`; earlier G05 push/integration holds below are historical. G06-G10, full per-group GHA, main/tag changes, artifact publication, production and datasci work remain unauthorized. Final full-fuzz/Linux/release/JAR qualification remains mandatory.
+
+> **Historical G05 review gate, 2026-11-20:** D05 is implemented and locally qualified in `joom/1.2-smj-filter` from accepted G04 `a89fea10e`. See G05-report.md/G05-results.json and STATE.json. Report before push/integration; protected refs remain unchanged. G06-G10, full per-group GHA, main/tag changes, publication, production and datasci work remain unauthorized. Final full-fuzz/Linux/release/JAR qualification remains mandatory. Earlier G05 authorization below is historical.
+
+> **Historical G05 implementation authorization, 2026-11-20:** G01-G04 are complete and integrated. The user explicitly started G05 on `joom/1.2-smj-filter` from `a89fea10e`. Implement D05 with local builds/targeted regressions and report before push/integration. G06-G10, full per-group GHA, main/tag changes, publication, production and datasci access remain unauthorized. Earlier G05 holds below are historical. See decisions.json#g05_authorization and STATE.json.
+
 > **Current G04 acceptance, 2026-11-20:** G04 is complete and accepted for publication/integration into branch-1.2. Exact final local/remote refs, five commits and qualified-source preservation are recorded after integration in `${MIGRATION_AUX_ROOT}/20261120_comet12-g04-integration/completion.json`. G05 requires separate explicit authorization. Earlier G04 push/merge holds below are historical; final qualification remains required.
 
 > **Historical G04 continuation checkpoint, 2026-11-19:** Implementation and local targeted validation are complete; see G04-report.md/G04-results.json and `${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json`. Memory, Partial metadata and ordering failures were corrected; regressions pass without higher budgets or weaker checks. Await user review: no push, merge, full GHA, G05 or protected-ref changes. Preserve historical checkpoints below.

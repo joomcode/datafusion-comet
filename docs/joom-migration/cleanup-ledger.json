@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-20",
-  "stage": "G04_ACCEPTED_INTEGRATION",
+  "stage": "G05_COMPLETED_INTEGRATED",
   "baseline": "resource-baseline.json",
   "no_dependency_downloads_or_release_outputs_yet": false,
   "entries": [
@@ -184,6 +184,14 @@
       "contains": "Before/after refs, qualified-tree/doc preservation checks, remote push receipts and final integration proof; no new builds or downloads.",
       "backup_ref": "refs/joom-migration/backups/g04-before-integration-20261120",
       "preserve_until": "Final migration acceptance and explicit user cleanup decision"
+    },
+    {
+      "type": "g05_auxiliary_outputs",
+      "path": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "contains": "Port proposals, independent Spark semantics review, native/JVM test/build and existing benchmark receipts; preserve failures/source hashes and cleanup identities.",
+      "preserve_until": "Final migration acceptance and user cleanup decision"
     }
   ],
   "preexisting_or_shared": {
@@ -814,5 +822,31 @@
     "recovery_ref": "refs/joom-migration/checkpoints/20261119-g03-before-integration",
     "preservation": "Keep original implementation and integration receipts separately through final migration acceptance. No automatic cleanup of records, refs or shared caches.",
     "build_or_artifact_changes": "NONE: documentation consolidation and Git integration only; normal cached RAT may update its standard Maven cache/target."
+  },
+  "g05_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05",
+    "contains": "Proposal/review/source manifests, all failed and passing raw build/test/benchmark logs, exact cohort summaries and completion receipt.",
+    "reused_outputs": [
+      "native/target",
+      "spark/target",
+      "common/target",
+      "target/criterion"
+    ],
+    "criterion_outputs": ["native/target/criterion", "target/criterion"],
+    "measured_sizes_kib": {
+      "auxiliary_directory": 3412,
+      "native/target": 69195412,
+      "spark/target": 1439808,
+      "native/target/criterion": 860
+    },
+    "attribution": "Entire reused directory sizes, not G05-only growth. No additional Docker image, dependency download or release artifact created.",
+    "preserve": "Keep evidence through final migration acceptance and user cleanup decision. No automatic deletion. Existing standard caches/toolchains and user-provided source checkouts preserved."
+  },
+  "g05_integration_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05-integration",
+    "contains": "Pre-integration snapshot, independent review, documentation/source preservation proof and actual local/remote completion receipt.",
+    "source_preservation": "Qualified source remains reachable at refs/joom-migration/g05-qualified; original implementation receipts are untouched.",
+    "build_policy": "No new build or dependency download for documentation-only acceptance. No release artifacts created.",
+    "preserve": "Keep through final migration acceptance; no automatic deletion."
   }
 }

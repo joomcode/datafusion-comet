@@ -68,9 +68,9 @@ on:
         # profile except the `pr` one (the nightly run, and a `labeled` run,
         # where the PR-tier row already ran at this commit). Rows and tiers
         # are in dev/ci/linux-test-profiles.py.
-        description: 'Which Spark profiles linux-test runs: all, pr (the default build profile) or nightly (the rest)'
+        description: "Which Spark profiles linux-test runs: all, pr (the default build profile) or nightly (the rest)"
         type: string
-        default: 'all'
+        default: "all"
 
 env:
   RUST_VERSION: stable
@@ -81,7 +81,6 @@ env:
   RUSTFLAGS: "-Clink-arg=-fuse-ld=bfd"
 
 jobs:
-
   # Fast lint check - gates all other jobs. Runs in cache-refresh-only mode too:
   # it is 40 seconds, and `build-native` `needs:` it, so skipping it would skip
   # the job the push tier exists to run.
@@ -159,7 +158,7 @@ jobs:
     container:
       image: amd64/rust
       env:
-        JAVA_TOOL_OPTIONS: '--add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED'
+        JAVA_TOOL_OPTIONS: "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED"
     strategy:
       matrix:
         profile:
@@ -245,7 +244,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: "24"
 
       - name: Install prettier
         run: |
@@ -407,7 +406,7 @@ jobs:
         uses: ./.github/actions/setup-builder
         with:
           rust-version: ${{ env.RUST_VERSION }}
-          jdk-version: 17  # JDK only needed for JVM module proto generation
+          jdk-version: 17 # JDK only needed for JVM module proto generation
 
       - name: Restore Cargo cache
         id: cargo-cache
@@ -556,6 +555,8 @@ jobs:
             value: |
               org.apache.comet.exec.CometAggregateSuite
               org.apache.comet.exec.CometFirstLastBoolAggFuzzSuite
+              org.apache.comet.exec.CometSmjJoinFilterFuzzSuite
+              org.apache.comet.exec.CometSmjJoinFilterAnsiSuite
               org.apache.comet.exec.CometExec3_4PlusSuite
               org.apache.comet.exec.CometExecSuite
               org.apache.comet.exec.CometOffTaskThreadSuite
@@ -695,7 +696,7 @@ jobs:
     container:
       image: amd64/rust
       env:
-        JAVA_TOOL_OPTIONS: '--add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED'
+        JAVA_TOOL_OPTIONS: "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED"
 
     steps:
       - uses: actions/checkout@v7

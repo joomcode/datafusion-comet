@@ -1,10 +1,11 @@
 {
   "created_on": "2026-11-17",
+  "updated_on": "2026-11-20",
   "purpose": "Durable approved migration package; update checksums when documents intentionally change.",
   "files": [
     {
       "path": "AGENTS.md",
-      "sha256": "2311508475ee3c07c1856472abb09cd579ef6e285997e3d83b35ae364fd8861d"
+      "sha256": "ed21c1bbd4cae4aa494e30dc5946be2f0d06d19d70f29e745c2fe21560002245"
     },
     {
       "path": "CHECKPOINT-VERIFICATION.json",
@@ -87,8 +88,16 @@
       "sha256": "eb8d40a03375129f02f113406165e5eb9f20d4e2f7ae2ddde5eb1c8cf3bde696"
     },
     {
+      "path": "G05-report.md",
+      "sha256": "1e90716c78dc8e2ecc4fe0ede351785ea051440d9afb7c678c816812a2989c01"
+    },
+    {
+      "path": "G05-results.json",
+      "sha256": "576d5ffeee59b35ee3c307b9310e5b43e3a6b55657c88d1cc9075a2692a056d2"
+    },
+    {
       "path": "HANDOFF.md",
-      "sha256": "29367a3f2abebb66f6e186ca19057de798b6775c4d7e19a27004edde879b1d4f"
+      "sha256": "b1366ab29757347bbb51f59e7fcc5b22a36edb02b44b71de07ea8c5e90045bfa"
     },
     {
       "path": "NETWORK.md",
@@ -100,7 +109,7 @@
     },
     {
       "path": "PAUSED.md",
-      "sha256": "99658d6c55fd98d855eca0c8ba991cb223f23cea0bdad47d01ae3e7f2438e8ed"
+      "sha256": "f85bbac18dfc57c02648a28effabb38646b21f210c64efe1613ff5ecdfe26ab0"
     },
     {
       "path": "PERFORMANCE.md",
@@ -112,11 +121,11 @@
     },
     {
       "path": "README.md",
-      "sha256": "1959e61f28bc3569d418677da43a2b2c3c90aa81301d00c2f1a52c8be8ca1cee"
+      "sha256": "3342b29c9e857a1dc4b12769e1909b4f62c107f2ad432eb0dd1c7449af2992a5"
     },
     {
       "path": "STATE.json",
-      "sha256": "e073468a7e37da3cec5a1d867c1b7625b02208143a430a11c9025b05022c4356"
+      "sha256": "f916fd95181634b7bbd937cf35cdc76532c8f098fca0ebecea9060fd3720cf8e"
     },
     {
       "path": "approved-plan.json",
@@ -128,7 +137,7 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "e875529abf07c85d2f621b95fcbb8a97c89ff7aa358409e351033d2dd5b7f111"
+      "sha256": "e3701daa65fd8f9e6fdf5cf1db5d47c68ed98a699e88f4ccd403f429749c9243"
     },
     {
       "path": "correctness-test-plan.txt",
@@ -136,11 +145,11 @@
     },
     {
       "path": "created-files.txt",
-      "sha256": "d3c1abded231b8a8119ca6a1b01dc06560baef0b70f0f72bdb6a654b99400c5c"
+      "sha256": "c9a3de64e6d132cb682d9b9d56e6857617ae4fb72389aefefe05efed46cd5ba5"
     },
     {
       "path": "decisions.json",
-      "sha256": "8b85788fe82eb939fce114fd49b91e2379513cb5d8a46036b478ce0358b9c251"
+      "sha256": "0ccec8e145f21fe878fa72962a6f27f69308e66a98d3857436b979a847b60303"
     },
     {
       "path": "feature-register.json",
@@ -158,13 +167,5 @@
       "path": "vendor-provenance.json",
       "sha256": "0e861be161fbdb07382712985bcaec200a63b18bfc139e94825b9d6fb919ea0e"
     }
-  ],
-  "original_research_directories": [
-    "${MIGRATION_AUX_ROOT}/20261116_comet12-migration-register",
-    "${MIGRATION_AUX_ROOT}/20261116_comet12-consolidated-plan"
-  ],
-  "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
-  "source_commit": "981e26dff6b64110a8b3949a0ed065523d9012e4",
-  "updated_on": "2026-11-20",
-  "path_notation_ref": "PATHS.md"
+  ]
 }
