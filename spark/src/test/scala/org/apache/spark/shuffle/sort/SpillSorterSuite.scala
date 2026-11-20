@@ -201,7 +201,12 @@ class SpillSorterSuite extends AnyFunSuite with BeforeAndAfterEach {
       sorter.reset()
 
       assert(sorter.numRecords() === 0)
+      assert(!sorter.hasSpaceForAnotherRecord())
+      assert(sorter.getPointerArrayMemoryUsage() === 0L)
+      assert(allocator.getUsed === 0L)
+      sorter.expandPointerArray(allocator.allocateArray(INITIAL_SIZE.toLong))
       assert(sorter.hasSpaceForAnotherRecord())
+      assert(sorter.getPointerArrayMemoryUsage() === INITIAL_SIZE * 8L)
     } finally {
       sorter.freeMemory()
       sorter.freeArray()
@@ -331,6 +336,9 @@ class SpillSorterSuite extends AnyFunSuite with BeforeAndAfterEach {
       val files = mutable.ArrayBuffer[File]()
       try {
         Seq(false, true).foreach { isLastFile =>
+          if (!sorter.hasSpaceForAnotherRecord()) {
+            sorter.expandPointerArray(allocator.allocateArray(INITIAL_SIZE.toLong))
+          }
           records.foreach { case (record, partition) =>
             assert(sorter.acquireNewPageIfNecessary(record.length + UAO_SIZE))
             sorter.insertRecord(

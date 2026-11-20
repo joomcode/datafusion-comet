@@ -34,10 +34,13 @@ use arrow::array::{
         TimestampMicrosecondBuilder,
     },
     types::Int32Type,
-    Array, ArrayRef, RecordBatch, RecordBatchOptions,
+    Array, ArrayRef, AsArray, DictionaryArray, GenericByteArray, RecordBatch, RecordBatchOptions,
 };
+use arrow::buffer::{OffsetBuffer, ScalarBuffer};
 use arrow::compute::cast;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
+use arrow::datatypes::{
+    BinaryType, ByteArrayType, DataType, Field, Schema, SchemaRef, TimeUnit, Utf8Type,
+};
 use datafusion::physical_plan::metrics::Time;
 use datafusion_comet_jni_bridge::errors::CometError;
 use jni::sys::{jint, jlong};
@@ -1774,7 +1777,10 @@ fn builder_to_array(
                 Ok(Arc::new(dict_array))
             } else {
                 // If the dictionary is not efficient, we convert it to a plain string array.
-                Ok(cast(&dict_array, &DataType::Utf8)?)
+                match unique_dictionary_to_plain::<Utf8Type>(&dict_array) {
+                    Some(array) => Ok(array),
+                    None => Ok(cast(&dict_array, &DataType::Utf8)?),
+                }
             }
         }
         DataType::Binary if prefer_dictionary_ratio > 1.0 => {
@@ -1793,15 +1799,91 @@ fn builder_to_array(
                 Ok(Arc::new(dict_array))
             } else {
                 // If the dictionary is not efficient, we convert it to a plain string array.
-                Ok(cast(&dict_array, &DataType::Binary)?)
+                match unique_dictionary_to_plain::<BinaryType>(&dict_array) {
+                    Some(array) => Ok(array),
+                    None => Ok(cast(&dict_array, &DataType::Binary)?),
+                }
             }
         }
         _ => Ok(builder.finish()),
     }
 }
 
+/// Reuses the dictionary values buffer as a plain array when every non-null key refers to a
+/// distinct value in insertion order, avoiding the copy made by `cast`.
+fn unique_dictionary_to_plain<T: ByteArrayType<Offset = i32>>(
+    dict_array: &DictionaryArray<Int32Type>,
+) -> Option<ArrayRef> {
+    let keys = dict_array.keys();
+    let values = dict_array.values().as_bytes_opt::<T>()?;
+    if values.null_count() != 0 || values.len() != keys.len() - keys.null_count() {
+        return None;
+    }
+    let value_offsets = values.value_offsets();
+    let mut offsets = Vec::with_capacity(keys.len() + 1);
+    offsets.push(value_offsets[0]);
+    let mut next = 0usize;
+    for i in 0..keys.len() {
+        if keys.is_valid(i) {
+            if keys.value(i) as usize != next {
+                return None;
+            }
+            next += 1;
+        }
+        offsets.push(value_offsets[next]);
+    }
+    let offsets = OffsetBuffer::new(ScalarBuffer::from(offsets));
+    // SAFETY: every offset is a value boundary of the already validated `values` array.
+    let array = unsafe {
+        GenericByteArray::<T>::new_unchecked(
+            offsets,
+            values.values().clone(),
+            keys.nulls().cloned(),
+        )
+    };
+    Some(Arc::new(array))
+}
+
 #[cfg(test)]
 mod test {
+    #[test]
+    fn unique_binary_dictionary_matches_cast() {
+        let mut builder = BinaryDictionaryBuilder::<Int32Type>::new();
+        builder.append_value(b"a1".as_slice());
+        builder.append_null();
+        builder.append_value(b"".as_slice());
+        builder.append_value(vec![7u8; 70000].as_slice());
+        builder.append_null();
+        let dict = builder.finish();
+        let plain = unique_dictionary_to_plain::<BinaryType>(&dict).expect("unique values");
+        let expected = cast(&dict, &DataType::Binary).unwrap();
+        assert_eq!(plain.to_data(), expected.to_data());
+        assert_eq!(plain.null_count(), 2);
+    }
+
+    #[test]
+    fn unique_string_dictionary_matches_cast() {
+        let mut builder = StringDictionaryBuilder::<Int32Type>::new();
+        builder.append_null();
+        builder.append_value("x");
+        builder.append_value("\u{043f}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}");
+        let dict = builder.finish();
+        let plain = unique_dictionary_to_plain::<Utf8Type>(&dict).expect("unique values");
+        assert_eq!(
+            plain.to_data(),
+            cast(&dict, &DataType::Utf8).unwrap().to_data()
+        );
+    }
+
+    #[test]
+    fn repeated_dictionary_values_are_not_reused() {
+        let mut builder = BinaryDictionaryBuilder::<Int32Type>::new();
+        builder.append_value(b"a".as_slice());
+        builder.append_value(b"b".as_slice());
+        builder.append_value(b"a".as_slice());
+        assert!(unique_dictionary_to_plain::<BinaryType>(&builder.finish()).is_none());
+    }
+
     use arrow::array::AsArray;
     use arrow::datatypes::{Fields, TimestampMicrosecondType};
 
@@ -2107,5 +2189,272 @@ mod test {
         assert_eq!(n.data_type(), &DataType::Null);
         assert_eq!(n.len(), 4);
         assert_eq!(n.logical_null_count(), 4);
+    }
+    #[test]
+    fn unique_dictionary_reuses_values_and_retains_them_after_builder_reset() {
+        let mut binary = BinaryDictionaryBuilder::<Int32Type>::new();
+        binary.append_value(b"first".as_slice());
+        binary.append_null();
+        binary.append_value([0xff, 0, 0x80].as_slice());
+        let dict = binary.finish();
+        let value_ptr = dict.values().as_binary::<i32>().values().as_ptr();
+        let output = unique_dictionary_to_plain::<BinaryType>(&dict).unwrap();
+        assert_eq!(output.as_binary::<i32>().values().as_ptr(), value_ptr);
+        drop(dict);
+        binary.append_value(vec![42u8; 70_000].as_slice());
+        let replacement = binary.finish();
+        assert_eq!(output.as_binary::<i32>().value(0), b"first");
+        assert!(output.is_null(1));
+        assert_eq!(output.as_binary::<i32>().value(2), &[0xff, 0, 0x80]);
+        assert_ne!(
+            replacement.values().as_binary::<i32>().values().as_ptr(),
+            value_ptr
+        );
+
+        let mut strings = StringDictionaryBuilder::<Int32Type>::new();
+        strings.append_value("first");
+        strings.append_null();
+        strings.append_value("\u{043f}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}");
+        let dict = strings.finish();
+        let output = unique_dictionary_to_plain::<Utf8Type>(&dict).unwrap();
+        assert_eq!(
+            output.as_string::<i32>().values().as_ptr(),
+            dict.values().as_string::<i32>().values().as_ptr()
+        );
+        assert_eq!(
+            output.to_data(),
+            cast(&dict, &DataType::Utf8).unwrap().to_data()
+        );
+    }
+
+    #[test]
+    fn unique_dictionary_rejects_null_values_reordering_and_unused_values() {
+        use arrow::array::{BinaryArray, Int32Array};
+        let make = |keys: Vec<Option<i32>>, values: Vec<Option<&[u8]>>| {
+            DictionaryArray::<Int32Type>::try_new(
+                Int32Array::from(keys),
+                Arc::new(BinaryArray::from(values)),
+            )
+            .unwrap()
+        };
+        let cases = [
+            make(vec![Some(0), Some(1)], vec![Some(b"a"), None]),
+            make(vec![Some(1), Some(0)], vec![Some(b"a"), Some(b"b")]),
+            make(vec![Some(0)], vec![Some(b"a"), Some(b"unused")]),
+        ];
+        for dict in cases {
+            assert!(unique_dictionary_to_plain::<BinaryType>(&dict).is_none());
+        }
+    }
+
+    #[test]
+    fn unique_dictionary_preserves_sliced_keys_values_and_all_nulls() {
+        use arrow::array::{BinaryArray, Int32Array};
+        let values = BinaryArray::from(vec![
+            Some(b"prefix".as_slice()),
+            Some(b"a".as_slice()),
+            Some(b"".as_slice()),
+        ])
+        .slice(1, 2);
+        let keys = Int32Array::from(vec![None, Some(0), Some(1), None]).slice(1, 3);
+        let dict = DictionaryArray::<Int32Type>::try_new(keys, Arc::new(values)).unwrap();
+        let output = unique_dictionary_to_plain::<BinaryType>(&dict).unwrap();
+        assert_eq!(
+            output.to_data(),
+            cast(&dict, &DataType::Binary).unwrap().to_data()
+        );
+        assert_eq!(output.as_binary::<i32>().value_offsets()[0], 6);
+        assert_eq!(
+            output.as_binary::<i32>().values().as_ptr(),
+            dict.values().as_binary::<i32>().values().as_ptr()
+        );
+        let mut builder = BinaryDictionaryBuilder::<Int32Type>::new();
+        builder.append_null();
+        builder.append_null();
+        let dict = builder.finish();
+        let output = unique_dictionary_to_plain::<BinaryType>(&dict).unwrap();
+        assert_eq!(
+            output.to_data(),
+            cast(&dict, &DataType::Binary).unwrap().to_data()
+        );
+        assert_eq!(output.null_count(), 2);
+    }
+
+    /// Both JVM-writer JNI entry points must preserve independently constructed rows,
+    /// partition boundaries and checksums through unique and repeated dictionary fallback.
+    #[test]
+    fn dictionary_fallback_matches_both_writer_entry_points() {
+        use arrow::array::{BinaryArray, Int64Array, StringArray};
+        use arrow::compute::concat_batches;
+        const N: usize = 18;
+        let schema = [DataType::Int64, DataType::Binary, DataType::Utf8];
+        for repeated in [false, true] {
+            let mut page_bytes = Vec::<u8>::new();
+            let mut records = Vec::new();
+            let mut expected = Vec::new();
+            for id in 0..N {
+                let value_id = if repeated { id % 3 } else { id };
+                let binary = (id % 5 != 0).then(|| {
+                    if id % 4 == 0 {
+                        vec![]
+                    } else {
+                        [0xff, 0, value_id as u8].repeat(if id % 3 == 0 { 24_000 } else { 3 })
+                    }
+                });
+                let text = (id % 7 != 0).then(|| format!("value-{value_id}-\u{00e9}"));
+                let mut row = vec![0u8; 32]; // null word, Int64, Binary pointer, Utf8 pointer
+                row[8..16].copy_from_slice(&(id as i64).to_le_bytes());
+                for (field, value) in [
+                    (1usize, binary.as_deref()),
+                    (2, text.as_deref().map(str::as_bytes)),
+                ] {
+                    match value {
+                        Some(bytes) => {
+                            let offset = row.len();
+                            let pointer = ((offset as u64) << 32) | bytes.len() as u64;
+                            row[8 + field * 8..16 + field * 8]
+                                .copy_from_slice(&pointer.to_le_bytes());
+                            row.extend_from_slice(bytes);
+                            row.resize(row.len().div_ceil(8) * 8, 0);
+                        }
+                        None => row[0] |= 1 << field,
+                    }
+                }
+                let start = page_bytes.len();
+                let row_size = row.len();
+                page_bytes.extend_from_slice(&((row_size + 4) as u32).to_ne_bytes());
+                page_bytes.extend_from_slice(&(row_size as u32).to_be_bytes());
+                page_bytes.extend_from_slice(&row);
+                records.push((id % 3, start, row_size, id));
+                expected.push((binary, text));
+            }
+            let mut page = vec![0u64; page_bytes.len().div_ceil(8)];
+            // SAFETY: the aligned page owns at least page_bytes.len() writable bytes.
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    page_bytes.as_ptr(),
+                    page.as_mut_ptr() as *mut u8,
+                    page_bytes.len(),
+                );
+            }
+            records.sort_by_key(|r| r.0);
+            let pointers = records
+                .iter()
+                .map(|&(p, offset, _, _)| ((p as i64) << 40) | offset as i64)
+                .collect::<Vec<_>>();
+            for codec in [
+                CompressionCodec::None,
+                CompressionCodec::Lz4Frame,
+                CompressionCodec::Zstd(1),
+            ] {
+                for algo in [0, 1, 2] {
+                    let dir = tempfile::tempdir().unwrap();
+                    let single = dir.path().join("per-partition");
+                    let multi = dir.path().join("per-spill");
+                    let mut expected_lengths = Vec::new();
+                    let mut expected_checksums = Vec::new();
+                    for p in 0..3 {
+                        let rows = records.iter().filter(|r| r.0 == p).collect::<Vec<_>>();
+                        let mut addresses = rows
+                            .iter()
+                            .map(|r| page.as_ptr() as i64 + r.1 as i64 + 8)
+                            .collect::<Vec<_>>();
+                        let mut sizes = rows.iter().map(|r| r.2 as i32).collect::<Vec<_>>();
+                        let (len, checksum, _) = process_sorted_row_partition(
+                            rows.len(),
+                            3,
+                            addresses.as_mut_ptr(),
+                            sizes.as_mut_ptr(),
+                            &schema,
+                            single.to_str().unwrap().into(),
+                            10.0,
+                            true,
+                            algo,
+                            None,
+                            &codec,
+                            true,
+                        )
+                        .unwrap();
+                        expected_lengths.push(len);
+                        expected_checksums.push(checksum.unwrap() as i64);
+                    }
+                    let mut lengths = vec![0; 3];
+                    let mut checksums = vec![i64::MIN; 3];
+                    // SAFETY: every packed pointer names a valid record in the retained page.
+                    unsafe {
+                        process_sorted_partitions(
+                            &pointers,
+                            &[page.as_ptr() as i64],
+                            4,
+                            &schema,
+                            multi.to_str().unwrap(),
+                            10.0,
+                            3,
+                            Some(algo),
+                            &mut checksums,
+                            &mut lengths,
+                            &codec,
+                            true,
+                        )
+                        .unwrap();
+                    }
+                    assert_eq!(lengths, expected_lengths);
+                    assert_eq!(checksums, expected_checksums);
+                    let bytes = std::fs::read(multi).unwrap();
+                    assert_eq!(bytes, std::fs::read(single).unwrap());
+                    let mut at = 0;
+                    let mut batches = Vec::new();
+                    while at < bytes.len() {
+                        let len =
+                            u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap()) as usize;
+                        let batch =
+                            crate::read_ipc_compressed(&bytes[at + 16..at + 8 + len]).unwrap();
+                        let columns = batch
+                            .columns()
+                            .iter()
+                            .zip(&schema)
+                            .map(|(array, dt)| cast(array, dt).unwrap())
+                            .collect();
+                        let fields = vec![
+                            Field::new("id", DataType::Int64, true),
+                            Field::new("binary", DataType::Binary, true),
+                            Field::new("text", DataType::Utf8, true),
+                        ];
+                        batches.push(
+                            RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap(),
+                        );
+                        at += 8 + len;
+                    }
+                    let result = concat_batches(&batches[0].schema(), &batches).unwrap();
+                    assert_eq!(result.num_rows(), N);
+                    let ids = result
+                        .column(0)
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .unwrap();
+                    let binary = result
+                        .column(1)
+                        .as_any()
+                        .downcast_ref::<BinaryArray>()
+                        .unwrap();
+                    let text = result
+                        .column(2)
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap();
+                    for (position, &(_, _, _, id)) in records.iter().enumerate() {
+                        assert_eq!(ids.value(position), id as i64);
+                        assert_eq!(binary.is_null(position), expected[id].0.is_none());
+                        assert_eq!(text.is_null(position), expected[id].1.is_none());
+                        if let Some(v) = &expected[id].0 {
+                            assert_eq!(binary.value(position), v);
+                        }
+                        if let Some(v) = &expected[id].1 {
+                            assert_eq!(text.value(position), v);
+                        }
+                    }
+                }
+            }
+        }
     }
 }

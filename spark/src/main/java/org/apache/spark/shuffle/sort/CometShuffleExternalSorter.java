@@ -110,6 +110,36 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
 
   private boolean spilling = false;
 
+  /**
+   * The task thread that writes this sorter. Another consumer's request to spill is honoured only
+   * on it, between the sorter's own operations, so that it never runs concurrently with one.
+   */
+  private final Thread ownerThread = Thread.currentThread();
+
+  /** Whether the owner thread is inside one of this sorter's operations. */
+  private boolean busy = false;
+
+  /** Whether the sorter has written its final file or released its memory. */
+  private boolean closed = false;
+
+  // A native infallible grow may observe and consume an exception raised by this owner's
+  // spill callback. Never resume the writer after a possibly partial file/checksum write.
+  private Throwable spillFailure;
+  private File pendingSpillFile;
+
+  private void failIfSpillFailed() throws IOException {
+    if (spillFailure != null) {
+      throw new IOException("Shuffle sorter previously failed to write a spill", spillFailure);
+    }
+  }
+
+  private void poisonSpill(Throwable failure) {
+    if (spillFailure == null) {
+      spillFailure = failure;
+    }
+    allocator.setOwnerSpill(null);
+  }
+
   private final int uaoSize = UnsafeAlignedOffset.getUaoSize();
   private final double preferDictionaryRatio;
   private final boolean tracingEnabled;
@@ -147,6 +177,7 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
         (double) CometConf$.MODULE$.COMET_SHUFFLE_JVM_PREFER_DICTIONARY_RATIO().get();
 
     this.activeSpillSorter = createSpillSorter();
+    allocator.setOwnerSpill(this::spillForOtherConsumer);
   }
 
   /** Creates a new SpillSorter with all required dependencies. */
@@ -178,38 +209,70 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
 
   /** Sort and spill the current records in response to memory pressure. */
   public void spill() throws IOException {
-    if (spilling || activeSpillSorter == null || activeSpillSorter.numRecords() == 0) {
+    failIfSpillFailed();
+    if (closed || spilling || activeSpillSorter == null || activeSpillSorter.numRecords() == 0) {
       return;
     }
 
     spilling = true;
+    try {
+      logger.info(
+          "Thread {} spilling sort data of {} to disk ({} {} so far)",
+          Thread.currentThread().getId(),
+          Utils.bytesToString(getMemoryUsage()),
+          spills.size(),
+          spills.size() > 1 ? " times" : " time");
 
-    logger.info(
-        "Thread {} spilling sort data of {} to disk ({} {} so far)",
-        Thread.currentThread().getId(),
-        Utils.bytesToString(getMemoryUsage()),
-        spills.size(),
-        spills.size() > 1 ? " times" : " time");
+      final Tuple2<TempShuffleBlockId, File> spilledFileInfo =
+          blockManager.diskBlockManager().createTempShuffleBlock();
+      final File file = spilledFileInfo._2();
+      pendingSpillFile = file;
+      final TempShuffleBlockId blockId = spilledFileInfo._1();
+      final SpillInfo spillInfo = new SpillInfo(numPartitions, file, blockId);
 
-    final Tuple2<TempShuffleBlockId, File> spilledFileInfo =
-        blockManager.diskBlockManager().createTempShuffleBlock();
-    final File file = spilledFileInfo._2();
-    final TempShuffleBlockId blockId = spilledFileInfo._1();
-    final SpillInfo spillInfo = new SpillInfo(numPartitions, file, blockId);
+      activeSpillSorter.setSpillInfo(spillInfo);
+      activeSpillSorter.writeSortedPartitions(false, tracingEnabled);
+      updatePeakMemoryUsed();
+      final long spillSize = activeSpillSorter.freeMemory();
+      activeSpillSorter.reset();
 
-    activeSpillSorter.setSpillInfo(spillInfo);
+      // Replacement pointer allocation is deferred until insertion, outside Spark's callback.
+      taskContext.taskMetrics().incMemoryBytesSpilled(spillSize);
+      pendingSpillFile = null;
+    } catch (Throwable failure) {
+      poisonSpill(failure);
+      throw failure;
+    } finally {
+      spilling = false;
+    }
+  }
 
-    activeSpillSorter.writeSortedPartitions(false, tracingEnabled);
-    updatePeakMemoryUsed();
-    final long spillSize = activeSpillSorter.freeMemory();
-    activeSpillSorter.reset();
-
-    // Reset the in-memory sorter's pointer array only after freeing up the memory pages holding
-    // the records. Otherwise, if the task is over allocated memory, then without freeing the
-    // memory pages, we might not be able to get memory for the pointer array.
-    taskContext.taskMetrics().incMemoryBytesSpilled(spillSize);
-
-    spilling = false;
+  /**
+   * Spills the buffered records because another memory consumer of the task needs memory, and
+   * returns the bytes released. The request comes from the task memory manager while the writer
+   * waits for its next record, e.g. while a sort or a native plan upstream of it builds up its
+   * state. It spills nothing when made on another thread, e.g. by a native operator running on a
+   * worker thread while the writer inserts records, or while the sorter is busy, e.g. when writing
+   * a spill asks for memory itself.
+   */
+  long spillForOtherConsumer() throws IOException {
+    if (Thread.currentThread() != ownerThread
+        || busy
+        || closed
+        || spillFailure != null
+        || spilling
+        || activeSpillSorter == null
+        || activeSpillSorter.numRecords() == 0) {
+      return 0;
+    }
+    long before = allocator.getUsed();
+    busy = true;
+    try {
+      spill();
+    } finally {
+      busy = false;
+    }
+    return Math.max(0, before - allocator.getUsed());
   }
 
   private long getMemoryUsage() {
@@ -241,12 +304,26 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
 
   /** Force all memory and spill files to be deleted; called by shuffle error-handling code. */
   public void cleanupResources() {
-    freeMemory();
-
-    for (SpillInfo spill : spills) {
-      if (spill.file.exists() && !spill.file.delete()) {
-        logger.error("Unable to delete spill file {}", spill.file.getPath());
+    closed = true;
+    allocator.setOwnerSpill(null);
+    try {
+      freeMemory();
+    } finally {
+      // A failed native write is not appended to `spills`, but its partial file still belongs
+      // to this sorter. It must not survive error cleanup or become a candidate for commit.
+      if (pendingSpillFile != null) {
+        deleteSpillFile(pendingSpillFile);
+        pendingSpillFile = null;
       }
+      for (SpillInfo spill : spills) {
+        deleteSpillFile(spill.file);
+      }
+    }
+  }
+
+  private void deleteSpillFile(File file) {
+    if (file.exists() && !file.delete()) {
+      logger.error("Unable to delete spill file {}", file.getPath());
     }
   }
 
@@ -264,24 +341,16 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
       long used = activeSpillSorter.getPointerArrayMemoryUsage();
       LongArray array;
       try {
-        // could trigger spilling
-        array = allocator.allocateArray(used / 8 * 2);
-      } catch (TooLargePageException e) {
-        // The pointer array is too big to fix in a single page, spill.
-        spill();
-        return;
-      } catch (SparkOutOfMemoryError e) {
-        // Cannot allocate enough memory, spill and reset pointer array.
-        try {
-          spill();
-        } catch (SparkOutOfMemoryError e2) {
-          // Cannot allocate memory even after spilling, throw the error.
-          if (!activeSpillSorter.hasSpaceForAnotherRecord()) {
-            logger.error("Unable to grow the pointer array");
-            throw e2;
-          }
+        array = allocator.allocateArray(used == 0 ? initialSize : used / 8 * 2);
+      } catch (TooLargePageException | SparkOutOfMemoryError failure) {
+        if (activeSpillSorter.numRecords() == 0) {
+          // Nothing in this sorter can be released to satisfy the refused allocation.
+          throw failure;
         }
-        return;
+        spill();
+        // reset() releases the old array without allocating from a spill callback. Once
+        // back in insertion, explicitly restore only the initial-sized pointer array.
+        array = allocator.allocateArray(initialSize);
       }
       // check if spilling is triggered or not
       if (activeSpillSorter.hasSpaceForAnotherRecord()) {
@@ -299,7 +368,20 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
    */
   public void insertRecord(Object recordBase, long recordOffset, int length, int partitionId)
       throws IOException {
+    busy = true;
+    try {
+      insertRecordWhileBusy(recordBase, recordOffset, length, partitionId);
+    } finally {
+      busy = false;
+    }
+  }
 
+  private void insertRecordWhileBusy(
+      Object recordBase, long recordOffset, int length, int partitionId) throws IOException {
+    failIfSpillFailed();
+    if (closed) {
+      throw new IllegalStateException("Shuffle sorter is closed");
+    }
     assert (activeSpillSorter != null);
     int threshold = numElementsForSpillThreshold;
     if (activeSpillSorter.numRecords() >= threshold) {
@@ -319,6 +401,9 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
       activeSpillSorter.initialCurrentPage(required);
     }
 
+    // A failed page allocation can spill and lazily clear the pointer array after the
+    // first capacity check. Re-establish it before writing the pending record.
+    growPointerArrayIfNecessary();
     activeSpillSorter.insertRecord(recordBase, recordOffset, length, partitionId);
   }
 
@@ -329,20 +414,28 @@ public final class CometShuffleExternalSorter implements CometShuffleChecksumSup
    *     into this sorter, then this will return an empty array.
    */
   public SpillInfo[] closeAndGetSpills() throws IOException {
-    if (activeSpillSorter != null) {
-      // Do not count the final file towards the spill count.
-      final Tuple2<TempShuffleBlockId, File> spilledFileInfo =
-          blockManager.diskBlockManager().createTempShuffleBlock();
-      final File file = spilledFileInfo._2();
-      final TempShuffleBlockId blockId = spilledFileInfo._1();
-      final SpillInfo spillInfo = new SpillInfo(numPartitions, file, blockId);
+    failIfSpillFailed();
+    closed = true;
+    allocator.setOwnerSpill(null);
+    try {
+      if (activeSpillSorter != null) {
+        // Do not count the final file towards the spill count.
+        final Tuple2<TempShuffleBlockId, File> spilledFileInfo =
+            blockManager.diskBlockManager().createTempShuffleBlock();
+        final File file = spilledFileInfo._2();
+        pendingSpillFile = file;
+        final TempShuffleBlockId blockId = spilledFileInfo._1();
+        final SpillInfo spillInfo = new SpillInfo(numPartitions, file, blockId);
 
-      activeSpillSorter.setSpillInfo(spillInfo);
-      activeSpillSorter.writeSortedPartitions(true, tracingEnabled);
-
-      freeMemory();
+        activeSpillSorter.setSpillInfo(spillInfo);
+        activeSpillSorter.writeSortedPartitions(true, tracingEnabled);
+        freeMemory();
+        pendingSpillFile = null;
+      }
+      return spills.toArray(new SpillInfo[spills.size()]);
+    } catch (Throwable failure) {
+      poisonSpill(failure);
+      throw failure;
     }
-
-    return spills.toArray(new SpillInfo[spills.size()]);
   }
 }

@@ -1,0 +1,653 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+use arrow::array::{Array, RecordBatch};
+use arrow::compute::concat_batches;
+use datafusion::error::Result;
+use datafusion_comet_common::offset_extents::OffsetBudget;
+use std::sync::Arc;
+
+#[derive(Debug)]
+pub struct ShuffleReadCoalescer {
+    target_rows: usize,
+    target_bytes: usize,
+    pending: Vec<RecordBatch>,
+    pending_rows: usize,
+    pending_bytes: usize,
+    offsets: OffsetBudget,
+}
+
+impl ShuffleReadCoalescer {
+    /// Joins blocks until `target_rows` rows or `target_bytes` bytes of column data are buffered.
+    /// A block that alone exceeds `target_bytes` passes through as it is.
+    pub fn new(target_rows: usize, target_bytes: usize) -> Self {
+        Self::with_offset_budget(target_rows, target_bytes, OffsetBudget::default())
+    }
+
+    fn with_offset_budget(target_rows: usize, target_bytes: usize, offsets: OffsetBudget) -> Self {
+        Self {
+            target_rows: target_rows.max(1),
+            target_bytes: target_bytes.max(1),
+            pending: Vec::new(),
+            pending_rows: 0,
+            pending_bytes: 0,
+            offsets,
+        }
+    }
+
+    pub fn buffered_rows(&self) -> usize {
+        self.pending_rows
+    }
+
+    pub fn buffered_bytes(&self) -> usize {
+        self.pending_bytes
+    }
+
+    pub fn push(&mut self, batch: RecordBatch) -> Result<Option<RecordBatch>> {
+        // A byte-oversized block may pass through, but every JVM ColumnarBatch row count
+        // must fit a signed Int. In particular, a zero-column batch has no byte/offset
+        // budget to stop an otherwise valid pair of blocks from overflowing that boundary.
+        if batch.num_rows() > i32::MAX as usize {
+            return Err(datafusion::error::DataFusionError::Execution(format!(
+                "Shuffle block has {} rows, exceeding the JVM batch limit of {}",
+                batch.num_rows(),
+                i32::MAX
+            )));
+        }
+        if batch.num_rows() == 0 {
+            return Ok(None);
+        }
+        let bytes = batch_bytes(&batch);
+        let flushed = match self.pending.first() {
+            Some(first) if !same_schema(first, &batch) => self.take()?,
+            Some(_)
+                if self
+                    .pending_rows
+                    .checked_add(batch.num_rows())
+                    .is_none_or(|rows| rows > i32::MAX as usize) =>
+            {
+                self.take()?
+            }
+            Some(_) if self.pending_bytes.saturating_add(bytes) > self.target_bytes => {
+                self.take()?
+            }
+            Some(_) if !self.offsets.try_add(batch.columns()) => self.take()?,
+            _ => None,
+        };
+        if self.pending.is_empty() {
+            self.offsets.try_add(batch.columns());
+        }
+        self.pending_rows += batch.num_rows();
+        self.pending_bytes = self.pending_bytes.saturating_add(bytes);
+        self.pending.push(batch);
+        if flushed.is_some() {
+            Ok(flushed)
+        } else if self.pending_rows >= self.target_rows || self.pending_bytes >= self.target_bytes {
+            self.take()
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn finish(&mut self) -> Result<Option<RecordBatch>> {
+        self.take()
+    }
+
+    fn take(&mut self) -> Result<Option<RecordBatch>> {
+        self.pending_rows = 0;
+        self.pending_bytes = 0;
+        self.offsets.clear();
+        match self.pending.len() {
+            0 => Ok(None),
+            1 => Ok(self.pending.pop()),
+            _ => {
+                let batches = std::mem::take(&mut self.pending);
+                let schema = batches[0].schema();
+                Ok(Some(concat_batches(&schema, &batches)?))
+            }
+        }
+    }
+}
+
+/// The byte target for a configured `spark.comet.shuffle.read.coalesce.maxBytes`, where 0 means
+/// no byte bound.
+pub fn coalesce_max_bytes(configured: u64) -> usize {
+    match configured {
+        0 => usize::MAX,
+        bytes => usize::try_from(bytes).unwrap_or(usize::MAX),
+    }
+}
+
+/// Bytes of column data the batch addresses. A decoded block slices all of its columns out of
+/// one IPC body, so the capacity of every column's buffers would count that body once per column.
+fn batch_bytes(batch: &RecordBatch) -> usize {
+    batch
+        .columns()
+        .iter()
+        .map(|column| {
+            column
+                .to_data()
+                .get_slice_memory_size()
+                .unwrap_or_else(|_| column.get_array_memory_size())
+        })
+        .sum()
+}
+
+fn same_schema(a: &RecordBatch, b: &RecordBatch) -> bool {
+    let (a, b) = (a.schema_ref(), b.schema_ref());
+    Arc::ptr_eq(a, b) || a == b
+}
+
+#[cfg(test)]
+mod tests {
+    fn zero_column_rows(rows: usize) -> RecordBatch {
+        RecordBatch::try_new_with_options(
+            Arc::new(Schema::empty()),
+            vec![],
+            &RecordBatchOptions::new().with_row_count(Some(rows)),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn never_coalesces_past_the_jvm_signed_int_row_limit() {
+        let limit = i32::MAX as usize;
+        let mut coalescer = ShuffleReadCoalescer::new(limit, usize::MAX);
+        assert!(coalescer
+            .push(zero_column_rows(limit - 1))
+            .unwrap()
+            .is_none());
+        let first = coalescer.push(zero_column_rows(2)).unwrap().unwrap();
+        assert_eq!(first.num_rows(), limit - 1);
+        assert_eq!(first.num_columns(), 0);
+        let last = coalescer.finish().unwrap().unwrap();
+        assert_eq!(last.num_rows(), 2);
+        assert_eq!(first.num_rows() + last.num_rows(), limit + 1);
+        assert!(coalescer.finish().unwrap().is_none());
+    }
+
+    #[test]
+    fn preserves_a_single_batch_at_the_jvm_row_limit() {
+        let limit = i32::MAX as usize;
+        let mut coalescer = ShuffleReadCoalescer::new(limit, usize::MAX);
+        assert_eq!(
+            coalescer
+                .push(zero_column_rows(limit))
+                .unwrap()
+                .unwrap()
+                .num_rows(),
+            limit
+        );
+        assert!(coalescer.finish().unwrap().is_none());
+    }
+
+    #[test]
+    fn rejects_an_unrepresentable_single_batch_without_consuming_pending_rows() {
+        let mut coalescer = ShuffleReadCoalescer::new(i32::MAX as usize, usize::MAX);
+        assert!(coalescer.push(zero_column_rows(3)).unwrap().is_none());
+        let error = coalescer
+            .push(zero_column_rows(i32::MAX as usize + 1))
+            .unwrap_err();
+        assert!(error.to_string().contains("exceeding the JVM batch limit"));
+        assert_eq!(coalescer.buffered_rows(), 3);
+        assert_eq!(coalescer.finish().unwrap().unwrap().num_rows(), 3);
+    }
+
+    use super::*;
+    use arrow::array::{
+        Array, ArrayRef, BinaryArray, DictionaryArray, Int32Array, Int64Array, ListArray,
+        StringArray, StructArray,
+    };
+    use arrow::buffer::OffsetBuffer;
+    use arrow::datatypes::{DataType, Field, Fields, Int32Type, Schema};
+    use arrow::record_batch::RecordBatchOptions;
+
+    fn schema() -> Arc<Schema> {
+        let point = Fields::from(vec![
+            Field::new("x", DataType::Int64, true),
+            Field::new("tag", DataType::Utf8, true),
+        ]);
+        Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new("p", DataType::Struct(point), true),
+            Field::new(
+                "l",
+                DataType::List(Arc::new(Field::new_list_field(DataType::Int64, true))),
+                true,
+            ),
+        ]))
+    }
+
+    fn block(schema: &Arc<Schema>, start: i32, rows: i32) -> RecordBatch {
+        let ids: Vec<i32> = (start..start + rows).collect();
+        let x: ArrayRef = Arc::new(Int64Array::from_iter(
+            ids.iter().map(|i| (i % 3 != 0).then_some(*i as i64 * 10)),
+        ));
+        let tag: ArrayRef = Arc::new(StringArray::from_iter(
+            ids.iter().map(|i| (i % 4 != 0).then(|| format!("t{i}"))),
+        ));
+        let DataType::Struct(point) = schema.field(1).data_type() else {
+            unreachable!()
+        };
+        let p = StructArray::new(point.clone(), vec![x, tag], None);
+        let l =
+            ListArray::from_iter_primitive::<arrow::datatypes::Int64Type, _, _>(ids.iter().map(
+                |i| (i % 5 != 0).then(|| (0..(*i % 3)).map(|v| Some(v as i64)).collect::<Vec<_>>()),
+            ));
+        RecordBatch::try_new(
+            Arc::clone(schema),
+            vec![Arc::new(Int32Array::from(ids)), Arc::new(p), Arc::new(l)],
+        )
+        .unwrap()
+    }
+
+    fn ids(batch: &RecordBatch) -> Vec<i32> {
+        batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap()
+            .values()
+            .to_vec()
+    }
+
+    fn drain(coalescer: &mut ShuffleReadCoalescer, blocks: Vec<RecordBatch>) -> Vec<RecordBatch> {
+        let mut out = Vec::new();
+        for b in blocks {
+            out.extend(coalescer.push(b).unwrap());
+        }
+        out.extend(coalescer.finish().unwrap());
+        out
+    }
+
+    #[test]
+    fn joins_small_blocks_up_to_the_target_and_keeps_row_order() {
+        let schema = schema();
+        let blocks: Vec<_> = (0..25).map(|i| block(&schema, i * 7, 7)).collect();
+        let expected = concat_batches(&schema, &blocks).unwrap();
+        let out = drain(&mut ShuffleReadCoalescer::new(50, usize::MAX), blocks);
+        assert_eq!(
+            out.iter().map(|b| b.num_rows()).collect::<Vec<_>>(),
+            vec![56, 56, 56, 7]
+        );
+        assert_eq!(concat_batches(&schema, &out).unwrap(), expected);
+        assert_eq!(ids(&out[3]), (168..175).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn passes_a_single_large_block_through() {
+        let schema = schema();
+        let large = block(&schema, 0, 100);
+        let mut coalescer = ShuffleReadCoalescer::new(50, usize::MAX);
+        let out = coalescer.push(large.clone()).unwrap().unwrap();
+        assert_eq!(out, large);
+        assert!(coalescer.finish().unwrap().is_none());
+    }
+
+    #[test]
+    fn drops_empty_blocks_and_finishes_empty() {
+        let schema = schema();
+        let mut coalescer = ShuffleReadCoalescer::new(10, usize::MAX);
+        assert!(coalescer.push(block(&schema, 0, 0)).unwrap().is_none());
+        assert_eq!(coalescer.buffered_rows(), 0);
+        assert!(coalescer.finish().unwrap().is_none());
+    }
+
+    #[test]
+    fn flushes_when_the_schema_changes() {
+        let plain = Arc::new(Schema::new(vec![Field::new("s", DataType::Utf8, true)]));
+        let dict = Arc::new(Schema::new(vec![Field::new(
+            "s",
+            DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
+            true,
+        )]));
+        let a = RecordBatch::try_new(
+            Arc::clone(&plain),
+            vec![Arc::new(StringArray::from(vec!["a", "b"]))],
+        )
+        .unwrap();
+        let d: DictionaryArray<Int32Type> = vec!["x", "y", "x"].into_iter().collect();
+        let b = RecordBatch::try_new(Arc::clone(&dict), vec![Arc::new(d)]).unwrap();
+        let c = RecordBatch::try_new(
+            Arc::clone(&plain),
+            vec![Arc::new(StringArray::from(vec![Some("c"), None]))],
+        )
+        .unwrap();
+        let out = drain(
+            &mut ShuffleReadCoalescer::new(100, usize::MAX),
+            vec![a.clone(), a.clone(), b.clone(), c.clone()],
+        );
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0], concat_batches(&plain, &[a.clone(), a]).unwrap());
+        assert_eq!(out[1], b);
+        assert_eq!(out[2], c);
+    }
+
+    #[test]
+    fn keeps_row_counts_of_batches_without_columns() {
+        let empty = Arc::new(Schema::empty());
+        let rows = |n| {
+            RecordBatch::try_new_with_options(
+                Arc::clone(&empty),
+                vec![],
+                &RecordBatchOptions::new().with_row_count(Some(n)),
+            )
+            .unwrap()
+        };
+        let out = drain(
+            &mut ShuffleReadCoalescer::new(10, usize::MAX),
+            vec![rows(3), rows(4), rows(5), rows(2)],
+        );
+        assert_eq!(
+            out.iter().map(|b| b.num_rows()).collect::<Vec<_>>(),
+            vec![12, 2]
+        );
+        assert!(out.iter().all(|b| b.num_columns() == 0));
+    }
+
+    fn price_history(values: &arrow::buffer::Buffer, bytes: usize) -> RecordBatch {
+        let variant_id: ArrayRef = Arc::new(unsafe {
+            StringArray::new_unchecked(
+                OffsetBuffer::new(vec![0, bytes as i32].into()),
+                values.clone(),
+                None,
+            )
+        });
+        let price = Fields::from(vec![
+            Field::new("variant_id", DataType::Utf8, true),
+            Field::new("price", DataType::Int64, true),
+        ]);
+        let prices = StructArray::new(
+            price.clone(),
+            vec![variant_id, Arc::new(Int64Array::from(vec![1]))],
+            None,
+        );
+        let price_list = Arc::new(Field::new_list_field(DataType::Struct(price), true));
+        let merchant_variant_prices: ArrayRef = Arc::new(ListArray::new(
+            Arc::clone(&price_list),
+            OffsetBuffer::new(vec![0, 1].into()),
+            Arc::new(prices),
+            None,
+        ));
+        let status = Fields::from(vec![
+            Field::new("status", DataType::Utf8, true),
+            Field::new("updated_time", DataType::Int64, true),
+            Field::new("merchant_variant_prices", DataType::List(price_list), true),
+        ]);
+        let history = StructArray::new(
+            status.clone(),
+            vec![
+                Arc::new(StringArray::from(vec!["pending"])),
+                Arc::new(Int64Array::from(vec![7])),
+                merchant_variant_prices,
+            ],
+            None,
+        );
+        let history_list = Arc::new(Field::new_list_field(DataType::Struct(status), true));
+        let status_history = ListArray::new(
+            Arc::clone(&history_list),
+            OffsetBuffer::new(vec![0, 1].into()),
+            Arc::new(history),
+            None,
+        );
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "status_history",
+            DataType::List(history_list),
+            true,
+        )]));
+        RecordBatch::try_new(schema, vec![Arc::new(status_history)]).unwrap()
+    }
+
+    #[test]
+    fn does_not_join_blocks_whose_nested_strings_overflow_32_bit_offsets() {
+        let bytes = (i32::MAX as usize) / 2 + (64 << 20);
+        let values = arrow::buffer::Buffer::from(vec![b'v'; bytes]);
+        let blocks: Vec<_> = (0..2).map(|_| price_history(&values, bytes)).collect();
+        let out = drain(
+            &mut ShuffleReadCoalescer::new(100, usize::MAX),
+            blocks.clone(),
+        );
+        assert_eq!(out, blocks);
+    }
+
+    #[test]
+    fn joins_blocks_only_while_every_nested_offset_fits() {
+        let schema = schema();
+        let blocks: Vec<_> = (0..10).map(|i| block(&schema, i * 4, 4)).collect();
+        let expected = concat_batches(&schema, &blocks).unwrap();
+        let mut coalescer = ShuffleReadCoalescer::with_offset_budget(
+            1000,
+            usize::MAX,
+            OffsetBudget::with_limit(30),
+        );
+        let out = drain(&mut coalescer, blocks);
+        assert!(out.len() > 1);
+        for batch in &out {
+            let p = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<StructArray>()
+                .unwrap();
+            let tag = p.column(1).as_any().downcast_ref::<StringArray>().unwrap();
+            assert!(tag.value_offsets()[tag.len()] - tag.value_offsets()[0] <= 30);
+        }
+        assert_eq!(concat_batches(&schema, &out).unwrap(), expected);
+    }
+
+    fn sketches(start: usize, rows: usize, sketch_bytes: usize) -> RecordBatch {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("hll", DataType::Binary, true),
+        ]));
+        let ids = Int64Array::from_iter_values((start..start + rows).map(|i| i as i64));
+        let hll = BinaryArray::from_iter_values((start..start + rows).map(|i| {
+            let mut sketch = vec![(i % 251) as u8; sketch_bytes];
+            sketch[0] = (i >> 8) as u8;
+            sketch
+        }));
+        RecordBatch::try_new(schema, vec![Arc::new(ids), Arc::new(hll)]).unwrap()
+    }
+
+    #[test]
+    fn stops_joining_wide_rows_at_the_byte_target() {
+        let sketch_bytes = 190 << 10;
+        let target_bytes = 4 << 20;
+        let blocks: Vec<_> = (0..60).map(|i| sketches(i * 6, 6, sketch_bytes)).collect();
+        let schema = blocks[0].schema();
+        let expected = concat_batches(&schema, &blocks).unwrap();
+
+        let unbounded = drain(
+            &mut ShuffleReadCoalescer::new(8192, usize::MAX),
+            blocks.clone(),
+        );
+        assert_eq!(unbounded.len(), 1);
+        assert!(batch_bytes(&unbounded[0]) > 60 << 20);
+
+        let out = drain(&mut ShuffleReadCoalescer::new(8192, target_bytes), blocks);
+        assert!(out.len() > 1);
+        for batch in &out {
+            assert!(batch_bytes(batch) <= target_bytes, "{}", batch_bytes(batch));
+        }
+        assert!(out[..out.len() - 1]
+            .iter()
+            .all(|b| batch_bytes(b) + 6 * (sketch_bytes + 16) > target_bytes));
+        assert_eq!(concat_batches(&schema, &out).unwrap(), expected);
+    }
+
+    #[test]
+    fn passes_a_block_larger_than_the_byte_target_through() {
+        let small = sketches(0, 1, 1 << 10);
+        let large = sketches(1, 8, 1 << 20);
+        let mut coalescer = ShuffleReadCoalescer::new(8192, 1 << 20);
+        assert!(coalescer.push(small.clone()).unwrap().is_none());
+        assert_eq!(coalescer.push(large.clone()).unwrap().unwrap(), small);
+        assert_eq!(coalescer.buffered_rows(), 8);
+        assert_eq!(coalescer.finish().unwrap().unwrap(), large);
+        assert_eq!(coalescer.buffered_bytes(), 0);
+    }
+
+    #[test]
+    fn counts_a_body_shared_by_all_columns_once() {
+        let (columns, rows) = (16, 1000);
+        let body =
+            arrow::buffer::Buffer::from_vec((0..(columns * rows) as i64).collect::<Vec<_>>());
+        let schema = Arc::new(Schema::new(
+            (0..columns)
+                .map(|c| Field::new(format!("c{c}"), DataType::Int64, false))
+                .collect::<Vec<_>>(),
+        ));
+        let block = |_| {
+            let arrays: Vec<ArrayRef> = (0..columns)
+                .map(|c| {
+                    Arc::new(Int64Array::new(
+                        arrow::buffer::ScalarBuffer::new(body.clone(), c * rows, rows),
+                        None,
+                    )) as ArrayRef
+                })
+                .collect();
+            RecordBatch::try_new(Arc::clone(&schema), arrays).unwrap()
+        };
+        let block_bytes = columns * rows * 8;
+        assert_eq!(batch_bytes(&block(0)), block_bytes);
+        let blocks: Vec<_> = (0..6).map(block).collect();
+        let out = drain(
+            &mut ShuffleReadCoalescer::new(8192, 2 * block_bytes),
+            blocks,
+        );
+        assert_eq!(
+            out.iter().map(|b| b.num_rows()).collect::<Vec<_>>(),
+            vec![2 * rows; 3]
+        );
+    }
+
+    #[test]
+    fn keeps_nulls_of_nested_columns() {
+        let schema = schema();
+        let blocks: Vec<_> = (0..6).map(|i| block(&schema, i * 3, 3)).collect();
+        let out = drain(&mut ShuffleReadCoalescer::new(1000, usize::MAX), blocks);
+        assert_eq!(out.len(), 1);
+        let p = out[0]
+            .column(1)
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        assert_eq!(p.column(0).null_count(), 6);
+        assert_eq!(p.column(1).null_count(), 5);
+        assert_eq!(out[0].column(2).null_count(), 4);
+    }
+
+    #[test]
+    fn sliced_boolean_list_map_and_struct_offsets_flush_without_losing_values() {
+        use arrow::array::{BooleanArray, ListBuilder, MapBuilder, StringBuilder};
+        use arrow::buffer::NullBuffer;
+        use datafusion_comet_common::offset_extents::offset_extents;
+
+        let mut list = ListBuilder::new(StringBuilder::new());
+        let mut map = MapBuilder::new(None, StringBuilder::new(), StringBuilder::new());
+        for row in 0..9 {
+            list.values().append_value(format!("v{row}"));
+            list.append(row != 3);
+            map.keys().append_value(format!("k{row}"));
+            map.values().append_value(format!("v{row}"));
+            map.append(row != 5).unwrap();
+        }
+        let list: ArrayRef = Arc::new(list.finish());
+        let map: ArrayRef = Arc::new(map.finish());
+        let flags: ArrayRef = Arc::new(BooleanArray::from(
+            (0..9)
+                .map(|row| {
+                    if row % 3 == 0 {
+                        None
+                    } else {
+                        Some(row % 2 == 0)
+                    }
+                })
+                .collect::<Vec<_>>(),
+        ));
+        // Test each nested offset-bearing child independently so one correct guard cannot
+        // mask a missing List or Map guard, and also exercise their combined Struct.
+        for children in [
+            vec![Arc::clone(&list)],
+            vec![Arc::clone(&map)],
+            vec![list.clone(), map.clone()],
+        ] {
+            let fields = Fields::from(
+                children
+                    .iter()
+                    .enumerate()
+                    .map(|(i, a)| Field::new(format!("c{i}"), a.data_type().clone(), true))
+                    .collect::<Vec<_>>(),
+            );
+            let payload: ArrayRef = Arc::new(StructArray::new(
+                fields,
+                children,
+                Some(NullBuffer::from(
+                    (0..9).map(|row| row != 7).collect::<Vec<_>>(),
+                )),
+            ));
+            let source = RecordBatch::try_from_iter([
+                (
+                    "id",
+                    Arc::new(Int32Array::from_iter_values(0..9)) as ArrayRef,
+                ),
+                ("flag", Arc::clone(&flags)),
+                ("payload", payload),
+            ])
+            .unwrap();
+            let blocks = (1..9)
+                .step_by(2)
+                .map(|row| source.slice(row, 2))
+                .collect::<Vec<_>>();
+            for block in &blocks {
+                assert!(
+                    block
+                        .column(1)
+                        .as_any()
+                        .downcast_ref::<BooleanArray>()
+                        .unwrap()
+                        .values()
+                        .offset()
+                        > 0
+                );
+            }
+            let expected = source.slice(1, 8);
+            let out = drain(
+                &mut ShuffleReadCoalescer::with_offset_budget(
+                    8192,
+                    usize::MAX,
+                    OffsetBudget::with_limit(8),
+                ),
+                blocks,
+            );
+            assert!(out.len() > 1);
+            for batch in &out {
+                let mut extents = vec![];
+                for column in batch.columns() {
+                    offset_extents(column.as_ref(), &mut extents);
+                }
+                assert!(extents.iter().all(|extent| *extent <= 8));
+            }
+            assert_eq!(concat_batches(&expected.schema(), &out).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn zero_byte_config_means_unbounded_and_finite_values_are_preserved() {
+        assert_eq!(coalesce_max_bytes(0), usize::MAX);
+        assert_eq!(coalesce_max_bytes(64 * 1024 * 1024), 64 * 1024 * 1024);
+    }
+}

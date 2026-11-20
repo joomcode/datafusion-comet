@@ -210,24 +210,22 @@ public class SpillSorter extends SpillWriter {
   /** Free the pointer array held by this sorter. */
   public void freeArray() {
     synchronized (this) {
-      inMemSorter.free();
+      if (inMemSorter != null) {
+        inMemSorter.free();
+        inMemSorter = null;
+      }
+      sorterArray = null;
       freed = true;
     }
   }
 
   /**
-   * Reset the in-memory sorter's pointer array only after freeing up the memory pages holding the
-   * records.
+   * Releases the pointer array without allocating from a spill callback. Spark versions before the
+   * lazy-reset change allocate from ShuffleInMemorySorter.reset(), so discard that metadata object
+   * as well and recreate it only when the next insertion supplies a replacement array.
    */
   public void reset() {
-    synchronized (this) {
-      // We allocate pointer array outside the sorter.
-      // So we can get array address which can be used by native code.
-      inMemSorter.reset();
-      sorterArray = allocator.allocateArray(initialSize);
-      inMemSorter.expandPointerArray(sorterArray);
-      freed = false;
-    }
+    freeArray();
   }
 
   void setSpillInfo(SpillInfo spillInfo) {
@@ -235,7 +233,7 @@ public class SpillSorter extends SpillWriter {
   }
 
   public int numRecords() {
-    return this.inMemSorter.numRecords();
+    return inMemSorter == null ? 0 : inMemSorter.numRecords();
   }
 
   /**
@@ -244,7 +242,7 @@ public class SpillSorter extends SpillWriter {
    * checksum.
    */
   public void writeSortedPartitions(boolean isLastFile, boolean tracingEnabled) throws IOException {
-    final int numRecords = inMemSorter.numRecords();
+    final int numRecords = numRecords();
     // If there are no records, we don't need to create an empty spill file.
     if (numRecords == 0) {
       return;
@@ -321,12 +319,24 @@ public class SpillSorter extends SpillWriter {
   }
 
   public boolean hasSpaceForAnotherRecord() {
-    return inMemSorter.hasSpaceForAnotherRecord();
+    return inMemSorter != null && inMemSorter.hasSpaceForAnotherRecord();
   }
 
   public void expandPointerArray(LongArray newArray) {
+    if (inMemSorter == null) {
+      try {
+        // This runs during insertion, never in a spill callback. Spark's constructor owns a
+        // temporary one-entry array until expandPointerArray adopts the supplied allocation.
+        inMemSorter = new ShuffleInMemorySorter(allocator, 1, true);
+      } catch (Throwable failure) {
+        // The caller already allocated newArray; no sorter adopted it if construction failed.
+        allocator.freeArray(newArray);
+        throw failure;
+      }
+    }
     inMemSorter.expandPointerArray(newArray);
     this.sorterArray = newArray;
+    this.freed = false;
   }
 
   public void insertRecord(Object recordBase, long recordOffset, int length, int partitionId) {
