@@ -77,6 +77,36 @@ class SparkErrorConverterSuite extends AnyFunSuite {
     }
   }
 
+  test("window partition limit matches the original Spark error factory") {
+    val cls = Class.forName("org.apache.spark.sql.errors.QueryExecutionErrors$")
+    val factory = cls.getMethods.find(m =>
+      m.getName == "windowFunctionPartitionSizeExceedsLimitError" && m.getParameterCount == 1)
+    if (CometSparkSessionExtensions.isSpark42Plus) {
+      assert(factory.isDefined)
+    }
+    factory.foreach { method =>
+      val numRows = Int.MaxValue.toLong + 1L
+      val expected = method
+        .invoke(cls.getField("MODULE$").get(null), Long.box(numRows))
+        .asInstanceOf[Throwable]
+      val actual = SparkErrorConverter
+        .convertErrorType(
+          "WindowPartitionSizeExceedsLimit",
+          "WINDOW_FUNCTION_PARTITION_SIZE_EXCEEDS_LIMIT",
+          Map("numRows" -> numRows.toString),
+          Array.empty,
+          null)
+        .getOrElse(fail("Expected window partition limit error"))
+      assert(actual.getClass == expected.getClass)
+      val se = expected.asInstanceOf[SparkThrowable]
+      val ce = actual.asInstanceOf[SparkThrowable]
+      assert(ce.getErrorClass == se.getErrorClass)
+      assert(ce.getSqlState == se.getSqlState)
+      assert(ce.getMessageParameters == se.getMessageParameters)
+      assert(actual.getMessage == expected.getMessage)
+    }
+  }
+
   test("ArithmeticOverflow preserves the suggested function") {
     for (function <- Seq("try_add", "try_subtract", "try_multiply")) {
       val error = SparkErrorConverter

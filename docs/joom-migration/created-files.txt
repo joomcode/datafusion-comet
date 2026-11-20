@@ -256,3 +256,14 @@ native/spark-expr/benches/smj_streamed_filter.rs
 spark/src/test/scala/org/apache/comet/exec/CometSmjJoinFilterAnsiSuite.scala
 spark/src/test/scala/org/apache/comet/exec/CometSmjJoinFilterFuzzSuite.scala
 Source/test inventory: G05-results.json#source_sha256. Auxiliary evidence and actual local commit/ref/tree receipt: ${MIGRATION_AUX_ROOT}/20261120_comet12-g05/completion.json.
+
+G06 native windows and local qualification (2026-11-20):
+docs/joom-migration/G06-report.md
+docs/joom-migration/verify-g06-native-windows.py
+native/operators/benches/sorted_window.rs
+native/operators/src/partition_aggregate_window.rs
+native/operators/src/sorted_window.rs
+spark/src/test/scala/org/apache/comet/exec/CometPartitionAggregateWindowSuite.scala
+spark/src/test/scala/org/apache/comet/exec/CometWindowSemanticsSuite.scala
+docs/joom-migration/G06-results.json
+Source hashes: G06-results.json#source_sha256. Auxiliary evidence and final local commit/tree/ref receipt: ${MIGRATION_AUX_ROOT}/20261120_comet12-g06/completion.json.

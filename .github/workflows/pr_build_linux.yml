@@ -574,6 +574,8 @@ jobs:
               org.apache.comet.exec.CometInMemoryCacheLastAttemptMetricSuite
               org.apache.comet.exec.CometGenerateExecSuite
               org.apache.comet.exec.CometWindowExecSuite
+              org.apache.comet.exec.CometPartitionAggregateWindowSuite
+              org.apache.comet.exec.CometWindowSemanticsSuite
               org.apache.comet.exec.CometJoinSuite
               org.apache.comet.exec.CometTypedDatasetSuite
               org.apache.spark.sql.comet.CometMapInBatchSuite

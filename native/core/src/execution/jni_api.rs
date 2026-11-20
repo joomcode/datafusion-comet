@@ -61,6 +61,7 @@ use datafusion::{
 };
 use datafusion_comet_common::cancellation::{cancelled_error, PlanCancellation};
 use datafusion_comet_common::decode_string_arrays;
+use datafusion_comet_operators::{PartitionAggregateWindowEnabled, SortedWindowEnabled};
 use datafusion_comet_proto::spark_expression::agg_expr::ExprStruct as AggExprStruct;
 use datafusion_comet_proto::spark_operator::{AggregateMode, Operator, ShuffleScan};
 use datafusion_comet_spark_expr::url_funcs::{CometParseUrl, CometTryParseUrl};
@@ -146,10 +147,10 @@ use crate::execution::memory_pools::logging_pool::LoggingMemoryPool;
 use crate::execution::spark_config::{
     SparkConfig, COMET_DEBUG_ENABLED, COMET_DEBUG_MEMORY,
     COMET_EXEC_AGGREGATE_SKIP_PARTIAL_ENABLED, COMET_EXEC_SORT_SPILL_BEFORE_OUTPUT_THRESHOLD,
-    COMET_EXEC_SPILL_COMPRESSION_CODEC, COMET_EXPLAIN_NATIVE_ENABLED,
-    COMET_MAX_TEMP_DIRECTORY_SIZE, COMET_PARQUET_PREFETCH_NEXT_FILE_METADATA_ENABLED,
-    COMET_PARQUET_ROW_FILTER_PUSHDOWN_ENABLED, COMET_STRICT_TIMESTAMP_LABELS,
-    COMET_TRACING_ENABLED, SPARK_EXECUTOR_CORES,
+    COMET_EXEC_SPILL_COMPRESSION_CODEC, COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED,
+    COMET_EXEC_WINDOW_SORTED_ENABLED, COMET_EXPLAIN_NATIVE_ENABLED, COMET_MAX_TEMP_DIRECTORY_SIZE,
+    COMET_PARQUET_PREFETCH_NEXT_FILE_METADATA_ENABLED, COMET_PARQUET_ROW_FILTER_PUSHDOWN_ENABLED,
+    COMET_STRICT_TIMESTAMP_LABELS, COMET_TRACING_ENABLED, SPARK_EXECUTOR_CORES,
 };
 use crate::parquet::encryption_support::{CometEncryptionFactory, ENCRYPTION_FACTORY_ID};
 use crate::parquet::parquet_exec::CometParquetScanOptions;
@@ -1201,6 +1202,14 @@ fn prepare_datafusion_session_context(
     if spill_before_output > 0 {
         session_config = session_config
             .with_extension(Arc::new(SpillBeforeOutputThreshold(spill_before_output)));
+    }
+
+    if spark_config.get_bool(COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED) {
+        session_config = session_config.with_extension(Arc::new(PartitionAggregateWindowEnabled));
+    }
+
+    if spark_config.get_bool(COMET_EXEC_WINDOW_SORTED_ENABLED) {
+        session_config = session_config.with_extension(Arc::new(SortedWindowEnabled));
     }
 
     // The planner reads this back to decide whether a plan may load a native UDF library.

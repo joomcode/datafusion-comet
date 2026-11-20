@@ -182,6 +182,19 @@ trait ShimSparkErrorConverter {
       case "ExceedMapSizeLimit" =>
         Some(QueryExecutionErrors.exceedMapSizeLimitError(params("size").toString.toInt))
 
+      case "WindowPartitionSizeExceedsLimit" =>
+        val numRows = params("numRows").toString
+        if (org.apache.comet.CometSparkSessionExtensions.isSpark42Plus) {
+          Some(
+            new SparkException(
+              errorClass = "WINDOW_FUNCTION_PARTITION_SIZE_EXCEEDS_LIMIT",
+              messageParameters = Map("numRows" -> numRows),
+              cause = null))
+        } else {
+          // Older Spark catalogs do not define this condition, but must still fail loudly.
+          Some(new SparkException(s"Window partition exceeds the Int row limit: $numRows", null))
+        }
+
       case "CollectionSizeLimitExceeded" =>
         // Pass the count as its decimal string since the reported length can exceed Long range.
         Some(

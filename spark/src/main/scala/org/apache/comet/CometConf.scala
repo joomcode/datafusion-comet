@@ -385,6 +385,33 @@ object CometConf extends ShimCometConf {
     createExecEnabledConfig("explode", defaultValue = true)
   val COMET_EXEC_WINDOW_ENABLED: ConfigEntry[Boolean] =
     createExecEnabledConfig("window", defaultValue = true)
+  val COMET_EXEC_WINDOW_SORTED_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.window.sorted.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "Whether native window operators whose expressions are all ROW_NUMBER, RANK, " +
+          "DENSE_RANK, or LEAD/LAG with a constant offset and default and without IGNORE " +
+          "NULLS run in Comet's SortedWindowExec, which processes each sorted input batch as " +
+          "a whole instead of slicing it per window partition. When false, they run in " +
+          "DataFusion's BoundedWindowAggExec, as in upstream Comet.")
+      .booleanConf
+      .createWithDefault(true)
+
+  val COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED: ConfigEntry[Boolean] =
+    conf(s"$COMET_EXEC_CONFIG_PREFIX.window.partitionAggregate.enabled")
+      .category(CATEGORY_EXEC)
+      .doc(
+        "Whether native window expressions that cannot stream, such as whole-partition " +
+          "aggregates, FIRST_VALUE/LAST_VALUE/NTH_VALUE over whole partitions, NTILE, " +
+          "PERCENT_RANK, CUME_DIST and frames ending at UNBOUNDED FOLLOWING, run in Comet's " +
+          "PartitionAggregateWindowExec, which spills the rows of a window partition to disk " +
+          "when memory runs out. When false, eligible expressions run in DataFusion's " +
+          "WindowAggExec, which buffers each window partition in memory. Whole floating " +
+          "SUM/AVG requires this executor; when it is disabled those expressions use Spark. " +
+          "Suffix SUM/AVG and floating MIN/MAX use Spark regardless of this setting.")
+      .booleanConf
+      .createWithDefault(false)
+
   val COMET_EXEC_WINDOW_GROUP_LIMIT_ENABLED: ConfigEntry[Boolean] =
     createExecEnabledConfig("windowGroupLimit", defaultValue = true)
   val COMET_EXEC_TAKE_ORDERED_AND_PROJECT_ENABLED: ConfigEntry[Boolean] =

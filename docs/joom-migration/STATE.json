@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-20",
-  "phase": "G05_COMPLETED_INTEGRATED",
+  "phase": "G06_COMPLETED_INTEGRATED",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -131,10 +131,16 @@
       "branch": "joom/1.2-native-windows",
       "cards": ["N01", "N02", "N03"],
       "depends_on": ["G01", "G02"],
-      "status": "NOT_STARTED",
+      "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
-      "tests": "NOT_RUN",
-      "handoff_report": null
+      "tests": "PASSED_LOCAL_TARGETED_WITH_FINAL_PLATFORM_BACKLOG",
+      "handoff_report": "G06-report.md",
+      "base_commit": "72d40726eee5fadbf94c5ddd0537d05854766d88",
+      "results": "G06-results.json",
+      "completion_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06-integration/completion.json",
+      "head_ref": "refs/heads/branch-1.2",
+      "functional_source_previously_verified": "2aeca4df3ddba3712bbe2473a9ee436dcc633858",
+      "implementation_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06/completion.json"
     },
     {
       "id": "G07",
@@ -304,8 +310,8 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "G05 accepted for integration; post-commit receipt records actual local/remote refs and unchanged qualified source. Wait for explicit G06 authorization.",
-  "qualification": "G05 local targeted ARM64/dev checks passed; all qualified source bytes preserved for integration. Final full-fuzz/Linux/release/JAR backlog remains mandatory.",
+  "next_step": "Report G06 integration and actual local/remote/tree preservation evidence. Await explicit user authorization before G07.",
+  "qualification": "G06 accepted with existing correctness fallbacks;51native/219JVM/88exactnativeactions locally passed. Qualified code/test bytes unchanged; final Linux/release/JAR and prior backlogs remain mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
   "execution_model": {
@@ -530,17 +536,18 @@
   },
   "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04",
   "integration_gate": {
-    "group": "G05",
-    "status": "ACCEPTED_FOR_VERIFIED_FAST_FORWARD_INTEGRATION",
+    "group": "G06",
+    "status": "USER_ACCEPTED_INTEGRATION_ACTUAL_RESULT_IN_EXTERNAL_RECEIPT",
     "merge_authorized": true,
     "push_authorized": true,
-    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05-integration/completion.json",
+    "method": "Fast-forward only; atomic scoped feature/base publication with exact leases.",
+    "actual_result": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06-integration/completion.json",
     "next_group_authorized": false,
     "not_authorized": [
-      "G06-G10",
+      "G07-G10",
       "full per-group GHA",
-      "main/tag changes",
-      "publication",
+      "main/tag updates",
+      "release/publication",
       "production",
       "datasci access"
     ]
@@ -1370,12 +1377,13 @@
         "feature_cards": ["J14"],
         "behavior_or_test": "Apply shared OffsetBudget to the Joom partition-window concat and shuffle coalescer when those missing consumers are ported; verify their combined FFI/offset behavior.",
         "required_inputs_and_settings": "G06 windows and G07 coalescer with nested/string/map/boolean sliced arrays and synthetic offset budgets, then normal configured limits.",
-        "reason_deferred": "Those consumer implementations belong to the explicitly separate G06/G07 groups and are not implemented/authorized in G02. Shared utility and explode are validated here.",
+        "reason_deferred": "Window consumer is implemented and locally validated in G06. Shuffle coalescer belongs to separately authorized G07 and remains pending. Final Linux/release coverage remains required.",
         "owner": "G06 and G07 integration",
         "intended_validation_command_or_job": "Window/coalescer targeted regressions during their authorized ports; final agreed native/JVM/SQL and exact-JAR qualification.",
         "native_execution_requirement": "Assert actual native window/coalescer/FFI paths with Spark result parity; not incidental fallback.",
-        "status": "PLANNED_DEPENDENT_GROUP_VALIDATION",
-        "evidence_path_and_source_sha": "Shared offset utility tests and explode tests under ${MIGRATION_AUX_ROOT}/20261119_comet12-g02; future consumer SHA pending."
+        "status": "G06_WINDOW_PASSED_LOCAL_G07_SHUFFLE_CONSUMER_PENDING",
+        "evidence_path_and_source_sha": "Shared offset utility tests and explode tests under ${MIGRATION_AUX_ROOT}/20261119_comet12-g02; future consumer SHA pending.; G06 consumer source/receipts: ${MIGRATION_AUX_ROOT}/20261120_comet12-g06/final-source-manifest.json and native-window-qualified.json.",
+        "actual_g06_evidence": "G06-results.json; output_coalescing_flushes_at_nested_offset_budget: real consumer flush, isolated List/Map/Struct children, sliced Boolean, exact rows/schema/order/nulls and zero reserved memory."
       },
       {
         "group": "G03",
@@ -1518,6 +1526,19 @@
         "native_execution_requirement": "Complete rows/multiplicities and mandatory errors, actual native or explicitly safe fallback, real spill where required; canceled/ignored not passes.",
         "status": "DEFERRED_FINAL_QUALIFICATION",
         "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05/final-source-manifest.json"
+      },
+      {
+        "id": "G06-LINUX-RELEASE",
+        "group": "G06",
+        "feature_cards": ["N01", "N02", "N03"],
+        "behavior_or_test": "Full final windows/native/vendor/Spark SQL coverage with exact native node/row/error/spill evidence on Linux and release graph; final-JAR AMD64/ARM64 smoke.",
+        "required_inputs_and_settings": "Original Spark4.2.1/ANSI=true, both partition flag values, sorted flags, final shared lock/vendor/release graph; complete CometWindowSemanticsSuite log.",
+        "reason_deferred": "Approved local targeted per-group validation; no intermediate release qualification after G06.",
+        "owner": "Final migration qualification",
+        "intended_validation_command_or_job": "Full agreed Comet CI plus RC Build & Smoke; run docs/joom-migration/verify-g06-native-windows.py on the complete merged focused-suite log.",
+        "native_execution_requirement": "Independent88-action verifier requires post-execution exact native nodes and window-owned spill metrics; Scala separately asserts original Spark rows/errors and explicit safe fallback. No cancellation/ignore counted as pass.",
+        "status": "DEFERRED_FINAL_QUALIFICATION",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06/final-source-manifest.json; G06-results.json"
       }
     ],
     "final_gate": "No unresolved/unverified applicable cases. Require actual passing evidence; retain only applicability exclusions explicitly agreed with the user (such as the existing HDFS-cluster exclusion)."
@@ -1926,6 +1947,56 @@
       "main/tag changes",
       "publication",
       "production"
+    ]
+  },
+  "g05_accepted_integration_gate_history": {
+    "group": "G05",
+    "status": "ACCEPTED_FOR_VERIFIED_FAST_FORWARD_INTEGRATION",
+    "merge_authorized": true,
+    "push_authorized": true,
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05-integration/completion.json",
+    "next_group_authorized": false,
+    "not_authorized": [
+      "G06-G10",
+      "full per-group GHA",
+      "main/tag changes",
+      "publication",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g06": {
+    "status": "COMPLETED_INTEGRATED",
+    "branch": "joom/1.2-native-windows",
+    "base": "72d40726eee5fadbf94c5ddd0537d05854766d88",
+    "authorization_ref": "decisions.json#g06_authorization",
+    "evidence": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06",
+    "merge_allowed": true,
+    "full_gha_allowed": false,
+    "report": "G06-report.md",
+    "results": "G06-results.json",
+    "qualification": "PASSED_LOCAL_TARGETED_WITH_EXPLICIT_FINAL_BACKLOG",
+    "completion_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06/completion.json",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06/final-source-manifest.json",
+    "native_identity_verifier": "verify-g06-native-windows.py",
+    "integration_authorization_ref": "decisions.json#g06_integration_authorization",
+    "fallback_acceptance_ref": "decisions.json#g06_fallback_acceptance",
+    "functional_source_previously_verified": "2aeca4df3ddba3712bbe2473a9ee436dcc633858",
+    "integration_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06-integration/completion.json"
+  },
+  "g06_review_gate_history": {
+    "group": "G06",
+    "status": "AWAITING_USER_REVIEW_BEFORE_PUSH_OR_INTEGRATION",
+    "base_commit": "72d40726eee5fadbf94c5ddd0537d05854766d88",
+    "merge_authorized": false,
+    "push_authorized": false,
+    "not_authorized": [
+      "G07-G10",
+      "full per-group GHA",
+      "main/tag changes",
+      "publication",
+      "production",
+      "datasci access"
     ]
   }
 }

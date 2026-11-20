@@ -19,6 +19,8 @@
 
 package org.apache.comet.exec
 
+import java.sql.Timestamp
+
 import scala.util.Random
 
 import org.scalactic.source.Position
@@ -33,7 +35,7 @@ import org.apache.spark.sql.execution.window.{WindowExec => SparkWindowExec}
 import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions.{count, lead, sum}
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.types.DecimalType
+import org.apache.spark.sql.types.{DecimalType, DoubleType, FloatType}
 
 import org.apache.comet.CometConf
 import org.apache.comet.CometSparkSessionExtensions.{isSpark35Plus, isSpark40Plus}
@@ -42,12 +44,16 @@ class CometWindowExecSuite extends CometTestBase {
 
   import testImplicits._
 
+  protected def partitionAggregateWindowEnabled: Boolean = false
+
   override protected def test(testName: String, testTags: Tag*)(testFun: => Any)(implicit
       pos: Position): Unit = {
     super.test(testName, testTags: _*) {
       withSQLConf(
         CometConf.COMET_SHUFFLE_ENABLED.key -> "true",
         CometConf.COMET_EXEC_WINDOW_ENABLED.key -> "true",
+        CometConf.COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED.key ->
+          partitionAggregateWindowEnabled.toString,
         "spark.comet.operator.WindowExec.allowIncompatible" -> "true",
         "spark.comet.explain.fallback.enabled" -> "true",
         "spark.comet.explain.fallback.log.enabled" -> "true",
@@ -615,7 +621,16 @@ class CometWindowExecSuite extends CometTestBase {
                     }
                   aggregateFunctions.foreach { function =>
                     val df1 = sql(s"SELECT $function OVER() FROM tbl")
-                    checkSparkAnswerAndOperatorWithTol(df1)
+                    if (!partitionAggregateWindowEnabled && function.startsWith("SUM(") &&
+                      Seq(FloatType, DoubleType).contains(df1.schema.head.dataType)) {
+                      val (_, fallbackPlan) = checkSparkAnswerAndFallbackReason(
+                        df1,
+                        "Whole floating SUM/AVG requires the forward-order partition window executor")
+                      assert(collect(fallbackPlan) { case w: SparkWindowExec => w }.nonEmpty)
+                      assert(collect(fallbackPlan) { case w: CometWindowExec => w }.isEmpty)
+                    } else {
+                      checkSparkAnswerAndOperatorWithTol(df1)
+                    }
 
                     val df2 = sql(s"SELECT $function OVER(order by _2) FROM tbl")
                     checkSparkAnswerAndOperatorWithTol(df2)
@@ -1067,7 +1082,11 @@ class CometWindowExecSuite extends CometTestBase {
           SUM(c) OVER (PARTITION BY a ORDER BY b, c ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) as sum_c
         FROM window_test
       """)
-      checkSparkAnswerAndOperator(df)
+      val (_, fallbackPlan) = checkSparkAnswerAndFallbackReason(
+        df,
+        "Suffix SUM/AVG requires Spark's forward accumulation order")
+      assert(collect(fallbackPlan) { case w: SparkWindowExec => w }.nonEmpty)
+      assert(collect(fallbackPlan) { case w: CometWindowExec => w }.isEmpty)
     }
   }
 
@@ -1312,7 +1331,9 @@ class CometWindowExecSuite extends CometTestBase {
           LAG(c) IGNORE NULLS OVER (PARTITION BY a ORDER BY b) as lag_c
         FROM window_test
       """)
-      checkSparkAnswerAndOperator(df)
+      val (_, plan) = checkSparkAnswerAndFallbackReason(df, "LEAD/LAG IGNORE NULLS")
+      assert(collect(plan) { case w: SparkWindowExec => w }.nonEmpty)
+      assert(collect(plan) { case w: CometWindowExec => w }.isEmpty)
     }
   }
 
@@ -1371,7 +1392,9 @@ class CometWindowExecSuite extends CometTestBase {
           LEAD(c) IGNORE NULLS OVER (PARTITION BY a ORDER BY b) as lead_c
         FROM window_test
       """)
-      checkSparkAnswerAndOperator(df)
+      val (_, plan) = checkSparkAnswerAndFallbackReason(df, "LEAD/LAG IGNORE NULLS")
+      assert(collect(plan) { case w: SparkWindowExec => w }.nonEmpty)
+      assert(collect(plan) { case w: CometWindowExec => w }.isEmpty)
     }
   }
 
@@ -1955,6 +1978,342 @@ class CometWindowExecSuite extends CometTestBase {
         """)
         checkSparkAnswerAndOperator(df)
       }
+    }
+  }
+  // Shapes that run in DataFusion's WindowAggExec, which buffers each partition in memory, or
+  // with spark.comet.exec.window.partitionAggregate.enabled in the spilling
+  // PartitionAggregateWindowExec (see CometPartitionAggregateWindowSuite). Partitions include a
+  // NULL key, sizes 1 and 2 (smaller than the NTILE bucket counts), ORDER BY ties and NULLs,
+  // and NULL values.
+  private def withWindowSpillTable(f: => Unit): Unit =
+    withSQLConf(SQLConf.ANSI_ENABLED.key -> "true") {
+      withTempDir { dir =>
+        val sizes = Seq[(Option[Int], Int)](
+          (None, 3),
+          (Some(1), 1),
+          (Some(2), 2),
+          (Some(3), 7),
+          (Some(4), 40),
+          (Some(5), 120))
+        var id = 0
+        val rows = sizes.flatMap { case (k, size) =>
+          (0 until size).map { i =>
+            id += 1
+            val o = if (i % 9 == 4) None else Some(i * 7 % 11)
+            val v = if (id * 5 % 7 == 0) None else Some(id * 13 % 17 - 8)
+            (id, k, o, v)
+          }
+        }
+        rows
+          .toDF("id", "k", "o", "v")
+          .repartition(3)
+          .write
+          .mode("overwrite")
+          .parquet(dir.toString)
+        spark.read.parquet(dir.toString).createOrReplaceTempView("window_spill")
+        f
+      }
+    }
+
+  private def assertNoSparkWindow(plan: SparkPlan): Unit = {
+    assertCometWindowExecExists(plan)
+    assert(collect(plan) { case w: SparkWindowExec => w }.isEmpty)
+  }
+
+  test("window: whole-partition FIRST/LAST/NTH_VALUE with and without IGNORE NULLS") {
+    withWindowSpillTable {
+      for (frame <- Seq(
+          "ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING",
+          "RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING")) {
+        val df = sql(s"""
+          SELECT id, k, o, v,
+            first_value(v) OVER w AS f,
+            first_value(v) IGNORE NULLS OVER w AS fi,
+            last_value(v) OVER w AS l,
+            last_value(v) IGNORE NULLS OVER w AS li,
+            first(v, true) OVER w AS first_agg,
+            last(v) OVER w AS last_agg,
+            nth_value(v, 2) OVER w AS n2,
+            nth_value(v, 2) IGNORE NULLS OVER w AS n2i,
+            nth_value(v, 50) OVER w AS n50
+          FROM window_spill
+          WINDOW w AS (PARTITION BY k ORDER BY o, id $frame)
+        """)
+        val (_, cometPlan) = checkSparkAnswerAndOperator(df)
+        assertNoSparkWindow(cometPlan)
+      }
+    }
+  }
+
+  test("window: NTILE, PERCENT_RANK and CUME_DIST with ties and small partitions") {
+    withWindowSpillTable {
+      for (order <- Seq("o", "o DESC NULLS LAST")) {
+        val df = sql(s"""
+          SELECT k, o,
+            PERCENT_RANK() OVER (PARTITION BY k ORDER BY $order) AS pr,
+            CUME_DIST() OVER (PARTITION BY k ORDER BY $order) AS cd
+          FROM window_spill
+        """)
+        val (_, cometPlan) = checkSparkAnswerAndOperator(df)
+        assertNoSparkWindow(cometPlan)
+      }
+      val df = sql("""
+        SELECT id, k, o,
+          NTILE(3) OVER (PARTITION BY k ORDER BY o, id) AS n3,
+          NTILE(4) OVER (PARTITION BY k ORDER BY o, id) AS n4,
+          NTILE(100) OVER (PARTITION BY k ORDER BY o, id) AS n100,
+          NTILE(2) OVER (ORDER BY o, id) AS n_global
+        FROM window_spill
+      """)
+      val (_, cometPlan) = checkSparkAnswerAndOperator(df)
+      assertNoSparkWindow(cometPlan)
+    }
+  }
+
+  test("window: mixed whole-partition, distribution and running expressions in one node") {
+    withWindowSpillTable {
+      val df = sql("""
+        SELECT id, k, o, v,
+          SUM(v) OVER (PARTITION BY k ORDER BY o, id
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS total,
+          first_value(v) IGNORE NULLS OVER (PARTITION BY k ORDER BY o, id
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS first_v,
+          NTILE(4) OVER (PARTITION BY k ORDER BY o, id) AS quartile,
+          CUME_DIST() OVER (PARTITION BY k ORDER BY o, id) AS cd,
+          ROW_NUMBER() OVER (PARTITION BY k ORDER BY o, id) AS rn,
+          SUM(v) OVER (PARTITION BY k ORDER BY o, id
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running,
+          MAX(v) OVER (PARTITION BY k ORDER BY o, id
+                       ROWS BETWEEN 1 PRECEDING AND UNBOUNDED FOLLOWING) AS max_after,
+          LAG(v) OVER (PARTITION BY k ORDER BY o, id) AS previous
+        FROM window_spill
+      """)
+      val (_, cometPlan) = checkSparkAnswerAndOperator(df)
+      assertNoSparkWindow(cometPlan)
+      // All expressions share one window specification, so Spark plans a single node.
+      assert(collect(cometPlan) { case w: CometWindowExec => w }.size == 1)
+    }
+  }
+
+  test("window: frames ending at UNBOUNDED FOLLOWING") {
+    withWindowSpillTable {
+      for ((frame, order) <- Seq(
+          ("ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING", "o, id"),
+          ("ROWS BETWEEN 2 PRECEDING AND UNBOUNDED FOLLOWING", "o, id"),
+          ("ROWS BETWEEN 3 FOLLOWING AND UNBOUNDED FOLLOWING", "o, id"),
+          ("RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING", "o"),
+          ("RANGE BETWEEN 2 PRECEDING AND UNBOUNDED FOLLOWING", "o"),
+          ("RANGE BETWEEN 2 PRECEDING AND UNBOUNDED FOLLOWING", "o DESC NULLS LAST"))) {
+        val aggregates = sql(s"""
+          SELECT id, k, o, v,
+            COUNT(v) OVER w AS c,
+            COUNT(*) OVER w AS c_all,
+            MIN(v) OVER w AS mn,
+            MAX(v) OVER w AS mx
+          FROM window_spill
+          WINDOW w AS (PARTITION BY k ORDER BY $order $frame)
+        """)
+        val (_, aggregatePlan) = checkSparkAnswerAndOperator(aggregates)
+        assertNoSparkWindow(aggregatePlan)
+        // Spark recomputes a suffix in forward order. Reversing SUM/AVG can change
+        // floating results or suppress a mandatory ANSI overflow. Keep the original
+        // expressions in the differential oracle, with their safe Spark fallback.
+        val sums = sql(s"""
+          SELECT id, k, o, v, SUM(v) OVER w AS s, AVG(v) OVER w AS av
+          FROM window_spill
+          WINDOW w AS (PARTITION BY k ORDER BY $order $frame)
+        """)
+        val (_, sumPlan) = checkSparkAnswerAndFallbackReason(
+          sums,
+          "Suffix SUM/AVG requires Spark's forward accumulation order")
+        assert(collect(sumPlan) { case w: SparkWindowExec => w }.nonEmpty)
+        assert(collect(sumPlan) { case w: CometWindowExec => w }.isEmpty)
+        // Value functions over ROWS frames depend on the order of ORDER BY ties.
+        if (order.contains("id")) {
+          val values = sql(s"""
+            SELECT id, k, o, v,
+              first_value(v) OVER w AS f,
+              first_value(v) IGNORE NULLS OVER w AS fi,
+              last_value(v) OVER w AS l,
+              last_value(v) IGNORE NULLS OVER w AS li,
+              nth_value(v, 3) OVER w AS n3,
+              nth_value(v, 3) IGNORE NULLS OVER w AS n3i
+            FROM window_spill
+            WINDOW w AS (PARTITION BY k ORDER BY $order $frame)
+          """)
+          val (_, valuePlan) = checkSparkAnswerAndOperator(values)
+          assertNoSparkWindow(valuePlan)
+        }
+      }
+    }
+  }
+
+  private def withTinyPartitions(f: => Unit): Unit =
+    withSQLConf(SQLConf.ANSI_ENABLED.key -> "true") {
+      withTempDir { dir =>
+        val random = new Random(42)
+        val sizes = Seq.fill(700)(1 + random.nextInt(3)) ++ Seq(400) ++ Seq.fill(200)(1)
+        val positiveNaN = java.lang.Double.longBitsToDouble(0x7ff8000000000001L)
+        val negativeNaN = java.lang.Double.longBitsToDouble(0xfff8000000000002L)
+        val doubles = Seq(Some(0.0d), Some(-0.0d), Some(positiveNaN), Some(negativeNaN), None)
+        var id = 0
+        val rows = sizes.zipWithIndex.flatMap { case (size, p) =>
+          val k1 = if (p < 3) None else Some(p / 4)
+          val k2 = if (p % 4 == 0) None else Some(s"key-${p % 4}")
+          (0 until size).map { i =>
+            id += 1
+            val ts =
+              if (i == 0 && p % 5 == 0) None
+              else Some(new Timestamp(1700000000000L + i * 1000L))
+            val eventTimeMs = if (random.nextInt(6) == 0) None else Some(random.nextInt(4).toLong)
+            val v = if (random.nextInt(5) == 0) None else Some(random.nextInt(100))
+            val d = doubles((p / 7) % doubles.size)
+            (id, k1, k2, ts, eventTimeMs, v, s"payload-$id", d)
+          }
+        }
+        rows
+          .toDF("id", "k1", "k2", "effective_ts", "eventTimeMs", "v", "s", "d")
+          .repartition(3)
+          .write
+          .mode("overwrite")
+          .parquet(dir.toString)
+        spark.read.parquet(dir.toString).createOrReplaceTempView("tiny")
+        f
+      }
+    }
+
+  private def checkAllModes(query: String, expectSparkWindow: Boolean = false): Unit = {
+    for {
+      sorted <- Seq("true", "false")
+      batchSize <- Seq("3", "8192")
+    } {
+      withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
+        CometConf.COMET_EXEC_WINDOW_SORTED_ENABLED.key -> sorted,
+        CometConf.COMET_BATCH_SIZE.key -> batchSize) {
+        val ordered = s"SELECT * FROM ($query) g06 ORDER BY id"
+        val expected = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+          sql(ordered).collect().toSeq
+        }
+        val df = sql(ordered)
+        val (_, plan) = if (expectSparkWindow) {
+          checkSparkAnswerAndFallbackReason(df, "LEAD/LAG IGNORE NULLS")
+        } else {
+          checkSparkAnswerAndOperator(df)
+        }
+        assert(df.collect().toSeq == expected)
+        if (expectSparkWindow) {
+          assert(collect(plan) { case w: SparkWindowExec => w }.nonEmpty)
+          assert(collect(plan) { case w: CometWindowExec => w }.isEmpty)
+        } else {
+          assert(collect(plan) { case w: CometWindowExec => w }.nonEmpty)
+          assert(collect(plan) { case w: SparkWindowExec => w }.isEmpty)
+        }
+      }
+    }
+  }
+
+  test("sorted window: LEAD of a timestamp with a far-future default over tiny partitions") {
+    withTinyPartitions {
+      checkAllModes("""
+        SELECT id, k1, k2, effective_ts,
+          lead(effective_ts, 1, TIMESTAMP'9999-12-31 23:59:59')
+            OVER (PARTITION BY k1, k2 ORDER BY effective_ts ASC NULLS FIRST
+                  ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING) AS next_ts
+        FROM tiny
+      """)
+    }
+  }
+
+  test("sorted window: ROW_NUMBER DESC NULLS LAST, alone and filtered to the first row") {
+    withTinyPartitions {
+      checkAllModes("""
+        SELECT id, k1, eventTimeMs,
+          row_number() OVER (PARTITION BY k1 ORDER BY eventTimeMs DESC NULLS LAST, id) AS rn
+        FROM tiny
+      """)
+      checkAllModes("""
+        SELECT id, k1, k2, s FROM (
+          SELECT *,
+            row_number() OVER (PARTITION BY k1, k2 ORDER BY eventTimeMs DESC NULLS LAST, id) AS rn
+          FROM tiny
+        ) WHERE rn = 1
+      """)
+    }
+  }
+
+  test("sorted window: ranking functions with ties and multi-column keys") {
+    withTinyPartitions {
+      checkAllModes("""
+        SELECT id, k1, k2, eventTimeMs,
+          row_number() OVER w AS rn,
+          rank() OVER w AS r,
+          dense_rank() OVER w AS dr
+        FROM tiny
+        WINDOW w AS (PARTITION BY k1, k2 ORDER BY eventTimeMs DESC NULLS LAST, id)
+      """)
+      checkAllModes("""
+        SELECT id, k1, eventTimeMs,
+          rank() OVER (PARTITION BY k1 ORDER BY eventTimeMs ASC NULLS FIRST) AS r,
+          dense_rank() OVER (PARTITION BY k1 ORDER BY eventTimeMs ASC NULLS FIRST) AS dr
+        FROM tiny
+      """)
+      checkAllModes("""
+        SELECT id, k1, k2, eventTimeMs,
+          rank() OVER w AS r,
+          dense_rank() OVER w AS dr
+        FROM tiny
+        WINDOW w AS (PARTITION BY k1, k2 ORDER BY eventTimeMs DESC NULLS LAST)
+      """)
+    }
+  }
+
+  test("sorted window: LEAD and LAG with offsets 1 to 3 and defaults") {
+    withTinyPartitions {
+      checkAllModes("""
+        SELECT id, k1, k2, v, s,
+          lead(v) OVER w AS lead1,
+          lead(v, 2, -1) OVER w AS lead2,
+          lead(s, 3, 'none') OVER w AS lead3,
+          lag(v) OVER w AS lag1,
+          lag(v, 2, -2) OVER w AS lag2,
+          lag(s, 3) OVER w AS lag3,
+          row_number() OVER w AS rn
+        FROM tiny
+        WINDOW w AS (PARTITION BY k1, k2 ORDER BY id)
+      """)
+    }
+  }
+
+  test("sorted window: struct, string and floating-point partition keys and nested values") {
+    withTinyPartitions {
+      checkAllModes("""
+        SELECT id, d, v,
+          row_number() OVER (PARTITION BY d ORDER BY id) AS rn_d,
+          lead(named_struct('v', v, 's', array(s, k2)))
+            OVER (PARTITION BY d ORDER BY id) AS lead_nested,
+          row_number() OVER (PARTITION BY named_struct('a', k1 % 3, 'b', k2) ORDER BY id) AS rn_s
+        FROM tiny
+      """)
+    }
+  }
+
+  test("sorted window: LEAD IGNORE NULLS and other functions keep the existing operators") {
+    withTinyPartitions {
+      checkAllModes(
+        """
+        SELECT id, k1, v,
+          lead(v) IGNORE NULLS OVER (PARTITION BY k1 ORDER BY id) AS lead_in,
+          row_number() OVER (PARTITION BY k1 ORDER BY id) AS rn
+        FROM tiny
+      """,
+        expectSparkWindow = true)
+      checkAllModes("""
+        SELECT id, k1, v,
+          sum(v) OVER (PARTITION BY k1 ORDER BY id) AS running,
+          lag(v) OVER (PARTITION BY k1 ORDER BY id) AS previous
+        FROM tiny
+      """)
     }
   }
 }

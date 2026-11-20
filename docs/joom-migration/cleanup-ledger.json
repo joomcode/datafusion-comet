@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-20",
-  "stage": "G05_COMPLETED_INTEGRATED",
+  "stage": "G06_IN_PROGRESS",
   "baseline": "resource-baseline.json",
   "no_dependency_downloads_or_release_outputs_yet": false,
   "entries": [
@@ -191,6 +191,14 @@
       "ownership": "TASK_CREATED",
       "shared": false,
       "contains": "Port proposals, independent Spark semantics review, native/JVM test/build and existing benchmark receipts; preserve failures/source hashes and cleanup identities.",
+      "preserve_until": "Final migration acceptance and user cleanup decision"
+    },
+    {
+      "type": "g06_auxiliary_outputs",
+      "path": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "contains": "Port proposals, independent window/Spark semantic review, local build/test/existing benchmark receipts, source manifests and cleanup identities.",
       "preserve_until": "Final migration acceptance and user cleanup decision"
     }
   ],
@@ -848,5 +856,33 @@
     "source_preservation": "Qualified source remains reachable at refs/joom-migration/g05-qualified; original implementation receipts are untouched.",
     "build_policy": "No new build or dependency download for documentation-only acceptance. No release artifacts created.",
     "preserve": "Keep through final migration acceptance; no automatic deletion."
+  },
+  "g06_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06",
+    "contains": "All proposals/reviews/source snapshots, positive and intentional negative test logs, paired existing benchmarks, initial/final verifier and corrupted-log controls, documentation archive and completion receipt.",
+    "reused_outputs": [
+      "native/target",
+      "spark/target",
+      "common/target",
+      "native/target/criterion",
+      "target/criterion"
+    ],
+    "measured_sizes_kib": {
+      "auxiliary_directory": 11632,
+      "native_target": 71912196,
+      "spark_target": 1641944,
+      "common_target": 140,
+      "native_criterion": 1596,
+      "root_criterion": 372
+    },
+    "attribution": "Whole reused directory sizes at the checkpoint, not G06-only growth. Completion receipt records final auxiliary size. No new Docker image, toolchain, package cache or release artifact; normal debug outputs/dylib resources reused.",
+    "preservation": "Keep all evidence/snapshots and standard shared caches through final acceptance. Nothing automatically deleted."
+  },
+  "g06_integration_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06-integration",
+    "contains": "Qualified documentation archive, pre-integration source/ref snapshot, independent review, static/license checks and actual push/integration completion receipt.",
+    "source_preservation": "refs/joom-migration/g06-qualified retains2aeca4df3; initial implementation evidence and receipts preserved.",
+    "build_policy": "Documentation-only acceptance; no native/JVM rebuild, release artifact or new Docker image. Cached tools and ordinary RAT check may use standard temporary output.",
+    "preservation": "Keep through final migration acceptance; no automatic deletion of records, recovery refs or shared caches."
   }
 }

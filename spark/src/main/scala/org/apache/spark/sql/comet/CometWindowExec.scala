@@ -25,16 +25,16 @@ import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeSet
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, Average, Complete, Count, First, Last, Max, Min, Sum}
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
 import org.apache.spark.sql.execution.SparkPlan
-import org.apache.spark.sql.execution.metric.SQLMetric
+import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
 import org.apache.spark.sql.execution.window.WindowExec
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.types.{ArrayType, DataType, DateType, Decimal, DecimalType, DoubleType, LongType, MapType, NumericType, StructType}
+import org.apache.spark.sql.types.{ArrayType, DataType, DateType, Decimal, DecimalType, DoubleType, FloatType, LongType, MapType, NumericType, StructType}
 
 import com.google.common.base.Objects
 
 import org.apache.comet.{CometConf, ConfigEntry}
 import org.apache.comet.CometSparkSessionExtensions.withFallbackReason
-import org.apache.comet.serde.{AggSerde, CometOperatorSerde, CometSortOrder, LiteralOuterClass, OperatorOuterClass}
+import org.apache.comet.serde.{AggSerde, CometOperatorSerde, CometSortOrder, LiteralOuterClass, OperatorOuterClass, SupportLevel}
 import org.apache.comet.serde.OperatorOuterClass.Operator
 import org.apache.comet.serde.QueryPlanSerde.{aggExprToProto, exprToProto, liftFallbackReasons, scalarFunctionExprToProto, serializeDataType}
 
@@ -297,6 +297,16 @@ object CometWindowExec extends CometOperatorSerde[WindowExec] {
       (aggExprToProto(agg, output, true, conf), None, ignoreNulls)
     } else {
       windowExpr.windowFunction match {
+        case lag: Lag if lag.ignoreNulls =>
+          withFallbackReason(
+            windowExpr,
+            "LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling")
+          (None, None, false)
+        case lead: Lead if lead.ignoreNulls =>
+          withFallbackReason(
+            windowExpr,
+            "LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling")
+          (None, None, false)
         case lag: Lag if !lag.default.isInstanceOf[Literal] =>
           // https://github.com/apache/datafusion-comet/issues/4268
           withFallbackReason(windowExpr, "Lag default value must be a literal")
@@ -580,6 +590,73 @@ object CometWindowExec extends CometOperatorSerde[WindowExec] {
             .build())
     }
 
+    // The generic non-streaming DataFusion path reduces floating values in Arrow lanes,
+    // which changes Spark's forward fold (1e16, -1e16, 1 becomes 0 instead of 1).
+    // The custom partition executor implements the forward fold. When it is disabled,
+    // leave these whole-partition aggregates on Spark rather than silently changing rows.
+    val isWholePartition = f match {
+      case SpecifiedWindowFrame(_, UnboundedPreceding, UnboundedFollowing) => true
+      case SpecifiedWindowFrame(RangeFrame, UnboundedPreceding, CurrentRow)
+          if windowExpr.windowSpec.orderSpec.isEmpty =>
+        true
+      case _ => false
+    }
+    if (isWholePartition && !CometConf.COMET_EXEC_WINDOW_PARTITION_AGGREGATE_ENABLED.get(conf)) {
+      windowExpr.windowFunction match {
+        case agg: AggregateExpression
+            if (agg.aggregateFunction.isInstanceOf[Sum] ||
+              agg.aggregateFunction.isInstanceOf[Average]) &&
+              (agg.dataType == FloatType || agg.dataType == DoubleType) =>
+          withFallbackReason(
+            windowExpr,
+            "Whole floating SUM/AVG requires the forward-order partition window executor")
+          return None
+        case _ =>
+      }
+    }
+
+    // Spark recomputes a suffix aggregate in forward input order. A reverse pass can change
+    // floating results or miss a mandatory intermediate ANSI overflow (MAX_LONG, 1, -1).
+    // Neither the custom reverse executor nor DataFusion's retracting fallback proves that
+    // contract, so keep order-sensitive suffix SUM/AVG on Spark before native serialization.
+    val isSuffix = f match {
+      case SpecifiedWindowFrame(_, UnboundedPreceding, _) => false
+      case SpecifiedWindowFrame(_, _, UnboundedFollowing) => true
+      case _ => false
+    }
+    if (isSuffix) {
+      windowExpr.windowFunction match {
+        case agg: AggregateExpression =>
+          agg.aggregateFunction match {
+            case _: Sum | _: Average =>
+              withFallbackReason(
+                windowExpr,
+                "Suffix SUM/AVG requires Spark's forward accumulation order")
+              return None
+            case extrema: Min
+                if SupportLevel.containsType(
+                  extrema.dataType,
+                  classOf[FloatType],
+                  classOf[DoubleType]) =>
+              withFallbackReason(
+                windowExpr,
+                "Suffix floating MIN/MAX requires Spark's first-equal value selection")
+              return None
+            case extrema: Max
+                if SupportLevel.containsType(
+                  extrema.dataType,
+                  classOf[FloatType],
+                  classOf[DoubleType]) =>
+              withFallbackReason(
+                windowExpr,
+                "Suffix floating MIN/MAX requires Spark's first-equal value selection")
+              return None
+            case _ =>
+          }
+        case _ =>
+      }
+    }
+
     val frame = OperatorOuterClass.WindowFrame
       .newBuilder()
       .setFrameType(frameType)
@@ -770,7 +847,10 @@ case class CometWindowExec(
   override def producedAttributes: AttributeSet = outputSet ++ AttributeSet(windowExpression)
 
   override lazy val metrics: Map[String, SQLMetric] =
-    CometMetricNode.baselineMetrics(sparkContext)
+    CometMetricNode.baselineMetrics(sparkContext) ++ Map(
+      "spill_count" -> SQLMetrics.createMetric(sparkContext, "number of spills"),
+      "spilled_bytes" -> SQLMetrics.createSizeMetric(sparkContext, "total spilled bytes"),
+      "spilled_rows" -> SQLMetrics.createMetric(sparkContext, "number of spilled rows"))
 
   override def outputOrdering: Seq[SortOrder] = child.outputOrdering
 

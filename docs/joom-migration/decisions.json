@@ -324,12 +324,29 @@
   },
   "stage_start_policy": {
     "explicit_user_approval_per_group": true,
-    "currently_authorized": ["G03"],
-    "groups_not_authorized": ["G04", "G05", "G06", "G07", "G08", "G09", "G10"],
-    "reaffirmed_on": "2026-11-19",
-    "completed_groups": ["G01", "G02", "G03"],
+    "currently_authorized": [],
+    "groups_not_authorized": ["G07", "G08", "G09", "G10"],
+    "reaffirmed_on": "2026-11-20",
+    "completed_groups": ["G01", "G02", "G03", "G04", "G05", "G06"],
     "active_implementation_group": null,
-    "next_group_requires_separate_approval": "G04"
+    "next_group_requires_separate_approval": "G07",
+    "before_g06_final_checkpoint": {
+      "explicit_user_approval_per_group": true,
+      "currently_authorized": ["G03"],
+      "groups_not_authorized": [
+        "G04",
+        "G05",
+        "G06",
+        "G07",
+        "G08",
+        "G09",
+        "G10"
+      ],
+      "reaffirmed_on": "2026-11-19",
+      "completed_groups": ["G01", "G02", "G03"],
+      "active_implementation_group": null,
+      "next_group_requires_separate_approval": "G04"
+    }
   },
   "execution_pause": {
     "status": "G01_AMD64_QUALIFICATION_PENDING_USER_REVIEW",
@@ -717,6 +734,54 @@
       "full per-group GHA",
       "artifact publication",
       "production use",
+      "datasci access"
+    ]
+  },
+  "g06_authorization": {
+    "recorded_on": "2026-11-20",
+    "status": "APPROVED_EXPLICITLY",
+    "request_translation": "Start G06 joom/1.2-native-windows: spillable windows, tiny partitions and SortedWindow, under the approved plan. Report after local builds and targeted tests before merge. Do not run full GHA or start G07.",
+    "base_commit": "72d40726eee5fadbf94c5ddd0537d05854766d88",
+    "cards": ["N01", "N02", "N03"],
+    "scope": "Port final tag13 window executors onto current operators crate/planner while preserving upstream guards and all agreed G01-G05 code. Original Spark4.2.1 oracle, ANSI=true, row/ordering/error/native/spill assertions.",
+    "excluded": [
+      "push/merge before review",
+      "G07-G10",
+      "full per-group GHA",
+      "main/tag changes",
+      "publication",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g06_local_qualification": {
+    "date": "2026-11-20",
+    "status": "COMPLETE_AWAITING_USER_REVIEW",
+    "results": "G06-results.json",
+    "safe_adaptations": "Use original Spark for unsupported forward-order/mandatory-error-sensitive suffixes and broken IGNORE NULLS shifts. Preserve optimized native paths where tested. Implements already-approved correctness/fallback policy, not a new feature decision.",
+    "policy_unchanged": "ANSI=true; full original Spark rows/errors/native proof; no weakened checks. No full per-group GHA or G06 RC.",
+    "authorization_boundary": "No push/integration until user review; no G07, main/tag changes, release/publication, production or datasci access."
+  },
+  "g06_fallback_acceptance": {
+    "date": "2026-11-20",
+    "status": "APPROVED_EXPLICITLY",
+    "request_translation": "For now we will not change this, because we have no such queries. If there are no other problems in G06, finish G06.",
+    "scope": "Keep the qualified suffix SUM/AVG, suffix floating MIN/MAX and LEAD/LAG IGNORE NULLS Spark fallbacks. The user reports no such queries; no additional native implementation or performance work is requested now.",
+    "correctness": "Keep current original-Spark semantics, ANSI=true, exact rows/mandatory errors and native/fallback verification. Do not remove guards or weaken tests."
+  },
+  "g06_integration_authorization": {
+    "date": "2026-11-20",
+    "status": "APPROVED_BY_STAGE_COMPLETION_REQUEST_AFTER_REVIEW",
+    "interpretation": "Finish the reviewed and locally qualified G06 using the established feature publication/branch-1.2 fast-forward closeout. Preserve all source/test bytes and fold acceptance documentation into the existing second substantive commit.",
+    "qualified_source_previously_verified": "2aeca4df3ddba3712bbe2473a9ee436dcc633858",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06-integration/completion.json",
+    "allowed": "Local history consolidation of acceptance documentation; scoped two-ref origin push and remote-ref verification; fast-forward branch-1.2; post-integration preservation checks.",
+    "excluded": [
+      "G07-G10",
+      "full per-group GHA",
+      "main/tag updates",
+      "release/publication",
+      "production",
       "datasci access"
     ]
   }

@@ -29,7 +29,7 @@ use datafusion::{
         AggregateUDF, WindowFrame, WindowFrameBound, WindowFrameUnits, WindowFunctionDefinition,
     },
     physical_expr::{
-        expressions::{CastExpr, Column},
+        expressions::{CastExpr, Column, Literal},
         window::WindowExpr,
         LexOrdering, PhysicalExpr, PhysicalSortExpr,
     },
@@ -40,7 +40,11 @@ use datafusion::{
         ExecutionPlan, InputOrderMode,
     },
 };
-use datafusion_comet_operators::{PartitionedRankLimitExec, WindowFnKind};
+use datafusion_comet_operators::{
+    sorted_window_supports_output_type, PartitionAggregateWindowEnabled,
+    PartitionAggregateWindowExec, PartitionedRankLimitExec, SortedWindowEnabled, SortedWindowExec,
+    SortedWindowFunction, WindowFnKind,
+};
 use datafusion_comet_proto::{
     spark_expression::{
         self, agg_expr::ExprStruct as AggExprStruct, expr::ExprStruct, literal::Value, AggExpr,
@@ -132,13 +136,48 @@ impl OperatorBuilder for WindowBuilder {
         // trigger a retract call.
         let window_expr = window_expr?;
         let all_bounded = window_expr.iter().all(|e| e.uses_bounded_memory());
-        let window_agg: Arc<dyn ExecutionPlan> = if all_bounded {
+        // These flags are resolved by the JVM before crossing JNI. The spilling partition
+        // path is opt-in; simple sorted windows are enabled by default in CometConf.
+        let config = planner.session_ctx.copied_config();
+        let sorted_window = if config.get_extension::<SortedWindowEnabled>().is_some() {
+            planner.plan_sorted_window(
+                wnd,
+                &window_expr,
+                &child.native_plan,
+                partition_exprs,
+                sort_exprs,
+                &input_schema,
+            )?
+        } else {
+            None
+        };
+        // Only non-streaming nodes need the spilling partition implementation. Bounded
+        // expressions in a mixed node retain the bounded evaluator below that operator.
+        let partition_aggregate = if !all_bounded
+            && config
+                .get_extension::<PartitionAggregateWindowEnabled>()
+                .is_some()
+        {
+            PartitionAggregateWindowExec::try_plan(
+                window_expr.clone(),
+                Arc::clone(&child.native_plan),
+                !partition_exprs.is_empty(),
+                wnd.window_expr.iter().map(|e| e.ignore_nulls).collect(),
+            )?
+        } else {
+            None
+        };
+        let window_agg: Arc<dyn ExecutionPlan> = if let Some(plan) = sorted_window {
+            plan
+        } else if all_bounded {
             Arc::new(BoundedWindowAggExec::try_new(
                 window_expr,
                 Arc::clone(&child.native_plan),
                 InputOrderMode::Sorted,
                 !partition_exprs.is_empty(),
             )?)
+        } else if let Some(plan) = partition_aggregate {
+            plan
         } else {
             Arc::new(WindowAggExec::try_new(
                 window_expr,
@@ -337,6 +376,14 @@ impl PhysicalPlanner {
                 }
             };
         } else if let Some(agg_func) = &spark_expr.agg_func {
+            // Scala normally falls back before serialization. Reject a filter at the native
+            // boundary too: create_window_expr below does not pass one to DataFusion, and its
+            // public WindowExpr API cannot expose it later to custom window operators.
+            if agg_func.filter.is_some() {
+                return Err(GeneralError(
+                    "FILTER (WHERE ...) is not supported for window aggregates".to_string(),
+                ));
+            }
             // Is the frame ever-expanding (start = UnboundedPreceding)? When it is,
             // DataFusion uses `PlainAggregateWindowExpr` which does not call
             // `retract_batch`, so we can safely use Comet's Spark-compatible
@@ -537,6 +584,109 @@ impl PhysicalPlanner {
             None,
         )
         .map_err(|e| ExecutionError::DataFusionError(e.to_string()))
+    }
+
+    fn plan_sorted_window(
+        &self,
+        wnd: &spark_operator::Window,
+        window_expr: &[Arc<dyn WindowExpr>],
+        input: &Arc<dyn ExecutionPlan>,
+        partition_exprs: &[Arc<dyn PhysicalExpr>],
+        sort_exprs: &[PhysicalSortExpr],
+        input_schema: &SchemaRef,
+    ) -> Result<Option<Arc<dyn ExecutionPlan>>, ExecutionError> {
+        let mut functions = Vec::with_capacity(window_expr.len());
+        let mut fields = Vec::with_capacity(window_expr.len());
+        for (spark_expr, df_expr) in wnd.window_expr.iter().zip(window_expr.iter()) {
+            if spark_expr.agg_func.is_some() {
+                return Ok(None);
+            }
+            let Some(ExprStruct::ScalarFunc(func)) = spark_expr
+                .built_in_window_function
+                .as_ref()
+                .and_then(|f| f.expr_struct.as_ref())
+            else {
+                return Ok(None);
+            };
+            let function = match func.func.as_str() {
+                "row_number" => SortedWindowFunction::RowNumber,
+                "rank" => SortedWindowFunction::Rank,
+                "dense_rank" => SortedWindowFunction::DenseRank,
+                name @ ("lead" | "lag") => {
+                    if spark_expr.ignore_nulls || func.args.len() != 3 {
+                        return Ok(None);
+                    }
+                    let value = self.create_expr(&func.args[0], Arc::clone(input_schema))?;
+                    let offset = self.create_expr(&func.args[1], Arc::clone(input_schema))?;
+                    let default = self.create_expr(&func.args[2], Arc::clone(input_schema))?;
+                    let (Some(offset), Some(default)) = (
+                        offset.downcast_ref::<Literal>(),
+                        default.downcast_ref::<Literal>(),
+                    ) else {
+                        return Ok(None);
+                    };
+                    let offset = match offset.value() {
+                        ScalarValue::Int8(Some(v)) => *v as i64,
+                        ScalarValue::Int16(Some(v)) => *v as i64,
+                        ScalarValue::Int32(Some(v)) => *v as i64,
+                        ScalarValue::Int64(Some(v)) => *v,
+                        _ => return Ok(None),
+                    };
+                    let Some(offset) = (if name == "lead" {
+                        Some(offset)
+                    } else {
+                        offset.checked_neg()
+                    }) else {
+                        return Ok(None);
+                    };
+                    let value_type = value.data_type(input_schema)?;
+                    let default = if default.value().is_null() {
+                        ScalarValue::try_from(&value_type)?
+                    } else {
+                        match default.value().cast_to(&value_type) {
+                            Ok(v) => v,
+                            Err(_) => return Ok(None),
+                        }
+                    };
+                    SortedWindowFunction::Shift {
+                        value,
+                        offset,
+                        default,
+                    }
+                }
+                _ => return Ok(None),
+            };
+            let result_type = spark_expr.result_type.as_ref().map(to_arrow_datatype);
+            let data_type = match &function {
+                SortedWindowFunction::Shift { value, .. } => {
+                    let value_type = value.data_type(input_schema)?;
+                    if result_type.as_ref().is_some_and(|t| t != &value_type) {
+                        return Ok(None);
+                    }
+                    value_type
+                }
+                _ => result_type.unwrap_or(DataType::UInt64),
+            };
+            if !sorted_window_supports_output_type(&function, &data_type, input_schema)? {
+                return Ok(None);
+            }
+            let nullable = matches!(function, SortedWindowFunction::Shift { .. });
+            let field = df_expr
+                .field()?
+                .as_ref()
+                .clone()
+                .with_data_type(data_type)
+                .with_nullable(nullable);
+            fields.push(Arc::new(field));
+            functions.push(function);
+        }
+        Ok(Some(Arc::new(SortedWindowExec::try_new(
+            Arc::clone(input),
+            partition_exprs.to_vec(),
+            sort_exprs.to_vec(),
+            functions,
+            fields,
+        )?)))
     }
 
     fn process_agg_func(
@@ -771,5 +921,253 @@ fn coerce_range_offset_for_order_by(
             ))))
         }
         _ => Ok(scalar),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::datatypes::{Field, Schema};
+    use datafusion::datasource::memory::MemorySourceConfig;
+    use datafusion::prelude::{SessionConfig, SessionContext};
+    use datafusion_comet_proto::spark_operator::operator::OpStruct;
+
+    fn datatype(type_id: i32) -> spark_expression::DataType {
+        spark_expression::DataType {
+            type_id,
+            type_info: None,
+        }
+    }
+
+    fn column() -> spark_expression::Expr {
+        spark_expression::Expr {
+            expr_struct: Some(ExprStruct::Bound(spark_expression::BoundReference {
+                index: 0,
+                datatype: Some(datatype(3)),
+            })),
+            ..Default::default()
+        }
+    }
+
+    fn literal(value: Option<i32>) -> spark_expression::Expr {
+        spark_expression::Expr {
+            expr_struct: Some(ExprStruct::Literal(spark_expression::Literal {
+                value: value.map(Value::IntVal),
+                datatype: Some(datatype(3)),
+                is_null: value.is_none(),
+            })),
+            ..Default::default()
+        }
+    }
+
+    fn window_expr(name: &str, offset: i32, ignore_nulls: bool) -> spark_operator::WindowExpr {
+        spark_operator::WindowExpr {
+            built_in_window_function: Some(spark_expression::Expr {
+                expr_struct: Some(ExprStruct::ScalarFunc(spark_expression::ScalarFunc {
+                    func: name.to_string(),
+                    args: if matches!(name, "lead" | "lag") {
+                        vec![column(), literal(Some(offset)), literal(None)]
+                    } else {
+                        vec![]
+                    },
+                    return_type: None,
+                    fail_on_error: false,
+                    ..Default::default()
+                })),
+                ..Default::default()
+            }),
+            spec: Some(spark_operator::WindowSpecDefinition {
+                partition_spec: vec![],
+                order_spec: vec![],
+                frame_specification: Some(spark_operator::WindowFrame {
+                    frame_type: WindowFrameType::Rows as i32,
+                    lower_bound: Some(spark_operator::LowerWindowFrameBound {
+                        lower_frame_bound_struct: Some(LowerFrameBoundStruct::UnboundedPreceding(
+                            spark_operator::UnboundedPreceding {},
+                        )),
+                    }),
+                    upper_bound: Some(spark_operator::UpperWindowFrameBound {
+                        upper_frame_bound_struct: Some(UpperFrameBoundStruct::CurrentRow(
+                            spark_operator::CurrentRow {},
+                        )),
+                    }),
+                }),
+            }),
+            ignore_nulls,
+            // The Spark counter/shift result is Int32; percent_rank is Double.
+            result_type: Some(datatype(if name == "percent_rank" { 6 } else { 3 })),
+            ..Default::default()
+        }
+    }
+
+    fn window_operator(window_expr: Vec<spark_operator::WindowExpr>) -> Operator {
+        Operator {
+            children: vec![Operator {
+                op_struct: Some(OpStruct::Scan(spark_operator::Scan {
+                    fields: vec![datatype(3)],
+                    source: "".to_string(),
+                })),
+                ..Default::default()
+            }],
+            op_struct: Some(OpStruct::Window(Box::new(spark_operator::Window {
+                window_expr,
+                order_by_list: vec![spark_expression::Expr {
+                    expr_struct: Some(ExprStruct::SortOrder(Box::new(
+                        spark_expression::SortOrder {
+                            child: Some(Box::new(column())),
+                            direction: 0,
+                            null_ordering: 0,
+                        },
+                    ))),
+                    ..Default::default()
+                }],
+                partition_by_list: vec![column()],
+                child: None,
+            }))),
+            ..Default::default()
+        }
+    }
+
+    fn plan_string(op: &Operator, sorted: bool, partition: bool) -> String {
+        let mut config = SessionConfig::new();
+        if sorted {
+            config = config.with_extension(Arc::new(SortedWindowEnabled));
+        }
+        if partition {
+            config = config.with_extension(Arc::new(PartitionAggregateWindowEnabled));
+        }
+        let planner = PhysicalPlanner::new(Arc::new(SessionContext::new_with_config(config)), 0);
+        let (_, _, plan) = planner.create_plan(op, &mut vec![], 1).unwrap();
+        let display = datafusion::physical_plan::displayable(plan.native_plan.as_ref())
+            .indent(false)
+            .to_string();
+        display
+    }
+
+    #[test]
+    fn sorted_window_routing_preserves_flags_and_offset_eligibility() {
+        let simple = window_operator(vec![
+            window_expr("row_number", 0, false),
+            window_expr("rank", 0, false),
+            window_expr("dense_rank", 0, false),
+            window_expr("lead", 1, false),
+            window_expr("lag", 1, false),
+        ]);
+        assert!(plan_string(&simple, true, false).contains("CometSortedWindowExec"));
+        assert!(plan_string(&simple, false, false).contains("BoundedWindowAggExec"));
+        for name in ["lead", "lag"] {
+            for offset in [0, 1, -1, 1024, -1024, 1025, -1025] {
+                let op = window_operator(vec![window_expr(name, offset, false)]);
+                let plan = plan_string(&op, true, false);
+                assert_eq!(
+                    plan.contains("CometSortedWindowExec"),
+                    offset.unsigned_abs() <= 1024,
+                    "{name} offset {offset}: {plan}"
+                );
+            }
+            let op = window_operator(vec![window_expr(name, 1, true)]);
+            let plan = plan_string(&op, true, true);
+            assert!(plan.contains("BoundedWindowAggExec"), "{plan}");
+            assert!(!plan.contains("CometSortedWindowExec"), "{plan}");
+        }
+    }
+
+    #[test]
+    fn partition_window_routing_is_opt_in_and_preserves_mixed_nodes() {
+        for mixed in [false, true] {
+            let mut expressions = vec![window_expr("percent_rank", 0, false)];
+            if mixed {
+                expressions.push(window_expr("row_number", 0, false));
+            }
+            let op = window_operator(expressions);
+            let disabled = plan_string(&op, true, false);
+            assert!(disabled.contains("WindowAggExec"), "{disabled}");
+            assert!(
+                !disabled.contains("PartitionAggregateWindowExec"),
+                "{disabled}"
+            );
+            let enabled = plan_string(&op, true, true);
+            assert!(
+                enabled.contains("PartitionAggregateWindowExec"),
+                "{enabled}"
+            );
+            if mixed {
+                assert!(enabled.contains("BoundedWindowAggExec"), "{enabled}");
+            }
+        }
+    }
+
+    #[test]
+    fn sorted_window_rejects_nonliteral_offset_and_default() {
+        let planner = PhysicalPlanner::default();
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int32, true)]));
+        let input: Arc<dyn ExecutionPlan> =
+            MemorySourceConfig::try_new_exec(&[vec![]], Arc::clone(&schema), None).unwrap();
+        // The DF expression only supplies a field here; selection must reject a nonliteral
+        // offset/default before constructing the custom operator.
+        let field_expr = planner
+            .create_window_expr(
+                &window_expr("row_number", 0, false),
+                Arc::clone(&schema),
+                &[],
+                &[],
+            )
+            .unwrap();
+        for arg in [1, 2] {
+            let mut expr = window_expr("lead", 1, false);
+            let Some(ExprStruct::ScalarFunc(func)) = expr
+                .built_in_window_function
+                .as_mut()
+                .and_then(|e| e.expr_struct.as_mut())
+            else {
+                unreachable!()
+            };
+            func.args[arg] = column();
+            let window = spark_operator::Window {
+                window_expr: vec![expr],
+                ..Default::default()
+            };
+            assert!(planner
+                .plan_sorted_window(
+                    &window,
+                    &[Arc::clone(&field_expr)],
+                    &input,
+                    &[],
+                    &[],
+                    &schema,
+                )
+                .unwrap()
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn window_aggregate_filter_is_rejected_at_native_boundary() {
+        let planner = PhysicalPlanner::default();
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int32, true)]));
+        let mut expr = window_expr("row_number", 0, false);
+        expr.built_in_window_function = None;
+        expr.agg_func = Some(AggExpr {
+            expr_struct: Some(AggExprStruct::Count(spark_expression::Count {
+                children: vec![column()],
+            })),
+            filter: Some(spark_expression::Expr {
+                expr_struct: Some(ExprStruct::Literal(spark_expression::Literal {
+                    value: Some(Value::BoolVal(false)),
+                    datatype: Some(datatype(0)),
+                    is_null: false,
+                })),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let error = planner
+            .create_window_expr(&expr, Arc::clone(&schema), &[], &[])
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("FILTER (WHERE ...) is not supported for window aggregates"));
+        expr.agg_func.as_mut().unwrap().filter = None;
+        assert!(planner.create_window_expr(&expr, schema, &[], &[]).is_ok());
     }
 }

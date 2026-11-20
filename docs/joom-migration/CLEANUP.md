@@ -208,3 +208,19 @@ existing caches; their full size is not G04 growth. Maven copied the debug dylib
 to runtime resources; these are not release JARs. No Docker image, toolchain or
 release artifact was created. Use existing manual cleanup instructions after
 all migration builds finish; nothing is automatically deleted.
+
+## G06 local windows qualification
+
+`${MIGRATION_AUX_ROOT}/20261120_comet12-g06` holds source proposals and snapshots, independent reviews, all failed/passing build/test logs, intentionally failing old-logic controls, existing paired benchmark outputs, verifier controls and the final completion receipt. The complete final log is required to recheck all 88 native/fallback actions. Preserve this evidence through review and final migration acceptance.
+
+Reused `native/target`, `spark/target`, `common/target` and Criterion output directories are listed with whole-directory checkpoint sizes in cleanup-ledger.json. Their total size is not G06-only growth. No Docker image, new toolchain or release JAR was produced. Keep shared caches and prior qualified release artifacts; do not clean build outputs while later groups need them. Only after preserving required evidence and a user cleanup decision may this specific task directory be removed manually. No automatic deletion is authorized.
+
+## G06 accepted integration
+
+`${MIGRATION_AUX_ROOT}/20261120_comet12-g06-integration` contains the qualified
+documentation archive, source/ref snapshots, preservation checks, license/static
+logs and actual completion receipt. `refs/joom-migration/g06-qualified` retains
+the original qualified commit. Preserve this evidence and original G06 logs
+through final acceptance; nothing is automatically deleted. Integration creates
+no runtime build, release JAR or Docker image. Final auxiliary size and exact
+local/remote source identities are in this directory's completion.json.

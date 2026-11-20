@@ -5,7 +5,7 @@
   "files": [
     {
       "path": "AGENTS.md",
-      "sha256": "ed21c1bbd4cae4aa494e30dc5946be2f0d06d19d70f29e745c2fe21560002245"
+      "sha256": "31a770c6a1c3b51df9fd79619583818aeb2e2da04bfcc4e40f661f3e6e544563"
     },
     {
       "path": "CHECKPOINT-VERIFICATION.json",
@@ -13,7 +13,7 @@
     },
     {
       "path": "CLEANUP.md",
-      "sha256": "51482585eabec8081c25a5892c892df46bf363603e71140d802d6c0f7ee2ed1f"
+      "sha256": "b56446df51fd1d876df5ae8397f4500b764436a50274a77a451c23a4de9607a8"
     },
     {
       "path": "G01-CLOSEOUT.md",
@@ -96,12 +96,20 @@
       "sha256": "576d5ffeee59b35ee3c307b9310e5b43e3a6b55657c88d1cc9075a2692a056d2"
     },
     {
+      "path": "G06-report.md",
+      "sha256": "133daa8107a173a3d8f37730ef27adec084b5bc96ebd7817ad50d1e1e990e773"
+    },
+    {
+      "path": "G06-results.json",
+      "sha256": "c8d453b649134e58fffd565b1afd31d464daa1f31637d2e4abeb8c6632d92ad8"
+    },
+    {
       "path": "HANDOFF.md",
-      "sha256": "b1366ab29757347bbb51f59e7fcc5b22a36edb02b44b71de07ea8c5e90045bfa"
+      "sha256": "16de8ae33d63535298e89807ff6c1882b97e7e0196321873331bea0dcb430439"
     },
     {
       "path": "NETWORK.md",
-      "sha256": "a7fc6041d89935b0e694d8ebe29a9c8f557c86a646908e04120db72ad4ce2e38"
+      "sha256": "7a128d2e523611fdf05785dcc655b43ba771356f446a6a7bcc76a7851e423433"
     },
     {
       "path": "PATHS.md",
@@ -109,7 +117,7 @@
     },
     {
       "path": "PAUSED.md",
-      "sha256": "f85bbac18dfc57c02648a28effabb38646b21f210c64efe1613ff5ecdfe26ab0"
+      "sha256": "8665fc895b669884a9f2a44ddadfc7d05024e1446a6f6aadbd207c975f9addb4"
     },
     {
       "path": "PERFORMANCE.md",
@@ -121,11 +129,11 @@
     },
     {
       "path": "README.md",
-      "sha256": "3342b29c9e857a1dc4b12769e1909b4f62c107f2ad432eb0dd1c7449af2992a5"
+      "sha256": "509f9c132c8d54576323cbb86efaeefa937c4de34eca09a8356e5d4c048b2e7a"
     },
     {
       "path": "STATE.json",
-      "sha256": "f916fd95181634b7bbd937cf35cdc76532c8f098fca0ebecea9060fd3720cf8e"
+      "sha256": "582b86e4e9761975a59daede9d22e4d5c304332de506f691cff3d65ee4e6b1dc"
     },
     {
       "path": "approved-plan.json",
@@ -137,7 +145,7 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "e3701daa65fd8f9e6fdf5cf1db5d47c68ed98a699e88f4ccd403f429749c9243"
+      "sha256": "ffd7b8d9ea5255708045f8425d0893b1bf3f16951a121de859ad60cef890c12e"
     },
     {
       "path": "correctness-test-plan.txt",
@@ -145,11 +153,11 @@
     },
     {
       "path": "created-files.txt",
-      "sha256": "c9a3de64e6d132cb682d9b9d56e6857617ae4fb72389aefefe05efed46cd5ba5"
+      "sha256": "72a20d08e803552e5c051c38d8ae8d8f14437f02762af52570ad043c6b5f425f"
     },
     {
       "path": "decisions.json",
-      "sha256": "0ccec8e145f21fe878fa72962a6f27f69308e66a98d3857436b979a847b60303"
+      "sha256": "78e1b26b54354497fdc720605bc1c7a395aadbd5c6a43c6b6fd4594782693ed9"
     },
     {
       "path": "feature-register.json",
@@ -166,6 +174,10 @@
     {
       "path": "vendor-provenance.json",
       "sha256": "0e861be161fbdb07382712985bcaec200a63b18bfc139e94825b9d6fb919ea0e"
+    },
+    {
+      "path": "verify-g06-native-windows.py",
+      "sha256": "38d49357b2672501704f9efa3dcb74ee746e9e06b6ee27f3acb4013d3e9e28cd"
     }
   ]
 }

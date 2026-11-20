@@ -128,3 +128,16 @@ documentation into the existing second substantive commit; the original feature
 was not yet published. No main/tag push, PR/full per-group CI launch, artifact
 publication, production operation or G04 implementation is authorized here.
 Existing read-only GitHub and official Apache RAT/Maven scopes remain unchanged.
+
+## G06 accepted completion (2026-11-20)
+
+After reviewing the qualified G06 and accepting the current correctness fallbacks,
+the user requested completion. This authorizes the established scoped integration:
+inspect origin refs, publish `joom/1.2-native-windows` and fast-forward
+`branch-1.2`, then verify exact remote refs. Use github.com/joomcode/datafusion-comet
+only, prefer an atomic two-ref push with exact expected leases, and reject any
+unexpected remote update. Fold acceptance documentation into the second existing
+substantive commit; preserve all qualified code/tests. Do not create a PR or launch
+full per-group CI, update main/tags, publish release artifacts, access production
+or datasci, or start G07. Existing read-only GitHub and official RAT/Maven scopes
+remain unchanged. Actual integration evidence is separate from initial validation.
