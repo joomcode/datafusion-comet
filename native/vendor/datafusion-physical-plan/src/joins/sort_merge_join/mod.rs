@@ -18,6 +18,7 @@
 //! Sort Merge Join Execution Plan Operator
 
 pub use exec::SortMergeJoinExec;
+pub use filter::PrecomputeSafeExpr;
 
 pub(crate) mod bitwise_stream;
 mod exec;
