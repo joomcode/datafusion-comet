@@ -1,6 +1,6 @@
 {
-  "updated_on": "2026-11-20",
-  "phase": "G07_COMPLETED_INTEGRATED",
+  "updated_on": "2026-11-21",
+  "phase": "G08_COMPLETED_INTEGRATED",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -57,8 +57,17 @@
     {
       "id": "G02",
       "branch": "joom/1.2-native-runtime",
-      "cards": ["I05", "I06", "J14", "J15", "J16", "J22"],
-      "depends_on": ["G01"],
+      "cards": [
+        "I05",
+        "I06",
+        "J14",
+        "J15",
+        "J16",
+        "J22"
+      ],
+      "depends_on": [
+        "G01"
+      ],
       "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
       "tests": "157 native tests retained on unchanged native source/library; 93 final selected JVM/SQL cases passed, zero failed/canceled/ignored. JNI memory-wait gap closed locally with negative-control proof. Strict Clippy/format/config passed.",
@@ -72,8 +81,15 @@
     {
       "id": "G03",
       "branch": "joom/1.2-sort-spill-budget",
-      "cards": ["D02", "D03", "D04", "D11"],
-      "depends_on": ["G01"],
+      "cards": [
+        "D02",
+        "D03",
+        "D04",
+        "D11"
+      ],
+      "depends_on": [
+        "G01"
+      ],
       "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
       "tests": "371unique native/vendor and41JVM/SQL cases passed; known pre-existing workspace lint/toolchain and final Linux/release qualification tracked.",
@@ -100,7 +116,9 @@
         "N08",
         "N09"
       ],
-      "depends_on": ["G01"],
+      "depends_on": [
+        "G01"
+      ],
       "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
       "tests": "Initial checkpoint:559native/330JVM. Independent fix:239native/53JVM. MixedBloom recheck:3/3. Cohorts overlap; do not sum. Final qualification still requires25full-fuzz cases,2metric dispositions and Linux/release coverage.",
@@ -113,8 +131,12 @@
     {
       "id": "G05",
       "branch": "joom/1.2-smj-filter",
-      "cards": ["D05"],
-      "depends_on": ["G01"],
+      "cards": [
+        "D05"
+      ],
+      "depends_on": [
+        "G01"
+      ],
       "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
       "tests": "88unique native/39JVM passed;23 opt-in full fuzz canceled and explicitly tracked; no remaining failed qualified case.",
@@ -129,8 +151,15 @@
     {
       "id": "G06",
       "branch": "joom/1.2-native-windows",
-      "cards": ["N01", "N02", "N03"],
-      "depends_on": ["G01", "G02"],
+      "cards": [
+        "N01",
+        "N02",
+        "N03"
+      ],
+      "depends_on": [
+        "G01",
+        "G02"
+      ],
       "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
       "tests": "PASSED_LOCAL_TARGETED_WITH_FINAL_PLATFORM_BACKLOG",
@@ -159,7 +188,10 @@
         "J26",
         "J27"
       ],
-      "depends_on": ["G01", "G02"],
+      "depends_on": [
+        "G01",
+        "G02"
+      ],
       "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
       "tests": "292unique native and266unique JVM cases passed; no remaining selected failed/canceled/ignored case. Exact Spark4.2.1 SQL/native/writer proof; final platform/packaging and G09 matrix remain due.",
@@ -176,18 +208,45 @@
     {
       "id": "G08",
       "branch": "joom/1.2-jvm-codegen",
-      "cards": ["J05", "J06", "J07", "J17"],
-      "depends_on": ["G01", "G02"],
-      "status": "NOT_STARTED",
+      "cards": [
+        "J05",
+        "J06",
+        "J07",
+        "J17"
+      ],
+      "depends_on": [
+        "G01",
+        "G02"
+      ],
+      "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
-      "tests": "NOT_RUN",
-      "handoff_report": null
+      "tests": "52 unique native and446 unique JVM/SQL passed;11 repeated shaded-JAR UDF executions and2 shaded Delta cases. No failed/canceled/ignored selected local cases.",
+      "handoff_report": "G08-report.md",
+      "base_commit": "1a273499258107f8fd1e55534343dc629519e511",
+      "head_ref": "refs/heads/branch-1.2",
+      "results": "G08-results.json",
+      "functional_source_previously_verified": "2625e2c8e67c4fba4565e8370140545a54b29b9d",
+      "implementation_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g08/completion.json",
+      "completion_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g08-integration/completion.json"
     },
     {
       "id": "G09",
       "branch": "joom/1.2-cost-based-engines",
-      "cards": ["I07", "J01", "J02", "J03", "J04"],
-      "depends_on": ["G03", "G04", "G05", "G06", "G07", "G08"],
+      "cards": [
+        "I07",
+        "J01",
+        "J02",
+        "J03",
+        "J04"
+      ],
+      "depends_on": [
+        "G03",
+        "G04",
+        "G05",
+        "G06",
+        "G07",
+        "G08"
+      ],
       "status": "NOT_STARTED",
       "head_commit": null,
       "tests": "NOT_RUN",
@@ -290,7 +349,9 @@
       "project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
       "code_hold_preserved": true
     },
-    "implementation_authorized_groups": ["G01"],
+    "implementation_authorized_groups": [
+      "G01"
+    ],
     "language_policy": "Commit messages and committed documentation must be English; user conversation may remain Russian. User quotations in this directory are English translations."
   },
   "delivery_scope": {
@@ -303,7 +364,10 @@
       "Delta4.4.1",
       "GCP"
     ],
-    "linux_release_architectures": ["amd64", "arm64"],
+    "linux_release_architectures": [
+      "amd64",
+      "arm64"
+    ],
     "checks": "Retain mandatory correctness, ANSI, regression, integration and packaging checks. Final JARs must include SHA256, Git SHA and build information. The user will separately validate production GCP jobs.",
     "user_quote": "We need to implement everything planned and obtain JAR artifacts for inclusion in our Spark 4.2 image. I will check performance later."
   },
@@ -318,8 +382,8 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Report verified G07 publication/integration. Await explicit authorization before G08.",
-  "qualification": "G07 accepted with292native/266uniqueJVM locally passed. Qualified source/tests are unchanged; final full Linux/CI/release/exact-JAR and G09 cost-model matrix remain mandatory.",
+  "next_step": "Report verified G08 publication/integration. Await explicit authorization before G09.",
+  "qualification": "G08 accepted:52 unique native and446 unique JVM/SQL cases locally passed, with shaded developer-JAR origin/hash checks. All qualified source/test bytes preserved. Safe fallbacks accepted; final full CI/Linux/release/exact-JAR qualification remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
   "execution_model": {
@@ -544,15 +608,15 @@
   },
   "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04",
   "integration_gate": {
-    "group": "G07",
+    "group": "G08",
     "status": "USER_ACCEPTED_INTEGRATION_ACTUAL_RESULT_IN_EXTERNAL_RECEIPT",
     "merge_authorized": true,
     "push_authorized": true,
-    "method": "Fast-forward only; atomic two-ref origin push with exact leases.",
-    "actual_result": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07-integration/completion.json",
+    "method": "Fast-forward only; guarded atomic two-ref origin push.",
+    "actual_result": "${MIGRATION_AUX_ROOT}/20261121_comet12-g08-integration/completion.json",
     "next_group_authorized": false,
     "not_authorized": [
-      "G08-G10",
+      "G09-G10",
       "full per-group GHA",
       "main/tag changes",
       "release publication",
@@ -847,7 +911,11 @@
       "target_spark42_sql": {
         "passed": 6,
         "failed": 3,
-        "failed_shards": ["core-1", "core-2", "core-4"],
+        "failed_shards": [
+          "core-1",
+          "core-2",
+          "core-4"
+        ],
         "pending": 0
       },
       "target_comet": "scans/shuffle/execPASSED;expressions2284passed2failed2canceled12ignored",
@@ -1245,7 +1313,11 @@
       "conclusion": "FAILURE_BEFORE_HEAVY_BUILDS",
       "reason": "Negative duplicate-receipt fixture expected firstdiagnostic; Linuxfilesystemenumeration reachednativehashcheckfirst. Fixedfixturetoexclusivelyduplicateavalidreceipt, sameguardunchanged."
     },
-    "cancelled_comet_ci": [44378830488, 44379067790, 44379346180],
+    "cancelled_comet_ci": [
+      44378830488,
+      44379067790,
+      44379346180
+    ],
     "source_commit": "c6e9d375b",
     "fixture_fix_commit": "966b8529b",
     "previous_runs": [
@@ -1355,7 +1427,14 @@
       {
         "id": "G02-LINUX-AMD64-RELEASE",
         "group": "G02",
-        "feature_cards": ["I05", "I06", "J14", "J15", "J16", "J22"],
+        "feature_cards": [
+          "I05",
+          "I06",
+          "J14",
+          "J15",
+          "J16",
+          "J22"
+        ],
         "behavior_or_test": "Run G02 suites/unit regressions on native Linux AMD64 with the final CI/release feature graph; local macOS ARM64 debug evidence is not Linux/release qualification.",
         "required_inputs_and_settings": "Spark4.2.1/Java17/ANSI=true; full agreed final native/vendor/JVM suites; final JAR smoke on native AMD64/ARM64.",
         "reason_deferred": "Per-user policy: local targeted checks during each group, full agreed GHA and final artifact qualification after all feature work.",
@@ -1368,7 +1447,9 @@
       {
         "id": "G02-CANCEL-SPARK-MEMORY-WAIT",
         "group": "G02",
-        "feature_cards": ["J15"],
+        "feature_cards": [
+          "J15"
+        ],
         "behavior_or_test": "Cancel a plan whose already-running poll is blocked inside Spark JNI acquireExecutionMemory; verify bounded exit and no leaked/double-returned reservations.",
         "required_inputs_and_settings": "Deterministically saturate Spark off-heap pool using another task; interruptOnCancel=false; native producer and JVM-fed paths; restore/release held memory in test cleanup.",
         "reason_deferred": "Originally deferred; now reproduced by a bounded negative control and closed by passing deterministic local JNI and manager regressions. Final Linux/release coverage remains tracked separately.",
@@ -1382,7 +1463,9 @@
       {
         "id": "G02-OFFSET-CONSUMERS",
         "group": "G02",
-        "feature_cards": ["J14"],
+        "feature_cards": [
+          "J14"
+        ],
         "behavior_or_test": "Apply shared OffsetBudget to the Joom partition-window concat and shuffle coalescer when those missing consumers are ported; verify their combined FFI/offset behavior.",
         "required_inputs_and_settings": "G06 windows and G07 coalescer with nested/string/map/boolean sliced arrays and synthetic offset budgets, then normal configured limits.",
         "reason_deferred": "Both window and shuffle-coalescer consumers are now implemented and locally checked. Final Linux/release/platform qualification remains required.",
@@ -1396,7 +1479,12 @@
       },
       {
         "group": "G03",
-        "feature_cards": ["D11", "D02", "D04", "D03"],
+        "feature_cards": [
+          "D11",
+          "D02",
+          "D04",
+          "D03"
+        ],
         "native_execution_requirement": "Actual native paths, result/mandatory-error parity, no canceled/ignored case counted as passed.",
         "status": "DEFERRED_FINAL_QUALIFICATION",
         "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/completion.json; final migration release SHA pending.",
@@ -1409,7 +1497,12 @@
       },
       {
         "group": "G03",
-        "feature_cards": ["D11", "D02", "D04", "D03"],
+        "feature_cards": [
+          "D11",
+          "D02",
+          "D04",
+          "D03"
+        ],
         "native_execution_requirement": "Actual native paths, result/mandatory-error parity, no canceled/ignored case counted as passed.",
         "status": "LOCAL_STRICT_PASSED_FINAL_LINUX_CI_PENDING",
         "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/strict-workspace-clippy-final.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/lint-only-source-proof.json",
@@ -1513,7 +1606,9 @@
       {
         "id": "G05-LINUX-RELEASE",
         "group": "G05",
-        "feature_cards": ["D05"],
+        "feature_cards": [
+          "D05"
+        ],
         "behavior_or_test": "Validate G05 on final full agreed Linux CI/release graph and exact final-JAR AMD64/ARM64 smoke.",
         "required_inputs_and_settings": "Original Spark 4.2.1/ANSI=true plus preserved Legacy fuzz settings; final shared lock/vendor/release graph.",
         "reason_deferred": "Approved local-targeted per-group policy; final complete qualification mandatory.",
@@ -1526,7 +1621,9 @@
       {
         "id": "G05-FULL-FUZZ",
         "group": "G05",
-        "feature_cards": ["D05"],
+        "feature_cards": [
+          "D05"
+        ],
         "behavior_or_test": "Execute all23 full SMJ fuzz cases plus10 default cases; none canceled. Full suite4869query comparisons.",
         "required_inputs_and_settings": "Original Spark 4.2.1/ANSI=true plus preserved Legacy fuzz settings; final shared lock/vendor/release graph.",
         "reason_deferred": "Approved local-targeted per-group policy; final complete qualification mandatory.",
@@ -1539,7 +1636,11 @@
       {
         "id": "G06-LINUX-RELEASE",
         "group": "G06",
-        "feature_cards": ["N01", "N02", "N03"],
+        "feature_cards": [
+          "N01",
+          "N02",
+          "N03"
+        ],
         "behavior_or_test": "Full final windows/native/vendor/Spark SQL coverage with exact native node/row/error/spill evidence on Linux and release graph; final-JAR AMD64/ARM64 smoke.",
         "required_inputs_and_settings": "Original Spark4.2.1/ANSI=true, both partition flag values, sorted flags, final shared lock/vendor/release graph; complete CometWindowSemanticsSuite log.",
         "reason_deferred": "Approved local targeted per-group validation; no intermediate release qualification after G06.",
@@ -1578,7 +1679,11 @@
       {
         "id": "G07-G09-BROADCAST-COST-MATRIX",
         "group": "G07",
-        "feature_cards": ["J25", "J09", "J21"],
+        "feature_cards": [
+          "J25",
+          "J09",
+          "J21"
+        ],
         "behavior_or_test": "Run original skewed broadcast/C2R regression under both cost-based-engine flag settings after G09 implements that subsystem.",
         "required_inputs_and_settings": "Actual G09 cost model enabled/disabled; codegen.maxFields3/100; AQE skewed join, reused/staged Comet broadcast; compare complete original Spark rows and actual native/fallback plan.",
         "reason_deferred": "User-approved per-group local checks; full final platform/release qualification after all groups. G09 implementation requires separate user authorization.",
@@ -1587,6 +1692,24 @@
         "native_execution_requirement": "Actual native or explicitly safe fallback, full result/schema/mandatory-error oracle where applicable; final loaded artifacts verified. No ignored/canceled case counted as pass.",
         "status": "PENDING_AUTHORIZED_G09_IMPLEMENTATION",
         "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/final-source-manifest.json; G07-results.json"
+      },
+      {
+        "id": "G08-FINAL-LINUX-RELEASE-AND-FULL-CI",
+        "group": "G08",
+        "feature_cards": [
+          "J05",
+          "J06",
+          "J07",
+          "J17"
+        ],
+        "behavior_or_test": "Run G08 codegen/fuzz/conditional/serialization/Delta cases in the full agreed final profile matrix and release feature graph, then exact final AMD64/ARM64 JAR smoke.",
+        "required_inputs_and_settings": "Spark4.2.1, ANSI=true, original Spark result/schema/required-error oracle, actual native/dispatcher proof; broader supported profiles in existing full CI.",
+        "reason_deferred": "Approved local targeted per-group policy; current developer JAR checks are Darwin/debug, not final Linux artifacts.",
+        "owner": "Final migration qualification after all authorized groups",
+        "intended_validation_command_or_job": "Full agreed Comet CI and RC Build & Smoke after all temporary CI mechanisms are removed.",
+        "native_execution_requirement": "Verify actual final classes/libraries and expected native/dispatcher/fallback plans; no canceled/ignored case counted passed.",
+        "status": "DEFERRED_FINAL_QUALIFICATION",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g08/final-source-manifest.json; final release SHA remains pending."
       }
     ],
     "final_gate": "No unresolved/unverified applicable cases. Require actual passing evidence; retain only applicability exclusions explicitly agreed with the user (such as the existing HDFS-cluster exclusion)."
@@ -1614,7 +1737,14 @@
     "branch": "joom/1.2-native-runtime",
     "source_tag": "joom-1.1-13",
     "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02",
-    "cards": ["I05", "I06", "J14", "J15", "J16", "J22"],
+    "cards": [
+      "I05",
+      "I06",
+      "J14",
+      "J15",
+      "J16",
+      "J22"
+    ],
     "full_gha_run": false,
     "base_branch_update_authorized_this_stage": true,
     "status": "COMPLETED_INTEGRATED",
@@ -1696,8 +1826,14 @@
       "report": "G02-performance.md",
       "measurement_jvms": 16,
       "diagnostic_jvms": 2,
-      "bridge_zero_balance_ns_pair": [231.58596153846153, 249.80269230769233],
-      "bridge_two_worker_ns_pair": [445.9322497333446, 545.6832636363636],
+      "bridge_zero_balance_ns_pair": [
+        231.58596153846153,
+        249.80269230769233
+      ],
+      "bridge_two_worker_ns_pair": [
+        445.9322497333446,
+        545.6832636363636
+      ],
       "sql_result": "No reproducible SQL change established and no equivalence/small-upper-bound claim. Dev native and balanced background sandbox metrics errors limit interpretation.",
       "runtime_code_changed": false,
       "concurrent_scope": "Saturated shared-manager stress; default fair native path serializes in Rust, greedy permits parallel acquires.",
@@ -1726,7 +1862,12 @@
     "status": "COMPLETED_INTEGRATED",
     "base_commit": "6729883958442e865707d692f32a84e9554e4090",
     "branch": "joom/1.2-sort-spill-budget",
-    "cards": ["D11", "D02", "D04", "D03"],
+    "cards": [
+      "D11",
+      "D02",
+      "D04",
+      "D03"
+    ],
     "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03",
     "authorization_ref": "decisions.json#g03_authorization",
     "integration_authorized": true,
@@ -2095,6 +2236,53 @@
       "full per-group GHA",
       "main/tag changes",
       "release/publication",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g07_accepted_integration_gate_history": {
+    "group": "G07",
+    "status": "USER_ACCEPTED_INTEGRATION_ACTUAL_RESULT_IN_EXTERNAL_RECEIPT",
+    "merge_authorized": true,
+    "push_authorized": true,
+    "method": "Fast-forward only; atomic two-ref origin push with exact leases.",
+    "actual_result": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07-integration/completion.json",
+    "next_group_authorized": false,
+    "not_authorized": [
+      "G08-G10",
+      "full per-group GHA",
+      "main/tag changes",
+      "release publication",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g08": {
+    "status": "COMPLETED_INTEGRATED",
+    "branch": "joom/1.2-jvm-codegen",
+    "base": "1a273499258107f8fd1e55534343dc629519e511",
+    "authorization_ref": "decisions.json#g08_authorization",
+    "evidence": "${MIGRATION_AUX_ROOT}/20261120_comet12-g08",
+    "merge_allowed": true,
+    "full_gha_allowed": false,
+    "report": "G08-report.md",
+    "results": "G08-results.json",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g08/completion.json",
+    "integration_authorization_ref": "decisions.json#g08_integration_authorization",
+    "fallback_acceptance_ref": "decisions.json#g08_fallback_acceptance",
+    "functional_source_previously_verified": "2625e2c8e67c4fba4565e8370140545a54b29b9d",
+    "integration_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g08-integration/completion.json"
+  },
+  "g08_review_gate_history": {
+    "group": "G08",
+    "status": "LOCAL_QUALIFIED_AWAITING_EXPLICIT_PUSH_AND_INTEGRATION_APPROVAL",
+    "base_commit": "1a273499258107f8fd1e55534343dc629519e511",
+    "merge_authorized": false,
+    "push_authorized": false,
+    "not_authorized": [
+      "G09-G10",
+      "full per-group GHA",
+      "main/tag/release changes",
       "production",
       "datasci access"
     ]

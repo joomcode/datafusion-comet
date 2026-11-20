@@ -117,11 +117,25 @@ of this could outweigh the benefits of running parts of the query stage natively
 Once the plan has been transformed, any consecutive native Comet operators are combined into a `CometNativeExec` which contains
 a protocol buffer serialized version of the plan (the serialization code can be found in `QueryPlanSerde`).
 
-Spark serializes the physical plan and sends it to the executors when executing tasks. The executors deserialize the
-plan and invoke it.
+The driver keeps protobuf plans on the physical operators for conversion, copies and canonicalization, but those
+operator fields are transient. Execution carries its required plan explicitly in the task's RDD or write payload,
+rather than serializing every operator's redundant copy. `CometExecRDD` carries the block's serialized plan and common
+scan metadata; each partition carries only its own file-planning data. Finalized scan metadata is injected before the
+plan reaches JNI.
 
-When `CometNativeExec` is invoked, it will pass the serialized protobuf plan into
-`Native.createPlan`, which invokes the native code via JNI, where the plan is then deserialized.
+SQL text is stored once in the native block's root `sql_text_pool`, with expression `QueryContext`s referring to pool
+indexes. Scan metadata finalized after scalar-subquery evaluation and opaque contrib scan payloads use the same pool.
+The source locations are retained so native ANSI errors can still report the original SQL context.
+
+Dispatched Scala UDF expressions carry function identities rather than repeated serialized closure graphs.
+`CometUdfFunctionPool.PlanPayload` captures the live functions on the driver and travels in Spark's task-serialization
+stream. This preserves shared captures and snapshots their current state for a later execution of the same RDD.
+Task setup registers those functions before native execution; task completion removes them. A new task entry point
+must capture functions from the native root, finalized scan commons and any opaque contrib payloads on the driver,
+and register its payload on the executor before creating the native iterator.
+
+`CometExecIterator` passes the task's serialized protobuf plan into `Native.createPlan`, which invokes the native code
+via JNI, where the plan is then deserialized.
 
 In the native code there is a `PhysicalPlanner` struct (in `planner.rs`) which converts the deserialized plan into an
 Apache DataFusion `ExecutionPlan`. In some cases, Comet provides specialized physical operators and expressions to

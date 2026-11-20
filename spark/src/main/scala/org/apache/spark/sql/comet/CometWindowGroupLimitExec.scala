@@ -152,7 +152,7 @@ object CometWindowGroupLimitExec extends CometOperatorSerde[SparkPlan] {
  * would otherwise show identical labels for both).
  */
 case class CometWindowGroupLimitExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     partitionSpec: Seq[Expression],
@@ -161,7 +161,7 @@ case class CometWindowGroupLimitExec(
     limit: Int,
     mode: String,
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec
     with CometDelegatesRequiredChildDistribution {
 

@@ -24,7 +24,7 @@ import scala.collection.mutable
 import org.apache.spark.sql.{CometTestBase, DataFrame}
 import org.apache.spark.sql.comet.CometNativeExec
 
-import org.apache.comet.serde.{ExprOuterClass, OperatorOuterClass}
+import org.apache.comet.serde.{ExprOuterClass, OperatorOuterClass, QueryContextInterner}
 
 class QueryContextInternerSuite extends CometTestBase {
 
@@ -160,4 +160,125 @@ class QueryContextInternerSuite extends CometTestBase {
       }
     }
   }
+  test("ANSI error reports full SQL context from a native shuffle's map side and scan filter") {
+    withSQLConf("spark.sql.ansi.enabled" -> "true") {
+      withTempPath { dir =>
+        spark
+          .range(1, 10)
+          .selectExpr("cast(id as int) as a", "cast(0 as int) as b", "id % 3 as k")
+          .write
+          .mode("overwrite")
+          .parquet(dir.getAbsolutePath)
+        withTempView("t_div") {
+          spark.read.parquet(dir.getAbsolutePath).createOrReplaceTempView("t_div")
+          Seq(
+            "select k, sum(a / b) as s from t_div group by k",
+            "select k, count(*) as c from t_div where a / b > 1 group by k").foreach { query =>
+            val err = intercept[Exception](spark.sql(query).collect())
+            val msg = Option(err.getMessage).getOrElse("")
+            assert(msg.contains("DIVIDE_BY_ZERO"), msg)
+            assert(
+              msg.contains("== SQL") && msg.contains("a / b"),
+              s"error message lost the SQL context:\n$msg")
+          }
+        }
+      }
+    }
+  }
+
+  test("scan common interning preserves context positions and validates existing indexes") {
+    val context = ExprOuterClass.QueryContext
+      .newBuilder()
+      .setSqlText("select \u03b1 / 0 from source")
+      .setStartIndex(7)
+      .setStopIndex(11)
+      .setLine(2)
+      .setStartPosition(3)
+      .setObjectType("VIEW")
+      .setObjectName("source_view")
+      .build()
+    val expr = ExprOuterClass.Expr.newBuilder().setQueryContext(context).build()
+    val common = OperatorOuterClass.NativeScanCommon
+      .newBuilder()
+      .setSource("source")
+      .addDataFilters(expr)
+      .build()
+    val pool = new QueryContextInterner.Pool(Seq("an earlier block context"))
+    val interned = QueryContextInterner.internScanCommon(common, pool)
+    val indexed = interned.getDataFilters(0).getQueryContext
+    assert(indexed.getSqlTextIdx == 1)
+    assert(indexed.getSqlText.isEmpty)
+    assert(pool.added == Seq(context.getSqlText))
+    assert(indexed.toBuilder.clearSqlTextIdx().setSqlText(context.getSqlText).build() == context)
+    assert(QueryContextInterner.internScanCommon(interned, pool) eq interned)
+    Seq(-1, 2).foreach { invalid =>
+      val bad = common.toBuilder
+        .setDataFilters(
+          0,
+          expr.toBuilder.setQueryContext(context.toBuilder.clearSqlText().setSqlTextIdx(invalid)))
+        .build()
+      intercept[IllegalArgumentException] {
+        QueryContextInterner.internScanCommon(bad, pool)
+      }
+    }
+  }
+
+  test("appending a SQL pool preserves raw fields and nested function metadata") {
+    val marker = com.google.protobuf.UnknownFieldSet
+      .newBuilder()
+      .addField(
+        99,
+        com.google.protobuf.UnknownFieldSet.Field
+          .newBuilder()
+          .addLengthDelimited(com.google.protobuf.ByteString.copyFromUtf8("opaque marker"))
+          .build())
+      .build()
+    val child = OperatorOuterClass.Operator
+      .newBuilder()
+      .setPlanId(3)
+      .setUnknownFields(marker)
+      .build()
+    val root = OperatorOuterClass.Operator
+      .newBuilder()
+      .setPlanId(7)
+      .addSqlTextPool("existing text")
+      .setUnknownFields(marker)
+      .addChildren(child)
+      .build()
+    val bytes = root.toByteArray
+    assert(QueryContextInterner.appendToPool(bytes, Nil) eq bytes)
+    val appended = QueryContextInterner.appendToPool(bytes, Seq("\u03b1", "\ud83d\ude00"))
+    val restored = OperatorOuterClass.Operator.parseFrom(appended)
+    assert(restored.getUnknownFields == marker)
+    assert(restored.getChildren(0) == child)
+    assert(
+      restored.toBuilder.clearSqlTextPool().build() == root.toBuilder.clearSqlTextPool().build())
+    assert(
+      QueryContextInterner.sqlTextPool(appended) ==
+        IndexedSeq("existing text", "\u03b1", "\ud83d\ude00"))
+    assert(restored.getSqlTextPoolList.size() == 3)
+  }
+
+  test("fast SQL pool decoding matches protobuf wire types and rejects malformed strings") {
+    val out = new java.io.ByteArrayOutputStream()
+    val coded = com.google.protobuf.CodedOutputStream.newInstance(out)
+    // The generated parser treats a known field with the wrong wire type as an unknown field.
+    coded.writeUInt32(OperatorOuterClass.Operator.SQL_TEXT_POOL_FIELD_NUMBER, 7)
+    coded.writeString(OperatorOuterClass.Operator.SQL_TEXT_POOL_FIELD_NUMBER, "correct wire")
+    coded.flush()
+    val bytes = out.toByteArray
+    assert(OperatorOuterClass.Operator.parseFrom(bytes).getSqlTextPool(0) == "correct wire")
+    assert(QueryContextInterner.sqlTextPool(bytes) == IndexedSeq("correct wire"))
+    val invalidUtf8 = Array[Byte](26, 1, -1)
+    val truncated = Array[Byte](26, 3, 120)
+    Seq(invalidUtf8, truncated, Array[Byte](12)).foreach { malformed =>
+      intercept[com.google.protobuf.InvalidProtocolBufferException] {
+        OperatorOuterClass.Operator.parseFrom(malformed)
+      }
+      intercept[com.google.protobuf.InvalidProtocolBufferException] {
+        QueryContextInterner.sqlTextPool(malformed)
+      }
+    }
+  }
+
 }

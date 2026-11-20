@@ -63,6 +63,20 @@ class DeltaPlanDataInjector extends PlanDataInjector {
 
     op.toBuilder.setContribScan(DeltaSparkScanEnvelope.pack(scanBuilder.build())).build()
   }
+
+  override def embeddedFunctionMessages(op: Operator): Seq[AnyRef] =
+    if (DeltaSparkScanEnvelope.matches(op)) Seq(DeltaSparkScanEnvelope.unpack(op))
+    else Seq.empty
+
+  override def internScan(op: Operator, pool: QueryContextInterner.Pool): Operator = {
+    val scan = DeltaSparkScanEnvelope.unpack(op)
+    val common = QueryContextInterner.internScanCommon(scan.getCommon, pool)
+    if (common eq scan.getCommon) op
+    else {
+      val interned = scan.toBuilder.setCommon(common).build()
+      op.toBuilder.setContribScan(DeltaSparkScanEnvelope.pack(interned)).build()
+    }
+  }
 }
 
 object DeltaPlanDataInjector {

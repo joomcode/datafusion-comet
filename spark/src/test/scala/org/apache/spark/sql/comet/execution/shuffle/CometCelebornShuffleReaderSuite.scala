@@ -244,7 +244,7 @@ class CometCelebornShuffleReaderSuite extends CometTestBase {
             dependency.rdd,
             (context: TaskContext, inputs: Iterator[Product2[Int, ColumnarBatch]]) => {
               val writer = new CometNativeShuffleWriter[Int, ColumnarBatch](
-                dependency.nativeShuffleSpec.get,
+                Option(dependency.nativeShuffleSpec).flatten.orNull,
                 dependency.outputPartitioning.get,
                 dependency.outputAttributes,
                 dependency.shuffleWriteMetrics,

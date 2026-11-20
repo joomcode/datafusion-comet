@@ -55,18 +55,19 @@ import org.apache.spark.util.SerializableConfiguration
 import org.apache.spark.util.io.ChunkedByteBuffer
 
 import com.google.common.base.Objects
-import com.google.protobuf.CodedOutputStream
+import com.google.protobuf.{CodedOutputStream, Message}
 
 import org.apache.comet.{CometConf, CometExecIterator, CometRuntimeException, ConfigEntry, ContribServices}
 import org.apache.comet.CometSparkSessionExtensions.{isCometShuffleEnabled, isSpark35Plus, withFallbackReason}
 import org.apache.comet.parquet.{CometParquetUtils, HadoopFileOutput}
 import org.apache.comet.rules.CometExecRule
-import org.apache.comet.serde.{CometCollectBuffer, CometOperatorSerde, Compatible, OperatorOuterClass, QueryContextInterner, SupportLevel, Unsupported}
+import org.apache.comet.serde.{CometCollectBuffer, CometOperatorSerde, Compatible, ExprOuterClass, OperatorOuterClass, QueryContextInterner, SupportLevel, Unsupported}
 import org.apache.comet.serde.OperatorOuterClass.{AggregateMode => CometAggregateMode, Operator}
 import org.apache.comet.serde.QueryPlanSerde
 import org.apache.comet.serde.QueryPlanSerde.{aggExprToProto, exprToProto, hasNonDefaultStringCollation, isStringCollationType, supportedSortType}
 import org.apache.comet.serde.operator.CometSink
 import org.apache.comet.shims.MergeRowsMetricsShim
+import org.apache.comet.udf.codegen.CometUdfFunctionPool
 
 /**
  * Trait for injecting per-partition planning data into operator nodes.
@@ -114,6 +115,29 @@ private[comet] trait PlanDataInjector {
    * operators need rebuilding.
    */
   def inject(op: Operator, preparedCommon: Prepared, partitionBytes: Array[Byte]): Operator
+
+  def internScan(op: Operator, pool: QueryContextInterner.Pool): Operator = op
+
+  /**
+   * Messages hidden inside an opaque scan envelope, invisible to protobuf field traversal. Keep
+   * the SPI free of protobuf base types: contribs compile against the shaded core JAR, whose
+   * bytecode relocates Message but whose Scala signatures retain its original name. Core
+   * validates these objects against its actual protobuf Message before traversal.
+   */
+  def embeddedFunctionMessages(op: Operator): Seq[AnyRef] = Seq.empty
+
+  /**
+   * Finalized scan predicates can introduce JVM UDF references after scalar subqueries resolve.
+   * An injector with a non-protobuf prepared form must expose its function-bearing messages
+   * explicitly; silently skipping them would lose task-owned functions at execution time.
+   */
+  def commonFunctionMessages(commonBytes: Array[Byte]): Seq[AnyRef] =
+    prepareCommon(commonBytes) match {
+      case message: Message => Seq(message)
+      case _ =>
+        throw new CometRuntimeException(
+          s"${getClass.getName} must expose its prepared common's UDF function messages")
+    }
 }
 
 /**
@@ -434,6 +458,104 @@ private[comet] object PlanDataInjector extends Logging {
     op.writeTo(codedOutput)
     codedOutput.checkNoSpaceLeft()
     bytes
+  }
+
+  /** Validate the SPI result inside core's actual protobuf namespace. */
+  private[comet] def checkedFunctionMessages(owner: String, values: Seq[AnyRef]): Seq[Message] =
+    values.map {
+      case message: Message => message
+      case other =>
+        val actual = Option(other).map(_.getClass.getName).getOrElse("null")
+        throw new CometRuntimeException(
+          s"$owner returned a non-protobuf UDF function message: $actual")
+    }
+
+  /**
+   * Driver-only function discovery after common planning data has been finalized. The returned
+   * messages are consumed immediately by the live-function capture, never retained in its task
+   * payload. Root traversal alone misses late scan predicates and opaque contrib envelopes.
+   */
+  private[comet] def functionMessages(
+      root: Operator,
+      commonByKey: Map[String, Array[Byte]]): Seq[Message] = {
+    val messages = ArrayBuffer[Message](root)
+    val prepared = mutable.HashSet.empty[String]
+    def visit(op: Operator): Unit = {
+      injectorsByKind.getOrElse(op.getOpStructCase, Seq.empty).foreach { injector =>
+        messages ++= checkedFunctionMessages(
+          injector.getClass.getName,
+          injector.embeddedFunctionMessages(op))
+        if (injector.canInject(op)) {
+          injector.getKey(op).foreach { key =>
+            commonByKey.get(key).foreach { bytes =>
+              if (prepared.add(preparedKey(injector, key))) {
+                messages ++= checkedFunctionMessages(
+                  injector.getClass.getName,
+                  injector.commonFunctionMessages(bytes))
+              }
+            }
+          }
+        }
+      }
+      op.getChildrenList.asScala.foreach(visit)
+    }
+    visit(root)
+    messages.toSeq
+  }
+
+  private[comet] def internScans(root: Operator): Operator = {
+    val pool = new QueryContextInterner.Pool(root.getSqlTextPoolList.asScala.toSeq)
+    def visit(op: Operator): Operator = {
+      val self = injectorsByKind
+        .get(op.getOpStructCase)
+        .flatMap(_.find(_.canInject(op)))
+        .map(_.internScan(op, pool))
+        .getOrElse(op)
+      val children = self.getChildrenList
+      var builder: Operator.Builder = null
+      var i = 0
+      while (i < children.size()) {
+        val child = children.get(i)
+        val visited = visit(child)
+        if (visited ne child) {
+          if (builder == null) builder = self.toBuilder
+          builder.setChildren(i, visited)
+        }
+        i += 1
+      }
+      if (builder == null) self else builder.build()
+    }
+    val result = visit(root)
+    if (pool.added.isEmpty) result
+    else result.toBuilder.addAllSqlTextPool(pool.added.asJava).build()
+  }
+
+  private[comet] def internCommons(
+      root: Operator,
+      commonByKey: Map[String, Array[Byte]],
+      pool: QueryContextInterner.Pool): Map[String, Array[Byte]] = {
+    if (commonByKey.isEmpty) return commonByKey
+    val interned = mutable.Map.empty[String, Array[Byte]]
+    def visit(op: Operator): Unit = {
+      injectorsByKind.get(op.getOpStructCase).flatMap(_.find(_.canInject(op))).foreach {
+        injector =>
+          injector.getKey(op).foreach { key =>
+            commonByKey.get(key).filterNot(_ => interned.contains(key)).foreach { bytes =>
+              injector.prepareCommon(bytes) match {
+                case message: com.google.protobuf.Message =>
+                  val result = QueryContextInterner.internAgainst(message, pool)
+                  if (result ne message) {
+                    interned(key) = result.toByteArray
+                  }
+                case _ =>
+              }
+            }
+          }
+      }
+      op.getChildrenList.asScala.foreach(visit)
+    }
+    visit(root)
+    if (interned.isEmpty) commonByKey else commonByKey ++ interned
   }
 
   /**
@@ -807,6 +929,28 @@ object CometExec {
   }
 
   /**
+   * Task payload captured on the driver; live UDF references snapshot with Spark's task graph.
+   */
+  def getCometIterator(
+      inputObjects: Array[Object],
+      numOutputCols: Int,
+      planPayload: CometUdfFunctionPool.PlanPayload,
+      numParts: Int,
+      partitionIdx: Int,
+      sqlConf: CapturedSQLConf,
+      outputTypes: Seq[DataType]): CometExecIterator = {
+    planPayload.register(TaskContext.get())
+    getCometIterator(
+      inputObjects,
+      numOutputCols,
+      planPayload.bytes,
+      numParts,
+      partitionIdx,
+      sqlConf,
+      outputTypes)
+  }
+
+  /**
    * Create a CometExecIterator with a pre-serialized native plan. Use this overload when
    * executing the same plan across multiple partitions to avoid serializing the plan repeatedly.
    * `sqlConf` is captured on the driver; see [[CapturedSQLConf]].
@@ -885,12 +1029,13 @@ private[comet] case class NativeExecContext(
     // counts it is huge. It is only read on the driver (to slice per partition onto each task's
     // Partition object - see CometNativeShuffleInputRDD / CometExecRDD); the executor reads its own
     // slice, never this map. Keeping it off the wire stops it from bloating the broadcast task
-    // binary when this context rides on the non-transient CometShuffleDependency.nativeShuffleSpec.
+    // binary when this context rides on the map-side CometNativeShuffleInputRDD.nativeShuffleSpec.
     @transient perPartitionByKey: Map[String, Array[Array[Byte]]],
     shuffleScanIndices: Set[Int],
     hasScanInput: Boolean,
     // Like plan data, file paths are sliced onto each task's Partition on the driver.
-    @transient perPartitionFilePaths: Array[Seq[String]] = Array.empty) {
+    @transient perPartitionFilePaths: Array[Seq[String]] = Array.empty,
+    addedSqlTexts: Seq[String] = Seq.empty) {
   // Catch shape divergence (e.g. broadcast scans with different partition counts after DPP
   // filtering) at construction so consumers don't trip ArrayIndexOutOfBoundsException at
   // partition idx access time.
@@ -913,6 +1058,9 @@ abstract class CometNativeExec extends CometExec {
 
   /** The Comet native operator */
   def nativeOp: Operator
+
+  private[comet] def internedNativeOp: Operator =
+    serializedPlanOpt.plan.map(Operator.parseFrom).getOrElse(nativeOp)
 
   override protected def doPrepare(): Unit = prepareSubqueries(this)
 
@@ -952,9 +1100,11 @@ abstract class CometNativeExec extends CometExec {
   private[comet] def executeColumnarWithContext(
       ctx: NativeExecContext,
       nativeMetrics: CometMetricNode): RDD[ColumnarBatch] = {
-    val serializedPlan = serializedPlanOpt.plan.getOrElse(
-      throw new CometRuntimeException(
-        s"CometNativeExec should not be executed directly without a serialized plan: $this"))
+    val serializedPlan = QueryContextInterner.appendToPool(
+      serializedPlanOpt.plan.getOrElse(
+        throw new CometRuntimeException(
+          s"CometNativeExec should not be executed directly without a serialized plan: $this")),
+      ctx.addedSqlTexts)
 
     new CometExecRDD(
       sparkContext,
@@ -1018,7 +1168,10 @@ abstract class CometNativeExec extends CometExec {
       }
 
     // Find planning data within this stage (stops at shuffle boundaries).
-    val (commonByKey, perPartitionByKey) = PlanDataInjector.findAllPlanData(this)
+    val (scanCommonByKey, perPartitionByKey) = PlanDataInjector.findAllPlanData(this)
+    val sqlTextPool = new QueryContextInterner.Pool(
+      serializedPlanOpt.plan.map(QueryContextInterner.sqlTextPool).getOrElse(Nil))
+    val commonByKey = PlanDataInjector.internCommons(nativeOp, scanCommonByKey, sqlTextPool)
 
     // Collect the input batches from the child operators. Non-shuffle inputs become
     // RDD[ArrowArrayStream] (one stream per partition, exported via the C Stream Interface
@@ -1196,6 +1349,7 @@ abstract class CometNativeExec extends CometExec {
       commonByKey = commonByKey,
       perPartitionByKey = perPartitionByKey,
       shuffleScanIndices = shuffleScanIndices,
+      addedSqlTexts = sqlTextPool.added,
       // A leaf Comet scan (`CometNativeScanExec`, `CometIcebergNativeScanExec`, or a contrib
       // leaf such as `CometDeltaNativeScanExec`) can contribute `bytes_scanned` /
       // `output_rows` to Spark's task-level input metrics, which drive the Input column on
@@ -1261,7 +1415,10 @@ abstract class CometNativeExec extends CometExec {
         // Hoist duplicated QueryContext SQL text into a pool on the root operator. This is the
         // point where the whole native block is in hand, which is what the pool indices are
         // scoped to.
-        SerializedPlan(Some(CometExec.serializeNativePlan(QueryContextInterner.intern(nativeOp))))
+        SerializedPlan(
+          Some(
+            CometExec.serializeNativePlan(
+              PlanDataInjector.internScans(QueryContextInterner.intern(nativeOp)))))
       case other: AnyRef => other
       case null => null
     }
@@ -1469,12 +1626,12 @@ object CometProjectExec extends CometOperatorSerde[ProjectExec] {
 }
 
 case class CometProjectExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     projectList: Seq[NamedExpression],
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec
     with PartitioningPreservingUnaryExecNode {
   override def producedAttributes: AttributeSet = outputSet
@@ -1510,20 +1667,122 @@ object CometFilterExec extends CometOperatorSerde[FilterExec] {
       op: FilterExec,
       builder: Operator.Builder,
       childOp: OperatorOuterClass.Operator*): Option[OperatorOuterClass.Operator] = {
-    val cond = exprToProto(op.condition, op.child.output)
+    val conjuncts = QueryPlanSerde.flattenAssociative(
+      op.condition,
+      { case _: And => true; case _ => false },
+      { case a: And => (a.left, a.right) })
+    val protos = conjuncts.map(exprToProto(_, op.child.output))
+    if (protos.exists(_.isEmpty) || childOp.isEmpty) return None
+    val leaves = protos.map(_.get)
+    val safe = conjuncts.map(QueryPlanSerde.mayEvaluateEagerly)
 
-    if (cond.isDefined && childOp.nonEmpty) {
-      val filterBuilder = OperatorOuterClass.Filter
-        .newBuilder()
-        .setPredicate(cond.get)
-        .setAllowRuntimeFilterPushdown(
-          op.condition.deterministic &&
-            CometConf.COMET_EXEC_JOIN_DYNAMIC_FILTER_ALLOW_DETERMINISTIC_FILTER_PUSHDOWN
-              .get(op.conf))
-      Some(builder.setFilter(filterBuilder).build())
-    } else {
-      None
+    // Shared Spark subexpressions may run before the conditional use that reads them. The native
+    // boolean masks must not suppress a mandatory error/state update that Spark evaluates eagerly.
+    if (safe.contains(false) && !QueryPlanSerde.canSkipEvaluation(
+        conjuncts.zip(safe).collect { case (expr, false) => expr },
+        QueryPlanSerde.mayEvaluateEagerly)) {
+      withFallbackReason(op, "Filter shared-expression evaluation order requires Spark")
+      return None
     }
+
+    // Consult Spark's own physical rule rather than assume wholeStage=true means the Filter
+    // actually runs its flattened-conjunct codegen path. This includes maxFields, factory mode,
+    // non-leaf CodegenFallback and the operator/child schemas.
+    val wholeStageFilter = CollapseCodegenStages().apply(op).isInstanceOf[WholeStageCodegenExec]
+    val nullChecks = conjuncts.collect {
+      case n: IsNotNull
+          if n.child.nullIntolerant ||
+            n.child.isInstanceOf[Attribute] =>
+        n
+    }
+    val prefixChecks = conjuncts.takeWhile(_.isInstanceOf[IsNotNull])
+    if (wholeStageFilter && safe.contains(false) && nullChecks.exists { check =>
+        !check.child.isInstanceOf[Attribute] || !prefixChecks.contains(check) || {
+          val firstUse = conjuncts.indexWhere(e =>
+            (e ne check) &&
+              e.references.exists(_.semanticEquals(check.child)))
+          val beforeUse = if (firstUse < 0) conjuncts else conjuncts.take(firstUse)
+          beforeUse.exists(e =>
+            !e.isInstanceOf[IsNotNull] && !QueryPlanSerde.mayEvaluateEagerly(e))
+        }
+      }) {
+      // Spark interleaves inferred IsNotNull checks immediately before each referenced input.
+      // Do not invent a partial copy of that reordering for throw-capable native predicates.
+      withFallbackReason(op, "Filter inferred null-check evaluation order requires Spark")
+      return None
+    }
+
+    val optionalJvmMask =
+      wholeStageFilter && op.condition.deterministic &&
+        CometConf.COMET_EXEC_FILTER_SHORT_CIRCUIT_JVM_DISPATCH_ENABLED.get(op.conf)
+    var prefixSafe = safe.head
+    var prefixNullable = conjuncts.head.nullable
+    val segments = ArrayBuffer(ArrayBuffer(leaves.head))
+    conjuncts.indices.drop(1).foreach { index =>
+      // Whole-stage Spark Filter rejects NULL as well as FALSE before later conjuncts. A
+      // projected/nested AND instead must evaluate RHS on NULL. Keep these policies separate.
+      val requiresNullMask = wholeStageFilter && prefixNullable && !safe(index)
+      val requestsJvmMask = optionalJvmMask && containsJvmScalarUdf(leaves(index))
+      if (requiresNullMask && (!prefixSafe || !op.condition.deterministic)) {
+        withFallbackReason(op, "Filter nullable or stateful conjunct ordering requires Spark")
+        return None
+      }
+      if (requiresNullMask || (requestsJvmMask && prefixSafe)) {
+        segments += ArrayBuffer(leaves(index))
+      } else {
+        segments.last += leaves(index)
+      }
+      prefixSafe = prefixSafe && safe(index)
+      prefixNullable = prefixNullable || conjuncts(index).nullable
+    }
+    // Keep long ordinary AND segments balanced as upstream does; a left-deep rebuild would
+    // reintroduce protobuf recursion-limit/stack failures for wide generated predicates.
+    val predicate = segments.tail.foldLeft(balancedAnd(segments.head.toIndexedSeq)) {
+      (guard, segment) =>
+        ExprOuterClass.Expr
+          .newBuilder()
+          .setCaseWhen(
+            ExprOuterClass.CaseWhen
+              .newBuilder()
+              .addWhen(guard)
+              .addThen(balancedAnd(segment.toIndexedSeq)))
+          .build()
+    }
+    val filterBuilder = OperatorOuterClass.Filter
+      .newBuilder()
+      .setPredicate(predicate)
+      .setAllowRuntimeFilterPushdown(op.condition.deterministic &&
+        CometConf.COMET_EXEC_JOIN_DYNAMIC_FILTER_ALLOW_DETERMINISTIC_FILTER_PUSHDOWN.get(op.conf))
+    Some(builder.setFilter(filterBuilder).build())
+  }
+
+  private def balancedAnd(values: IndexedSeq[ExprOuterClass.Expr]): ExprOuterClass.Expr = {
+    if (values.length == 1) values.head
+    else {
+      val mid = values.length / 2
+      ExprOuterClass.Expr
+        .newBuilder()
+        .setAnd(
+          ExprOuterClass.BinaryExpr
+            .newBuilder()
+            .setLeft(balancedAnd(values.take(mid)))
+            .setRight(balancedAnd(values.drop(mid))))
+        .build()
+    }
+  }
+
+  private def containsJvmScalarUdf(message: Message): Boolean = message match {
+    case e: ExprOuterClass.Expr if e.hasJvmScalarUdf => true
+    case _ =>
+      message.getAllFields.values.asScala.exists {
+        case child: Message => containsJvmScalarUdf(child)
+        case children: java.util.List[_] =>
+          children.asScala.exists {
+            case child: Message => containsJvmScalarUdf(child)
+            case _ => false
+          }
+        case _ => false
+      }
   }
 
   override def createExec(nativeOp: Operator, op: FilterExec): CometNativeExec = {
@@ -1532,12 +1791,12 @@ object CometFilterExec extends CometOperatorSerde[FilterExec] {
 }
 
 case class CometFilterExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     condition: Expression,
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
 
   override def outputPartitioning: Partitioning = child.outputPartitioning
@@ -1612,13 +1871,13 @@ object CometSortExec extends CometOperatorSerde[SortExec] {
 }
 
 case class CometSortExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     override val outputOrdering: Seq[SortOrder],
     sortOrder: Seq[SortOrder],
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
 
   override def outputPartitioning: Partitioning = child.outputPartitioning
@@ -1678,11 +1937,11 @@ object CometLocalLimitExec extends CometOperatorSerde[LocalLimitExec] {
 }
 
 case class CometLocalLimitExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     limit: Int,
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
 
   override def output: Seq[Attribute] = child.output
@@ -1739,12 +1998,12 @@ object CometGlobalLimitExec extends CometOperatorSerde[GlobalLimitExec] {
 }
 
 case class CometGlobalLimitExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     limit: Int,
     offset: Int,
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
 
   override def output: Seq[Attribute] = child.output
@@ -1810,12 +2069,12 @@ object CometExpandExec extends CometOperatorSerde[ExpandExec] {
 }
 
 case class CometExpandExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     projections: Seq[Seq[Expression]],
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
   override def outputPartitioning: Partitioning = UnknownPartitioning(0)
 
@@ -1848,7 +2107,7 @@ case class CometExpandExec(
  * case-class fields so Catalyst can discover their references and scalar subqueries.
  */
 case class CometMergeRowsExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     isSourceRowPresent: Expression,
@@ -1859,7 +2118,7 @@ case class CometMergeRowsExec(
     checkCardinality: Boolean,
     rowIdOrdinal: Option[Int],
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
   // Match Spark's MergeRowsExec partitioning contract.
   override def outputPartitioning: Partitioning = UnknownPartitioning(0)
@@ -2002,14 +2261,14 @@ object CometExplodeExec extends CometOperatorSerde[GenerateExec] {
 }
 
 case class CometExplodeExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     generator: Generator,
     generatorOutput: Seq[Attribute],
     outer: Boolean,
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
   override def outputPartitioning: Partitioning = child.outputPartitioning
 
@@ -2816,7 +3075,7 @@ abstract class CometBaseAggregateExec
 }
 
 case class CometHashAggregateExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     groupingExpressions: Seq[NamedExpression],
@@ -2825,7 +3084,7 @@ case class CometHashAggregateExec(
     resultExpressions: Seq[NamedExpression],
     input: Seq[Attribute],
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometBaseAggregateExec {
 
   override protected def withNewChildInternal(newChild: SparkPlan): SparkPlan =
@@ -2833,7 +3092,7 @@ case class CometHashAggregateExec(
 }
 
 case class CometSortAggregateExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     groupingExpressions: Seq[NamedExpression],
@@ -2842,7 +3101,7 @@ case class CometSortAggregateExec(
     resultExpressions: Seq[NamedExpression],
     input: Seq[Attribute],
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan,
+    @transient override val serializedPlanOpt: SerializedPlan,
     preservesGroupingOrder: Boolean = true)
     extends CometBaseAggregateExec {
 
@@ -3142,7 +3401,7 @@ trait CometHashJoin {
 }
 
 case class CometBroadcastNestedLoopJoinExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     override val outputOrdering: Seq[SortOrder],
@@ -3151,7 +3410,7 @@ case class CometBroadcastNestedLoopJoinExec(
     buildSide: BuildSide,
     override val left: SparkPlan,
     override val right: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometBinaryExec {
 
   // Mirror Spark's BroadcastNestedLoopJoinExec: output partitioning derives from the streamed
@@ -3353,7 +3612,7 @@ object CometHashJoinExec extends CometOperatorSerde[HashJoin] with CometHashJoin
 }
 
 case class CometHashJoinExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     override val outputOrdering: Seq[SortOrder],
@@ -3364,7 +3623,7 @@ case class CometHashJoinExec(
     buildSide: BuildSide,
     override val left: SparkPlan,
     override val right: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometBinaryExec
     with CometDelegatesRequiredChildDistribution {
 
@@ -3421,7 +3680,7 @@ case class CometHashJoinExec(
 }
 
 case class CometBroadcastHashJoinExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     override val outputOrdering: Seq[SortOrder],
@@ -3433,7 +3692,7 @@ case class CometBroadcastHashJoinExec(
     isNullAwareAntiJoin: Boolean,
     override val left: SparkPlan,
     override val right: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometBinaryExec {
 
   // The following logic of `outputPartitioning` is copied from Spark `BroadcastHashJoinExec`.
@@ -3785,7 +4044,7 @@ object CometSortMergeJoinExec extends CometOperatorSerde[SortMergeJoinExec] {
 }
 
 case class CometSortMergeJoinExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     override val outputOrdering: Seq[SortOrder],
@@ -3795,7 +4054,7 @@ case class CometSortMergeJoinExec(
     condition: Option[Expression],
     override val left: SparkPlan,
     override val right: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometBinaryExec
     with CometDelegatesRequiredChildDistribution {
 
@@ -3845,7 +4104,9 @@ object CometScanWrapper extends CometSink[SparkPlan] {
   }
 }
 
-case class CometScanWrapper(override val nativeOp: Operator, override val originalPlan: SparkPlan)
+case class CometScanWrapper(
+    @transient override val nativeOp: Operator,
+    override val originalPlan: SparkPlan)
     extends CometNativeExec
     with LeafExecNode {
   override val serializedPlanOpt: SerializedPlan = SerializedPlan(None)
@@ -3861,7 +4122,7 @@ case class CometScanWrapper(override val nativeOp: Operator, override val origin
  * This is very similar to `CometScanWrapper` above except it has child.
  */
 case class CometSinkPlaceHolder(
-    override val nativeOp: Operator, // Must be a Scan
+    @transient override val nativeOp: Operator, // Must be a Scan
     override val originalPlan: SparkPlan,
     child: SparkPlan)
     extends CometUnaryExec {

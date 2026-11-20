@@ -22,7 +22,8 @@ package org.apache.comet.serde
 import scala.util.control.NonFatal
 
 import org.apache.spark.SparkEnv
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, AttributeSeq, BindReferences, Expression, ExpressionSet, If, IsNull, KnownNotNull, Literal, Or, RuntimeReplaceable, ScalaUDF}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, AttributeSeq, BindReferences, BoundReference, Expression, ExpressionSet, If, IsNull, KnownNotNull, Literal, Or, RuntimeReplaceable, ScalaUDF}
+import org.apache.spark.sql.execution.ScalarSubquery
 import org.apache.spark.sql.types.BinaryType
 
 import org.apache.comet.CometConf
@@ -31,14 +32,15 @@ import org.apache.comet.CometSparkSessionExtensions.{withCodegenDispatchExpr, wi
 import org.apache.comet.codegen.{CometBatchKernelCodegen, DispatchOccurrence}
 import org.apache.comet.serde.ExprOuterClass.Expr
 import org.apache.comet.serde.QueryPlanSerde.{exprToProtoInternal, serializeDataType}
-import org.apache.comet.udf.codegen.CometScalaUDFCodegen
+import org.apache.comet.udf.codegen.{CometScalaUDFCodegen, CometUdfFunctionPool}
 
 /**
  * Routes scalar `ScalaUDF` (Scala and Java UDFs) through the codegen dispatcher.
  * `ScalaUDF.doGenCode` emits compilable Java that invokes the user function via
- * `ctx.addReferenceObj`; the dispatcher serializes the bound tree, the closure serializer carries
- * the function reference across the wire, and the Janino-compiled kernel invokes it in a tight
- * batch loop.
+ * `ctx.addReferenceObj`; the dispatcher serializes the bound tree with compact function
+ * references. A live [[CometUdfFunctionPool.PlanPayload]] carries their shared object graph
+ * through Spark's task-serialization stream, and the Janino-compiled kernel invokes them in a
+ * tight batch loop.
  *
  * Not covered:
  *   - Aggregate UDFs (`ScalaAggregator`, `TypedImperativeAggregate`, legacy UDAF).
@@ -176,7 +178,14 @@ object CometScalaUDF extends CometExpressionSerde[ScalaUDF] {
     // Bind against only the AttributeReferences the tree actually reads, so ordinals align with
     // the data args we ship.
     val attrs = target.collect { case a: AttributeReference => a }.distinct
-    val boundExpr = BindReferences.bindReference(target, AttributeSeq(attrs))
+    // Scalar subqueries finish after planning. Capture their expression identity here, but
+    // pass their resolved value through the native argument path on every execution. The
+    // closure contains only typed positions, so a cached kernel cannot retain an old result.
+    val subqueries = target.collect { case s: ScalarSubquery => s }.distinct
+    val withSubqueryInputs = target.transform { case s: ScalarSubquery =>
+      BoundReference(attrs.length + subqueries.indexOf(s), s.dataType, s.nullable)
+    }
+    val boundExpr = BindReferences.bindReference(withSubqueryInputs, AttributeSeq(attrs))
 
     // Gate at plan time. Surface the reason as a fallback rather than crashing Janino at execute.
     CometBatchKernelCodegen.canHandle(boundExpr) match {
@@ -187,8 +196,9 @@ object CometScalaUDF extends CometExpressionSerde[ScalaUDF] {
 
     // Serialize via Spark's closure serializer: respects the task context classloader (so user
     // UDF jars are visible) and matches Spark's wire format. The bytes become arg 1 of the
-    // JvmScalarUdf proto and self-describe the expression so this works in cluster mode without
-    // executor-side driver registry state.
+    // JvmScalarUdf proto. ScalaUDF functions become compact references; the enclosing driver's
+    // PlanPayload carries their live graph through Spark's task-serialization stream. Executor
+    // lookup uses only that task's registered payload, never driver-global registry state.
     //
     // Guarded because this is the one step in this method that can throw rather than degrade: a
     // tree can hold a reference the closure serializer refuses, such as a `Literal` wrapping a
@@ -197,16 +207,25 @@ object CometScalaUDF extends CometExpressionSerde[ScalaUDF] {
     // `CometStaticInvoke` / `CometInvoke` route unrecognized nodes here as a catch-all, so the
     // trees reaching this point are arbitrary.
     //
-    // A tree with a `Nondeterministic` node is tagged with a unique occurrence id first, so two
+    // A tree with any nondeterministic node is tagged with a unique occurrence id first, so two
     // identical occurrences in one plan get distinct bytes and digests, and therefore distinct
     // kernels and state on the executor (see `DispatchOccurrence`).
+    val tagged = DispatchOccurrence.tag(boundExpr)
+    val functions = CometUdfFunctionPool.functionsOf(tagged)
+    if (!CometUdfFunctionPool.areSerializable(functions)) {
+      return Left(s"$exprName: codegen dispatch: UDF functions could not be closure-serialized")
+    }
     val bytes =
       try {
-        val serializer = SparkEnv.get.closureSerializer.newInstance()
-        val buffer = serializer.serialize(DispatchOccurrence.tag(boundExpr))
-        val serialized = new Array[Byte](buffer.remaining())
-        buffer.get(serialized)
-        serialized
+        if (functions.nonEmpty) {
+          CometUdfFunctionPool.serializeExpression(tagged, functions)
+        } else {
+          val serializer = SparkEnv.get.closureSerializer.newInstance()
+          val buffer = serializer.serialize(tagged)
+          val serialized = new Array[Byte](buffer.remaining())
+          buffer.get(serialized)
+          serialized
+        }
       } catch {
         // `NonFatal` rather than `NotSerializableException`: Java serialization reports an
         // unserializable object graph as one of several exception types depending on where in
@@ -227,7 +246,7 @@ object CometScalaUDF extends CometExpressionSerde[ScalaUDF] {
       }
     }
 
-    val dataArgs = attrs.map { a =>
+    val dataArgs = (attrs ++ subqueries).map { a =>
       exprToProtoInternal(a, inputs, binding).getOrElse {
         return Left(s"$exprName: codegen dispatch: could not serialize data arg $a")
       }
@@ -259,7 +278,7 @@ object CometScalaUDF extends CometExpressionSerde[ScalaUDF] {
     // references and literals are the kernel's inputs rather than work it performed, so they are
     // left out - which also keeps them from appearing in the coverage stats as "expressions".
     target.foreach {
-      case _: AttributeReference | _: Literal =>
+      case _: AttributeReference | _: Literal | _: ScalarSubquery =>
       case node if !(node eq target) =>
         val _ = withCodegenDispatchExpr(expr, CometExplainInfo.exprDisplayName(node))
       case _ =>

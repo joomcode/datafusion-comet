@@ -48,8 +48,10 @@ import org.apache.comet.udf.CometUDF
  * Arg 0 is a `VarBinaryVector` scalar carrying the [[CometScalaUDFCodegen.digest]] of the
  * closure-serialized bound `Expression`; arg 1 is a `VarBinaryVector` scalar carrying the
  * serialized bytes themselves; args 2..N are the data columns the `BoundReference`s read in
- * ordinal order. A batch finds its kernel by the digest, so the serialized expression, several KB
- * for a Scala UDF's closure, is read only to compile a kernel on a cache miss.
+ * ordinal order. A batch finds its kernel by the digest, so the serialized expression is read
+ * only to compile a kernel on a cache miss. ScalaUDF function references resolve from the current
+ * task's live function payload before compilation; large captured graphs are not embedded in each
+ * expression or reused as stale serialized bytes across jobs.
  *
  * Caching hierarchy, broadest scope on the left:
  * {{{
@@ -194,10 +196,14 @@ class CometScalaUDFCodegen extends CometUDF with Logging {
         // has its own cache entry; the wrapper is only a key component and is dropped here.
         val boundExpr =
           try {
-            DispatchOccurrence.untag(
+            val deserialized = if (CometUdfFunctionPool.isSharedExpression(bytes)) {
+              CometUdfFunctionPool.deserializeExpression(bytes, loader)
+            } else {
               SparkEnv.get.closureSerializer
                 .newInstance()
-                .deserialize[Expression](ByteBuffer.wrap(bytes), loader))
+                .deserialize[Expression](ByteBuffer.wrap(bytes), loader)
+            }
+            DispatchOccurrence.untag(deserialized)
           } catch {
             case NonFatal(t) =>
               logError(

@@ -1,5 +1,5 @@
 {
-  "updated_on": "2026-11-20",
+  "updated_on": "2026-11-21",
   "stage": "G06_IN_PROGRESS",
   "baseline": "resource-baseline.json",
   "no_dependency_downloads_or_release_outputs_yet": false,
@@ -24,7 +24,9 @@
       "path": "${MIGRATION_AUX_ROOT}/20261117_comet12-session-setup",
       "ownership": "TASK_CREATED",
       "shared": false,
-      "created_files": ["resource-baseline-command-results.json"]
+      "created_files": [
+        "resource-baseline-command-results.json"
+      ]
     },
     {
       "type": "g01_auxiliary_outputs",
@@ -146,7 +148,10 @@
       "shared": false,
       "contains": "Pre-G02 documentation archive, source/command manifests, native/JVM build and regression logs, failed and passing report snapshots, independent reviews and final completion receipt.",
       "preserve_until": "G02 review and final migration qualification; no automatic shared-cache deletion.",
-      "build_outputs_reused": ["native/target", "spark/target"],
+      "build_outputs_reused": [
+        "native/target",
+        "spark/target"
+      ],
       "new_docker_images": false,
       "new_release_artifacts": false
     },
@@ -208,6 +213,14 @@
       "shared": false,
       "contains": "Source proposals/reviews/parity manifests, local build/targeted test/existing benchmark logs and qualification receipts.",
       "preserve_until": "Final migration acceptance and user cleanup decision"
+    },
+    {
+      "type": "g08_auxiliary_outputs",
+      "path": "${MIGRATION_AUX_ROOT}/20261120_comet12-g08",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "contains": "Codegen/expression/serialization proposals, source/oracle reviews, local build/targeted/shaded artifact tests, existing benchmarks and preservation receipts.",
+      "preserve_until": "Final migration acceptance/user cleanup decision"
     }
   ],
   "preexisting_or_shared": {
@@ -220,7 +233,10 @@
     "${UPSTREAM_SPARK_ROOT}",
     "${JOOM_SPARK_ROOT}"
   ],
-  "user_installed_tools_preserve": ["Rust/Rustup via Homebrew", "SDKMAN JDKs"],
+  "user_installed_tools_preserve": [
+    "Rust/Rustup via Homebrew",
+    "SDKMAN JDKs"
+  ],
   "historical_auxiliary_directories_review_before_cleanup": [
     "${MIGRATION_AUX_ROOT}/20261115_comet-upstream-audit",
     "${MIGRATION_AUX_ROOT}/20261115_comet-upstream-branches-pr-audit",
@@ -829,7 +845,10 @@
       "target/criterion": 372,
       "auxiliary_directory": 427884
     },
-    "criterion_outputs": ["native/target/criterion", "target/criterion"],
+    "criterion_outputs": [
+      "native/target/criterion",
+      "target/criterion"
+    ],
     "attribution": "Entire reused directory sizes, not G03-only growth. Baseline dylib copy is task-created; shared cache/toolchain/release artifacts remain preserved."
   },
   "g03_integration_resources": {
@@ -848,7 +867,10 @@
       "common/target",
       "target/criterion"
     ],
-    "criterion_outputs": ["native/target/criterion", "target/criterion"],
+    "criterion_outputs": [
+      "native/target/criterion",
+      "target/criterion"
+    ],
     "measured_sizes_kib": {
       "auxiliary_directory": 3412,
       "native/target": 69195412,
@@ -918,5 +940,31 @@
     "source_preservation": "refs/joom-migration/g07-qualified preserves62e9ffd7a and the original implementation evidence.",
     "build_policy": "Documentation-only closeout; no native/JVM rebuild, release artifact or new Docker image. Standard pinned RAT may use its normal temporary directory/download.",
     "preservation": "Keep through final migration acceptance; no automatic deletion of evidence, refs or shared caches."
+  },
+  "g08_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261120_comet12-g08",
+    "whole_directory_sizes_kib": {
+      "auxiliary": 80632,
+      "native_target": 76680928,
+      "spark_target": 1715152,
+      "delta_target": 1724
+    },
+    "native_target_growth_kib_from_recorded_baseline": 2191756,
+    "spark_target_growth_kib_from_recorded_baseline": 59988,
+    "contents": "Source/patch/review manifests; failed/negative/positive logs; XML snapshots; existing Criterion measurements; isolated shaded test-support copies and loaded-class/native receipts.",
+    "developer_artifacts": [
+      "spark/target/comet-spark-spark4.2_2.13-1.2.0.jar",
+      "spark/target/comet-spark-spark4.2_2.13-1.2.0-tests.jar",
+      "contrib/delta-spark/target/comet-contrib-delta-spark4.2_2.13-1.2.0.jar"
+    ],
+    "attribution": "Whole reused target sizes are not G08-only usage. Offline Maven/Cargo package/test used existing caches, without Maven install, Docker, new toolchains, publication or Linux release generation. Standard post-commit RAT may fetch its official pinned jar.",
+    "cleanup": "Keep evidence through final acceptance; CLEANUP.md manual guarded instructions apply only after builds stop. Do not automatically remove shared caches, original checkouts or evidence."
+  },
+  "g08_integration_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g08-integration",
+    "contains": "Qualified documentation archive, pre-integration source/ref snapshot, independent audit, preservation proof, formatting/static checks and exact publication/completion receipt.",
+    "source_preservation": "refs/joom-migration/g08-qualified preserves2625e2c8e and its immutable original local qualification evidence.",
+    "build_policy": "Documentation-only closeout; no runtime rebuild, release artifact, Docker image, dependency download or full GHA.",
+    "preservation": "Keep through final migration acceptance; no automatic deletion of evidence, recovery refs or shared caches."
   }
 }

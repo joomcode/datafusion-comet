@@ -53,6 +53,7 @@ import org.apache.comet.serde.OperatorOuterClass
 import org.apache.comet.serde.OperatorOuterClass.Operator
 import org.apache.comet.serde.operator.{schema2Proto, NativeWriteUtils}
 import org.apache.comet.shims.ShimCometWriteFilesExec
+import org.apache.comet.udf.codegen.CometUdfFunctionPool
 
 /**
  * Comet's replacement for Spark's `WriteFilesExec`: writes Parquet files natively for one task,
@@ -88,7 +89,7 @@ import org.apache.comet.shims.ShimCometWriteFilesExec
  *   The Comet native operator producing the batches to write.
  */
 case class CometWriteFilesExec(
-    nativeOp: Operator,
+    @transient nativeOp: Operator,
     override val originalPlan: SparkPlan,
     child: SparkPlan)
     extends CometNativeExec
@@ -148,9 +149,9 @@ case class CometWriteFilesExec(
     }
 
     // Everything the write task needs is resolved here on the driver and captured by value. The
-    // closure below must not touch `this`: a CometWriteFilesExec holds `nativeOp` plus the whole
-    // converted child subtree, each node of which carries its own non-transient protobuf, so
-    // capturing it would ship a redundant copy of the plan to every executor. Spark's own
+    // closure below must not touch `this`: a CometWriteFilesExec keeps the converted child
+    // subtree and driver planning state. Its protobuf fields are transient, while NativeWriteTask
+    // explicitly carries the one plan and live UDF functions that execution needs. Spark's own
     // WriteFilesExec.doExecuteWrite avoids this the same way, by delegating to a static
     // FileFormatWriter.executeTask.
     // The write's target schema rather than the child's output. Spark's analyzer normally makes
@@ -195,7 +196,11 @@ private[comet] case class NativeWriteTask(
     childSchema: StructType,
     numPartitions: Int,
     nativeMetrics: CometMetricNode,
-    nodeName: String)
+    nodeName: String) {
+  // Constructed on the driver. Keep functions live until Spark serializes the job's task graph.
+  private val udfFunctions = CometUdfFunctionPool.capture(nativeOp, Array.emptyByteArray)
+  def registerUdfFunctions(context: TaskContext): Unit = udfFunctions.register(context)
+}
 
 object CometWriteFilesExec extends Logging {
 
@@ -210,6 +215,7 @@ object CometWriteFilesExec extends Logging {
       taskWrite: NativeWriteTask,
       batches: Iterator[ColumnarBatch]): Iterator[WriterCommitMessage] = {
     val taskCtx = TaskContext.get()
+    taskWrite.registerUdfFunctions(taskCtx)
     val sparkPartitionId = taskCtx.partitionId()
     val taskAttemptContext = createTaskAttemptContext(
       description,

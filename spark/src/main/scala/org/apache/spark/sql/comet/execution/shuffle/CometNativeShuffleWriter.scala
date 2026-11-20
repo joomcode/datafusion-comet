@@ -68,6 +68,8 @@ class CometNativeShuffleWriter[K, V](
     extends ShuffleWriter[K, V]
     with Logging {
 
+  private var activeSpec: NativeShuffleSpec = spec
+
   var partitionLengths: Array[Long] = _
   // `private[shuffle]` rather than public: `MapStatus` is `private[spark]`, and a public
   // var exposing it trips `-Xlint:inaccessible`. The shuffle package, which includes the
@@ -95,7 +97,22 @@ class CometNativeShuffleWriter[K, V](
 
   override def write(inputs: Iterator[Product2[K, V]]): Unit = {
     try {
-      spec.sqlConf.withConf(writeInternal(inputs))
+      // A serialized dependency intentionally carries no execution plan. Resolve its map-side
+      // iterator payload before entering the captured SQLConf scope or creating output files.
+      val shuffleInputIter = inputs match {
+        case it: CometNativeShuffleInputIterator => it
+        case other =>
+          throw new IllegalStateException(
+            "CometNativeShuffleWriter expects its input iterator to be a " +
+              "CometNativeShuffleInputIterator (produced by CometNativeShuffleInputRDD), got " +
+              s"${other.getClass.getName}")
+      }
+      Option(shuffleInputIter.nativeShuffleSpec).foreach(activeSpec = _)
+      if (activeSpec == null) {
+        throw new IllegalStateException("Native Comet shuffle has no execution plan")
+      }
+      activeSpec.udfFunctions.foreach(_.register(context))
+      activeSpec.sqlConf.withConf(writeInternal(shuffleInputIter))
     } catch {
       case failure: Throwable =>
         remoteDestination.foreach { destination =>
@@ -111,7 +128,8 @@ class CometNativeShuffleWriter[K, V](
     }
   }
 
-  private def writeInternal(inputs: Iterator[Product2[K, V]]): Unit = {
+  private def writeInternal(shuffleInputIter: CometNativeShuffleInputIterator): Unit = {
+    val spec = activeSpec
     val localOutput = if (remoteDestination.isEmpty) {
       val resolver =
         SparkEnv.get.shuffleManager.shuffleBlockResolver.asInstanceOf[IndexShuffleBlockResolver]
@@ -123,17 +141,6 @@ class CometNativeShuffleWriter[K, V](
       None
     }
 
-    // The dep's _rdd is always a CometNativeShuffleInputRDD on this path. Pattern-match instead
-    // of asInstanceOf so a future RDD-layering change produces a clear error here rather than a
-    // bare ClassCastException deeper in the stack.
-    val shuffleInputIter = inputs match {
-      case it: CometNativeShuffleInputIterator => it
-      case other =>
-        throw new IllegalStateException(
-          "CometNativeShuffleWriter expects its input iterator to be a " +
-            "CometNativeShuffleInputIterator (produced by CometNativeShuffleInputRDD), got " +
-            s"${other.getClass.getName}")
-    }
     val partitionIdx = shuffleInputIter.partitionIndex
     val inputObjects = shuffleInputIter.inputObjects
     val shuffleBlockIters = shuffleInputIter.shuffleBlockIterators
@@ -439,7 +446,7 @@ class CometNativeShuffleWriter[K, V](
           CometConf.COMET_SHUFFLE_NATIVE_ROUND_ROBIN_PARTITIONING_MAX_HASH_COLUMNS.get())
         // Decided on the driver, from the shape of the plan fused into this writer; the executor
         // cannot re-derive it. See `CometShuffleExchangeExec.positionalRoundRobinSpec`.
-        spec.positionalRoundRobin.foreach { positional =>
+        activeSpec.positionalRoundRobin.foreach { positional =>
           partitioning.setPositional(true)
           partitioning.setPositionalGroupRows(positional.groupRows)
           // Per task, unlike the two above: which partition this mapper's first group goes to.
@@ -474,7 +481,8 @@ class CometNativeShuffleWriter[K, V](
     OperatorOuterClass.Operator
       .newBuilder()
       .setShuffleWriter(shuffleWriterBuilder)
-      .addChildren(spec.childNativeOp)
+      .addAllSqlTextPool(activeSpec.sqlTextPool.asJava)
+      .addChildren(activeSpec.childNativeOp)
       .build()
   }
 

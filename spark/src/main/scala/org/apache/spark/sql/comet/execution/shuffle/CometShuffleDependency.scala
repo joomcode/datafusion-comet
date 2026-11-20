@@ -28,12 +28,13 @@ import org.apache.spark.shuffle.ShuffleWriteProcessor
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.physical.Partitioning
-import org.apache.spark.sql.comet.{CapturedSQLConf, CometMetricNode, NativeExecContext}
+import org.apache.spark.sql.comet.{CapturedSQLConf, CometMetricNode, NativeExecContext, PlanDataInjector}
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeExec
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.types.StructType
 
 import org.apache.comet.serde.OperatorOuterClass
+import org.apache.comet.udf.codegen.CometUdfFunctionPool
 
 /**
  * Bundle of context the native shuffle write path needs at task time. Co-populated for native
@@ -53,7 +54,18 @@ case class NativeShuffleSpec(
      * size so that a re-executed map task places rows exactly as the attempt it replaces. See
      * `CometShuffleExchangeExec.positionalRoundRobinSpec`.
      */
-    positionalRoundRobin: Option[PositionalRoundRobin] = None)
+    positionalRoundRobin: Option[PositionalRoundRobin] = None,
+    sqlTextPool: Seq[String] = Seq.empty) {
+  // This payload is serialized with the map task, in Spark's shared Java stream, so a later
+  // action snapshots current closure state and repeated functions retain shared captures.
+  private[shuffle] val udfFunctions: Option[CometUdfFunctionPool.PlanPayload] =
+    Option(childNativeOp).map { op =>
+      // The writer carries its protobuf separately; these empty bytes are never passed to JNI.
+      CometUdfFunctionPool.capture(
+        PlanDataInjector.functionMessages(op, execContext.commonByKey),
+        Array.emptyByteArray)
+    }
+}
 
 /**
  * Parameters for positional round-robin placement, resolved on the driver.
@@ -88,7 +100,7 @@ class CometShuffleDependency[K: ClassTag, V: ClassTag, C: ClassTag](
     val shuffleWriteMetrics: Map[String, SQLMetric] = Map.empty,
     val numParts: Int = 0,
     val rangePartitionBounds: Option[Seq[InternalRow]] = None,
-    val nativeShuffleSpec: Option[NativeShuffleSpec] = None,
+    @transient val nativeShuffleSpec: Option[NativeShuffleSpec] = None,
     val useLocalShuffle: Boolean = false,
     private[shuffle] val outputMetrics: Option[CometShuffleOutputMetrics] = None)
     extends ShuffleDependency[K, V, C](
@@ -99,6 +111,11 @@ class CometShuffleDependency[K: ClassTag, V: ClassTag, C: ClassTag](
       aggregator,
       mapSideCombine,
       shuffleWriterProcessor) {
+
+  // Executors need the captured session settings before the map iterator reaches write(),
+  // notably for Celeborn frame admission. Keep this small payload, never the upstream plan.
+  private[shuffle] val nativeShuffleSqlConf: Option[CapturedSQLConf] =
+    nativeShuffleSpec.map(_.sqlConf)
 
   @transient @volatile private var materializationInstance
       : CometCelebornShuffleMaterialization[K, V, C] = _

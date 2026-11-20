@@ -19,14 +19,19 @@
 
 package org.apache.spark.sql.comet.execution.shuffle
 
+import scala.collection.mutable
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.{HashPartitioner, Partition, TaskContext}
 import org.apache.spark.rdd.{DeterministicLevel, RDD}
 import org.apache.spark.serializer.JavaSerializer
 import org.apache.spark.sql.CometTestBase
-import org.apache.spark.sql.comet.{CapturedSQLConf, CometMetricNode, NativeExecContext}
+import org.apache.spark.sql.comet.{CapturedSQLConf, CometMetricNode, NativeExecContext, NativeScanPlanDataInjector, PlanDataInjector}
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
 import org.apache.spark.sql.vectorized.ColumnarBatch
 
+import org.apache.comet.CometConf
+import org.apache.comet.serde.{ExprOuterClass, OperatorOuterClass, QueryContextInterner}
 import org.apache.comet.serde.OperatorOuterClass.Operator
 
 /**
@@ -263,4 +268,191 @@ class CometNativeShuffleInputRDDSuite extends CometTestBase {
     assert(part.planDataByKey.keySet == Set("scan-0"))
     assert(part.planDataByKey("scan-0").length == 1024)
   }
+  test("the native shuffle plan rides on the map stage and stays off the reduce stage") {
+    val sc = spark.sparkContext
+    val ser = new JavaSerializer(sc.getConf).newInstance()
+    def build(planBytes: Int) = {
+      val metrics = Map(
+        "spilled_bytes" -> SQLMetrics.createSizeMetric(sc, "disk spilled bytes"),
+        "memory_spilled_bytes" -> SQLMetrics.createSizeMetric(sc, "memory spilled bytes"))
+      val rdd = new CometNativeShuffleInputRDD(
+        sc,
+        inputRDDs = Seq.empty,
+        numPartitionsParam = 4,
+        shuffleScanIndices = Set.empty,
+        spillMetricNode = CometMetricNode(metrics))
+      val execContext = NativeExecContext(
+        inputs = Seq.empty,
+        numPartitions = 4,
+        subqueries = Seq.empty,
+        broadcastedHadoopConfForEncryption = None,
+        encryptedFilePaths = Seq.empty,
+        commonByKey = Map("scan-0" -> new Array[Byte](planBytes)),
+        perPartitionByKey = Map.empty,
+        shuffleScanIndices = Set.empty,
+        hasScanInput = false)
+      val spec =
+        NativeShuffleSpec(
+          Operator.getDefaultInstance,
+          CometMetricNode(Map.empty),
+          execContext,
+          CapturedSQLConf.capture())
+      rdd.nativeShuffleSpec = spec
+      val dep = new CometShuffleDependency[Int, ColumnarBatch, ColumnarBatch](
+        _rdd = rdd,
+        partitioner = new HashPartitioner(4),
+        decodeTime = SQLMetrics.createMetric(sc, "decode time"),
+        shuffleWriteMetrics = metrics,
+        nativeShuffleSpec = Some(spec))
+      (rdd, dep)
+    }
+
+    val (smallRdd, smallDep) = build(1024)
+    val (largeRdd, largeDep) = build(4 * 1024 * 1024)
+    val smallReduce = ser.serialize(new CometShuffledBatchRDD(smallDep, Map.empty)).limit()
+    val largeReduce = ser.serialize(new CometShuffledBatchRDD(largeDep, Map.empty)).limit()
+    assert(math.abs(largeReduce - smallReduce) < 1024, s"$smallReduce vs $largeReduce")
+    assert(ser.serialize((largeRdd, largeDep)).limit() > 4 * 1024 * 1024)
+
+    assert(smallRdd.copyForLocalShuffle().nativeShuffleSpec eq smallRdd.nativeShuffleSpec)
+
+    val (mapRdd, mapDep) = ser.deserialize[(
+        CometNativeShuffleInputRDD,
+        CometShuffleDependency[Int, ColumnarBatch, ColumnarBatch])](
+      ser.serialize((smallRdd, smallDep)))
+    assert(mapDep.nativeShuffleSpec == null)
+    assert(mapDep.nativeShuffleSqlConf.isDefined)
+
+    assert(mapRdd.nativeShuffleSpec.execContext.commonByKey("scan-0").length == 1024)
+  }
+
+  test("a native shuffle's plan and scan planning data refer to the writer's pool") {
+    def contexts(m: com.google.protobuf.Message): Seq[ExprOuterClass.QueryContext] = {
+      val own = m match {
+        case e: ExprOuterClass.Expr if e.hasQueryContext => Seq(e.getQueryContext)
+        case a: ExprOuterClass.AggExpr if a.hasQueryContext => Seq(a.getQueryContext)
+        case _ => Nil
+      }
+      own ++ m.getAllFields.values.asScala.toSeq.flatMap {
+        case child: com.google.protobuf.Message => contexts(child)
+        case list: java.util.List[_] =>
+          list.asScala.toSeq.flatMap {
+            case child: com.google.protobuf.Message => contexts(child)
+            case _ => Nil
+          }
+        case _ => Nil
+      }
+    }
+    withTempPath { dir =>
+      spark
+        .range(0, 100)
+        .selectExpr("cast(id % 17 as int) as k1", "cast(id % 1000 as int) as i1")
+        .write
+        .parquet(dir.getAbsolutePath)
+      withTempView("t1") {
+        spark.read.parquet(dir.getAbsolutePath).createOrReplaceTempView("t1")
+        withSQLConf(CometConf.COMET_SHUFFLE_MODE.key -> "native") {
+          val df = spark.sql(
+            "select k1, max(case when i1 > 100 then i1 + 1 else i1 * 2 end) as m " +
+              "from t1 where i1 between 1 and 1000 group by k1")
+          df.collect()
+          val rdds = mutable.ArrayBuffer.empty[RDD[_]]
+          def walk(rdd: RDD[_]): Unit = {
+            rdds += rdd
+            rdd.dependencies.foreach(d => walk(d.rdd))
+          }
+          walk(df.queryExecution.executedPlan.execute())
+          val specs = rdds.collect {
+            case r: CometNativeShuffleInputRDD if r.nativeShuffleSpec != null =>
+              r.nativeShuffleSpec
+          }
+          assert(specs.nonEmpty, "expected a native shuffle fed by a native block")
+          specs.foreach { spec =>
+            assert(spec.childNativeOp.getSqlTextPoolCount == 0)
+            assert(spec.sqlTextPool.size == 1)
+            val planContexts = contexts(spec.childNativeOp)
+            assert(planContexts.nonEmpty)
+            val commons = spec.execContext.commonByKey.values
+              .map(OperatorOuterClass.NativeScanCommon.parseFrom)
+            assert(commons.nonEmpty, "expected the scan to be fused into the shuffle's child")
+            val commonContexts = commons.flatMap(contexts)
+            assert(commonContexts.nonEmpty)
+            (planContexts ++ commonContexts).foreach { ctx =>
+              assert(ctx.hasSqlTextIdx && ctx.getSqlText.isEmpty, ctx)
+              assert(ctx.getSqlTextIdx < spec.sqlTextPool.size)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  test("query-text interning does not change scan planning identity") {
+    val expr = ExprOuterClass.Expr
+      .newBuilder()
+      .setQueryContext(
+        ExprOuterClass.QueryContext
+          .newBuilder()
+          .setSqlText("select value / 0 from source")
+          .setStartIndex(7)
+          .setStopIndex(15))
+      .build()
+    val common = OperatorOuterClass.NativeScanCommon
+      .newBuilder()
+      .setSource("source")
+      .addDataFilters(expr)
+      .build()
+    val hash = NativeScanPlanDataInjector.sourceKeyHash(common)
+    val op = Operator
+      .newBuilder()
+      .setPlanId(73)
+      .setNativeScan(
+        OperatorOuterClass.NativeScan.newBuilder().setCommon(common).setSourceKeyHash(hash))
+      .build()
+    val interned = QueryContextInterner.intern(op)
+    val pooledCommon = QueryContextInterner.internScanCommon(
+      common,
+      new QueryContextInterner.Pool(Seq("select value / 0 from source")))
+    assert(NativeScanPlanDataInjector.sourceKeyHash(pooledCommon) == hash)
+    assert(
+      NativeScanPlanDataInjector.sourceKey(pooledCommon) ==
+        NativeScanPlanDataInjector.sourceKey(common))
+    assert(NativeScanPlanDataInjector.getKey(interned) == NativeScanPlanDataInjector.getKey(op))
+    val withoutHash = interned.toBuilder
+      .setNativeScan(interned.getNativeScan.toBuilder.clearSourceKeyHash())
+      .build()
+    assert(
+      NativeScanPlanDataInjector.getKey(withoutHash) == NativeScanPlanDataInjector.getKey(op))
+  }
+
+  test("function discovery includes finalized scan commons without unrelated planning data") {
+    val initial =
+      OperatorOuterClass.NativeScanCommon.newBuilder().setSource("late-filter").build()
+    val scan = OperatorOuterClass.Operator
+      .newBuilder()
+      .setPlanId(9)
+      .setNativeScan(
+        OperatorOuterClass.NativeScan
+          .newBuilder()
+          .setCommon(initial)
+          .setSourceKeyHash(NativeScanPlanDataInjector.sourceKeyHash(initial)))
+      .build()
+    val root =
+      OperatorOuterClass.Operator.newBuilder().addChildren(scan).addChildren(scan).build()
+    val lateFilter = ExprOuterClass.Expr
+      .newBuilder()
+      .setLiteral(org.apache.comet.serde.LiteralOuterClass.Literal.newBuilder().setBoolVal(true))
+      .build()
+    val finalized = initial.toBuilder.addDataFilters(lateFilter).build()
+    val key = NativeScanPlanDataInjector.getKey(scan).get
+    val messages = PlanDataInjector.functionMessages(
+      root,
+      Map(key -> finalized.toByteArray, "unreachable" -> Array[Byte](-1)))
+    assert(messages.head eq root)
+    assert(messages.tail == Seq(finalized), "one finalized common per injector and key")
+    assert(PlanDataInjector.functionMessages(root, Map.empty) == Seq(root))
+    // Discovery neither mutates the native placeholder nor requires partition file data.
+    assert(root.getChildren(0).getNativeScan.getCommon == initial)
+  }
+
 }

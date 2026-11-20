@@ -142,7 +142,9 @@
       "project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
       "code_hold_preserved": true
     },
-    "implementation_authorized_groups": ["G01"],
+    "implementation_authorized_groups": [
+      "G01"
+    ],
     "historical_scope_note": "Original stage-specific authorization/evidence retained. For current G01 finalization, g01_finalization_authorization supersedes earlier merge/tag holds; G02, Java 21, artifact publication and production remain unauthorized."
   },
   "ansi_policy": {
@@ -197,64 +199,180 @@
     "step2_order": "Spark4.2.1/Delta4.4.1 on registry DF55.2 -> pristine vendor55.2 in a separate commit -> root patch/shared lock/explicit vendor-unit CI -> repeat checks and release tooling.",
     "step2_separate_prs_superseded": true,
     "card_groups": {
-      "P01": ["G01"],
-      "I10": ["G01"],
-      "P03": ["G01"],
-      "D01": ["G01"],
-      "P02": ["G01"],
-      "I01": ["G01"],
-      "I02": ["G01"],
-      "I03": ["G01"],
-      "I04": ["G01"],
-      "I08": ["G01"],
-      "J18": ["G01"],
-      "I09": ["G01"],
-      "J14": ["G02"],
-      "I05": ["G02"],
-      "J16": ["G02"],
-      "J22": ["G02"],
-      "J15": ["G02"],
-      "D10": ["G04"],
-      "N06": ["G04"],
-      "D11": ["G03"],
-      "D02": ["G03"],
-      "D04": ["G03"],
-      "D03": ["G03"],
-      "D05": ["G05"],
-      "D06": ["G04"],
-      "D07": ["G04"],
-      "D08": ["G04"],
-      "N09": ["G04"],
-      "D09": ["G04"],
-      "N04": ["G04"],
-      "N05": ["G04"],
-      "N08": ["G04"],
-      "N07": ["G04"],
-      "N01": ["G06"],
-      "N02": ["G06"],
-      "N03": ["G06"],
-      "I06": ["G02"],
-      "J08": ["G07"],
-      "J09": ["G07"],
-      "J21": ["G07"],
-      "J25": ["G07"],
-      "J27": ["G07"],
-      "J10": ["G07"],
-      "J13": ["G07"],
-      "J11": ["G07"],
-      "J23": ["G07"],
-      "J12": ["G07"],
-      "J24": ["G07"],
-      "J26": ["G07"],
-      "J05": ["G08"],
-      "J06": ["G08"],
-      "J07": ["G08"],
-      "J17": ["G08"],
-      "J02": ["G09"],
-      "I07": ["G09"],
-      "J03": ["G09"],
-      "J04": ["G09"],
-      "J01": ["G09"]
+      "P01": [
+        "G01"
+      ],
+      "I10": [
+        "G01"
+      ],
+      "P03": [
+        "G01"
+      ],
+      "D01": [
+        "G01"
+      ],
+      "P02": [
+        "G01"
+      ],
+      "I01": [
+        "G01"
+      ],
+      "I02": [
+        "G01"
+      ],
+      "I03": [
+        "G01"
+      ],
+      "I04": [
+        "G01"
+      ],
+      "I08": [
+        "G01"
+      ],
+      "J18": [
+        "G01"
+      ],
+      "I09": [
+        "G01"
+      ],
+      "J14": [
+        "G02"
+      ],
+      "I05": [
+        "G02"
+      ],
+      "J16": [
+        "G02"
+      ],
+      "J22": [
+        "G02"
+      ],
+      "J15": [
+        "G02"
+      ],
+      "D10": [
+        "G04"
+      ],
+      "N06": [
+        "G04"
+      ],
+      "D11": [
+        "G03"
+      ],
+      "D02": [
+        "G03"
+      ],
+      "D04": [
+        "G03"
+      ],
+      "D03": [
+        "G03"
+      ],
+      "D05": [
+        "G05"
+      ],
+      "D06": [
+        "G04"
+      ],
+      "D07": [
+        "G04"
+      ],
+      "D08": [
+        "G04"
+      ],
+      "N09": [
+        "G04"
+      ],
+      "D09": [
+        "G04"
+      ],
+      "N04": [
+        "G04"
+      ],
+      "N05": [
+        "G04"
+      ],
+      "N08": [
+        "G04"
+      ],
+      "N07": [
+        "G04"
+      ],
+      "N01": [
+        "G06"
+      ],
+      "N02": [
+        "G06"
+      ],
+      "N03": [
+        "G06"
+      ],
+      "I06": [
+        "G02"
+      ],
+      "J08": [
+        "G07"
+      ],
+      "J09": [
+        "G07"
+      ],
+      "J21": [
+        "G07"
+      ],
+      "J25": [
+        "G07"
+      ],
+      "J27": [
+        "G07"
+      ],
+      "J10": [
+        "G07"
+      ],
+      "J13": [
+        "G07"
+      ],
+      "J11": [
+        "G07"
+      ],
+      "J23": [
+        "G07"
+      ],
+      "J12": [
+        "G07"
+      ],
+      "J24": [
+        "G07"
+      ],
+      "J26": [
+        "G07"
+      ],
+      "J05": [
+        "G08"
+      ],
+      "J06": [
+        "G08"
+      ],
+      "J07": [
+        "G08"
+      ],
+      "J17": [
+        "G08"
+      ],
+      "J02": [
+        "G09"
+      ],
+      "I07": [
+        "G09"
+      ],
+      "J03": [
+        "G09"
+      ],
+      "J04": [
+        "G09"
+      ],
+      "J01": [
+        "G09"
+      ]
     },
     "quality_requirements_unchanged": true,
     "no_implementation_authorization": false,
@@ -271,7 +389,10 @@
       "Delta4.4.1",
       "GCP"
     ],
-    "linux_release_architectures": ["amd64", "arm64"],
+    "linux_release_architectures": [
+      "amd64",
+      "arm64"
+    ],
     "checks": "Mandatory correctness/ANSI/regression/integration and packaging checks remain. Final JARs must have SHA256, Git SHA and build details. The user will separately validate real production GCP jobs.",
     "user_quote": "For now, we need to complete everything planned so that I receive JAR artifacts to include in our Spark 4.2 image. I will check performance later."
   },
@@ -285,7 +406,7 @@
     "reference": "PERFORMANCE.md",
     "correctness_tests_unchanged": true
   },
-  "last_updated_on": "2026-11-19",
+  "last_updated_on": "2026-11-21",
   "execution_documentation_policy": {
     "user_quote": "All such documentation for carrying out the migration will be kept only in docs/joom-migration.",
     "directory": "docs/joom-migration",
@@ -325,14 +446,28 @@
   "stage_start_policy": {
     "explicit_user_approval_per_group": true,
     "currently_authorized": [],
-    "groups_not_authorized": ["G07", "G08", "G09", "G10"],
-    "reaffirmed_on": "2026-11-20",
-    "completed_groups": ["G01", "G02", "G03", "G04", "G05", "G06", "G07"],
+    "groups_not_authorized": [
+      "G09",
+      "G10"
+    ],
+    "reaffirmed_on": "2026-11-21",
+    "completed_groups": [
+      "G01",
+      "G02",
+      "G03",
+      "G04",
+      "G05",
+      "G06",
+      "G07",
+      "G08"
+    ],
     "active_implementation_group": null,
-    "next_group_requires_separate_approval": "G08",
+    "next_group_requires_separate_approval": "G09",
     "before_g06_final_checkpoint": {
       "explicit_user_approval_per_group": true,
-      "currently_authorized": ["G03"],
+      "currently_authorized": [
+        "G03"
+      ],
       "groups_not_authorized": [
         "G04",
         "G05",
@@ -343,7 +478,11 @@
         "G10"
       ],
       "reaffirmed_on": "2026-11-19",
-      "completed_groups": ["G01", "G02", "G03"],
+      "completed_groups": [
+        "G01",
+        "G02",
+        "G03"
+      ],
       "active_implementation_group": null,
       "next_group_requires_separate_approval": "G04"
     }
@@ -599,7 +738,12 @@
     "recorded_on": "2026-11-19",
     "status": "APPROVED_EXPLICITLY",
     "user_request_translation": "Push documentation commit672988395 to origin/branch-1.2 and verify the remote update. Then proceed to G03 joom/1.2-sort-spill-budget: wide-row sorting, memory, spill and output handoff to the JVM.",
-    "cards": ["D11", "D02", "D04", "D03"],
+    "cards": [
+      "D11",
+      "D02",
+      "D04",
+      "D03"
+    ],
     "base_commit": "6729883958442e865707d692f32a84e9554e4090",
     "validation": "Local builds and targeted regressions; preserve final full agreed GHA and exact-JAR native AMD64/ARM64 qualification. No full per-group GHA.",
     "boundaries": "Feature implementation and local coherent commits. Report for integration review; do not start G04, change main/tags, publish artifacts or use production. Portable-path and datasci exclusion rules remain unchanged.",
@@ -692,7 +836,9 @@
     "status": "APPROVED_EXPLICITLY",
     "request_translation": "Start G05 joom/1.2-smj-filter: filter before payload, outer-join correctness, hoisting and ANSI guards, under the approved plan. Report after local builds/targeted regressions before merge. Do not run full GHA or start G06.",
     "base_commit": "a89fea10ed661a9e76ba2cd3bdbd3a78b5b3aec8",
-    "cards": ["D05"],
+    "cards": [
+      "D05"
+    ],
     "scope": "Port the complete safe block from joom-1.1-13 onto current DataFusion55.2, retaining upstream fixes and validating against original Spark4.2.1, ANSI=true.",
     "excluded": [
       "merge before user review",
@@ -742,7 +888,11 @@
     "status": "APPROVED_EXPLICITLY",
     "request_translation": "Start G06 joom/1.2-native-windows: spillable windows, tiny partitions and SortedWindow, under the approved plan. Report after local builds and targeted tests before merge. Do not run full GHA or start G07.",
     "base_commit": "72d40726eee5fadbf94c5ddd0537d05854766d88",
-    "cards": ["N01", "N02", "N03"],
+    "cards": [
+      "N01",
+      "N02",
+      "N03"
+    ],
     "scope": "Port final tag13 window executors onto current operators crate/planner while preserving upstream guards and all agreed G01-G05 code. Original Spark4.2.1 oracle, ANSI=true, row/ordering/error/native/spill assertions.",
     "excluded": [
       "push/merge before review",
@@ -824,6 +974,64 @@
     "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07-integration/completion.json",
     "excluded": [
       "G08-G10",
+      "full per-group GHA",
+      "main/tag changes",
+      "release publication",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g08_authorization": {
+    "recorded_on": "2026-11-20",
+    "status": "APPROVED_EXPLICITLY",
+    "request_translation": "Start G08 joom/1.2-jvm-codegen: scalar arguments, short-circuit, UDF pools and serialization, necessary expression evaluation-order fixes. Report after local builds/targeted tests before merge. No full GHA or G09.",
+    "base_commit": "1a273499258107f8fd1e55534343dc629519e511",
+    "cards": [
+      "J05",
+      "J06",
+      "J07",
+      "J17"
+    ],
+    "conditional_scope": "C02 expression evaluation-order and necessary G05 guard follow-up; do not automatically adopt post-tag work or excluded PR5889.",
+    "excluded": [
+      "push/merge before review",
+      "G09-G10",
+      "full per-group GHA",
+      "main/tag/release changes",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g08_local_qualification": {
+    "date": "2026-11-20",
+    "kind": "IMPLEMENTATION_WITHIN_EXISTING_USER_AUTHORIZATION",
+    "scope": "J05/J06/J07/J17 and necessary C02; no approved feature omitted.",
+    "adaptations": [
+      "Fresh live task UDF transport replaces stale global byte-snapshot caching while preserving shared graph identity/size.",
+      "Preserve original Spark required errors/order using narrow native proofs, JVM conditional kernels or safe Spark fallback.",
+      "Contrib message SPI avoids protobuf base-type leakage across shading and validates actual messages inside Core."
+    ],
+    "evidence": "G08-results.json",
+    "gate": "Report before push/integration. G09 and full per-group GHA remain unauthorized."
+  },
+  "g08_fallback_acceptance": {
+    "date": "2026-11-21",
+    "status": "APPROVED_EXPLICITLY",
+    "request_translation": "Keep the safe fallbacks.",
+    "accepted_scope": "Keep Spark Filter/Project for unsafe operator-shared CSE, ambiguous nullable predicate ordering and guarded nondeterministic combinations. Stateful conditionals may use one JVM kernel within Comet.",
+    "historical_comparison": "Some of these paths were native-eligible in joom-1.1-13; the old tests explicitly required native Filter. Narrower eligibility is accepted for Spark4.2.1 correctness. This is not evidence of an incident in the old production runtime.",
+    "future_optimization": "Do not remove guards to recover acceleration. Any later optimization needs separate scope and Spark-equivalent value, mandatory-error, evaluation-order and native-coverage evidence."
+  },
+  "g08_integration_authorization": {
+    "date": "2026-11-21",
+    "status": "APPROVED_EXPLICITLY",
+    "request_translation": "Push G08 to origin and merge into branch-1.2. After the merge verify the final state and report all included commits. Do not proceed to G09.",
+    "qualified_source_previously_verified": "2625e2c8e67c4fba4565e8370140545a54b29b9d",
+    "method": "Fold acceptance documentation into the one unpushed substantive commit; fast-forward with no extra merge or service commit.",
+    "scope": "Read remote refs, publish only the feature and integration branches with guarded atomic push, fast-forward locally, verify exact local/remote/source/document bytes.",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g08-integration/completion.json",
+    "excluded": [
+      "G09-G10",
       "full per-group GHA",
       "main/tag changes",
       "release publication",

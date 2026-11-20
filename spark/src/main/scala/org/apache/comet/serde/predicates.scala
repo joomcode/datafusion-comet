@@ -89,6 +89,12 @@ object CometAnd extends CometExpressionSerde[And] {
       expr,
       { case _: And => true; case _ => false },
       { case a: And => (a.left, a.right) })
+    // Spark may hoist an operator-shared RHS expression out of this conditional. In that
+    // case laziness could hide a required ANSI error; use Spark for the enclosing operator.
+    if (!canSkipEvaluation(operands.tail, mayEvaluateEagerly)) {
+      withFallbackReason(expr, "AND shared-expression evaluation order requires Spark")
+      return None
+    }
     createBalancedBinaryExpr(
       operands,
       inputs,
@@ -106,6 +112,12 @@ object CometOr extends CometExpressionSerde[Or] {
       expr,
       { case _: Or => true; case _ => false },
       { case o: Or => (o.left, o.right) })
+    // Spark may hoist an operator-shared RHS expression out of this conditional. In that
+    // case laziness could hide a required ANSI error; use Spark for the enclosing operator.
+    if (!canSkipEvaluation(operands.tail, mayEvaluateEagerly)) {
+      withFallbackReason(expr, "OR shared-expression evaluation order requires Spark")
+      return None
+    }
     createBalancedBinaryExpr(
       operands,
       inputs,

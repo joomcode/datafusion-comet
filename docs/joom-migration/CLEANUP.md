@@ -248,3 +248,35 @@ static/license logs, preservation proof and exact publication/completion receipt
 `refs/joom-migration/g07-qualified` retains the original qualified commit.
 Preserve this evidence through final acceptance; no automatic cleanup is performed.
 No new runtime build, release JAR or Docker image is created by integration.
+
+## G08 local codegen/serialization qualification
+
+Keep `${MIGRATION_AUX_ROOT}/20261120_comet12-g08` through final acceptance. It holds
+all source/audit snapshots, failure and old-library controls, final test XML/logs,
+existing Criterion output and isolated shaded-JAR support/receipts. The auxiliary
+test-support POM only relocates a copy of the local test JAR with existing project
+Shade/ASM tools; it changes no production POM or dependency. The first empty support
+archive/run was a harness failure and is superseded by the successful 13-case proof.
+
+Reused outputs include `native/target`, `spark/target`, `common/target`,
+`contrib/delta-spark/target` and Criterion directories. Measured whole sizes and
+baseline growth are in `cleanup-ledger.json#g08_resources` and the completion
+receipt. The Darwin/debug developer JARs are not Linux release artifacts. G08 used
+offline dependency caches without Maven install, new toolchains, Docker or external
+publication. Standard RAT may temporarily download its pinned official jar.
+
+After preserving required evidence and stopping all migration builds, the existing
+guarded target-cleaning commands in this guide apply. The dated G08 auxiliary tree
+can be removed manually only after final acceptance and a user cleanup decision.
+Keep shared caches, source checkouts and accepted release artifacts. No automatic
+cleanup or deletion of migration evidence is performed.
+
+## G08 accepted integration
+
+`${MIGRATION_AUX_ROOT}/20261121_comet12-g08-integration` retains the qualified
+documentation archive, source/ref snapshot, independent audit, static/formatting
+checks, preservation proof and exact publication/completion receipt.
+`refs/joom-migration/g08-qualified` retains the original qualified commit.
+Keep these records through final acceptance; nothing is automatically deleted.
+No runtime rebuild, release JAR, Docker image or dependency download is created
+by this integration.

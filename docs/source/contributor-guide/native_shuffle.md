@@ -130,14 +130,14 @@ Native shuffle (`CometExchange`) is selected when all of the following condition
 
 ### Scala Side
 
-| Class                          | Location                                         | Description                                                                                                                                         |
-| ------------------------------ | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CometShuffleExchangeExec`     | `.../shuffle/CometShuffleExchangeExec.scala`     | Physical plan node. Validates types and partitioning, creates `CometShuffleDependency`.                                                             |
-| `CometNativeShuffleWriter`     | `.../shuffle/CometNativeShuffleWriter.scala`     | Implements `ShuffleWriter`. Builds the unified `ShuffleWriter(child = childNativeOp)` plan and runs it in one `CometExecIterator` per partition.    |
-| `CometShuffleDependency`       | `.../shuffle/CometShuffleDependency.scala`       | Extends `ShuffleDependency`. Holds shuffle type, schema, range partition bounds, and (native shuffle only) a `NativeShuffleSpec`.                   |
-| `CometNativeShuffleInputRDD`   | `.../shuffle/CometNativeShuffleInputRDD.scala`   | Thin scheduling-anchor RDD on the native-shuffle path. `compute` returns a `CometNativeShuffleInputIterator` carrying per-partition leaf iterators. |
-| `CometBlockStoreShuffleReader` | `.../shuffle/CometBlockStoreShuffleReader.scala` | Reads shuffle blocks via `ShuffleBlockFetcherIterator`. Decodes Arrow IPC to `ColumnarBatch`.                                                       |
-| `NativeBatchDecoderIterator`   | `.../shuffle/NativeBatchDecoderIterator.scala`   | Reads compressed Arrow IPC from input stream. Calls native decode via JNI.                                                                          |
+| Class                          | Location                                         | Description                                                                                                                                           |
+| ------------------------------ | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CometShuffleExchangeExec`     | `.../shuffle/CometShuffleExchangeExec.scala`     | Physical plan node. Validates types and partitioning, creates `CometShuffleDependency`.                                                               |
+| `CometNativeShuffleWriter`     | `.../shuffle/CometNativeShuffleWriter.scala`     | Implements `ShuffleWriter`. Builds the unified `ShuffleWriter(child = childNativeOp)` plan and runs it in one `CometExecIterator` per partition.      |
+| `CometShuffleDependency`       | `.../shuffle/CometShuffleDependency.scala`       | Extends `ShuffleDependency`. Holds shuffle type, schema, range partition bounds and small captured SQLConf; its driver-only native plan is transient. |
+| `CometNativeShuffleInputRDD`   | `.../shuffle/CometNativeShuffleInputRDD.scala`   | Map-side scheduling anchor. Owns `NativeShuffleSpec`; `compute` passes it and per-partition inputs to `CometNativeShuffleInputIterator`.              |
+| `CometBlockStoreShuffleReader` | `.../shuffle/CometBlockStoreShuffleReader.scala` | Reads shuffle blocks via `ShuffleBlockFetcherIterator`. Decodes Arrow IPC to `ColumnarBatch`.                                                         |
+| `NativeBatchDecoderIterator`   | `.../shuffle/NativeBatchDecoderIterator.scala`   | Reads compressed Arrow IPC from input stream. Calls native decode via JNI.                                                                            |
 
 ### Rust Side
 
@@ -160,6 +160,12 @@ The native shuffle implementation is its own workspace crate, `datafusion-comet-
 ## Data Flow
 
 ### Write Path
+
+The heavy `NativeShuffleSpec` belongs to the map-side `CometNativeShuffleInputRDD`; it is transient on
+`CometShuffleDependency` so a reduce stage does not carry its input stage's plan. The writer obtains the spec from
+the map iterator before creating native resources. The dependency retains the small captured SQL configuration
+needed for admission checks before that handoff. A remote-to-local shuffle fallback copies the spec to its sibling
+map RDD. Root SQL-text pool entries and task-owned UDF functions accompany the writer's native plan.
 
 1. **Plan construction**: `CometNativeShuffleWriter` builds a protobuf operator tree with a
    `ShuffleWriter` operator at the root and `childNativeOp` as its child. `childNativeOp` takes

@@ -1338,7 +1338,9 @@ class CometCodegenSuite
       val guard = plan.expressions.flatMap(_.collect { case g: If => g }).head
       val Seq(a, b) = plan.collectLeaves().head.output
       def root(expr: Expression): ExprStructCase =
-        QueryPlanSerde.exprToProto(expr, Seq(a, b)).get.getExprStructCase
+        QueryPlanSerde.withSharedSubexpressions(Seq(expr)) {
+          QueryPlanSerde.exprToProto(expr, Seq(a, b)).get.getExprStructCase
+        }
       assert(root(guard) == ExprStructCase.JVM_SCALAR_UDF)
       // A predicate that checks a column the call does not read, or one besides its arguments.
       assert(root(guard.copy(predicate = IsNull(b))) == ExprStructCase.IF)
@@ -1349,7 +1351,9 @@ class CometCodegenSuite
       val random = guard.transformUp { case r: AttributeReference =>
         If(LessThan(Rand(Literal(1L)), Literal(2.0)), r, Literal(null, LongType))
       }
-      assert(root(random) == ExprStructCase.IF)
+      // The new conditional-state contract keeps all nondeterministic occurrences in one
+      // row-oriented kernel. SQL parity is covered by CometConditionalEvaluationOrderSuite.
+      assert(root(random) == ExprStructCase.JVM_SCALAR_UDF)
     }
   }
 
@@ -2045,6 +2049,32 @@ class CometCodegenSuite
       s"expected only the shared kernel to outlive the plans, got plan ids $cached")
     val stats = CometScalaUDFCodegen.stats()
     assert(stats.compileCount == 5, s"expected 1 shared and 4 per-plan compiles, got $stats")
+  }
+
+  test("codegen takes unresolved scalar subqueries as runtime inputs") {
+    withTable("codegen_strings", "codegen_patterns") {
+      sql("CREATE TABLE codegen_strings (s STRING) USING parquet")
+      // Both rows must reach the same batch: separate one-row files hide scalar broadcasting bugs.
+      sql(
+        "INSERT INTO codegen_strings SELECT /*+ COALESCE(1) */ * " +
+          "FROM VALUES ('abc123'), ('def456') AS v(s)")
+      sql("CREATE TABLE codegen_patterns (pattern STRING) USING parquet")
+      sql("INSERT INTO codegen_patterns VALUES ('([0-9]+)')")
+      for (aggregate <- Seq("max(pattern)", "max(pattern) FILTER (WHERE false)")) {
+        assertCodegenRan {
+          checkSparkAnswerAndOperator(
+            sql(s"SELECT regexp_extract(s, (SELECT $aggregate FROM codegen_patterns), 1) " +
+              "FROM codegen_strings"))
+        }
+      }
+      // A second execution must use its own subquery value, even when the kernel is cached.
+      sql("INSERT OVERWRITE codegen_patterns VALUES ('([a-z]+)')")
+      assertCodegenRan {
+        checkSparkAnswerAndOperator(
+          sql("SELECT regexp_extract(s, (SELECT max(pattern) FROM codegen_patterns), 1) " +
+            "FROM codegen_strings"))
+      }
+    }
   }
 
   test("ScalaUDF composed with reused scalar subquery across projection and filter") {

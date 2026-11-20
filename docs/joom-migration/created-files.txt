@@ -282,3 +282,19 @@ docs/joom-migration/G07-report.md
 docs/joom-migration/G07-results.json
 docs/joom-migration/G07-performance.md
 Source/auxiliary inventory: G07-results.json and ${MIGRATION_AUX_ROOT}/20261120_comet12-g07/completion.json.
+
+G08 project files:
+docs/joom-migration/G08-performance.md
+docs/joom-migration/G08-report.md
+docs/joom-migration/G08-results.json
+native/spark-expr/src/conditional_funcs/logical_short_circuit.rs
+spark/src/main/scala/org/apache/comet/udf/codegen/CometSharedFunctionRef.scala
+spark/src/main/scala/org/apache/comet/udf/codegen/CometUdfFunctionPool.scala
+spark/src/test/resources/sql-tests/expressions/conditional/and_evaluation_order.sql
+spark/src/test/resources/sql-tests/expressions/conditional/or_evaluation_order.sql
+spark/src/test/scala/org/apache/comet/CometCodegenRuntimeScalarSuite.scala
+spark/src/test/scala/org/apache/comet/exec/CometConditionalEvaluationOrderSuite.scala
+spark/src/test/scala/org/apache/comet/exec/CometFilterShortCircuitSuite.scala
+spark/src/test/scala/org/apache/comet/exec/CometTaskBinarySizeSuite.scala
+spark/src/test/scala/org/apache/spark/sql/comet/CometUdfFunctionPoolSuite.scala
+Source/auxiliary inventory: G08-results.json and ${MIGRATION_AUX_ROOT}/20261120_comet12-g08/completion.json.

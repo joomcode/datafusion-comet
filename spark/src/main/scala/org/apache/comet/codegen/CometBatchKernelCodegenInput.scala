@@ -71,11 +71,16 @@ private[codegen] object CometBatchKernelCodegenInput extends CometTypeShim {
     classOf[IntervalMonthDayNanoVector])
   private val cometPlainVectorName: String = classOf[CometPlainVector].getName
 
+  // Scalars arrive as length-one Arrow vectors. Ordinary columns use -1 so each read
+  // retains its row index; the per-batch mask is refreshed even for a cached kernel.
+  private def rowIndex(ord: Int): String = s"(this.rowIdx & this.col${ord}_rowMask)"
+
   /** Emit kernel typed-vector field declarations for every level of every input column. */
   def emitInputFieldDecls(inputSchema: Seq[ArrowColumnSpec]): String = {
     val lines = new mutable.ArrayBuffer[String]()
     inputSchema.zipWithIndex.foreach { case (spec, ord) =>
       val path = s"col$ord"
+      lines += s"private int ${path}_rowMask;"
       collectVectorFieldDecls(path, spec, lines)
     }
     lines.mkString("\n  ")
@@ -88,6 +93,13 @@ private[codegen] object CometBatchKernelCodegenInput extends CometTypeShim {
     val lines = new mutable.ArrayBuffer[String]()
     inputSchema.zipWithIndex.foreach { case (spec, ord) =>
       val path = s"col$ord"
+      // Reject a malformed input before any unsafe getter can read beyond its buffers.
+      lines += s"int ${path}_rows = inputs[$ord].getValueCount();"
+      lines += s"""if (${path}_rows != 1 && ${path}_rows != numRows) {
+                  |  throw new IllegalArgumentException("Input $ord has " + ${path}_rows +
+                  |    " rows; expected a scalar or " + numRows);
+                  |}""".stripMargin
+      lines += s"this.${path}_rowMask = ${path}_rows == 1 ? 0 : -1;"
       collectCasts(path, spec, s"inputs[$ord]", lines)
     }
     lines.mkString("\n    ")
@@ -115,27 +127,27 @@ private[codegen] object CometBatchKernelCodegenInput extends CometTypeShim {
           case cls if wrapsInCometPlainVector(cls) => "isNullAt"
           case _ => "isNull"
         }
-        s"      case $ord: return this.col$ord.$method(this.rowIdx);"
+        s"      case $ord: return this.col$ord.$method(${rowIndex(ord)});"
       }
     }
 
     val booleanCases = withOrd.collect {
       case (ArrowColumnSpec(cls, _), ord) if cls == classOf[BitVector] =>
-        s"      case $ord: return this.col$ord.getBoolean(this.rowIdx);"
+        s"      case $ord: return this.col$ord.getBoolean(${rowIndex(ord)});"
     }
     val byteCases = withOrd.collect {
       case (ArrowColumnSpec(cls, _), ord) if cls == classOf[TinyIntVector] =>
-        s"      case $ord: return this.col$ord.getByte(this.rowIdx);"
+        s"      case $ord: return this.col$ord.getByte(${rowIndex(ord)});"
     }
     val shortCases = withOrd.collect {
       case (ArrowColumnSpec(cls, _), ord) if cls == classOf[SmallIntVector] =>
-        s"      case $ord: return this.col$ord.getShort(this.rowIdx);"
+        s"      case $ord: return this.col$ord.getShort(${rowIndex(ord)});"
     }
     val intCases = withOrd.collect {
       case (ArrowColumnSpec(cls, _), ord)
           if cls == classOf[IntVector] || cls == classOf[DateDayVector] ||
             cls == classOf[IntervalYearVector] =>
-        s"      case $ord: return this.col$ord.getInt(this.rowIdx);"
+        s"      case $ord: return this.col$ord.getInt(${rowIndex(ord)});"
     }
     val longCases = withOrd.collect {
       case (ArrowColumnSpec(cls, _), ord)
@@ -144,27 +156,27 @@ private[codegen] object CometBatchKernelCodegenInput extends CometTypeShim {
             cls == classOf[TimeNanoVector] ||
             cls == classOf[TimeStampMicroVector] ||
             cls == classOf[TimeStampMicroTZVector] =>
-        s"      case $ord: return this.col$ord.getLong(this.rowIdx);"
+        s"      case $ord: return this.col$ord.getLong(${rowIndex(ord)});"
     }
     val intervalCases = withOrd.collect {
       case (ArrowColumnSpec(cls, _), ord) if cls == classOf[IntervalMonthDayNanoVector] =>
-        s"      case $ord: return this.col$ord.getInterval(this.rowIdx);"
+        s"      case $ord: return this.col$ord.getInterval(${rowIndex(ord)});"
     }
     val floatCases = withOrd.collect {
       case (ArrowColumnSpec(cls, _), ord) if cls == classOf[Float4Vector] =>
-        s"      case $ord: return this.col$ord.getFloat(this.rowIdx);"
+        s"      case $ord: return this.col$ord.getFloat(${rowIndex(ord)});"
     }
     val doubleCases = withOrd.collect {
       case (ArrowColumnSpec(cls, _), ord) if cls == classOf[Float8Vector] =>
-        s"      case $ord: return this.col$ord.getDouble(this.rowIdx);"
+        s"      case $ord: return this.col$ord.getDouble(${rowIndex(ord)});"
     }
     val decimalCases = withOrd.collect {
       case (ArrowColumnSpec(cls, _), ord) if cls == classOf[DecimalVector] =>
         val known = decimalTypeByOrdinal.getOrElse(ord, None)
         val valueAddr = s"this.col${ord}_valueAddr"
         val slowField = s"this.col$ord"
-        val fastPath = emitDecimalFastBodyUnsafe(valueAddr, "this.rowIdx", "        ")
-        val slowPath = emitDecimalSlowBody(slowField, "this.rowIdx", "        ")
+        val fastPath = emitDecimalFastBodyUnsafe(valueAddr, rowIndex(ord), "        ")
+        val slowPath = emitDecimalSlowBody(slowField, rowIndex(ord), "        ")
         val body = known match {
           case Some(dt) if canReadDecimalAsUnscaledLong(dt) => fastPath
           case Some(_) => slowPath
@@ -185,7 +197,7 @@ private[codegen] object CometBatchKernelCodegenInput extends CometTypeShim {
            |${emitBinaryBodyUnsafe(
             s"this.col${ord}_valueAddr",
             s"this.col${ord}_offsetAddr",
-            "this.rowIdx",
+            rowIndex(ord),
             "        ")}
            |      }""".stripMargin
     }
@@ -195,7 +207,7 @@ private[codegen] object CometBatchKernelCodegenInput extends CometTypeShim {
            |${emitUtf8BodyUnsafe(
             s"this.col${ord}_valueAddr",
             s"this.col${ord}_offsetAddr",
-            "this.rowIdx",
+            rowIndex(ord),
             "        ")}
            |      }""".stripMargin
     }
@@ -346,7 +358,7 @@ private[codegen] object CometBatchKernelCodegenInput extends CometTypeShim {
   def emitGetArrayMethod(inputSchema: Seq[ArrowColumnSpec]): String = {
     val cases = inputSchema.zipWithIndex.collect { case (_: ArrayColumnSpec, ord) =>
       s"""      case $ord: {
-         |        int __idx = this.rowIdx;
+         |        int __idx = ${rowIndex(ord)};
          |        int __s = this.col$ord.getElementStartIndex(__idx);
          |        int __e = this.col$ord.getElementEndIndex(__idx);
          |        return new InputArray_col$ord(__s, __e - __s);
@@ -372,7 +384,7 @@ private[codegen] object CometBatchKernelCodegenInput extends CometTypeShim {
   def emitGetMapMethod(inputSchema: Seq[ArrowColumnSpec]): String = {
     val cases = inputSchema.zipWithIndex.collect { case (_: MapColumnSpec, ord) =>
       s"""      case $ord: {
-         |        int __idx = this.rowIdx;
+         |        int __idx = ${rowIndex(ord)};
          |        int __s = this.col$ord.getElementStartIndex(__idx);
          |        int __e = this.col$ord.getElementEndIndex(__idx);
          |        return new InputMap_col$ord(__s, __e - __s);
@@ -397,7 +409,7 @@ private[codegen] object CometBatchKernelCodegenInput extends CometTypeShim {
   /** Top-level `getStruct(int ordinal, int numFields)` switch when the schema has any struct. */
   def emitGetStructMethod(inputSchema: Seq[ArrowColumnSpec]): String = {
     val cases = inputSchema.zipWithIndex.collect { case (_: StructColumnSpec, ord) =>
-      s"""      case $ord: return new InputStruct_col$ord(this.rowIdx);""".stripMargin
+      s"""      case $ord: return new InputStruct_col$ord(${rowIndex(ord)});""".stripMargin
     }
     if (cases.isEmpty) {
       ""

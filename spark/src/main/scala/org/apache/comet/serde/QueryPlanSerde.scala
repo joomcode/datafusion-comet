@@ -1201,9 +1201,9 @@ object QueryPlanSerde extends Logging with CometExprShim with CometTypeShim {
    * predicates otherwise builds a proto nested deeper than protobuf's default recursion limit
    * (100), which overflows when the serialized plan is re-parsed -- on the JVM
    * (`OperatorOuterClass.Operator.parseFrom`, e.g. `findShuffleScanIndices` / explain) and in the
-   * Rust prost decoder. Comet evaluates `And`/`Or` vectorially (both sides always evaluated, no
-   * row-level short-circuit), so rebalancing the associative chain is semantically identical --
-   * it only changes the proto's shape.
+   * Rust prost decoder. Leaf order remains left-to-right. Native logical nodes preserve lazy RHS
+   * selection and use a row loop when both sides may fail or carry state, so rebalancing must not
+   * reorder effectful operands. The serdes separately guard Spark's operator-wide CSE.
    *
    * `operands` are the flattened leaves of the chain (see [[flattenAssociative]]); `wrap` tags
    * each combined `BinaryExpr` as `And` or `Or`.
@@ -1354,14 +1354,81 @@ object QueryPlanSerde extends Logging with CometExprShim with CometTypeShim {
    * `withSharedSubexpressions`; see `canShortCircuitNulls`. Normalize both sides with decimal
    * promotion so callers may pass either original or already-promoted trees.
    */
-  def canSkipEvaluation(skippable: Seq[Expression]): Boolean = {
-    // Subexpression elimination never shares a leaf, such as a column or a literal
+  def canSkipEvaluation(skippable: Seq[Expression]): Boolean =
+    canSkipEvaluation(skippable, _ => false)
+
+  /**
+   * Variant for conditionals whose lazy native path is new: sharing a positively infallible,
+   * effect-free subtree cannot make skipping it suppress a Spark error or state update. Check the
+   * shared subtree itself, not the whole RHS: an unsafe RHS can share only a pure column
+   * comparison and contain an unrelated, unshared ANSI cast. Existing null-intolerant callers
+   * retain their original conservative overload.
+   */
+  def canSkipEvaluation(
+      skippable: Seq[Expression],
+      eagerSafeCommon: Expression => Boolean): Boolean = {
     skippable.forall(_.isInstanceOf[LeafExpression]) || sharedSubexpressions.value.exists { s =>
-      // Avoid decimal promotion when Spark shares nothing.
-      s.common.isEmpty || !skippable.exists { expr =>
-        DecimalPrecision.promote(expr).exists(e => s.common.exists(_.semanticEquals(e)))
+      val harmfulCommon = s.common.filterNot(eagerSafeCommon)
+      harmfulCommon.isEmpty || !skippable.exists { expr =>
+        DecimalPrecision.promote(expr).exists(e => harmfulCommon.exists(_.semanticEquals(e)))
       }
     }
+  }
+
+  // This proof is deliberately stricter than Expression.throwable. Unknown/UDF/random and ANSI
+  // casts/arithmetic are not eager-safe merely because Spark leaves throwable=false. Remainder
+  // by a known nonzero integral literal is safe here; this does not relax the separate SMJ proof.
+  def mayEvaluateEagerly(expr: Expression): Boolean = {
+    def primitive(dt: DataType): Boolean = dt match {
+      case BooleanType | ByteType | ShortType | IntegerType | LongType | FloatType | DoubleType |
+          BinaryType | DateType | TimestampType | TimestampNTZType =>
+        true
+      case _: StringType | _: DecimalType => true
+      case _ => false
+    }
+    def number(dt: DataType): Boolean = dt match {
+      case ByteType | ShortType | IntegerType | LongType | FloatType | DoubleType => true
+      case _ => false
+    }
+    def safeCast(c: Cast): Boolean = {
+      val from = c.child.dataType
+      val to = c.dataType
+      val widening = (from, to) match {
+        case (ByteType, ShortType | IntegerType | LongType | FloatType | DoubleType) => true
+        case (ShortType, IntegerType | LongType | FloatType | DoubleType) => true
+        case (IntegerType, LongType | FloatType | DoubleType) => true
+        case (LongType, FloatType | DoubleType) => true
+        case (FloatType, DoubleType) => true
+        case _ => false
+      }
+      from == to || from == NullType || widening ||
+      (c.evalMode != EvalMode.ANSI && from.isInstanceOf[StringType] &&
+        Seq(ByteType, ShortType, IntegerType, LongType).contains(to))
+    }
+    val safe = expr match {
+      case _: Attribute | _: BoundReference | _: Literal => true
+      case _: Alias | _: IsNull | _: IsNotNull | _: Not | _: And | _: Or | _: If | _: CaseWhen =>
+        true
+      case length: Length =>
+        length.child.dataType.isInstanceOf[StringType] || length.child.dataType == BinaryType
+      // These compare existing strings; unlike CONCAT they do not construct an unbounded
+      // result value. Unknown child functions still fail the recursive proof below.
+      case _: StartsWith | _: EndsWith | _: Contains =>
+        expr.children.forall(_.dataType.isInstanceOf[StringType])
+      case b: BinaryComparison =>
+        b.left.dataType == b.right.dataType && primitive(b.left.dataType)
+      case c: Cast => safeCast(c)
+      case a: Add => a.evalMode == EvalMode.LEGACY && number(a.dataType)
+      case a: Subtract => a.evalMode == EvalMode.LEGACY && number(a.dataType)
+      case a: Multiply => a.evalMode == EvalMode.LEGACY && number(a.dataType)
+      case r: Remainder =>
+        Seq(ByteType, ShortType, IntegerType, LongType).contains(r.dataType) && (r.right match {
+          case Literal(n: java.lang.Number, _) => n.longValue() != 0L
+          case _ => false
+        })
+      case _ => false
+    }
+    expr.deterministic && safe && expr.children.forall(mayEvaluateEagerly)
   }
 
   /**

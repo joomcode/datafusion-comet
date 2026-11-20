@@ -36,6 +36,7 @@ import org.apache.comet.CometSparkSessionExtensions.isCometShuffleEnabled
 import org.apache.comet.serde.{Compatible, OperatorOuterClass, SupportLevel, Unsupported}
 import org.apache.comet.serde.QueryPlanSerde.{exprToProto, supportedSortType, withSharedSubexpressions}
 import org.apache.comet.serde.operator.CometSink
+import org.apache.comet.udf.codegen.CometUdfFunctionPool
 
 object CometTakeOrderedAndProjectExec extends CometSink[TakeOrderedAndProjectExec] {
 
@@ -169,7 +170,8 @@ case class CometTakeOrderedAndProjectExec(
           val numParts = childRDD.getNumPartitions
           // Serialize the plan once before mapping to avoid repeated serialization per partition
           val topK = topKNativePlan(offset = 0).get
-          val serializedTopK = CometExec.serializeNativePlan(topK)
+          val serializedTopK =
+            CometUdfFunctionPool.capture(topK, CometExec.serializeNativePlan(topK))
           val numOutputCols = child.output.length
           val inputSchema = CometUtils.fromAttributes(child.output)
           childRDD.mapPartitionsWithIndexInternal { case (idx, iter) =>
@@ -197,8 +199,9 @@ case class CometTakeOrderedAndProjectExec(
       }
 
       // Serialize the plan once before mapping to avoid repeated serialization per partition
+      val finalPlan = finalNativePlan(childRDD.getNumPartitions).get
       val serializedFinalPlan =
-        CometExec.serializeNativePlan(finalNativePlan(childRDD.getNumPartitions).get)
+        CometUdfFunctionPool.capture(finalPlan, CometExec.serializeNativePlan(finalPlan))
       val finalOutputTypes = output.map(_.dataType)
       val finalInputSchema = CometUtils.fromAttributes(child.output)
       singlePartitionRDD.mapPartitionsInternal { iter =>

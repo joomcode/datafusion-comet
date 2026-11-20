@@ -778,4 +778,20 @@ class PlanDataInjectorSuite extends AnyFunSuite {
     assert(injectedSource.getIcebergScan.getCommon.getRequiredSchemaCount == 2)
     assert(injectedSource.getIcebergScan.getFileScanTasks(0).getDataFilePath == "source.parquet")
   }
+
+  test("contrib UDF message SPI validates actual protobuf objects before traversal") {
+    val common =
+      OperatorOuterClass.NativeScanCommon.newBuilder().setSource("typed-source").build()
+    val messages = PlanDataInjector.checkedFunctionMessages("test-provider", Seq(common))
+    assert(messages.size == 1)
+    assert(messages.head eq common)
+    Seq[AnyRef](new Object, null).foreach { invalid =>
+      val error = intercept[org.apache.comet.CometRuntimeException] {
+        PlanDataInjector.checkedFunctionMessages("test-provider", Seq(invalid))
+      }
+      assert(error.getMessage.contains("test-provider"))
+      assert(error.getMessage.contains("non-protobuf UDF function message"))
+    }
+  }
+
 }

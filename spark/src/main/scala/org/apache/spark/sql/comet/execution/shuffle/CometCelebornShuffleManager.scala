@@ -170,8 +170,9 @@ class CometCelebornShuffleManager private[shuffle] (
           .computeIfAbsent(handle.shuffleId, _ => new ConcurrentHashMap[Int, AnyRef]())
           .put(resolved.celebornShuffleId, resolved.client)
 
-        val spec = dependency.nativeShuffleSpec.getOrElse {
-          throw new IllegalStateException("Native Comet shuffle has no execution plan")
+        val spec = Option(dependency.nativeShuffleSpec).flatten.orNull
+        val sqlConf = dependency.nativeShuffleSqlConf.getOrElse {
+          throw new IllegalStateException("Native Comet shuffle has no captured session settings")
         }
         new CometNativeShuffleWriter[K, V](
           spec,
@@ -190,7 +191,7 @@ class CometCelebornShuffleManager private[shuffle] (
             CelebornNativeShuffleDestination(
               resolved.pusher,
               CometCelebornShuffleManager.maxNativeFrameBytes(
-                spec.sqlConf.withConf(CometConf.COMET_SHUFFLE_RSS_MAX_FRAME_BYTES.get().toInt),
+                sqlConf.withConf(CometConf.COMET_SHUFFLE_RSS_MAX_FRAME_BYTES.get().toInt),
                 resolved.pusher),
               dependency.partitioner.numPartitions,
               commitAuthorized = true,

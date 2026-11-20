@@ -4109,4 +4109,116 @@ class CometDeltaNativeScanSuite extends CometDeltaTestBase {
       }
     }
   }
+
+  test("stage task binaries over delta scans do not repeat the query text per expression") {
+    withTempDir { dir =>
+      val paths = (0 until 20).map { i =>
+        val path = new File(dir, s"t$i").getAbsolutePath
+        spark
+          .range(0, 200)
+          .selectExpr("id", s"id % ${i + 3} AS k", "concat('data/', cast(id AS string)) AS name")
+          .write
+          .format("delta")
+          .save(path)
+        path
+      }
+      val sql = paths
+        .map(p =>
+          s"SELECT k, name FROM delta.`$p` WHERE name LIKE 'data/%' AND NOT endswith(name, '/') " +
+            "AND id % 7 <> 3 AND length(name) > 5")
+        .mkString("SELECT k, count(*) AS c FROM (\n", "\nUNION ALL\n", "\n) GROUP BY k")
+      def mapStageBytes(cometEnabled: Boolean): Long = {
+        var bytes = 0L
+        withSQLConf(
+          CometConf.COMET_ENABLED.key -> cometEnabled.toString,
+          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+          val df = spark.sql(sql)
+          val serializer = org.apache.spark.SparkEnv.get.closureSerializer.newInstance()
+          val deps = mutable.ArrayBuffer.empty[org.apache.spark.ShuffleDependency[_, _, _]]
+          def walk(rdd: org.apache.spark.rdd.RDD[_]): Unit = {
+            rdd.partitions
+            rdd.dependencies.foreach {
+              case d: org.apache.spark.ShuffleDependency[_, _, _] => deps += d
+              case d => walk(d.rdd)
+            }
+          }
+          walk(df.queryExecution.executedPlan.execute())
+          deps.foreach { d =>
+            walk(d.rdd)
+            bytes = math.max(bytes, serializer.serialize((d.rdd, d)).limit().toLong)
+          }
+          checkSparkAnswer(df)
+        }
+        bytes
+      }
+      val vanilla = mapStageBytes(cometEnabled = false)
+      val comet = mapStageBytes(cometEnabled = true)
+      // scalastyle:off println
+      println(s"delta task binary: vanilla=$vanilla comet=$comet sql=${sql.length}")
+      // scalastyle:on println
+      assert(comet < vanilla + 20L * sql.length * 3, s"vanilla=$vanilla comet=$comet")
+    }
+  }
+
+  test("query-text interning preserves Delta opaque payload keys and SQL context positions") {
+    val context = org.apache.comet.serde.ExprOuterClass.QueryContext
+      .newBuilder()
+      .setSqlText("select value / 0 from delta_source")
+      .setStartIndex(7)
+      .setStopIndex(15)
+      .setLine(1)
+      .setStartPosition(7)
+      .build()
+    val common = org.apache.comet.serde.OperatorOuterClass.NativeScanCommon
+      .newBuilder()
+      .setSource("delta-source")
+      .addDataFilters(
+        org.apache.comet.serde.ExprOuterClass.Expr.newBuilder().setQueryContext(context))
+      .build()
+    val key = org.apache.spark.sql.comet.DeltaPlanDataInjector.sourceKey("file:/table", common)
+    val scan = org.apache.comet.serde.OperatorOuterClass.DeltaSparkScan
+      .newBuilder()
+      .setCommon(common)
+      .setDeltaCommon(
+        org.apache.comet.serde.OperatorOuterClass.DeltaSparkScanCommon
+          .newBuilder()
+          .setTableRoot("file:/table")
+          .setSourceKey(key))
+      .build()
+    val op = org.apache.comet.serde.OperatorOuterClass.Operator
+      .newBuilder()
+      .setContribScan(org.apache.comet.contrib.delta.DeltaSparkScanEnvelope.pack(scan))
+      .build()
+    val pool = new org.apache.comet.serde.QueryContextInterner.Pool(Seq("existing text"))
+    val interner = new org.apache.spark.sql.comet.DeltaPlanDataInjector
+    // The UDF collector must see through the generic contrib bytes, both before and after
+    // partition injection. Protobuf reflection by itself cannot traverse this envelope.
+    assert(interner.embeddedFunctionMessages(op) == Seq(scan))
+    assert(interner.commonFunctionMessages(scan.toByteArray) == Seq(scan))
+    val injected = interner.inject(
+      op,
+      scan,
+      org.apache.comet.serde.OperatorOuterClass.DeltaSparkScan
+        .newBuilder()
+        .setFilePartition(
+          org.apache.comet.serde.OperatorOuterClass.DeltaSparkFilePartition.newBuilder())
+        .build()
+        .toByteArray)
+    assert(!interner.canInject(injected))
+    assert(
+      interner.embeddedFunctionMessages(injected) ==
+        Seq(org.apache.comet.contrib.delta.DeltaSparkScanEnvelope.unpack(injected)))
+    val after = interner.internScan(op, pool)
+    val decoded = org.apache.comet.contrib.delta.DeltaSparkScanEnvelope.unpack(after)
+    assert(decoded.getDeltaCommon == scan.getDeltaCommon)
+    assert(interner.getKey(after) == Some(key))
+    assert(
+      org.apache.spark.sql.comet.DeltaPlanDataInjector
+        .sourceKey("file:/table", decoded.getCommon) == key)
+    val indexed = decoded.getCommon.getDataFilters(0).getQueryContext
+    assert(indexed.getSqlTextIdx == 1 && indexed.getSqlText.isEmpty)
+    assert(indexed.toBuilder.clearSqlTextIdx().setSqlText(context.getSqlText).build() == context)
+    assert(pool.added == Seq(context.getSqlText))
+  }
+
 }

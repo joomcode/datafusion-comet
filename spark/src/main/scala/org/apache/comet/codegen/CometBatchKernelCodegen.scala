@@ -179,9 +179,9 @@ object CometBatchKernelCodegen extends Logging with CometExprTraitShim with Come
     // state advances correctly across batches, and each occurrence gets its own entry
     // (`DispatchOccurrence`).
     //
-    // `ExecSubqueryExpression` (`ScalarSubquery`, `InSubqueryExec`): rejected. The tree is
-    // closure-serialized at plan time, before Spark has run the subquery, so the deserialized
-    // copy never holds a result and `ScalarSubquery.doGenCode` fails with "has not finished".
+    // ScalarSubquery nodes are lowered to BoundReference inputs by CometScalaUDF before
+    // this gate. Resolved scalar values travel as runtime arguments, never in the closure.
+    // Other ExecSubqueryExpression nodes remain rejected below.
     //
     // `Unevaluable`: rejected by default. `isCodegenInertUnevaluable` exempts version-specific
     // leaves that are `Unevaluable` but never invoked by codegen (e.g. Spark 4.0's
@@ -474,7 +474,8 @@ object CometBatchKernelCodegen extends Logging with CometExprTraitShim with Come
       // leaf-only-children roots, where it is exact; see [[canShortCircuitNulls]].
       val nullCheck = inputOrdinals
         .map(ord =>
-          s"this.col$ord.${CometBatchKernelCodegenInput.nullCheckMethod(inputSchema(ord))}(i)")
+          s"this.col$ord.${CometBatchKernelCodegenInput.nullCheckMethod(inputSchema(ord))}" +
+            s"(i & this.col${ord}_rowMask)")
         .mkString(" || ")
       // `NullIntolerant` only constrains "any input null -> output null"; it does NOT promise
       // that non-null inputs always produce non-null output. `MakeTimestamp(failOnError=false)`

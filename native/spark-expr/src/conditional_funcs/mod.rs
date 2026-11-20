@@ -17,10 +17,12 @@
 
 mod case_when;
 mod if_expr;
+mod logical_short_circuit;
 mod null_short_circuit;
 
 pub use case_when::{coerce_to_common_type, create_case_when, create_if_expr, CaseWhenExpr};
 pub use if_expr::IfExpr;
+pub use logical_short_circuit::LogicalShortCircuit;
 pub use null_short_circuit::NullShortCircuit;
 
 /// Whether an expression may be evaluated on rows Spark would skip without changing its value,

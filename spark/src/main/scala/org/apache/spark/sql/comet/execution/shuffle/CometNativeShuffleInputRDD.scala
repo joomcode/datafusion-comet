@@ -50,13 +50,15 @@ private[shuffle] class CometNativeShuffleInputRDD(
       sc,
       inputRDDs.map(rdd => new OneToOneDependency(rdd))) {
 
+  @volatile private[shuffle] var nativeShuffleSpec: NativeShuffleSpec = _
+
   /**
    * Give local fallback its own scheduling RDD over the original upstream inputs. Spark aborts
    * jobs whose RDD ancestry contains the failed stage's RDD, so reusing this instance or wrapping
    * it in a narrow dependency lets a late remote failure abort the local replacement as well.
    */
-  private[shuffle] def copyForLocalShuffle(): CometNativeShuffleInputRDD =
-    new CometNativeShuffleInputRDD(
+  private[shuffle] def copyForLocalShuffle(): CometNativeShuffleInputRDD = {
+    val copy = new CometNativeShuffleInputRDD(
       context,
       inputRDDs,
       numPartitionsParam,
@@ -64,6 +66,9 @@ private[shuffle] class CometNativeShuffleInputRDD(
       spillMetricNode,
       perPartitionByKey,
       positionalRoundRobin)
+    copy.nativeShuffleSpec = nativeShuffleSpec
+    copy
+  }
 
   /**
    * Spark's `isOrderSensitive` rule, applied to the RDD graph below the native plan. Spark only
@@ -122,7 +127,8 @@ private[shuffle] class CometNativeShuffleInputRDD(
       partition.index,
       inputObjects,
       shuffleBlockIters,
-      partition.planDataByKey)
+      partition.planDataByKey,
+      nativeShuffleSpec)
   }
 
   override def getPreferredLocations(split: Partition): Seq[String] = {
@@ -159,7 +165,8 @@ private[shuffle] class CometNativeShuffleInputIterator(
     val partitionIndex: Int,
     val inputObjects: Array[Object],
     val shuffleBlockIterators: Map[Int, CometShuffleBlockIterator],
-    val planDataByKey: Map[String, Array[Byte]])
+    val planDataByKey: Map[String, Array[Byte]],
+    val nativeShuffleSpec: NativeShuffleSpec = null)
     extends Iterator[Product2[Int, ColumnarBatch]] {
 
   override def hasNext: Boolean = false

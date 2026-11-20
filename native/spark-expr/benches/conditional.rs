@@ -21,16 +21,19 @@
 //! patterns that are common in TPC-H and TPC-DS, the null guard Comet puts around a divisor, and a
 //! branch that can fail, which must still be evaluated only for the rows that choose it.
 
-use arrow::array::{ArrayRef, Int32Array, Int64Array, StringArray};
+use arrow::array::{ArrayRef, BooleanArray, Int32Array, Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use datafusion::common::config::ConfigOptions;
 use datafusion::common::ScalarValue;
-use datafusion::logical_expr::Operator;
+use datafusion::functions::string::{ends_with::EndsWithFunc, starts_with::StartsWithFunc};
+use datafusion::logical_expr::{Operator, ScalarUDF};
 use datafusion::physical_expr::expressions::{lit, BinaryExpr, Column, IsNotNullExpr};
-use datafusion::physical_expr::PhysicalExpr;
+use datafusion::physical_expr::{PhysicalExpr, ScalarFunctionExpr};
 use datafusion_comet_spark_expr::{
-    create_case_when, Cast, EvalMode, IfExpr, NormalizeNaNAndZero, SparkCastOptions,
+    create_case_when, Cast, EvalMode, IfExpr, LogicalShortCircuit, NormalizeNaNAndZero,
+    SparkCastOptions,
 };
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
@@ -351,6 +354,159 @@ fn case_selective_parse_3_branches() -> Expr {
     )
 }
 
+/// Paired versions of the same valid AND/OR fixture. The baseline is DataFusion's existing
+/// BinaryExpr; the candidate is the Comet factory used by the planner. Guard selectivity and
+/// NULLs change how many RHS rows are needed. Numeric strings are always valid so the fixture
+/// can assert complete value equivalence before either implementation is measured.
+fn logical_short_circuit_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("logical_short_circuit");
+    group.throughput(Throughput::Elements(NUM_ROWS as u64));
+    for is_and in [true, false] {
+        for nullable in [false, true] {
+            for selected_percent in [5, 50, 95] {
+                let guard: BooleanArray = (0..NUM_ROWS)
+                    .map(|i| {
+                        if nullable && i % 11 == 0 {
+                            None
+                        } else {
+                            let selected = i % 100 < selected_percent;
+                            Some(if is_and { selected } else { !selected })
+                        }
+                    })
+                    .collect();
+                let text = StringArray::from_iter_values(
+                    (0..NUM_ROWS).map(|i| format!("{}", i as i64 - 4096)),
+                );
+                let right = BooleanArray::from_iter((0..NUM_ROWS).map(|i| Some(i % 3 == 0)));
+                let schema = Arc::new(Schema::new(vec![
+                    Field::new("guard", DataType::Boolean, nullable),
+                    Field::new("text", DataType::Utf8, false),
+                    Field::new("right", DataType::Boolean, false),
+                ]));
+                let batch = RecordBatch::try_new(
+                    Arc::clone(&schema),
+                    vec![Arc::new(guard), Arc::new(text), Arc::new(right)],
+                )
+                .unwrap();
+                for fallible in [false, true] {
+                    let lhs: Expr = Arc::new(Column::new("guard", 0));
+                    let rhs: Expr = if fallible {
+                        let cast: Expr = Arc::new(Cast::new(
+                            Arc::new(Column::new("text", 1)),
+                            DataType::Int64,
+                            SparkCastOptions::new_without_timezone(EvalMode::Ansi),
+                            None,
+                            None,
+                        ));
+                        binary(cast, Operator::Gt, lit(0i64))
+                    } else {
+                        Arc::new(Column::new("right", 2))
+                    };
+                    let baseline = binary(
+                        Arc::clone(&lhs),
+                        if is_and { Operator::And } else { Operator::Or },
+                        Arc::clone(&rhs),
+                    );
+                    let candidate =
+                        LogicalShortCircuit::try_new(lhs, rhs, is_and, &schema).unwrap();
+                    if !fallible {
+                        assert!(
+                            candidate.is::<BinaryExpr>(),
+                            "pure RHS must retain exactly the upstream kernel"
+                        );
+                    }
+                    let values = |e: &Expr| {
+                        let array = e.evaluate(&batch).unwrap().into_array(NUM_ROWS).unwrap();
+                        arrow::array::as_boolean_array(&array)
+                            .iter()
+                            .collect::<Vec<_>>()
+                    };
+                    assert_eq!(values(&baseline), values(&candidate));
+                    let name = format!(
+                        "{}_nulls{}_selected{}_{}",
+                        if is_and { "and" } else { "or" },
+                        nullable,
+                        selected_percent,
+                        if fallible { "valid_ansi_cast" } else { "pure" }
+                    );
+                    for (label, expr) in [("df", baseline), ("comet", candidate)] {
+                        group.bench_function(format!("{name}/{label}"), |b| {
+                            b.iter(|| black_box(expr.evaluate(black_box(&batch)).unwrap()))
+                        });
+                    }
+                }
+            }
+        }
+    }
+    group.finish();
+}
+
+/// Ordinary string predicates are immutable/nonthrowing, but the conservative generic
+/// function proof may still choose the ordered row loop. Keep that hot-path cost visible.
+fn logical_string_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("logical_known_string");
+    group.throughput(Throughput::Elements(NUM_ROWS as u64));
+    for nullable in [false, true] {
+        let text: StringArray = (0..NUM_ROWS)
+            .map(|i| {
+                if nullable && i % 11 == 0 {
+                    None
+                } else {
+                    Some(i.to_string())
+                }
+            })
+            .collect();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "text",
+            DataType::Utf8,
+            nullable,
+        )]));
+        let batch = RecordBatch::try_new(Arc::clone(&schema), vec![Arc::new(text)]).unwrap();
+        let lhs: Expr = Arc::new(
+            ScalarFunctionExpr::try_new(
+                Arc::new(ScalarUDF::new_from_impl(StartsWithFunc::new())),
+                vec![Arc::new(Column::new("text", 0)), lit("1")],
+                &schema,
+                Arc::new(ConfigOptions::default()),
+            )
+            .unwrap(),
+        );
+        let rhs: Expr = Arc::new(
+            ScalarFunctionExpr::try_new(
+                Arc::new(ScalarUDF::new_from_impl(EndsWithFunc::new())),
+                vec![Arc::new(Column::new("text", 0)), lit("2")],
+                &schema,
+                Arc::new(ConfigOptions::default()),
+            )
+            .unwrap(),
+        );
+        for is_and in [false, true] {
+            let baseline = binary(
+                Arc::clone(&lhs),
+                if is_and { Operator::And } else { Operator::Or },
+                Arc::clone(&rhs),
+            );
+            let candidate =
+                LogicalShortCircuit::try_new(Arc::clone(&lhs), Arc::clone(&rhs), is_and, &schema)
+                    .unwrap();
+            let values = |expr: &Expr| {
+                let array = expr.evaluate(&batch).unwrap().into_array(NUM_ROWS).unwrap();
+                arrow::array::as_boolean_array(&array)
+                    .iter()
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(values(&baseline), values(&candidate));
+            let name = format!("{}_nulls{}", if is_and { "and" } else { "or" }, nullable);
+            for (label, expr) in [("df", baseline), ("comet", candidate)] {
+                group.bench_function(format!("{name}/{label}"), |b| {
+                    b.iter(|| black_box(expr.evaluate(black_box(&batch)).unwrap()))
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
 fn criterion_benchmark(c: &mut Criterion) {
     let no_nulls = make_batch(0.0, false);
     let sparse_nulls = make_batch(0.1, false);
@@ -434,6 +590,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         });
     }
     group.finish();
+    logical_short_circuit_benchmark(c);
+    logical_string_benchmark(c);
 }
 
 criterion_group!(benches, criterion_benchmark);

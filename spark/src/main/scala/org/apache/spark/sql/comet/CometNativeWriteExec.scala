@@ -46,6 +46,7 @@ import org.apache.spark.util.{SerializableConfiguration, Utils}
 
 import org.apache.comet.serde.OperatorOuterClass.Operator
 import org.apache.comet.serde.operator.NativeWriteUtils
+import org.apache.comet.udf.codegen.CometUdfFunctionPool
 
 /**
  * Native Parquet writes on Spark 3.x, where Comet replaces the entire write command.
@@ -60,7 +61,7 @@ import org.apache.comet.serde.operator.NativeWriteUtils
  *   The JVM data-writing command restored when Comet reverts a transition-heavy stage
  */
 case class CometNativeWriteExec(
-    nativeOp: Operator,
+    @transient nativeOp: Operator,
     @transient override val originalPlan: DataWritingCommandExec,
     child: SparkPlan,
     outputPath: String,
@@ -186,6 +187,8 @@ case class CometNativeWriteExec(
     val numPartitions = writeRDD.getNumPartitions
     val childSchema = CometUtils.fromAttributes(child.output)
     val capturedNativeOp = nativeOp
+    // Capture live functions on the driver, before this write callback enters a task binary.
+    val udfFunctions = CometUdfFunctionPool.capture(capturedNativeOp, Array.emptyByteArray)
     val capturedCommitter = committer
     val capturedJobTrackerID = jobTrackerID
     val capturedOutputPath = outputPath
@@ -196,6 +199,7 @@ case class CometNativeWriteExec(
     sparkContext.runJob(
       writeRDD,
       (context: TaskContext, batches: Iterator[ColumnarBatch]) => {
+        udfFunctions.register(context)
         val taskContext =
           CometNativeWriteExec.createTaskContext(hadoopConf.value, capturedJobTrackerID, context)
         capturedCommitter.setupTask(taskContext)

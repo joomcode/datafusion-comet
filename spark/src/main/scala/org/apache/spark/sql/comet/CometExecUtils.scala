@@ -34,6 +34,7 @@ import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.comet.serde.OperatorOuterClass
 import org.apache.comet.serde.OperatorOuterClass.Operator
 import org.apache.comet.serde.QueryPlanSerde.{exprToProto, serializeDataType}
+import org.apache.comet.udf.codegen.CometUdfFunctionPool
 
 object CometExecUtils {
 
@@ -70,7 +71,8 @@ object CometExecUtils {
     val numParts = childPlan.getNumPartitions
     // Serialize the plan once before mapping to avoid repeated serialization per partition
     val limitOp = CometExecUtils.getLimitNativePlan(outputAttribute, limit, offset).get
-    val serializedPlan = CometExec.serializeNativePlan(limitOp)
+    val serializedPlan =
+      CometUdfFunctionPool.capture(limitOp, CometExec.serializeNativePlan(limitOp))
     val inputSchema = Utils.fromAttributes(outputAttribute)
     val sqlConf = CapturedSQLConf.capture()
     childPlan.mapPartitionsWithIndexInternal { case (idx, iter) =>

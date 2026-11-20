@@ -19,6 +19,8 @@
 
 package org.apache.spark.sql.comet
 
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.{Partition, TaskContext}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
@@ -39,6 +41,7 @@ import com.google.common.base.Objects
 
 import org.apache.comet.parquet.CometParquetUtils
 import org.apache.comet.serde.OperatorOuterClass.Operator
+import org.apache.comet.serde.QueryContextInterner
 import org.apache.comet.serde.QueryPlanSerde.exprToProto
 import org.apache.comet.shims.ShimFileFormat
 
@@ -56,7 +59,7 @@ import org.apache.comet.shims.ShimFileFormat
  * each executor task receives only its partition's file list rather than all files.
  */
 case class CometNativeScanExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     @transient relation: HadoopFsRelation,
     override val output: Seq[Attribute],
     requiredSchema: StructType,
@@ -67,7 +70,7 @@ case class CometNativeScanExec(
     tableIdentifier: Option[TableIdentifier],
     disableBucketedScan: Boolean = false,
     originalPlan: FileSourceScanExec,
-    override val serializedPlanOpt: SerializedPlan,
+    @transient override val serializedPlanOpt: SerializedPlan,
     @transient scan: CometScanExec, // Lazy access to file partitions without serializing with plan
     sourceKey: String) // Key for PlanDataInjector to match common+partition data at runtime
     extends CometLeafExec
@@ -246,7 +249,12 @@ case class CometNativeScanExec(
 
   override def doExecuteColumnar(): RDD[ColumnarBatch] = {
     val nativeMetrics = CometMetricNode.fromCometPlan(this)
-    val serializedPlan = CometExec.serializeNativePlan(nativeOp)
+    val plan = QueryContextInterner.intern(nativeOp)
+    val sqlTextPool = new QueryContextInterner.Pool(plan.getSqlTextPoolList.asScala.toSeq)
+    val commonByKey =
+      PlanDataInjector.internCommons(plan, Map(sourceKey -> commonData), sqlTextPool)
+    val serializedPlan = CometExec.serializeNativePlan(
+      plan.toBuilder.addAllSqlTextPool(sqlTextPool.added.asJava).build())
 
     // Encryption config must be passed to each executor task
     val hadoopConf = relation.sparkSession.sessionState
@@ -263,7 +271,7 @@ case class CometNativeScanExec(
     new CometExecRDD(
       sparkContext,
       Seq.empty,
-      Map(sourceKey -> commonData),
+      commonByKey,
       Map(sourceKey -> perPartitionData),
       serializedPlan,
       PlanDataInjector.planFingerprint(serializedPlan),

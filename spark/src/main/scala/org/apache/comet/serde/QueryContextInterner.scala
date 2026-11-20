@@ -21,8 +21,8 @@ package org.apache.comet.serde
 
 import scala.collection.mutable
 
+import com.google.protobuf.{CodedInputStream, CodedOutputStream, Message, WireFormat}
 import com.google.protobuf.Descriptors.FieldDescriptor
-import com.google.protobuf.Message
 
 import org.apache.comet.serde.OperatorOuterClass.Operator
 
@@ -79,6 +79,75 @@ object QueryContextInterner {
     } else {
       builder.build()
     }
+  }
+
+  def sqlTextPool(planBytes: Array[Byte]): IndexedSeq[String] = {
+    val in = CodedInputStream.newInstance(planBytes)
+    val pool = IndexedSeq.newBuilder[String]
+    var tag = in.readTag()
+    while (tag != 0) {
+      if (WireFormat.getTagFieldNumber(tag) == Operator.SQL_TEXT_POOL_FIELD_NUMBER &&
+        WireFormat.getTagWireType(tag) == WireFormat.WIRETYPE_LENGTH_DELIMITED) {
+        pool += in.readStringRequireUtf8()
+      } else {
+        if (!in.skipField(tag)) {
+          throw new com.google.protobuf.InvalidProtocolBufferException(
+            "Unexpected end group in native plan")
+        }
+      }
+      tag = in.readTag()
+    }
+    pool.result()
+  }
+
+  final class Pool(initial: Seq[String]) {
+    private val indexOf = mutable.HashMap(initial.zipWithIndex: _*)
+    private val extra = mutable.ArrayBuffer.empty[String]
+
+    def index(text: String): Int =
+      indexOf.getOrElseUpdate(
+        text, {
+          extra += text
+          initial.size + extra.size - 1
+        })
+
+    def validateIndex(index: Int): Unit =
+      require(
+        index >= 0 && index < initial.size + extra.size,
+        s"QueryContext SQL text index $index is outside the plan pool")
+
+    def added: Seq[String] = extra.toSeq
+  }
+
+  def internAgainst[M <: Message](message: M, pool: Pool): M = {
+    var changed = false
+    val builder = message.toBuilder
+    walk(
+      builder,
+      ctx =>
+        if (ctx.hasSqlTextIdx) {
+          pool.validateIndex(ctx.getSqlTextIdx)
+          Some(ctx)
+        } else {
+          changed = true
+          Some(ctx.toBuilder.clearSqlText().setSqlTextIdx(pool.index(ctx.getSqlText)).build())
+        })
+    if (changed) builder.build().asInstanceOf[M] else message
+  }
+
+  def internScanCommon(
+      common: OperatorOuterClass.NativeScanCommon,
+      pool: Pool): OperatorOuterClass.NativeScanCommon =
+    internAgainst(common, pool)
+
+  def appendToPool(planBytes: Array[Byte], texts: Seq[String]): Array[Byte] = {
+    if (texts.isEmpty) return planBytes
+    val out = new java.io.ByteArrayOutputStream(planBytes.length + texts.map(_.length + 8).sum)
+    out.write(planBytes)
+    val coded = CodedOutputStream.newInstance(out)
+    texts.foreach(coded.writeString(Operator.SQL_TEXT_POOL_FIELD_NUMBER, _))
+    coded.flush()
+    out.toByteArray
   }
 
   /**

@@ -21,7 +21,7 @@ package org.apache.comet.codegen
 
 import java.util.concurrent.atomic.AtomicLong
 
-import org.apache.spark.sql.catalyst.expressions.{Expression, Nondeterministic, UnaryExpression, Unevaluable}
+import org.apache.spark.sql.catalyst.expressions.{Expression, UnaryExpression, Unevaluable}
 import org.apache.spark.sql.types.DataType
 
 /**
@@ -50,7 +50,7 @@ private[comet] object DispatchOccurrence {
    * Deterministic trees are returned as is, so identical ones keep sharing one compiled kernel.
    */
   def tag(expr: Expression): Expression =
-    if (expr.exists(_.isInstanceOf[Nondeterministic])) {
+    if (expr.exists(!_.deterministic)) {
       DispatchOccurrence(expr, nextOccurrence.getAndIncrement())
     } else {
       expr

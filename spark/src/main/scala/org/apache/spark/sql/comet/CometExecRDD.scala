@@ -30,6 +30,8 @@ import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.spark.util.SerializableConfiguration
 
 import org.apache.comet.{CometExecIterator, CometRuntimeException, CometShuffleBlockIterator}
+import org.apache.comet.serde.OperatorOuterClass.Operator
+import org.apache.comet.udf.codegen.CometUdfFunctionPool
 
 /**
  * Partition that carries per-partition planning data, avoiding closure capture of all partitions.
@@ -94,6 +96,11 @@ private[spark] class CometExecRDD(
       perPartitionByKey.map { case (key, arr) => s"$key -> ${arr.length}" }.mkString(", "))
 
   private val sqlConf = CapturedSQLConf.capture()
+  // Capture live references while constructing this RDD on the driver. Spark serializes the
+  // payload afresh for every job, in the same stream as the rest of that task binary.
+  private val udfFunctions = CometUdfFunctionPool.capture(
+    PlanDataInjector.functionMessages(Operator.parseFrom(serializedPlan), commonByKey),
+    serializedPlan)
 
   override protected def getPartitions: Array[Partition] = {
     (0 until numPartitions).map { idx =>
@@ -109,6 +116,7 @@ private[spark] class CometExecRDD(
     sqlConf.withConf(computeNative(split, context))
 
   private def computeNative(split: Partition, context: TaskContext): Iterator[ColumnarBatch] = {
+    udfFunctions.register(context)
     // Must precede resolveInputObjects and the CometExecIterator: completion listeners run in
     // reverse registration order, so registering first means this listener runs last, after
     // nested native blocks and the iterator have published their final metric values.

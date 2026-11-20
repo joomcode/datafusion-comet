@@ -37,10 +37,10 @@ import org.apache.comet.serde.OperatorOuterClass.Operator
  * consumes the range, `EliminateRedundantTransitions` restores Spark's `RangeExec`.
  */
 case class CometRangeExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     @transient override val originalPlan: RangeExec,
     override val output: Seq[Attribute],
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometLeafExec {
 
   override def simpleString(maxFields: Int): String = {

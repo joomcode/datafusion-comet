@@ -81,14 +81,14 @@ object CometLocalTopKExec {
 
 /** Selects candidates within one Spark partition in the same native execution as its scan. */
 case class CometLocalTopKExec(
-    override val nativeOp: Operator,
+    @transient override val nativeOp: Operator,
     override val originalPlan: SparkPlan,
     override val output: Seq[Attribute],
     limit: Int,
     sortOrder: Seq[SortOrder],
     dynamicFilterEnabled: Boolean,
     child: SparkPlan,
-    override val serializedPlanOpt: SerializedPlan)
+    @transient override val serializedPlanOpt: SerializedPlan)
     extends CometUnaryExec {
 
   override def sparkFallback(newChildren: Seq[SparkPlan]): SparkPlan = newChildren match {

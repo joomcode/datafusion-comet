@@ -1,11 +1,11 @@
 {
   "created_on": "2026-11-17",
-  "updated_on": "2026-11-20",
+  "updated_on": "2026-11-21",
   "purpose": "Durable approved migration package; update checksums when documents intentionally change.",
   "files": [
     {
       "path": "AGENTS.md",
-      "sha256": "d5ada653661a8aa7fd6137f6646583e220e900a27d704cb26eb956b805b04263"
+      "sha256": "242a432f67121b46ef70f5f487d429334e261708d2e123f952899706e98ff13b"
     },
     {
       "path": "CHECKPOINT-VERIFICATION.json",
@@ -13,7 +13,7 @@
     },
     {
       "path": "CLEANUP.md",
-      "sha256": "a4ce42248d67274ce57d6811193c42f05dfbbc931556dda05001c49d066fabd9"
+      "sha256": "21d824a601432765b70fd22db2311d9a478d37deee2b519816cdfde6634c81c2"
     },
     {
       "path": "G01-CLOSEOUT.md",
@@ -116,8 +116,20 @@
       "sha256": "228fb731defad67b8709cf19a1d87b575fe9c46394269ff85252b693ae4e9d3e"
     },
     {
+      "path": "G08-performance.md",
+      "sha256": "524a8572bacf560209b6aad326f13993bf9ef06ce557b04b710d9843236dce55"
+    },
+    {
+      "path": "G08-report.md",
+      "sha256": "d360eb8c463890ebbaa3b36dac99592e0bc43033beeaa6b8189de83e89d96edd"
+    },
+    {
+      "path": "G08-results.json",
+      "sha256": "616a8056c6e0ab3ca4ec0bb2d2c0ce2919480d175ad0ec51635f09c2f5287fae"
+    },
+    {
       "path": "HANDOFF.md",
-      "sha256": "464689d558aa0a7baf90025f64036fb1c8e1592348736b6f5d7b61ae1457afd5"
+      "sha256": "cddc0f201ed83ca14214308516e10623a86704e2aa7e862f64ffb7a05383f349"
     },
     {
       "path": "NETWORK.md",
@@ -129,7 +141,7 @@
     },
     {
       "path": "PAUSED.md",
-      "sha256": "b9b4c40231f15c164d605d00f20b71a9f30489955536e9c7ae6aabc47b898bfa"
+      "sha256": "1ba589026bf92dbab33ecbb7ded994bd4c07a01686ff42e5973a8ddfc2d13714"
     },
     {
       "path": "PERFORMANCE.md",
@@ -141,11 +153,11 @@
     },
     {
       "path": "README.md",
-      "sha256": "af69f834ed0b1f37c9640ef7913fd587342767295aabd75f3672f700dc3659fc"
+      "sha256": "66fb464500bfd0e5cf0ea1df737dcf62f55e508bee79dd0c8158f72d998c763d"
     },
     {
       "path": "STATE.json",
-      "sha256": "edd552d01afcef6495151d2441552dcf1ce6c200600ab37f09ea0faf41627515"
+      "sha256": "d755dcbaa62bea9c39e40cde34ee0aa395004bec75d24e8686b294fececfb3b1"
     },
     {
       "path": "approved-plan.json",
@@ -157,7 +169,7 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "5803c6ed7e330954a4539a2505307ee80cef033c731cceb2627729c97428d9d6"
+      "sha256": "a8ce4743375a9fd5ebbc39ca74701291ee004da118c9999302c72d6099f57f6b"
     },
     {
       "path": "correctness-test-plan.txt",
@@ -165,11 +177,11 @@
     },
     {
       "path": "created-files.txt",
-      "sha256": "c17b809d68990594a6033af7113cbc66a9788cc1fa78495a9ceadcf0c6009673"
+      "sha256": "34f689f0d45e29820e910ce2f5f11e8234edd8d011bb9d377af8b70012e7a560"
     },
     {
       "path": "decisions.json",
-      "sha256": "15e18233be3c7c6ef29b3842b195d85571c6f24347023aa590a4bd61216467be"
+      "sha256": "175237c0bdb9ecc64175a54b17e7ead668bb7b4aa5dbd97bf55b64b0e2cdf0f6"
     },
     {
       "path": "feature-register.json",

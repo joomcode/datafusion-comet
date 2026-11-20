@@ -622,6 +622,15 @@ object CometConf extends ShimCometConf {
       .booleanConf
       .createWithDefault(true)
 
+  val COMET_EXEC_FILTER_SHORT_CIRCUIT_JVM_DISPATCH_ENABLED: ConfigEntry[Boolean] =
+    conf("spark.comet.exec.filter.shortCircuitJvmDispatch.enabled")
+      .category(CATEGORY_EXEC)
+      .doc("Whether a deterministic native filter uses CASE masks for JVM-dispatched conjuncts " +
+        "after a proven eager-safe prefix. Mandatory Spark NULL/evaluation-order guards remain " +
+        "active when this optimization is disabled. Ambiguous ordering falls back to Spark.")
+      .booleanConf
+      .createWithDefault(true)
+
   val COMET_SHUFFLE_READ_COALESCE_ENABLED: ConfigEntry[Boolean] =
     conf("spark.comet.shuffle.read.coalesce.enabled")
       .category(CATEGORY_SHUFFLE)

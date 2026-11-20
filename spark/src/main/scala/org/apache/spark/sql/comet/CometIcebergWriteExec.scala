@@ -39,6 +39,7 @@ import com.google.protobuf.CodedOutputStream
 import org.apache.comet.CometExecIterator
 import org.apache.comet.iceberg.IcebergReflection
 import org.apache.comet.serde.OperatorOuterClass.Operator
+import org.apache.comet.udf.codegen.CometUdfFunctionPool
 
 /**
  * Native variant of [[IcebergWriteExec]]. Drives the iceberg-rust writer stack via Comet's native
@@ -68,7 +69,7 @@ import org.apache.comet.serde.OperatorOuterClass.Operator
  *   with this spec id; required because iceberg-rust's `DataFile` is spec-agnostic at the wire.
  */
 case class CometIcebergWriteExec(
-    nativeOp: Operator,
+    @transient nativeOp: Operator,
     @transient override val originalPlan: IcebergWriteExec,
     child: SparkPlan,
     override val output: Seq[Attribute],
@@ -241,8 +242,10 @@ case class CometIcebergWriteExec(
     // column each (see `build_output_schema` in `iceberg_write.rs`).
     val numOutputCols = 2
     val capturedNativeOp = nativeOp
+    val udfFunctions = CometUdfFunctionPool.capture(capturedNativeOp, Array.emptyByteArray)
 
     childRDD.mapPartitionsInternal { iter =>
+      udfFunctions.register(TaskContext.get())
       val partitionId = TaskContext.getPartitionId()
       val taskAttemptId = TaskContext.get().taskAttemptId()
 
