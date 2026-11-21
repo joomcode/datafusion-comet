@@ -1186,5 +1186,16 @@
       "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/user-iceberg-scope-20261121.json",
       "sha256": "5883131ff4304bc7cb4775f516ef89a1dfdfa0e7034dfdfe1fa577dede6cef48"
     }
+  },
+  "g10_shuffle_UDF_key_transport_and_RC25": {
+    "date": "2026-11-21",
+    "source": "Bounded correctness work under the user-authorized G10 qualification; coordinator approved the key-proto interner and additive packaged checks.",
+    "fix": "Prepare/capture/reuse complete driver key-function identities; retain task-payload lookup without global fallback.",
+    "old_tag": "The failure indicates an incomplete G08 migration, not proof of an identical old production defect.",
+    "wrong_result_evidence": "Controlled independent-ID collision hazard, not an observed distributed production corruption.",
+    "packaged_scope": "Preserve all 23 previous cases and 17 Core classes; add 2 existing hash/range tests and 5 Core origin classes: 25 cases, 12 groups, 22 Core and 2 Delta classes per architecture. Seven RC jobs are unchanged.",
+    "final_gate": "All four workflows, 25 actual packaged cases on both native architectures and artifact verification must bind the corrected final SHA.",
+    "scope_preservation": "All 58 active cards, H01, prior decisions, G01-G09 history and 15 backlog requirements are unchanged.",
+    "merge_stable_tag_production_authorized": false
   }
 }

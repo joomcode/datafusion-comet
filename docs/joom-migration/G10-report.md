@@ -337,3 +337,58 @@ difference is the existing generator-only coverage policy. Only shared extended
 plan diagnostics changed for q49/q66 on Spark 3.4/3.5; a Spark 4.0 q66 override
 preserves the prior effective Spark 4.x plan. Three shared base files and that
 one override changed. These are plan checks, not SQL row-result counts.
+
+## Shuffle UDF key transport correctness follow-up
+
+The cf86a3b4 full CI exposed five Spark 3.4 UDF SQL runtime failures. Hash/range
+key serialization happened after the task snapshot, leaving key functions outside
+the transported pool. Two Spark 4.2 old-source regressions reproduce missing-pool
+failures. This is a runtime correctness defect in the incomplete G08 migration,
+not an assertion-only adjustment.
+
+A separate controlled test uses two isolated classloader copies of the process-local
+pool to model independent ID spaces; it does not launch two operating-system
+processes. Mixed IDs can resolve the wrong compatible function (111 instead of 222). This
+is evidence of a real source-derived hazard; the audit did not observe an actual
+production job silently writing incorrect results. The old Joom tag attached pools
+to the complete writer plan, so this finding does not establish the same old
+production defect.
+
+The correction prepares hash/range key protos on the driver, captures every
+child/common/key function together and reuses those exact protos on executors.
+Global fallback remains disabled. Hash seeds, partition counts, range boundaries,
+shared evaluation context, SQL configuration, live per-action snapshots and task
+cleanup retain their contracts. Key contexts also reuse the existing interner.
+Tests compare exact Spark rows/partition IDs and mutable-action snapshots.
+
+The first fixed Spark 4.2 six-suite run passed 130 cases, before final interner
+and Scala 2.12 annotation updates. Its passing outcome is preserved with that
+source limit; the first Spark 3.4 strict attempt failed compilation and ran no
+tests. Actual final source-bound local gates are recorded separately.
+
+Packaged acceptance grows additively from 23 to 25 cases per architecture: two
+existing hash/range UDF shuffle tests and five additional Core origin classes.
+All old cases/origin checks remain, giving 12 groups, 22 Core and two Delta
+classes. The seven-job RC workflow structure is unchanged. All 36 project Python
+controls passed; they do not replace actual packaged JVM runs.
+
+The cf86a3b4 CodeQL, selected Miri107 and RC23/download checks passed, but remain
+historical old-source evidence; its full CI was canceled after the runtime
+failures. Fresh same-SHA full CI, CodeQL, Miri, RC25 on AMD64/ARM64 and downloaded
+final-JAR verification are mandatory. No old JAR is a final corrected deliverable.
+All 58 active cards, historical H01, prior decisions and 15 backlog requirements
+remain preserved. Merge, stable tag and production remain unauthorized.
+
+The original five Spark 3.4 CI SQL fixtures remain a final remote gate, not a
+claimed local external-SBT run. Each unchanged registration must actually pass
+in the next same-SHA full GHA. Local direct hash/range reproductions and pool
+suites cover the corresponding runtime path. A later context-test-only failure
+expected a full query string where original Spark legitimately reports cropped
+context; the corrected oracle compares actual Spark structured context while
+retaining error-class and SQLSTATE checks. Its failed attempt stays preserved.
+
+Runtime qualification grows additively from 94 to 98 required cases: the three
+pool/key regressions and the new key-context interner test. All previous cases,
+88 native window actions and 15 backlog obligations remain required. Final
+source-bound local proof records the seven Spark 4.2 suites and the explicitly
+composed Spark 3.4 result; a failed 33-case invocation is never relabeled green.

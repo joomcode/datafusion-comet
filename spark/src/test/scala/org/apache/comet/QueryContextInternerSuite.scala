@@ -20,9 +20,14 @@
 package org.apache.comet
 
 import scala.collection.mutable
+import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.{CometTestBase, DataFrame}
+import org.apache.spark.sql.catalyst.expressions.Add
+import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, RangePartitioning}
 import org.apache.spark.sql.comet.CometNativeExec
+import org.apache.spark.sql.comet.execution.shuffle.{CometNativeShuffle, CometShuffleDependency, CometShuffleExchangeExec, NativeShuffleSpec}
+import org.apache.spark.sql.vectorized.ColumnarBatch
 
 import org.apache.comet.serde.{ExprOuterClass, OperatorOuterClass, QueryContextInterner}
 
@@ -219,6 +224,116 @@ class QueryContextInternerSuite extends CometTestBase {
         .build()
       intercept[IllegalArgumentException] {
         QueryContextInterner.internScanCommon(bad, pool)
+      }
+    }
+  }
+
+  test("native shuffle keys share the child SQL pool and preserve mandatory ANSI errors") {
+    import org.apache.spark.SparkThrowable
+
+    withSQLConf(
+      "spark.sql.ansi.enabled" -> "true",
+      "spark.sql.adaptive.enabled" -> "false",
+      "spark.sql.shuffle.partitions" -> "3",
+      CometConf.COMET_SHUFFLE_ENABLED.key -> "true",
+      CometConf.COMET_SHUFFLE_MODE.key -> "native") {
+      withTestTable {
+        def nativeExchange(df: DataFrame): CometShuffleExchangeExec = {
+          val exchanges = collect(stripAQEPlan(df.queryExecution.executedPlan)) {
+            case exchange: CometShuffleExchangeExec => exchange
+          }
+          assert(exchanges.length == 1, df.queryExecution.executedPlan)
+          assert(exchanges.head.shuffleType == CometNativeShuffle)
+          exchanges.head
+        }
+
+        val keys = (1 to 6).map(i => s"i1 + $i")
+        Seq("DISTRIBUTE BY", "ORDER BY").foreach { clause =>
+          val query = "SELECT /* " + ("shared shuffle SQL context " * 1024) +
+            " */ k1 + 1 AS shifted, i1, d1 FROM t1 " + clause + " " + keys.mkString(", ")
+          val df = sql(query)
+          checkSparkAnswerAndOperator(df)
+          val exchange = nativeExchange(df)
+          val original = OperatorOuterClass.Operator.parseFrom(
+            exchange.child.asInstanceOf[CometNativeExec].serializedPlanOpt.plan.get)
+          val originalPool = original.getSqlTextPoolList.asScala.toSeq
+          assert(originalPool.contains(query), "the native child must share the full query text")
+          val dependency = exchange.shuffleDependency
+            .asInstanceOf[CometShuffleDependency[Int, ColumnarBatch, ColumnarBatch]]
+          val NativeShuffleSpec(child, _, _, _, _, pool, preparedKeys) =
+            dependency.nativeShuffleSpec.get
+          assert(pool.take(originalPool.length) == originalPool)
+          assert(collectContexts(child) == collectContexts(original))
+          assert(pool.count(_ == query) == 1)
+          assert(preparedKeys.length == keys.length)
+          val keyPlan = OperatorOuterClass.Operator
+            .newBuilder()
+            .setProjection(
+              OperatorOuterClass.Projection
+                .newBuilder()
+                .addAllProjectList(preparedKeys.asJava))
+            .build()
+          val contexts = collectContexts(keyPlan)
+          assert(contexts.length >= keys.length)
+          val fragments = contexts.map { context =>
+            assert(context.hasSqlTextIdx && context.getSqlText.isEmpty)
+            assert(context.getSqlTextIdx >= 0 && context.getSqlTextIdx < pool.length)
+            val restored = pool(context.getSqlTextIdx)
+            assert(restored == query)
+            assert(
+              context.getStartIndex >= 0 &&
+                context.getStopIndex >= context.getStartIndex &&
+                context.getStopIndex < restored.length)
+            restored.substring(context.getStartIndex, context.getStopIndex + 1)
+          }
+          assert(keys.forall(fragments.contains), fragments)
+          assert(
+            preparedKeys.map(_.getSerializedSize.toLong).sum < query.length.toLong,
+            "transported keys must not repeat the large SQL text")
+        }
+
+        Seq("DISTRIBUTE BY", "ORDER BY").foreach { clause =>
+          val query = s"SELECT k1, i1 FROM t1 $clause i1 + 2147483647"
+          val df = sql(query)
+          val keyExpressions = nativeExchange(df).outputPartitioning match {
+            case hash: HashPartitioning => hash.expressions
+            case range: RangePartitioning => range.ordering.map(_.child)
+            case other => fail(s"Expected native hash or range partitioning, found $other")
+          }
+          assert(keyExpressions.exists(_.exists(_.isInstanceOf[Add])))
+          // Hash keys fail in the native writer. Range sampling must raise the same Spark error
+          // before the writer runs; the successful range query above checks its native indices.
+          checkCometOperators(stripAQEPlan(df.queryExecution.executedPlan))
+          val (sparkError, cometError) = checkSparkAnswerMaybeThrows(df)
+          def structuredError(
+              error: Option[Throwable],
+              engine: String): SparkThrowable with Throwable = {
+            val chain = Iterator
+              .iterate(error.getOrElse(fail(s"$engine did not fail")))(_.getCause)
+              .takeWhile(_ != null)
+              .toVector
+            assert(!chain.exists(_.isInstanceOf[CometNativeException]), s"$engine: $error")
+            chain
+              .collect { case failure: SparkThrowable with Throwable => failure }
+              .lastOption
+              .getOrElse(fail(s"$engine did not throw a SparkThrowable: $error"))
+          }
+          val expected = structuredError(sparkError, "Spark")
+          val actual = structuredError(cometError, "Comet")
+          assert(expected.getErrorClass == "ARITHMETIC_OVERFLOW")
+          assert(actual.getClass == expected.getClass)
+          assert(actual.getErrorClass == expected.getErrorClass)
+          assert(actual.getSqlState == expected.getSqlState)
+          def renderedContext(error: Throwable): String = {
+            val message = error.getMessage
+            val start = message.indexOf("== SQL")
+            assert(start >= 0, message)
+            message.substring(start)
+          }
+          // Spark crops long context lines. Compare its entire rendered context, including
+          // position and carets, rather than requiring the unabridged query in an error message.
+          assert(renderedContext(actual) == renderedContext(expected))
+        }
       }
     }
   }

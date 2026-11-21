@@ -55,7 +55,7 @@ import org.apache.comet.{CometConf, CometExplainInfo}
 import org.apache.comet.CometConf.{COMET_SHUFFLE_ENABLED, COMET_SHUFFLE_MODE}
 import org.apache.comet.CometSparkSessionExtensions.{cometCelebornShuffleFallbackReason, hasFallbackReason, isCometCelebornShuffleManagerEnabled, isCometShuffleManagerEnabled, isSpark40Plus, withFallbackReasons}
 import org.apache.comet.rules.WideRowShuffleFallback
-import org.apache.comet.serde.{Compatible, OperatorOuterClass, QueryPlanSerde, SupportLevel, Unsupported}
+import org.apache.comet.serde.{Compatible, ExprOuterClass, OperatorOuterClass, QueryContextInterner, QueryPlanSerde, SupportLevel, Unsupported}
 import org.apache.comet.serde.operator.CometSink
 import org.apache.comet.shims.{CometTypeShim, ShimCometShuffleExchangeExec}
 
@@ -1040,6 +1040,30 @@ object CometShuffleExchangeExec
       positionalRoundRobin,
       childNativeOp.getSqlTextPoolList.asScala.toSeq ++ ctx.addedSqlTexts)
 
+  /** Prepare keys on the driver, before their function graph is serialized with the map task. */
+  private[comet] def preparePartitioningExpressions(
+      outputPartitioning: Partitioning,
+      outputAttributes: Seq[Attribute]): Seq[ExprOuterClass.Expr] = {
+    val expressions = outputPartitioning match {
+      case hash: HashPartitioning => hash.expressions
+      case range: RangePartitioning => range.ordering
+      case _ => Seq.empty
+    }
+    val sharedExpressions = outputPartitioning match {
+      case range: RangePartitioning => range.ordering.map(_.child)
+      case _ => expressions
+    }
+    // Match Spark's one-projection evaluation of partition keys, including its CSE context.
+    val prepared = QueryPlanSerde.withSharedSubexpressions(sharedExpressions) {
+      expressions.flatMap(e => QueryPlanSerde.exprToProto(e, outputAttributes))
+    }
+    if (prepared.length != expressions.length) {
+      throw new UnsupportedOperationException(
+        s"Partitioning $outputPartitioning is not supported.")
+    }
+    prepared
+  }
+
   /**
    * Build a Comet native shuffle dependency for the [[CometShuffleExchangeExec]] case where the
    * shuffle is fed by a [[CometNativeExec]] child. The writer drives the unified
@@ -1091,9 +1115,20 @@ object CometShuffleExchangeExec
     // also @transient (the structural guard against any build path), but we empty it explicitly
     // here too so the map isn't retained on the driver via this dependency. commonByKey stays
     // (O(#scans), not O(#partitions), and the writer still needs it).
-    val augmentedSpec = spec.copy(execContext = spec.execContext.copy(
-      subqueries = spec.execContext.subqueries ++ partitioningSubqueries,
-      perPartitionByKey = Map.empty))
+    // Serializing UDF keys on an executor would allocate process-local function IDs after the
+    // task payload was captured. They could be missing or collide with another driver function.
+    // Carry the exact driver-prepared protos and their live functions through the same stream.
+    val sqlTextPool = new QueryContextInterner.Pool(spec.sqlTextPool)
+    val partitioningExpressions = spec.sqlConf.withConf {
+      preparePartitioningExpressions(outputPartitioning, outputAttributes)
+        .map(expr => QueryContextInterner.internAgainst(expr, sqlTextPool))
+    }
+    val augmentedSpec = spec.copy(
+      execContext = spec.execContext.copy(
+        subqueries = spec.execContext.subqueries ++ partitioningSubqueries,
+        perPartitionByKey = Map.empty),
+      sqlTextPool = spec.sqlTextPool ++ sqlTextPool.added,
+      partitioningExpressions = partitioningExpressions)
     thinRDD.nativeShuffleSpec = augmentedSpec
 
     // The code block below is mostly brought over from

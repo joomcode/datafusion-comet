@@ -20,22 +20,25 @@
 package org.apache.spark.sql.comet
 
 import java.lang.ref.Reference
+import java.net.URLClassLoader
 import java.nio.ByteBuffer
 
 import scala.reflect.ClassTag
 
 import org.apache.spark.{SparkConf, SparkEnv, TaskContext}
-import org.apache.spark.sql.CometTestBase
+import org.apache.spark.sql.{CometTestBase, DataFrame, Row}
 import org.apache.spark.sql.catalyst.expressions.{Expression, Literal, ScalaUDF}
+import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, RangePartitioning}
+import org.apache.spark.sql.comet.execution.shuffle.{CometNativeShuffle, CometShuffleExchangeExec}
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
-import org.apache.spark.sql.functions.udf
+import org.apache.spark.sql.functions.{expr, udf}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.LongType
 
 import org.apache.comet.{CometCodegenAssertions, CometConf}
-import org.apache.comet.serde.{CometScalaUDF, ExprOuterClass, OperatorOuterClass}
+import org.apache.comet.serde.{CometScalaUDF, ExprOuterClass, LiteralOuterClass, OperatorOuterClass}
 import org.apache.comet.serde.OperatorOuterClass.Operator
-import org.apache.comet.udf.codegen.CometUdfFunctionPool
+import org.apache.comet.udf.codegen.{CometScalaUDFCodegen, CometUdfFunctionPool}
 import org.apache.comet.udf.codegen.CometUdfFunctionPool.PlanPayload
 
 class CometUdfFunctionPoolSuite
@@ -325,6 +328,181 @@ class CometUdfFunctionPoolSuite
         assert(
           sizes.head == sizes.last,
           s"native proto size must be independent of captured graph size: $sizes")
+      }
+    }
+  }
+
+  test("independent UDF ID spaces require driver-prepared shuffle key references") {
+    // Separate definitions of only the pool reproduce independent driver/executor static ID
+    // spaces without resetting counters or mutating private state. Spark and user functions
+    // remain parent-loaded, as they would after normal task deserialization.
+    val poolName = "org.apache.comet.udf.codegen.CometUdfFunctionPool"
+    val parent = getClass.getClassLoader
+    val location = CometUdfFunctionPool.getClass.getProtectionDomain.getCodeSource.getLocation
+    def loader(): URLClassLoader = new URLClassLoader(Array(location), parent) {
+      override def loadClass(name: String, resolve: Boolean): Class[_] = synchronized {
+        if (name == poolName || name.startsWith(poolName + "$")) {
+          val existing: Class[_] = findLoadedClass(name)
+          val loaded: Class[_] = if (existing == null) findClass(name) else existing
+          if (resolve) resolveClass(loaded)
+          loaded
+        } else super.loadClass(name, resolve)
+      }
+    }
+    val driverLoader = loader()
+    val executorLoader = loader()
+    try {
+      def pool(loader: ClassLoader): AnyRef =
+        loader.loadClass(poolName + "$").getField("MODULE$").get(null)
+      val driver = pool(driverLoader)
+      val executor = pool(executorLoader)
+      assert(driver.getClass ne executor.getClass)
+      def encode(pool: AnyRef, expr: Expression): Array[Byte] =
+        pool.getClass
+          .getMethod("serializeExpression", classOf[Expression], classOf[Seq[_]])
+          .invoke(pool, expr, CometUdfFunctionPool.functionsOf(expr))
+          .asInstanceOf[Array[Byte]]
+      def message(bytes: Array[Byte]): ExprOuterClass.Expr =
+        ExprOuterClass.Expr
+          .newBuilder()
+          .setJvmScalarUdf(
+            ExprOuterClass.JvmScalarUdf
+              .newBuilder()
+              .setClassName(classOf[CometScalaUDFCodegen].getName)
+              .addArgs(ExprOuterClass.Expr.getDefaultInstance)
+              .addArgs(
+                ExprOuterClass.Expr
+                  .newBuilder()
+                  .setLiteral(LiteralOuterClass.Literal
+                    .newBuilder()
+                    .setBytesVal(com.google.protobuf.ByteString.copyFrom(bytes)))))
+          .build()
+      def capture(messages: Seq[ExprOuterClass.Expr]): AnyRef =
+        driver.getClass
+          .getMethod("capture", classOf[Seq[_]], classOf[Array[Byte]])
+          .invoke(driver, messages, Array.emptyByteArray)
+      def transport(payload: AnyRef): AnyRef =
+        SparkEnv.get.closureSerializer
+          .newInstance()
+          .deserialize[AnyRef](ByteBuffer.wrap(serialize(payload)), executorLoader)
+      def register(payload: AnyRef, context: TaskContext): Unit = {
+        val _ =
+          payload.getClass.getMethod("register", classOf[TaskContext]).invoke(payload, context)
+      }
+      def evaluate(bytes: Array[Byte]): Long = {
+        val restored = executor.getClass
+          .getMethod("deserializeExpression", classOf[Array[Byte]], classOf[ClassLoader])
+          .invoke(executor, bytes, executorLoader)
+          .asInstanceOf[Expression]
+        restored.collect { case u: ScalaUDF => u.function.asInstanceOf[Long => Long](1L) }.head
+      }
+      val child = expression(new G08CapturedFunction(Array(11L), 100L))
+      val key = expression(new G08CapturedFunction(Array(22L), 200L))
+      val childBytes = encode(driver, child)
+      val driverKeyBytes = encode(driver, key)
+      val childOnly = transport(capture(Seq(message(childBytes))))
+      val complete = transport(capture(Seq(message(childBytes), message(driverKeyBytes))))
+      // The executor first encounters the key function after restoring the task closure. Its
+      // local ID1 collides with the driver's child ID1; matching Long signatures hide the bug.
+      val executorKey = deserialize[Expression](serialize(key))
+      val executorKeyBytes = encode(executor, executorKey)
+      inTask { context =>
+        register(childOnly, context)
+        assert(evaluate(childBytes) == 111L)
+        assert(evaluate(executorKeyBytes) == 111L)
+        assert(evaluate(executorKeyBytes) != 222L)
+      }
+      inTask { context =>
+        register(complete, context)
+        assert(evaluate(childBytes) == 111L)
+        assert(evaluate(driverKeyBytes) == 222L)
+      }
+      Reference.reachabilityFence(child)
+      Reference.reachabilityFence(key)
+    } finally {
+      driverLoader.close()
+      executorLoader.close()
+    }
+  }
+
+  for (partitioning <- Seq("hash", "range")) {
+    test(s"native $partitioning shuffle transports UDF keys separately from child functions") {
+      withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+        SQLConf.SHUFFLE_PARTITIONS.key -> "3",
+        "spark.sql.execution.rangeExchange.sampleSizePerPartition" -> "128",
+        CometConf.COMET_SHUFFLE_ENABLED.key -> "true",
+        CometConf.COMET_SHUFFLE_MODE.key -> "native") {
+        val captured = Array(1L, 10L)
+        // Compatible types but deliberately different functions: resolving a key's ID to the
+        // child function can silently choose the wrong partition without a type error.
+        spark.udf.register("g10_shuffle_child", (id: Long) => id + captured(1))
+        spark.udf.register("g10_shuffle_key", (id: Long) => id * captured(0))
+        withParquetTable((0L until 64L).map(Tuple1(_)), "g10_shuffle_udf_input") {
+          def planned(enabled: Boolean): DataFrame =
+            withSQLConfResult(CometConf.COMET_ENABLED.key -> enabled.toString) {
+              val input = sql("SELECT _1, g10_shuffle_child(_1) AS v FROM g10_shuffle_udf_input")
+              val key = expr("g10_shuffle_key(_1)")
+              val df =
+                if (partitioning == "hash") input.repartition(3, key)
+                else input.repartitionByRange(3, key).sortWithinPartitions(key)
+              df.queryExecution.executedPlan
+              df
+            }
+
+          def partitionRows(df: DataFrame): Seq[(Int, Long, Long)] =
+            df.rdd
+              .mapPartitionsWithIndex { case (partition, rows) =>
+                rows.map(row => (partition, row.getLong(0), row.getLong(1)))
+              }
+              .collect()
+              .toSeq
+              .sorted
+
+          for ((direction, delta) <- Seq((1L, 10L), (-1L, 90L))) {
+            captured(0) = direction
+            captured(1) = delta
+            // A fresh shuffle snapshots the current graph. Reusing completed shuffle files is
+            // Spark's responsibility, so do not expect mutation to invalidate a completed RDD.
+            val vanilla = planned(enabled = false)
+            val accelerated = planned(enabled = true)
+            val plan = accelerated.queryExecution.executedPlan
+            val shuffles = collect(plan) { case shuffle: CometShuffleExchangeExec => shuffle }
+            assert(shuffles.length == 1, plan)
+            assert(shuffles.head.shuffleType == CometNativeShuffle, plan)
+            assert(shuffles.head.outputPartitioning.numPartitions == 3, plan)
+            val keys = shuffles.head.outputPartitioning match {
+              case h: HashPartitioning if partitioning == "hash" => h.expressions
+              case r: RangePartitioning if partitioning == "range" => r.ordering.map(_.child)
+              case other => fail(s"Expected native $partitioning partitioning, found $other")
+            }
+            assert(keys.exists(_.exists(_.isInstanceOf[ScalaUDF])), plan)
+            assert(collect(plan) { case scan: CometNativeScanExec => scan }.nonEmpty, plan)
+            if (partitioning == "hash") {
+              val expected = partitionRows(vanilla)
+              assert(
+                expected.map { case (_, id, value) => (id, value) }.sorted ==
+                  (0L until 64L).map(id => (id, id + delta)))
+              assertCodegenRan { assert(partitionRows(accelerated) == expected) }
+              assert(partitionRows(accelerated) == expected)
+            } else {
+              // The sample budget exceeds the entire 64-row input, so both partitioners see
+              // every distinct key. Exact partition IDs catch a wrong compatible function even
+              // when it collapses all rows into one partition and a later sort repairs row order.
+              val expected = vanilla.collect().toSeq
+              assert(
+                expected == (0L until 64L).sortBy(_ * direction).map(id => Row(id, id + delta)))
+              val expectedPartitions = partitionRows(vanilla)
+              assert(expectedPartitions.map(_._1).distinct == Seq(0, 1, 2))
+              assertCodegenRan { assert(accelerated.collect().toSeq == expected) }
+              val actualPartitions = partitionRows(accelerated)
+              assert(actualPartitions.map(_._1).distinct == Seq(0, 1, 2))
+              assert(actualPartitions == expectedPartitions)
+              assert(accelerated.collect().toSeq == expected)
+            }
+          }
+        }
       }
     }
   }

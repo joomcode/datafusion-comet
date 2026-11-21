@@ -37,10 +37,10 @@ spec.loader.exec_module(runtime)
 class PackagedRuntimeFaults(unittest.TestCase):
     def test_summary_requires_exact_executed_test_count(self):
         good = ("Suites: completed 1, aborted 0\n"
-                "Tests: succeeded 23, failed 0, canceled 0, ignored 0, pending 0\n")
-        runtime.assert_test_summary(good, 23)
+                "Tests: succeeded 25, failed 0, canceled 0, ignored 0, pending 0\n")
+        runtime.assert_test_summary(good, 25)
         for malformed in [
-            good.replace("succeeded 23", "succeeded 22"),
+            good.replace("succeeded 25", "succeeded 24"),
             good.replace("failed 0", "failed 1"),
             good.replace("canceled 0", "canceled 1"),
             good.replace("ignored 0", "ignored 1"),
@@ -50,7 +50,7 @@ class PackagedRuntimeFaults(unittest.TestCase):
             "All tests passed.\n",
         ]:
             with self.subTest(summary=malformed), self.assertRaises(ValueError):
-                runtime.assert_test_summary(malformed, 23)
+                runtime.assert_test_summary(malformed, 25)
 
     def setUp(self):
         # The caller chooses an explicit task/project output location, never /tmp.
@@ -249,6 +249,30 @@ implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransfor
         with self.assertRaises(ValueError):
             runtime.validate_class_origins({"class_origins": core}, hashes,
                                            "g08-delta-serialization")
+
+    def test_shuffle_key_group_requires_each_fixed_production_class(self):
+        hashes = {runtime.CORE: "a" * 64, runtime.DELTA: "b" * 64}
+        origins = {name: {"jar_name": runtime.CORE, "jar_sha256": hashes[runtime.CORE],
+                          "resource_count": 1} for name in runtime.CORE_ORIGIN_CLASSES}
+        fixed = (
+            "org.apache.spark.sql.comet.execution.shuffle.NativeShuffleSpec",
+            "org.apache.spark.sql.comet.execution.shuffle.NativeShuffleSpec$",
+            "org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec",
+            "org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec$",
+            "org.apache.spark.sql.comet.execution.shuffle.CometNativeShuffleWriter",
+        )
+        self.assertTrue(set(fixed).issubset(origins))
+        runtime.validate_class_origins({"class_origins": origins}, hashes, "g10-udf-shuffle")
+        for name in fixed:
+            missing = json.loads(json.dumps(origins))
+            del missing[name]
+            with self.subTest(missing=name), self.assertRaises(ValueError):
+                runtime.validate_class_origins({"class_origins": missing}, hashes,
+                                               "g10-udf-shuffle")
+        wrong = json.loads(json.dumps(origins))
+        wrong[fixed[0]]["jar_name"] = "core-tests.jar"
+        with self.assertRaises(ValueError):
+            runtime.validate_class_origins({"class_origins": wrong}, hashes, "g10-udf-shuffle")
 
     def test_manifest_binds_support_to_release_and_source(self):
         out, manifest = self.fixture()

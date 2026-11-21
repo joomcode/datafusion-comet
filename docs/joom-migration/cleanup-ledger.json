@@ -1075,6 +1075,59 @@
       ],
       "interpretation": "Actual task-tree occupancy, not download-only growth. Existing cumulative Spark log copies are preserved; future captures use only the new log range. Shared cache/build totals are separate and are not claimed as migration-only growth.",
       "deletion_authorized": false
+    },
+    "shuffle_UDF_key_correctness_followup": {
+      "shuffle_key_followup_aux": [
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_udf-shuffle-keys",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_shuffle-udf-key-fix",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_rc-shuffle-qualification",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_v8-final-docs"
+      ],
+      "contains": "Old-source negative/fixed/profile receipts, source restoration/preservation archives, exact RC25 additive delta and fault controls; preserve every failed attempt.",
+      "historical_v7_artifacts": {
+        "path": "${COMET_ROOT}/target/joom-release/gha-44955646404",
+        "archive": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/qualified-artifact-44955646404.zip",
+        "disposition": "HISTORICAL_OLD_SOURCE; do not deliver as corrected final artifacts.",
+        "artifact_bytes": 197097508,
+        "unpacked_bytes": 512217969
+      },
+      "new_tools_dependencies_or_cache_changes": "None introduced by this bounded source/test correction. Standard caches/build directories are reused. No deletion authorized.",
+      "new_final_artifacts": "Pending same-SHA RC25 and verified download; record actual new run directory and checksums only afterward.",
+      "actual_task_tree_storage": {
+        "measured_at_UTC": "2026-11-21T23:49:22.459452+00:00",
+        "root": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10",
+        "files": 1636,
+        "logical_bytes": 3691082290,
+        "allocated_bytes": 3695022080,
+        "largest_evidence_files": [
+          {
+            "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark40-unit-tests.log",
+            "logical_bytes": 1526991821,
+            "allocated_bytes": 1526992896,
+            "note": "A copied cumulative Spark unit-tests.log includes history since November 17; this file size is not the single profile output size."
+          },
+          {
+            "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark41-unit-tests.log",
+            "logical_bytes": 1513187186,
+            "allocated_bytes": 1513189376,
+            "note": "A copied cumulative Spark unit-tests.log includes history since November 17; this file size is not the single profile output size."
+          },
+          {
+            "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/qualified-artifact-44955646404.zip",
+            "logical_bytes": 197097508,
+            "allocated_bytes": 197099520,
+            "note": "Existing task evidence; no automatic deletion."
+          },
+          {
+            "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/qualified-artifact-44939251247.zip",
+            "logical_bytes": 197041753,
+            "allocated_bytes": 197042176,
+            "note": "Existing task evidence; no automatic deletion."
+          }
+        ],
+        "interpretation": "Actual task-tree occupancy, not download-only growth. Existing cumulative Spark log copies are preserved; future captures use only the new log range. Shared cache/build totals are separate and are not claimed as migration-only growth.",
+        "deletion_authorized": false
+      }
     }
   }
 }

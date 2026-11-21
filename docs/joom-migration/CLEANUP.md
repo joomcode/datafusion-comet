@@ -324,3 +324,13 @@ unit-tests logs containing history since November 17; they are not the size of
 one new profile run. Keep those copies and receipt paths. Future captures record
 only newly appended ranges. Shared package caches and project build directories
 are separate from task-only occupancy. No cleanup is performed automatically.
+
+### Shuffle UDF key follow-up evidence
+
+Keep the udf-shuffle-keys, shuffle-udf-key-fix, rc-shuffle-qualification and
+v8-final-docs dated subdirectories under `${MIGRATION_AUX_ROOT}/20261121_comet12-g10`.
+They preserve negative source restoration, failed compatibility attempts, final
+local proof and the additive RC25 contract. The old cf86a3b4 archive and
+`${COMET_ROOT}/target/joom-release/gha-44955646404` are historical, not corrected
+final artifacts. Do not delete them automatically. Final corrected artifact
+directories and actual sizes remain pending; shared caches/builds are separate.

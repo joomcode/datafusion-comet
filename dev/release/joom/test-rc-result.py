@@ -135,12 +135,12 @@ class ReceiptBoundary(unittest.TestCase):
     def test_exporter_contract_matches_runtime_runner(self):
         runtime = rc.module("verify-packaged-runtime")
         self.assertEqual(rc.COUNTS, {label: count for label, _, _, count in runtime.CASES})
-        self.assertEqual(len(runtime.CASES), 11)
-        self.assertEqual(sum(rc.COUNTS.values()), 23)
+        self.assertEqual(len(runtime.CASES), 12)
+        self.assertEqual(sum(rc.COUNTS.values()), 25)
         self.assertEqual(set(rc.CORE_ORIGIN_CLASSES), set(runtime.CORE_ORIGIN_CLASSES))
         self.assertEqual(set(rc.DELTA_ORIGIN_CLASSES), set(runtime.DELTA_ORIGIN_CLASSES))
         self.assertEqual(rc.DELTA_GROUPS, set(runtime.DELTA_GROUPS))
-        self.assertEqual(len(runtime.CORE_ORIGIN_CLASSES), 17)
+        self.assertEqual(len(runtime.CORE_ORIGIN_CLASSES), 22)
         self.assertEqual(len(runtime.DELTA_ORIGIN_CLASSES), 2)
 
     def test_legacy_twelve_case_smoke_cannot_qualify_expanded_release(self):
@@ -150,6 +150,49 @@ class ReceiptBoundary(unittest.TestCase):
         result["total_passed"] = 12
         self.rewrite("amd64")
         with self.assertRaisesRegex(ValueError, "missing, duplicate or extra smoke groups"):
+            self.validate()
+
+    def test_previous_twenty_three_cases_cannot_omit_shuffle_keys(self):
+        result = self.results["amd64"][1]
+        result["cases"] = [case for case in result["cases"]
+                           if case["group"] != "g10-udf-shuffle"]
+        result["total_passed"] = 23
+        self.rewrite("amd64")
+        with self.assertRaisesRegex(ValueError, "missing, duplicate or extra smoke groups"):
+            self.validate()
+
+    def test_shuffle_group_requires_both_executed_cases(self):
+        case = self.case("g10-udf-shuffle")
+        for field, value in [("passed", 1), ("failed", 1), ("canceled", 1),
+                             ("ignored", 1), ("pending", 1)]:
+            with self.subTest(field=field):
+                old = case[field]
+                case[field] = value
+                self.rewrite("amd64")
+                with self.assertRaisesRegex(ValueError, "failed or skipped cases"):
+                    self.validate()
+                case[field] = old
+
+    def test_shuffle_group_requires_fixed_class_origins(self):
+        origins = self.case("g10-udf-shuffle")["loaded_native_proof"]["class_origins"]
+        fixed = (
+            "org.apache.spark.sql.comet.execution.shuffle.NativeShuffleSpec",
+            "org.apache.spark.sql.comet.execution.shuffle.NativeShuffleSpec$",
+            "org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec",
+            "org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec$",
+            "org.apache.spark.sql.comet.execution.shuffle.CometNativeShuffleWriter",
+        )
+        self.assertTrue(set(fixed).issubset(origins))
+        for name in fixed:
+            old = origins.pop(name)
+            self.rewrite("amd64")
+            with self.subTest(missing=name), self.assertRaisesRegex(
+                    ValueError, "missing or extra final-JAR class origins"):
+                self.validate()
+            origins[name] = old
+        origins[fixed[0]]["jar_name"] = "core-tests.jar"
+        self.rewrite("amd64")
+        with self.assertRaisesRegex(ValueError, "wrong or nonunique final-JAR class origin"):
             self.validate()
 
     def test_duplicate_new_group_cannot_hide_a_missing_group(self):

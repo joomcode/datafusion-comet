@@ -164,3 +164,14 @@ receipt. Do not count cancellations, ignores or censored SQL prefixes as passes.
 Freeze the new source manifest, then complete same-SHA full CI and dualarch
 23-case packaged qualification, verify final artifacts and report before merge
 or stable tag. All merge, stable-tag and production permissions remain false.
+
+## G10 shuffle UDF key transport checkpoint
+
+Read G10-results.json#shuffle_UDF_key_transport_followup and STATE.json#g10.
+The cf86a3b4 full CI found real missing-pool runtime failures; its successful
+CodeQL/Miri107/RC23/artifact checks are historical. Final local receipts must bind
+the complete key-proto capture/interner correction and compatibility annotation.
+Then freeze a new source and run full same-SHA CI/CodeQL/Miri plus RC25 on both
+native architectures. Download and verify the corrected final JARs. No canceled,
+ignored, version-N/A or negative-control failure receives executed-pass credit.
+Report before merge or stable tag; production remains unauthorized.

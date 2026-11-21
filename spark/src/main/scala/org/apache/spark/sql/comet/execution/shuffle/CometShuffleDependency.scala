@@ -33,7 +33,7 @@ import org.apache.spark.sql.execution.exchange.ShuffleExchangeExec
 import org.apache.spark.sql.execution.metric.SQLMetric
 import org.apache.spark.sql.types.StructType
 
-import org.apache.comet.serde.OperatorOuterClass
+import org.apache.comet.serde.{ExprOuterClass, OperatorOuterClass}
 import org.apache.comet.udf.codegen.CometUdfFunctionPool
 
 /**
@@ -55,16 +55,20 @@ case class NativeShuffleSpec(
      * `CometShuffleExchangeExec.positionalRoundRobinSpec`.
      */
     positionalRoundRobin: Option[PositionalRoundRobin] = None,
-    sqlTextPool: Seq[String] = Seq.empty) {
+    sqlTextPool: Seq[String] = Seq.empty,
+    /** Driver-prepared keys; their UDF references must share this task's function payload. */
+    private[comet] val partitioningExpressions: Seq[ExprOuterClass.Expr] = Seq.empty) {
   // This payload is serialized with the map task, in Spark's shared Java stream, so a later
   // action snapshots current closure state and repeated functions retain shared captures.
-  private[shuffle] val udfFunctions: Option[CometUdfFunctionPool.PlanPayload] =
-    Option(childNativeOp).map { op =>
+  private[shuffle] val udfFunctions: Option[CometUdfFunctionPool.PlanPayload] = {
+    val messages = Option(childNativeOp).toSeq.flatMap { op =>
+      PlanDataInjector.functionMessages(op, execContext.commonByKey)
+    } ++ partitioningExpressions
+    if (messages.nonEmpty) {
       // The writer carries its protobuf separately; these empty bytes are never passed to JNI.
-      CometUdfFunctionPool.capture(
-        PlanDataInjector.functionMessages(op, execContext.commonByKey),
-        Array.emptyByteArray)
-    }
+      Some(CometUdfFunctionPool.capture(messages, Array.emptyByteArray))
+    } else None
+  }
 }
 
 /**

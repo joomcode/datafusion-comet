@@ -352,13 +352,7 @@ class CometNativeShuffleWriter[K, V](
         val partitioning = PartitioningOuterClass.HashPartition.newBuilder()
         partitioning.setNumPartitions(effectivePartitionCount)
 
-        // Spark evaluates the keys in one projection, whose subexpression elimination sees what
-        // they share (see QueryPlanSerde.canShortCircuitNulls)
-        val partitionExprs =
-          QueryPlanSerde.withSharedSubexpressions(hashPartitioning.expressions) {
-            hashPartitioning.expressions
-              .flatMap(e => QueryPlanSerde.exprToProto(e, outputAttributes))
-          }
+        val partitionExprs = activeSpec.partitioningExpressions
 
         if (partitionExprs.length != hashPartitioning.expressions.length) {
           throw new UnsupportedOperationException(
@@ -391,12 +385,7 @@ class CometNativeShuffleWriter[K, V](
         }
 
         {
-          // As for hash partitioning, Spark evaluates the keys in one projection
-          val orderingExprs =
-            QueryPlanSerde.withSharedSubexpressions(rangePartitioning.ordering.map(_.child)) {
-              rangePartitioning.ordering
-                .flatMap(e => QueryPlanSerde.exprToProto(e, outputAttributes))
-            }
+          val orderingExprs = activeSpec.partitioningExpressions
           if (orderingExprs.length != rangePartitioning.ordering.length) {
             throw new UnsupportedOperationException(
               s"Partitioning $rangePartitioning is not supported.")

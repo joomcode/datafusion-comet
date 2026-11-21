@@ -59,6 +59,11 @@ CORE_ORIGIN_CLASSES = (
     "org.apache.spark.CometPlugin",
     "org.apache.comet.CometKryoRegistrator",
     "org.apache.spark.sql.comet.CometBroadcastExchangeExec",
+    "org.apache.spark.sql.comet.execution.shuffle.NativeShuffleSpec",
+    "org.apache.spark.sql.comet.execution.shuffle.NativeShuffleSpec$",
+    "org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec",
+    "org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec$",
+    "org.apache.spark.sql.comet.execution.shuffle.CometNativeShuffleWriter",
 )
 DELTA_ORIGIN_CLASSES = (
     "org.apache.spark.sql.comet.CometDeltaNativeScanExec",
@@ -108,6 +113,10 @@ CASES = [
     ("g07-kryo", "org.apache.spark.sql.comet.CometBroadcastDefaultKryoSuite", [
         "-t", "string distinct broadcast with default Kryo registration: aqe=true",
     ], 1),
+    ("g10-udf-shuffle", "org.apache.spark.sql.comet.CometUdfFunctionPoolSuite", [
+        "-t", "native hash shuffle transports UDF keys separately from child functions",
+        "-t", "native range shuffle transports UDF keys separately from child functions",
+    ], 2),
 ]
 
 # Reflection keeps this helper independent of the Scala/ScalaTest ABI at compile time.
