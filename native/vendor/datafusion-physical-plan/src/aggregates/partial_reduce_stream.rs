@@ -35,6 +35,7 @@ use futures::stream::{Stream, StreamExt};
 
 use super::AggregateExec;
 use super::aggregate_hash_table::{AggregateHashTable, PartialReduceMarker};
+use super::hash_stream::AggregateMemoryMetrics;
 use crate::metrics::{BaselineMetrics, RecordOutput, SpillMetrics};
 use crate::stream::EmptyRecordBatchStream;
 use crate::{InputOrderMode, RecordBatchStream, SendableRecordBatchStream};
@@ -80,6 +81,8 @@ pub(crate) struct PartialReduceHashAggregateStream {
 
     /// Memory reservation for group keys and accumulators.
     reservation: MemoryReservation,
+    /// Records only this aggregate consumer, including siblings used by spill replay.
+    memory_metrics: AggregateMemoryMetrics,
 
     /// Tracks the high-level stream lifecycle. The hash table owns the lower-level
     /// state for emitting output batches.
@@ -160,6 +163,8 @@ impl PartialReduceHashAggregateStream {
         let input = agg.input.execute(partition, Arc::clone(context))?;
         let batch_size = context.session_config().batch_size();
         let baseline_metrics = BaselineMetrics::new(&agg.metrics, partition);
+        let memory_metrics =
+            AggregateMemoryMetrics::new(&agg.metrics, partition, context.memory_pool());
 
         // Preserve the existing aggregate metric surface for this plan node.
         let _spill_metrics = SpillMetrics::new(&agg.metrics, partition);
@@ -173,13 +178,14 @@ impl PartialReduceHashAggregateStream {
 
         let reservation =
             MemoryConsumer::new(format!("PartialReduceHashAggregateStream[{partition}]"))
-                .register(context.memory_pool());
+                .register(&memory_metrics.pool());
 
         Ok(Self {
             schema,
             input,
             baseline_metrics,
             reservation,
+            memory_metrics,
             state: Some(PartialReduceHashAggregateState::ReadingInput { hash_table }),
         })
     }
@@ -355,6 +361,7 @@ impl Stream for PartialReduceHashAggregateStream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
+        let _memory_metrics = self.memory_metrics.clone();
         loop {
             let cur_state = self
                 .state

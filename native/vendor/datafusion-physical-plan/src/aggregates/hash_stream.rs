@@ -36,7 +36,9 @@ use datafusion_common::{
     DataFusionError, Result, exec_err, internal_datafusion_err, internal_err,
 };
 use datafusion_execution::TaskContext;
-use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
+use datafusion_execution::memory_pool::{
+    MemoryConsumer, MemoryPool, MemoryReservation, PeakRecordingPool,
+};
 use datafusion_physical_expr::PhysicalSortExpr;
 use datafusion_physical_expr::expressions::Column;
 use datafusion_physical_expr_common::sort_expr::LexOrdering;
@@ -54,8 +56,69 @@ use crate::metrics::{
 use crate::sorts::IncrementalSortIterator;
 use crate::sorts::streaming_merge::SortedSpillFile;
 use crate::spill::spill_manager::SpillManager;
-use crate::stream::EmptyRecordBatchStream;
+use crate::stream::{EmptyRecordBatchStream, RecordBatchStreamAdapter};
 use crate::{InputOrderMode, RecordBatchStream, SendableRecordBatchStream, metrics};
+
+/// Measurement for one aggregate partition, shared with its sequential spill
+/// replay. The recorder delegates the existing pool policy and consumer identity
+/// unchanged, and counts only reservations registered through this instance.
+/// Other operators keep using the original TaskContext memory pool directly.
+/// The peak is declared reservation bytes, not process RSS or Arrow allocations.
+#[derive(Clone, Debug)]
+pub(super) struct AggregateMemoryMetrics(Arc<AggregateMemoryMetricsInner>);
+
+#[derive(Debug)]
+struct AggregateMemoryMetricsInner {
+    pool: Arc<PeakRecordingPool>,
+    peak: metrics::Gauge,
+}
+
+impl AggregateMemoryMetrics {
+    pub(super) fn new(
+        metrics: &metrics::ExecutionPlanMetricsSet,
+        partition: usize,
+        pool: &Arc<dyn MemoryPool>,
+    ) -> Self {
+        Self(Arc::new(AggregateMemoryMetricsInner {
+            // The underlying task pool may already hold other operators' bytes.
+            // This new recorder starts at zero because it observes only this
+            // consumer and its siblings, not the whole task's reservations.
+            pool: Arc::new(PeakRecordingPool::new(Arc::clone(pool))),
+            peak: MetricBuilder::new(metrics)
+                .peak_memory_usage("peak_mem_used", partition),
+        }))
+    }
+
+    pub(super) fn pool(&self) -> Arc<dyn MemoryPool> {
+        Arc::clone(&self.0.pool) as Arc<dyn MemoryPool>
+    }
+
+    fn record(&self) {
+        self.0.peak.set_max(self.0.pool.peak_reserved());
+    }
+
+    pub(super) fn observe_stream(
+        &self,
+        mut input: SendableRecordBatchStream,
+    ) -> SendableRecordBatchStream {
+        let schema = input.schema();
+        let memory_metrics = self.clone();
+        let stream = futures::stream::poll_fn(move |cx| {
+            let poll = input.poll_next_unpin(cx);
+            memory_metrics.record();
+            poll
+        });
+        Box::pin(RecordBatchStreamAdapter::new(schema, stream))
+    }
+}
+
+impl Drop for AggregateMemoryMetrics {
+    fn drop(&mut self) {
+        // A poll-local clone publishes before its caller updates SQL metrics.
+        // The stream-owned handle also covers early close and error cleanup.
+        self.record();
+    }
+}
 
 /// Hash aggregation is implemented in two stages: partial and final. This
 /// stream implements the partial stage.
@@ -151,6 +214,8 @@ pub(crate) struct PartialHashAggregateStream {
 
     /// Memory reservation for group keys and accumulators.
     reservation: MemoryReservation,
+    /// Records only this aggregate consumer, including siblings used by spill replay.
+    memory_metrics: AggregateMemoryMetrics,
 
     /// Execution metrics shared with the aggregate plan node.
     baseline_metrics: BaselineMetrics,
@@ -246,6 +311,8 @@ pub(crate) struct FinalHashAggregateStream {
 
     /// Memory reservation for group keys, accumulators, and spill sorting.
     reservation: MemoryReservation,
+    /// Records only this aggregate consumer, including siblings used by spill replay.
+    memory_metrics: AggregateMemoryMetrics,
 
     /// See comments for the same variable in [`PartialHashAggregateStream`].
     group_values_soft_limit: Option<usize>,
@@ -388,6 +455,7 @@ impl FinalSpillContext {
         self,
         baseline_metrics: &BaselineMetrics,
         group_by_metrics: GroupByMetrics,
+        memory_metrics: AggregateMemoryMetrics,
         reservation: MemoryReservation,
     ) -> Result<SendableRecordBatchStream> {
         let Self {
@@ -409,7 +477,12 @@ impl FinalSpillContext {
             spill_manager,
             spills,
         }
-        .into_stream(baseline_metrics, group_by_metrics, reservation))
+        .into_stream(
+            baseline_metrics,
+            group_by_metrics,
+            memory_metrics,
+            reservation,
+        ))
     }
 }
 
@@ -426,6 +499,8 @@ impl PartialHashAggregateStream {
         let input = agg.input.execute(partition, Arc::clone(context))?;
         let batch_size = context.session_config().batch_size();
         let baseline_metrics = BaselineMetrics::new(&agg.metrics, partition);
+        let memory_metrics =
+            AggregateMemoryMetrics::new(&agg.metrics, partition, context.memory_pool());
 
         // Preserve the existing aggregate metric surface for this plan node.
         let _spill_metrics = SpillMetrics::new(&agg.metrics, partition);
@@ -464,7 +539,7 @@ impl PartialHashAggregateStream {
         let reservation =
             MemoryConsumer::new(format!("PartialHashAggregateStream[{partition}]"))
                 .with_can_spill(true)
-                .register(context.memory_pool());
+                .register(&memory_metrics.pool());
 
         Ok(Self {
             schema,
@@ -472,6 +547,7 @@ impl PartialHashAggregateStream {
             batch_size,
             baseline_metrics,
             reservation,
+            memory_metrics,
             reduction_factor,
             skip_aggregation_probe,
             group_values_soft_limit: agg.limit_options().map(|config| config.limit()),
@@ -959,6 +1035,7 @@ impl Stream for PartialHashAggregateStream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
+        let _memory_metrics = self.memory_metrics.clone();
         loop {
             let cur_state = self
                 .state
@@ -1038,6 +1115,8 @@ impl FinalHashAggregateStream {
         let input_schema = input.schema();
         let batch_size = context.session_config().batch_size();
         let baseline_metrics = BaselineMetrics::new(&agg.metrics, partition);
+        let memory_metrics =
+            AggregateMemoryMetrics::new(&agg.metrics, partition, context.memory_pool());
         let spill_metrics = SpillMetrics::new(&agg.metrics, partition);
 
         let hash_table = AggregateHashTable::<FinalMarker>::new(
@@ -1066,13 +1145,14 @@ impl FinalHashAggregateStream {
             super::AGGREGATE_EMIT_BUDGET_SUFFIX
         ))
         .with_can_spill(can_spill)
-        .register(context.memory_pool());
+        .register(&memory_metrics.pool());
 
         Ok(Self {
             schema,
             input,
             baseline_metrics,
             reservation,
+            memory_metrics,
             group_values_soft_limit: agg.limit_options().map(|config| config.limit()),
             state: Some(FinalHashAggregateState::ReadingInput {
                 hash_table,
@@ -1370,6 +1450,7 @@ impl FinalHashAggregateStream {
                     Ok(()) => (*spill_context).into_replay_stream(
                         &self.baseline_metrics,
                         group_by_metrics,
+                        self.memory_metrics.clone(),
                         self.reservation.new_empty(),
                     ),
                     Err(e) => Err(e),
@@ -1539,6 +1620,7 @@ impl Stream for FinalHashAggregateStream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
+        let _memory_metrics = self.memory_metrics.clone();
         loop {
             let cur_state = self
                 .state
@@ -1601,6 +1683,234 @@ impl Stream for FinalHashAggregateStream {
 impl RecordBatchStream for FinalHashAggregateStream {
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
+    }
+}
+
+#[cfg(test)]
+pub(super) mod memory_metrics_tests {
+    use super::*;
+    use datafusion_execution::memory_pool::{
+        FairSpillPool, GreedyMemoryPool, MemoryLimit,
+    };
+    use std::fmt::{Display, Formatter};
+    use std::sync::Mutex;
+
+    /// Independent test oracle: sample the real inner pool after each operation,
+    /// instead of accumulating the deltas used by the production recorder.
+    #[derive(Debug)]
+    pub(in crate::aggregates) struct ReservationOracle {
+        inner: Arc<dyn MemoryPool>,
+        samples: Mutex<Vec<usize>>,
+        registrations: Mutex<Vec<(bool, usize, String, bool)>>,
+    }
+
+    impl ReservationOracle {
+        pub(in crate::aggregates) fn new(inner: Arc<dyn MemoryPool>) -> Self {
+            Self {
+                inner,
+                samples: Mutex::new(Vec::new()),
+                registrations: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn sample(&self) {
+            self.samples.lock().unwrap().push(self.inner.reserved());
+        }
+
+        pub(in crate::aggregates) fn peak(&self) -> usize {
+            self.samples
+                .lock()
+                .unwrap()
+                .iter()
+                .copied()
+                .max()
+                .unwrap_or(0)
+        }
+
+        pub(in crate::aggregates) fn assert_balanced(&self) {
+            let events = self.registrations.lock().unwrap();
+            let mut live = std::collections::HashMap::new();
+            for (register, id, name, can_spill) in events.iter() {
+                if *register {
+                    assert!(live.insert(*id, (name, can_spill)).is_none());
+                } else {
+                    assert_eq!(live.remove(id), Some((name, can_spill)));
+                }
+            }
+            assert!(live.is_empty(), "all original consumer IDs must unregister");
+            assert_eq!(self.inner.reserved(), 0);
+        }
+    }
+
+    impl Display for ReservationOracle {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            Display::fmt(&self.inner, f)
+        }
+    }
+
+    impl MemoryPool for ReservationOracle {
+        fn name(&self) -> &str {
+            self.inner.name()
+        }
+        fn register(&self, consumer: &MemoryConsumer) {
+            self.inner.register(consumer);
+            self.registrations.lock().unwrap().push((
+                true,
+                consumer.id(),
+                consumer.name().to_owned(),
+                consumer.can_spill(),
+            ));
+        }
+        fn unregister(&self, consumer: &MemoryConsumer) {
+            self.inner.unregister(consumer);
+            self.registrations.lock().unwrap().push((
+                false,
+                consumer.id(),
+                consumer.name().to_owned(),
+                consumer.can_spill(),
+            ));
+        }
+        fn grow(&self, reservation: &MemoryReservation, additional: usize) {
+            self.inner.grow(reservation, additional);
+            self.sample();
+        }
+        fn shrink(&self, reservation: &MemoryReservation, amount: usize) {
+            self.inner.shrink(reservation, amount);
+            self.sample();
+        }
+        fn try_grow(
+            &self,
+            reservation: &MemoryReservation,
+            additional: usize,
+        ) -> Result<()> {
+            let result = self.inner.try_grow(reservation, additional);
+            self.sample();
+            result
+        }
+        fn reserved(&self) -> usize {
+            self.inner.reserved()
+        }
+        fn memory_limit(&self) -> MemoryLimit {
+            self.inner.memory_limit()
+        }
+    }
+
+    #[test]
+    fn aggregate_peak_records_siblings_and_preserves_pool_policy_and_identity()
+    -> Result<()> {
+        for inner in [
+            Arc::new(GreedyMemoryPool::new(1024)) as Arc<dyn MemoryPool>,
+            Arc::new(FairSpillPool::new(1024)) as Arc<dyn MemoryPool>,
+        ] {
+            let oracle = Arc::new(ReservationOracle::new(inner));
+            let pool: Arc<dyn MemoryPool> = Arc::clone(&oracle) as _;
+            // Other native operators may already hold bytes when this aggregate starts.
+            let unrelated = MemoryConsumer::new("unrelated operator")
+                .with_can_spill(true)
+                .register(&pool);
+            unrelated.try_grow(128)?;
+            let metrics = metrics::ExecutionPlanMetricsSet::new();
+            let observed = AggregateMemoryMetrics::new(&metrics, 0, &pool);
+            let consumer =
+                MemoryConsumer::new("FinalHashAggregateStream[0]/bounded-emit")
+                    .with_can_spill(true);
+            let consumer_id = consumer.id();
+            let reservation = consumer.register(&observed.pool());
+            assert_eq!(observed.pool().name(), pool.name());
+            assert_eq!(observed.pool().to_string(), pool.to_string());
+            assert!(matches!(
+                observed.pool().memory_limit(),
+                MemoryLimit::Finite(1024)
+            ));
+            reservation.try_grow(100)?;
+            let sibling = reservation.new_empty();
+            sibling.try_grow(200)?;
+            let mut split = sibling.split(80);
+            sibling.try_grow(50)?;
+            reservation.shrink(40);
+            assert!(reservation.try_grow(10_000).is_err());
+            assert_eq!(observed.pool().reserved(), pool.reserved());
+            assert_eq!(pool.reserved(), 438);
+            // One gauge survives a sequential phase change. Refused headroom is absent.
+            let replay_metrics = observed.clone();
+            drop(replay_metrics);
+            let values = metrics.clone_inner();
+            let peaks: Vec<_> = values
+                .iter()
+                .filter(|m| m.value().name() == "peak_mem_used")
+                .collect();
+            assert_eq!(peaks.len(), 1);
+            assert_eq!(peaks[0].value().as_usize(), oracle.peak() - 128);
+            assert_eq!(peaks[0].value().as_usize(), 350);
+            let moved = split.take();
+            drop(split);
+            drop(moved);
+            drop(sibling);
+            drop(reservation);
+            drop(unrelated);
+            oracle.assert_balanced();
+            let registrations = oracle.registrations.lock().unwrap();
+            assert!(
+                registrations
+                    .iter()
+                    .any(|(register, id, name, spill)| *register
+                        && *id == consumer_id
+                        && name == "FinalHashAggregateStream[0]/bounded-emit"
+                        && *spill)
+            );
+            assert_eq!(
+                registrations
+                    .iter()
+                    .filter(|(register, ..)| *register)
+                    .count(),
+                2
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn aggregate_peak_is_published_after_error_and_early_close() -> Result<()> {
+        use arrow::datatypes::Schema;
+        for early_close in [false, true] {
+            let oracle = Arc::new(ReservationOracle::new(Arc::new(
+                GreedyMemoryPool::new(1024),
+            )));
+            let pool: Arc<dyn MemoryPool> = Arc::clone(&oracle) as _;
+            let metrics = metrics::ExecutionPlanMetricsSet::new();
+            let observed = AggregateMemoryMetrics::new(&metrics, 0, &pool);
+            let reservation =
+                MemoryConsumer::new("FinalHashAggregateStream[0]/bounded-emit")
+                    .register(&observed.pool());
+            reservation.try_grow(256)?;
+            let input = futures::stream::once(async move {
+                reservation.free();
+                drop(reservation);
+                Err(DataFusionError::Execution(
+                    "expected original error".to_owned(),
+                ))
+            });
+            let input = Box::pin(RecordBatchStreamAdapter::new(
+                Arc::new(Schema::empty()),
+                input,
+            ));
+            let mut stream = observed.observe_stream(input);
+            if !early_close {
+                assert!(
+                    matches!(stream.next().await, Some(Err(DataFusionError::Execution(message))) if message == "expected original error")
+                );
+            }
+            drop(stream);
+            let values = metrics.clone_inner();
+            let peak = values
+                .iter()
+                .find(|m| m.value().name() == "peak_mem_used")
+                .unwrap();
+            assert_eq!(peak.value().as_usize(), oracle.peak());
+            assert_eq!(peak.value().as_usize(), 256);
+            oracle.assert_balanced();
+        }
+        Ok(())
     }
 }
 

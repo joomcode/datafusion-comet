@@ -434,6 +434,16 @@ budget includes decoded Arrow buffer capacity, not just logical serialized size,
 per-group owned variable-state headers that the IPC offsets do not represent. These
 reservations remain estimates and do not bound RSS or output retained by downstream code.
 
+The grouped aggregate streams publish `peak_mem_used` for the declared reservations
+owned by one aggregate partition. An observer built from DataFusion's
+`PeakRecordingPool` wraps only that consumer's registration; the original task pool,
+consumer identity, spill policy and allocation operations stay unchanged. Sibling
+reservations and sequential spill replay share the same observer and metric, so the
+reported value is the peak simultaneous reservation rather than a sum of phase peaks.
+Other operators' reservations and unreserved allocations are outside this metric.
+Polling and early-close cleanup publish the retained peak even after the bytes have
+been returned to the pool.
+
 ## How DataFusion consumes the pool
 
 Native operators reserve through DataFusion's `MemoryConsumer` / `MemoryReservation` API:

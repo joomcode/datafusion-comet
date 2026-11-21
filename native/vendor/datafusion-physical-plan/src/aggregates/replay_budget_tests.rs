@@ -39,6 +39,8 @@ use datafusion_physical_expr::{LexOrdering, PhysicalSortExpr};
 use futures::StreamExt;
 
 use super::group_values::GroupByMetrics;
+use super::hash_stream::AggregateMemoryMetrics;
+use super::hash_stream::memory_metrics_tests::ReservationOracle;
 use super::ordered_final_stream::OrderedFinalAggregateStream;
 use super::replay_budget::{decoded_spill_memory_bound, reserve_replay_headroom};
 use super::{AggregateExec, AggregateMode, PhysicalGroupBy};
@@ -106,7 +108,10 @@ async fn wide_replay_batches_are_reshaped_before_pinning_output_headroom() -> Re
         } else {
             3 * logical_start + ROWS * 24
         };
-        let pool: Arc<dyn MemoryPool> = Arc::new(GreedyMemoryPool::new(pool_size));
+        let oracle = Arc::new(ReservationOracle::new(Arc::new(GreedyMemoryPool::new(
+            pool_size,
+        ))));
+        let pool: Arc<dyn MemoryPool> = Arc::clone(&oracle) as _;
         let runtime = RuntimeEnvBuilder::new()
             .with_memory_pool(Arc::clone(&pool))
             .build_arc()?;
@@ -172,9 +177,10 @@ async fn wide_replay_batches_are_reshaped_before_pinning_output_headroom() -> Re
                 "the naive output grant and two readers must not fit together"
             );
         }
+        let memory_metrics = AggregateMemoryMetrics::new(&aggregate.metrics, 0, &pool);
         let reservation = MemoryConsumer::new("FinalHashAggregateStream[0]/bounded-emit")
             .with_can_spill(true)
-            .register(&pool);
+            .register(&memory_metrics.pool());
         let prepared =
             reserve_replay_headroom(&aggregate, &manager, spills, ROWS, reservation)
                 .await?;
@@ -236,6 +242,7 @@ async fn wide_replay_batches_are_reshaped_before_pinning_output_headroom() -> Re
                 metrics,
                 GroupByMetrics::new(&aggregate.metrics, 0),
                 None,
+                memory_metrics.clone(),
                 replay_reservation,
             )?);
         let output = collect(replay).await?;
@@ -263,6 +270,23 @@ async fn wide_replay_batches_are_reshaped_before_pinning_output_headroom() -> Re
             0,
             "replay, merge and reshaping release every grant"
         );
+        let all_metrics = aggregate.metrics.clone_inner();
+        let peaks: Vec<_> = all_metrics
+            .iter()
+            .filter(|metric| metric.value().name() == "peak_mem_used")
+            .collect();
+        assert_eq!(
+            peaks.len(),
+            1,
+            "sequential spill replay must reuse one metric"
+        );
+        assert_eq!(
+            peaks[0].value().as_usize(),
+            oracle.peak(),
+            "reported peak must cover the real simultaneous replay and merge grants"
+        );
+        assert!(oracle.peak() > 0);
+        oracle.assert_balanced();
     }
     Ok(())
 }

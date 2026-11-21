@@ -34,6 +34,7 @@ use futures::stream::{Stream, StreamExt};
 use super::AggregateExec;
 use super::aggregate_hash_table::{FinalMarker, OrderedAggregateTable};
 use super::group_values::GroupByMetrics;
+use super::hash_stream::AggregateMemoryMetrics;
 use crate::aggregates::AggregateMode;
 use crate::metrics::{BaselineMetrics, RecordOutput, SpillMetrics};
 use crate::sorts::IncrementalSortIterator;
@@ -65,6 +66,8 @@ pub(crate) struct OrderedFinalAggregateStream {
     schema: SchemaRef,
     input: SendableRecordBatchStream,
     reservation: MemoryReservation,
+    /// Records only this aggregate consumer, including siblings used by spill replay.
+    memory_metrics: AggregateMemoryMetrics,
     baseline_metrics: BaselineMetrics,
     state: Option<OrderedFinalAggregateState>,
     /// COMET PATCH: the group keys are fully ordered, so the table holds only the groups
@@ -227,6 +230,7 @@ impl OrderedFinalSpillContext {
         self,
         baseline_metrics: &BaselineMetrics,
         group_by_metrics: GroupByMetrics,
+        memory_metrics: AggregateMemoryMetrics,
         reservation: MemoryReservation,
     ) -> Result<SendableRecordBatchStream> {
         let Self {
@@ -248,7 +252,12 @@ impl OrderedFinalSpillContext {
             spill_manager,
             spills,
         }
-        .into_stream(baseline_metrics, group_by_metrics, reservation))
+        .into_stream(
+            baseline_metrics,
+            group_by_metrics,
+            memory_metrics,
+            reservation,
+        ))
     }
 }
 
@@ -276,6 +285,8 @@ impl OrderedFinalAggregateStream {
         input_order_mode: &InputOrderMode,
     ) -> Result<Self> {
         let baseline_metrics = BaselineMetrics::new(&agg.metrics, partition);
+        let memory_metrics =
+            AggregateMemoryMetrics::new(&agg.metrics, partition, context.memory_pool());
         let group_by_metrics = GroupByMetrics::new(&agg.metrics, partition);
         let spill_metrics = SpillMetrics::new(&agg.metrics, partition);
         let reservation = MemoryConsumer::new(format!(
@@ -288,7 +299,7 @@ impl OrderedFinalAggregateStream {
         // memory budget to suppress the bug.
         // Bug issue: https://github.com/apache/datafusion/issues/17334
         .with_can_spill(true)
-        .register(context.memory_pool());
+        .register(&memory_metrics.pool());
         Self::new_with_input_and_metrics(
             agg,
             context,
@@ -298,6 +309,7 @@ impl OrderedFinalAggregateStream {
             baseline_metrics,
             group_by_metrics,
             Some(spill_metrics),
+            memory_metrics,
             reservation,
         )
     }
@@ -318,6 +330,7 @@ impl OrderedFinalAggregateStream {
         baseline_metrics: BaselineMetrics,
         group_by_metrics: GroupByMetrics,
         spill_metrics: Option<SpillMetrics>,
+        memory_metrics: AggregateMemoryMetrics,
         reservation: MemoryReservation,
     ) -> Result<Self> {
         debug_assert!(matches!(
@@ -362,6 +375,7 @@ impl OrderedFinalAggregateStream {
             schema,
             input,
             reservation,
+            memory_metrics,
             baseline_metrics,
             state: Some(OrderedFinalAggregateState::ReadingInput {
                 table,
@@ -743,6 +757,7 @@ impl OrderedFinalAggregateStream {
                     Ok(()) => (*spill_context).into_replay_stream(
                         &self.baseline_metrics,
                         group_by_metrics,
+                        self.memory_metrics.clone(),
                         self.reservation.new_empty(),
                     ),
                     Err(e) => Err(e),
@@ -929,6 +944,7 @@ impl Stream for OrderedFinalAggregateStream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
+        let _memory_metrics = self.memory_metrics.clone();
         loop {
             let cur_state = self
                 .state

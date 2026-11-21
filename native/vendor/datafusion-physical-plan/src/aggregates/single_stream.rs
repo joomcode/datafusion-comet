@@ -40,6 +40,7 @@ use futures::stream::{Stream, StreamExt};
 
 use super::aggregate_hash_table::{AggregateHashTable, SingleMarker};
 use super::group_values::GroupByMetrics;
+use super::hash_stream::AggregateMemoryMetrics;
 use super::{AggregateExec, create_schema};
 use crate::aggregates::AggregateMode;
 use crate::metrics::{BaselineMetrics, RecordOutput, SpillMetrics};
@@ -97,6 +98,8 @@ pub(crate) struct SingleHashAggregateStream {
 
     /// Memory reservation for group keys, accumulators, and spill sorting.
     reservation: MemoryReservation,
+    /// Records only this aggregate consumer, including siblings used by spill replay.
+    memory_metrics: AggregateMemoryMetrics,
 
     /// Tracks the high-level stream lifecycle. The hash table owns the lower-level
     /// state for emitting output batches.
@@ -273,6 +276,7 @@ impl SingleSpillContext {
         self,
         baseline_metrics: &BaselineMetrics,
         group_by_metrics: GroupByMetrics,
+        memory_metrics: AggregateMemoryMetrics,
         reservation: MemoryReservation,
     ) -> Result<SendableRecordBatchStream> {
         let Self {
@@ -294,7 +298,12 @@ impl SingleSpillContext {
             spill_manager,
             spills,
         }
-        .into_stream(baseline_metrics, group_by_metrics, reservation))
+        .into_stream(
+            baseline_metrics,
+            group_by_metrics,
+            memory_metrics,
+            reservation,
+        ))
     }
 }
 
@@ -315,6 +324,8 @@ impl SingleHashAggregateStream {
         let input_schema = input.schema();
         let batch_size = context.session_config().batch_size();
         let baseline_metrics = BaselineMetrics::new(&agg.metrics, partition);
+        let memory_metrics =
+            AggregateMemoryMetrics::new(&agg.metrics, partition, context.memory_pool());
         let spill_metrics = SpillMetrics::new(&agg.metrics, partition);
         let state_schema = Arc::new(create_schema(
             input_schema.as_ref(),
@@ -350,13 +361,14 @@ impl SingleHashAggregateStream {
             super::AGGREGATE_EMIT_BUDGET_SUFFIX
         ))
         .with_can_spill(can_spill)
-        .register(context.memory_pool());
+        .register(&memory_metrics.pool());
 
         Ok(Self {
             schema,
             input,
             baseline_metrics,
             reservation,
+            memory_metrics,
             state: Some(SingleHashAggregateState::ReadingInput {
                 hash_table,
                 spill_context,
@@ -612,6 +624,7 @@ impl SingleHashAggregateStream {
                     Ok(()) => (*spill_context).into_replay_stream(
                         &self.baseline_metrics,
                         group_by_metrics,
+                        self.memory_metrics.clone(),
                         self.reservation.new_empty(),
                     ),
                     Err(e) => Err(e),
@@ -780,6 +793,7 @@ impl Stream for SingleHashAggregateStream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
+        let _memory_metrics = self.memory_metrics.clone();
         loop {
             let cur_state = self
                 .state

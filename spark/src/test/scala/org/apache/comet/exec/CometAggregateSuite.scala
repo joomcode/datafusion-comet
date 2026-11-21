@@ -61,17 +61,20 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
   override protected def sparkConf: SparkConf =
     super.sparkConf.set(SQLConf.ANSI_ENABLED.key, "false")
 
-  // TODO: To be addressed after DF 55 migration
-  ignore("grouped aggregate metrics are forwarded without fabricating global metrics") {
+  test("grouped aggregate metrics are forwarded without fabricating global metrics") {
     val aggregateMetricNames =
       Set("spill_count", "spilled_bytes", "spilled_rows", "peak_mem_used")
 
     withSQLConf(
+      SQLConf.ANSI_ENABLED.key -> "true",
       SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
       SQLConf.SHUFFLE_PARTITIONS.key -> "2") {
       withParquetTable((0 until 1024).map(i => (i % 64, i)), "tbl", false) {
-        val grouped = sql("SELECT _1, SUM(_2) FROM tbl GROUP BY _1")
-        assert(grouped.collect().length == 64)
+        val groupedQuery = "SELECT _1, SUM(_2) FROM tbl GROUP BY _1"
+        val (groupedExpected, _) = orderedSparkResult(groupedQuery)
+        assert(groupedExpected.size == 64)
+        val grouped = sql(groupedQuery)
+        checkCometAnswer(grouped, groupedExpected)
 
         val groupedAggregates = stripAQEPlan(grouped.queryExecution.executedPlan).collect {
           case aggregate: CometHashAggregateExec => aggregate
@@ -89,8 +92,11 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
             s"Expected peak aggregate memory for modes ${aggregate.modes}")
         }
 
-        val global = sql("SELECT SUM(_2) FROM tbl")
-        assert(global.collect().length == 1)
+        val globalQuery = "SELECT SUM(_2) FROM tbl"
+        val (globalExpected, _) = orderedSparkResult(globalQuery)
+        assert(globalExpected.size == 1)
+        val global = sql(globalQuery)
+        checkCometAnswer(global, globalExpected)
 
         val globalAggregates = stripAQEPlan(global.queryExecution.executedPlan).collect {
           case aggregate: CometHashAggregateExec => aggregate
@@ -103,13 +109,16 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
     }
   }
 
-  // TODO: To be addressed after DF 55 migration
-  ignore("range sampling does not report grouped aggregate metrics") {
+  test("range sampling does not report grouped aggregate metrics") {
     withSQLConf(
+      SQLConf.ANSI_ENABLED.key -> "true",
       SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
       SQLConf.SHUFFLE_PARTITIONS.key -> "2",
       CometConf.COMET_SHUFFLE_MODE.key -> "native") {
       withParquetTable((0 until 1024).map(i => (i % 64, i)), "tbl", false) {
+        val (expected, _) =
+          orderedSparkResult("SELECT _1, SUM(_2) AS total FROM tbl GROUP BY _1")
+        assert(expected.size == 64)
         val ranged =
           sql("SELECT _1, SUM(_2) AS total FROM tbl GROUP BY _1").repartitionByRange(2, col("_1"))
         val plan = stripAQEPlan(ranged.queryExecution.executedPlan)
@@ -150,7 +159,7 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
         assert(samplingInputBytes.get() > 0L)
         assert(samplingInputRecords.get() > 0L)
 
-        assert(ranged.collect().length == 64)
+        checkCometAnswer(ranged, expected)
         assert(aggregate.metrics("peak_mem_used").value > 0L)
       }
     }

@@ -36,6 +36,7 @@ use super::aggregate_hash_table::common::{
     EMIT_BYTES_PER_GROUP, column_group_key, emit_copies,
 };
 use super::group_values::GroupByMetrics;
+use super::hash_stream::AggregateMemoryMetrics;
 use super::ordered_final_stream::OrderedFinalAggregateStream;
 use crate::metrics::BaselineMetrics;
 use crate::sorts::streaming_merge::{SortedSpillFile, StreamingMergeBuilder};
@@ -229,6 +230,7 @@ impl ReplayInput {
         self,
         baseline_metrics: &BaselineMetrics,
         group_by_metrics: GroupByMetrics,
+        memory_metrics: AggregateMemoryMetrics,
         reservation: MemoryReservation,
     ) -> SendableRecordBatchStream {
         let schema = Arc::clone(&self.aggregate.schema);
@@ -256,6 +258,7 @@ impl ReplayInput {
                 baseline_metrics,
                 group_by_metrics,
                 None,
+                memory_metrics,
                 replay_reservation,
             )?;
             Ok::<SendableRecordBatchStream, DataFusionError>(Box::pin(replay))

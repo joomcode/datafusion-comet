@@ -28,6 +28,7 @@ use futures::stream::{Stream, StreamExt};
 
 use super::AggregateExec;
 use super::aggregate_hash_table::{OrderedAggregateTable, PartialMarker};
+use super::hash_stream::AggregateMemoryMetrics;
 use crate::aggregates::AggregateMode;
 use crate::metrics::{BaselineMetrics, MetricBuilder, SpillMetrics};
 use crate::stream::{EmptyRecordBatchStream, ObservedStream, RecordBatchStreamAdapter};
@@ -114,6 +115,8 @@ pub(crate) struct OrderedPartialAggregateStream {
     schema: SchemaRef,
     input: SendableRecordBatchStream,
     reservation: MemoryReservation,
+    /// Records only this aggregate consumer, including siblings used by spill replay.
+    memory_metrics: AggregateMemoryMetrics,
     baseline_metrics: BaselineMetrics,
     reduction_factor: metrics::RatioMetrics,
     table: Option<OrderedAggregateTable<PartialMarker>>,
@@ -132,6 +135,8 @@ impl OrderedPartialAggregateStream {
         let input = agg.input.execute(partition, Arc::clone(context))?;
         let batch_size = context.session_config().batch_size();
         let baseline_metrics = BaselineMetrics::new(&agg.metrics, partition);
+        let memory_metrics =
+            AggregateMemoryMetrics::new(&agg.metrics, partition, context.memory_pool());
 
         // Preserve the existing aggregate metric surface for this plan node.
         let _spill_metrics = SpillMetrics::new(&agg.metrics, partition);
@@ -149,12 +154,13 @@ impl OrderedPartialAggregateStream {
             MemoryConsumer::new(format!("OrderedPartialAggregateStream[{partition}]"))
                 // Partial states may be emitted early for any input ordering.
                 .with_can_spill(true)
-                .register(context.memory_pool());
+                .register(&memory_metrics.pool());
 
         Ok(Self {
             schema,
             input,
             reservation,
+            memory_metrics,
             baseline_metrics,
             reduction_factor,
             table: Some(table),
@@ -165,12 +171,17 @@ impl OrderedPartialAggregateStream {
         let schema_clone = Arc::clone(&self.schema);
 
         let cloned_metrics = self.baseline_metrics.clone();
+        let memory_metrics = self.memory_metrics.clone();
         let stream = Box::pin(RecordBatchStreamAdapter::new(
             schema_clone,
             self.create_stream(),
         ));
 
-        Box::pin(ObservedStream::new(stream, cloned_metrics, None))
+        memory_metrics.observe_stream(Box::pin(ObservedStream::new(
+            stream,
+            cloned_metrics,
+            None,
+        )))
     }
 
     /// Entry point for the ordered partial aggregate state machine.
