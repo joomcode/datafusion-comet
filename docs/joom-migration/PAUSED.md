@@ -106,3 +106,28 @@ actual final JARs and reconcile every validation-backlog item before reporting.
 Do not amend the qualified source merely to record post-commit outcomes.
 Report before merge/stable tag; main, branch-1.2, release tags, external artifact
 publication, production and datasci remain outside the authorized write scope.
+
+## G10 final frozen-source checkpoint
+
+The final candidate retains the original 12 packaged cases and adds 11 existing
+registrations for G08/G09 linkage and actual default Kryo: 23 cases in 11 groups
+per native AMD64/ARM64 architecture. Origin proof requires 17 Core and two Delta
+classes from the final JARs; checkout production classes and unexpected duplicates
+are rejected. Previous `040f83bac` runs were stopped for this coverage completion
+with no observed test failure; their CodeQL success belongs only to that SHA.
+
+Local prechecks passed: 11 additional real shaded cases, one new 19-origin Delta
+probe, 11 runtime fault controls, 18 receipt/contract controls, and the full source
+and compiled secondary-suite inventory. The previously omitted concrete default
+Kryo suite is now listed in both Linux/macOS workflows. All 15 backlog entries
+map to actual acceptance evidence; none is closed from planned execution alone.
+Production source is unchanged from `040f83bac`.
+
+Read `STATE.json#g10`, `G10-results.json` and the external `candidate-v3.json` and
+source manifest. All local processes are done. Publish and qualify the exact SHA
+with full Comet CI, CodeQL, Miri and the 23-case RC. Poll every five minutes;
+inspect failures promptly and cancel superseded runs if a correction is needed.
+Preserve old manifests, controls and receipts. Download and independently verify
+final JARs, then reconcile every backlog item before reporting. Do not amend tested
+source merely for status updates. Report before merge/stable tag; main,
+branch-1.2, release tags, external publication, production and datasci are excluded.

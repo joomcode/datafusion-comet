@@ -1,7 +1,7 @@
 {
   "date": "2026-11-21",
   "group": "G10",
-  "status": "REPLACEMENT_SOURCE_FROZEN_LOCAL_QUALITY_PASSED_POST_COMMIT_QUALIFICATION_REQUIRED",
+  "status": "FINAL_SOURCE_FROZEN_EXPANDED_PACKAGED_COVERAGE_POST_COMMIT_QUALIFICATION_REQUIRED",
   "branch": "joom/1.2-release-qualification",
   "base_commit": "4467d0337089036d3f01d28375260ce3dbcaaca5",
   "cards": "All agreed 58 active cards, plus preservation of historical H01; no scope is automatically excluded.",
@@ -15,19 +15,24 @@
     "jvm_arrow": "18.3.0",
     "java": "17.0.19-tem"
   },
-  "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v2.json",
-  "source_manifest_sha256": "7f330714d31202dfd844a1bf5a8d774a1b89f725df606f94ba6e3d6be30ef9e5",
+  "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v3.json",
+  "source_manifest_sha256": "05d9a9a502cb84d89d141dfb71fd3010fc5dc8a287163f1733143f0bf8d1687f",
   "changed_source_sha256": {
     ".github/actions/java-test/action.yaml": "3ff24f865e0b76d1e8fb7f991f7ac201294c4fcc7a9491feeb28a3b96823edc2",
     ".github/actions/rust-test/action.yaml": "ae1207a8c531775baf0db3698ea232171ec203675105cf886e87a17198e7016d",
     ".github/workflows/README.md": "895632fc8075642f4fd1f750df8850e8f97513f296d0b688d3882b2be2e1489f",
     ".github/workflows/codeql.yml": "6cf63c424f89916956f0e6be94cae161afcb0cfc8e1c95826f9e09641ac43c8d",
-    ".github/workflows/pr_build_linux.yml": "458ce73cc318519f0b8d3924708f82da6109f1aae50fe6c957533d884f20f42e",
+    ".github/workflows/pr_build_linux.yml": "e06705eba74ed57777d4cf6656c1f1ef09c80dcb4e6ddee94b681780009e8d66",
+    ".github/workflows/pr_build_macos.yml": "02480e6e6e6f1a3a7ea18b31a3d1c9b3289ad6c0e829a7b2009edc88066ee75b",
     "contrib/delta-spark/src/main/scala/org/apache/comet/contrib/delta/CometDeltaNativeScan.scala": "a64544ed87f9a2713548add46bee20aecea010a1f85494c7b41508ac42e46600",
     "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/CometDeltaS3Suite.scala": "66fb0061324315cc8fd0d0c5d4992a1864b55ae6280a1d52f64fc75eaf299b33",
     "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/DeltaScanContribSuite.scala": "6291496717e08f5322b560b0642ab81bb26822d57de517c77e66162da659f395",
     "dev/ci/verify-native-windows.py": "38d49357b2672501704f9efa3dcb74ee746e9e06b6ee27f3acb4013d3e9e28cd",
     "dev/release/joom/build-release.sh": "e2ed184d3cf3f7442346115ba1db647519d1f09972abcd4e01e130a7734ec365",
+    "dev/release/joom/test-packaged-runtime.py": "fca1b8e9501b5c39058bca452fb55586afc6c130fd42fee9d817283ec4ce7c0c",
+    "dev/release/joom/test-rc-result.py": "805d1030a6adeef3e0ab46eddd0ecaa57459fccafc755e3510bf14bef71c5461",
+    "dev/release/joom/verify-packaged-runtime.py": "6cdc4ad8f0d2109ef8ada3c442f7fddd2cf73561587124ea8f8aafc89385d281",
+    "dev/release/joom/verify-rc-result.py": "1bea6c32adb244785cfb003d3b769691793d37948308ef119bdf4b9a34de5489",
     "docs/source/contributor-guide/ci.md": "036cdc86a743069db2edd50fef11166e1b2692bb473379e6983a7497a7ec8b5b",
     "docs/source/contributor-guide/memory_management.md": "0f2c26937260892a239593f7f90d1675a9f54b9412420337f4e0071a4773c36e",
     "native/vendor/datafusion-physical-plan/src/aggregates/hash_stream.rs": "57c59676b56d3de9e94bddebac2f9b64ac2e3aa4f25d09a54003fee6a407b953",
@@ -399,6 +404,34 @@
     {
       "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/final-followup-review-68133883e.json",
       "sha256": "0756bb1cb91426bd63ceeb6ee88ecc7b2b35a1a66bb5c5837b75d02467baca5a"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_packaged-expansion/runtime-final-review.json",
+      "sha256": "37944b8c8e7bcd4b61f33f57c46b79c9a205b04c712a9d6a545480a78c2ea606"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_packaged-expansion/rc-result-and-secondary-final-handoff.json",
+      "sha256": "ce1da1585dffa5378514349f47c07e1b3f6c52283b4f2c3f2b5658ba0bde82b6"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_packaged-expansion/rc-result-final-protocol-proof.json",
+      "sha256": "65f6060fc65be0ce80332794122a1a4169a53e281e281d80e91251db40b86bf1"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_packaged-expansion/local-packaged-expansion-summary.json",
+      "sha256": "d0ef20bbd1a9358ca2315153b27194c54ab01132e346e206a1514e6397ad2395"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_packaged-expansion/20261121_new-probe-positive/new-probe-positive-summary.json",
+      "sha256": "89a856c8bb5804b4d1c46d3e67b49782b14908c8503a1f61ac03ec5aecfd986a"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v2.json",
+      "sha256": "26a23ecb054e7f97d7a28185c251c2030a40fb71c52b3127ff170aa8973c0100"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/compiled-secondary-suite-crosscheck.json",
+      "sha256": "f618bcd62884aaded025d5274f401be0bfe2613ff59bcaf87f6e5658f6f43764"
     }
   ],
   "superseded_remote_attempts": [
@@ -416,6 +449,17 @@
       ],
       "evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/cancel-first-candidate.json",
       "final_qualification_credit": false
+    },
+    {
+      "source_commit": "040f83bac15d335a40d5903366210d6dde1d4c13",
+      "full_ci": 44926780497,
+      "rc": 44926785977,
+      "miri": 44926783495,
+      "codeql": 44926774769,
+      "status": "CI_RC_MIRI_STOPPED_EARLY_FOR_FINAL_JAR_COVERAGE_COMPLETION_CODEQL_PASSED",
+      "observed_failures_before_stop": 0,
+      "qualification_credit": false,
+      "reason": "Direct final-JAR coverage needed for G08/G09 and default Kryo; original12G01smoke cases insufficient to close those explicit backlog promises."
     }
   ],
   "previous_source_manifests": [
@@ -423,6 +467,11 @@
       "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest.json",
       "sha256": "a2b931fabcb01a8fead9269b3bf33e059fc82d0849b2002c8cf3f62f93a5c27f",
       "source": "68133883ea32f6ab8c758f2b9d87f4aa7a36e642"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v2.json",
+      "sha256": "7f330714d31202dfd844a1bf5a8d774a1b89f725df606f94ba6e3d6be30ef9e5",
+      "source": "040f83bac15d335a40d5903366210d6dde1d4c13"
     }
   ],
   "corrective_local_quality": {
@@ -513,5 +562,22 @@
     "runtime_tests_note": "These are build/quality checks, not additional runtime-test pass counts. Earlier129-per-profile plan and34C2R/conditional runtime evidence is retained; final exact-SHA full CI remains required.",
     "preservation": "Explicit adaptations and compiler-proven literal bytes; no SQL/result/error/native assertion is relaxed. No new allocation policy, cost coefficient, configuration default, dependency pin or production algorithm changes.",
     "literal_proof_binding": "Original compiler-tested literals precede formatting; independent final-followup review binds actual formatted files and proves full Delta source-token equivalence against original68133883e, covering layout-only hash drift."
-  }
+  },
+  "packaged_acceptance": {
+    "cases_per_architecture": 23,
+    "groups": 11,
+    "architectures": [
+      "amd64",
+      "aarch64"
+    ],
+    "native_and_final_jar_bytes": "Exact loaded bundled native SHA and unchanged release JAR hashes, before/after execution.",
+    "class_origins": "17 unique final-core classes for every group;2 unique final-Delta classes for both Delta groups; exact JAR names/SHA/resource_count1.",
+    "additional_cases": "G08UDFpool1+Delta serialization2;G09cost/mixed/ANSI4+wide-sort1+wide-shuffle1+wide-decimal range1;actualdefaultKryobroadcast1. Original12G01cases retained.",
+    "source_assertions": "Select existing test registrations; original row/schema/error/native/Kryo checks unchanged.",
+    "local_precheck": "11additional registrations and one new19-origin Delta probe pass using Darwin shaded Core/Delta and Java17; not Linux/final-source acceptance.",
+    "boundary_controls": "11runtime fault controls and18receipt/contract controls passed; no bypass for missing/skipped/pending/wrong-origin/duplicate support.",
+    "ci_secondary_suite": "Existing CometBroadcastDefaultKryoSuite added beside PayloadSuite in Linux/macOS lists;2actualAQEcases per applicable profile. Source/compiled census finds no other unexpected omission.",
+    "python38": "Grammar/API compatibility review passed; actual Focal release execution remains remote gate."
+  },
+  "backlog_map": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v2.json"
 }

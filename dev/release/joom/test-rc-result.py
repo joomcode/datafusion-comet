@@ -56,16 +56,24 @@ class ReceiptBoundary(unittest.TestCase):
             proof = {"architecture": arch, "core_jar_sha256": jars[rc.CORE],
                      "loaded_native_sha256": rc.digest(native), "java_version": "17.0.19",
                      "spark_version": "4.2.1"}
+            cases = []
+            for group, count in rc.COUNTS.items():
+                origins = {name: {"jar_name": rc.CORE, "jar_sha256": jars[rc.CORE],
+                                  "resource_count": 1} for name in rc.CORE_ORIGIN_CLASSES}
+                if group in rc.DELTA_GROUPS:
+                    origins.update({name: {"jar_name": rc.DELTA,
+                                           "jar_sha256": jars[rc.DELTA], "resource_count": 1}
+                                    for name in rc.DELTA_ORIGIN_CLASSES})
+                loaded = dict(copy.deepcopy(proof), class_origins=origins)
+                cases.append({"group": group, "passed": count, "failed": 0,
+                              "canceled": 0, "ignored": 0, "pending": 0,
+                              "bundled_native_and_class_origins": "VERIFIED",
+                              "loaded_native_proof": loaded})
             result = {"architecture": arch, "commit": COMMIT, "cargo_lock_sha256": LOCK,
                       "release_jar_sha256": jars, "native_sha256": rc.digest(native),
                       "checksum_manifest_sha256": rc.digest(self.out / "sha256.txt"),
                       "test_support_manifest_sha256": rc.digest(self.out / "test-support/manifest.json"),
-                      "total_passed": 12,
-                      "cases": [{"group": group, "passed": count, "failed": 0,
-                                 "canceled": 0, "ignored": 0,
-                                 "bundled_native_and_class_origins": "VERIFIED",
-                                 "loaded_native_proof": copy.deepcopy(proof)}
-                                for group, count in rc.COUNTS.items()]}
+                      "total_passed": sum(rc.COUNTS.values()), "cases": cases}
             path = self.reports / arch / "results.json"
             path.parent.mkdir(parents=True)
             path.write_text(json.dumps(result))
@@ -78,8 +86,17 @@ class ReceiptBoundary(unittest.TestCase):
         path, result = self.results[arch]
         path.write_text(json.dumps(result))
 
+    def case(self, group, arch="amd64"):
+        return next(case for case in self.results[arch][1]["cases"] if case["group"] == group)
+
     def test_both_architectures_accept_identical_final_bytes(self):
         self.assertEqual(set(self.validate()), {"amd64", "aarch64"})
+
+    def test_case_proof_does_not_need_the_test_support_manifest(self):
+        result = self.results["amd64"][1]
+        (self.out / "test-support/manifest.json").unlink()
+        rc.validate_case_proof(self.case("g09-cost"), "amd64",
+                               result["release_jar_sha256"], result["native_sha256"])
 
     def test_repackaging_invalidates_previously_successful_smoke(self):
         (self.out / rc.CORE).write_text("new final package")
@@ -114,6 +131,95 @@ class ReceiptBoundary(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "loaded-native proof"):
                 self.validate()
             result["cases"][0]["loaded_native_proof"][field] = old
+
+    def test_exporter_contract_matches_runtime_runner(self):
+        runtime = rc.module("verify-packaged-runtime")
+        self.assertEqual(rc.COUNTS, {label: count for label, _, _, count in runtime.CASES})
+        self.assertEqual(len(runtime.CASES), 11)
+        self.assertEqual(sum(rc.COUNTS.values()), 23)
+        self.assertEqual(set(rc.CORE_ORIGIN_CLASSES), set(runtime.CORE_ORIGIN_CLASSES))
+        self.assertEqual(set(rc.DELTA_ORIGIN_CLASSES), set(runtime.DELTA_ORIGIN_CLASSES))
+        self.assertEqual(rc.DELTA_GROUPS, set(runtime.DELTA_GROUPS))
+        self.assertEqual(len(runtime.CORE_ORIGIN_CLASSES), 17)
+        self.assertEqual(len(runtime.DELTA_ORIGIN_CLASSES), 2)
+
+    def test_legacy_twelve_case_smoke_cannot_qualify_expanded_release(self):
+        result = self.results["amd64"][1]
+        result["cases"] = [case for case in result["cases"]
+                           if case["group"] in {"delta", "dpp", "reload", "ansi"}]
+        result["total_passed"] = 12
+        self.rewrite("amd64")
+        with self.assertRaisesRegex(ValueError, "missing, duplicate or extra smoke groups"):
+            self.validate()
+
+    def test_duplicate_new_group_cannot_hide_a_missing_group(self):
+        result = self.results["amd64"][1]
+        result["cases"] = [copy.deepcopy(self.case("g09-wide-sort"))
+                           if case["group"] == "g09-range" else case
+                           for case in result["cases"]]
+        self.rewrite("amd64")
+        with self.assertRaisesRegex(ValueError, "missing, duplicate or extra smoke groups"):
+            self.validate()
+
+    def test_new_group_requires_its_full_test_count(self):
+        self.case("g09-cost")["passed"] = 3
+        self.rewrite("amd64")
+        with self.assertRaisesRegex(ValueError, "failed or skipped cases"):
+            self.validate()
+
+    def test_pending_new_case_cannot_qualify_release(self):
+        self.case("g08-delta-serialization")["pending"] = 1
+        self.rewrite("amd64")
+        with self.assertRaisesRegex(ValueError, "failed or skipped cases"):
+            self.validate()
+
+    def test_new_group_requires_loaded_native_proof(self):
+        del self.case("g08-udf")["loaded_native_proof"]
+        self.rewrite("amd64")
+        with self.assertRaisesRegex(ValueError, "missing loaded-native proof"):
+            self.validate()
+
+    def test_verified_label_cannot_replace_class_origin_proof(self):
+        del self.case("g09-cost")["loaded_native_proof"]["class_origins"]
+        self.rewrite("amd64")
+        with self.assertRaisesRegex(ValueError, "missing or extra final-JAR class origins"):
+            self.validate()
+
+    def test_missing_new_payload_class_cannot_qualify_release(self):
+        origins = self.case("g08-udf")["loaded_native_proof"]["class_origins"]
+        del origins["org.apache.comet.udf.codegen.CometUdfFunctionPool$PlanPayload"]
+        self.rewrite("amd64")
+        with self.assertRaisesRegex(ValueError, "missing or extra final-JAR class origins"):
+            self.validate()
+
+    def test_wrong_or_nonunique_new_core_origin_cannot_qualify_release(self):
+        origin = self.case("g09-cost")["loaded_native_proof"]["class_origins"][
+            "org.apache.comet.rules.CostBasedEngineChoice"]
+        for field, value in [("jar_name", "core-tests.jar"), ("jar_sha256", "0" * 64),
+                             ("resource_count", 2)]:
+            with self.subTest(field=field):
+                old = origin[field]
+                origin[field] = value
+                self.rewrite("amd64")
+                with self.assertRaisesRegex(ValueError, "wrong or nonunique final-JAR class origin"):
+                    self.validate()
+                origin[field] = old
+
+    def test_new_serialization_group_requires_final_delta_origins(self):
+        origins = self.case("g08-delta-serialization")["loaded_native_proof"]["class_origins"]
+        origins["org.apache.spark.sql.comet.DeltaPlanDataInjector"]["jar_name"] = rc.CORE
+        self.rewrite("amd64")
+        with self.assertRaisesRegex(ValueError, "wrong or nonunique final-JAR class origin"):
+            self.validate()
+
+    def test_duplicate_class_origin_json_cannot_qualify_release(self):
+        path, _ = self.results["amd64"]
+        duplicate = json.dumps("org.apache.comet.NativeBase") + ": {}"
+        text = path.read_text().replace('"class_origins": {',
+                                       '"class_origins": {' + duplicate + ', ', 1)
+        path.write_text(text)
+        with self.assertRaisesRegex(ValueError, "duplicate JSON field in smoke receipt"):
+            self.validate()
 
 
 if __name__ == "__main__":

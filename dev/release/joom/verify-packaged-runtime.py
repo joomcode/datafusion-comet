@@ -40,10 +40,32 @@ sys.dont_write_bytecode = True
 
 CORE = "comet-spark-spark4.2_2.13-1.2.0.jar"
 DELTA = "comet-contrib-delta-spark4.2_2.13-1.2.0.jar"
-FORBIDDEN_CLASSES = {
-    "org/apache/comet/NativeBase.class",
-    "org/apache/spark/sql/comet/CometDeltaNativeScanExec.class",
-}
+CORE_ORIGIN_CLASSES = (
+    "org.apache.comet.NativeBase",
+    "org.apache.comet.udf.codegen.CometUdfFunctionPool$",
+    "org.apache.comet.udf.codegen.CometUdfFunctionPool$PlanPayload",
+    "org.apache.comet.udf.codegen.CometSharedFunctionRef",
+    "org.apache.comet.udf.codegen.CometSharedFunctionRef$",
+    "org.apache.comet.udf.codegen.CometScalaUDFCodegen",
+    "org.apache.comet.serde.QueryContextInterner$",
+    "org.apache.comet.serde.QueryContextInterner$Pool",
+    "org.apache.comet.rules.BoundaryFormats$",
+    "org.apache.comet.rules.ChooseBoundaryFormats",
+    "org.apache.comet.rules.CostBasedEngineChoice",
+    "org.apache.comet.rules.EngineCostModel",
+    "org.apache.comet.rules.WideRowSortFallback",
+    "org.apache.comet.rules.WideRowShuffleFallback$",
+    "org.apache.spark.CometPlugin",
+    "org.apache.comet.CometKryoRegistrator",
+    "org.apache.spark.sql.comet.CometBroadcastExchangeExec",
+)
+DELTA_ORIGIN_CLASSES = (
+    "org.apache.spark.sql.comet.CometDeltaNativeScanExec",
+    "org.apache.spark.sql.comet.DeltaPlanDataInjector",
+)
+DELTA_GROUPS = {"delta", "g08-delta-serialization"}
+FORBIDDEN_CLASSES = {name.replace(".", "/") + ".class"
+                     for name in CORE_ORIGIN_CLASSES + DELTA_ORIGIN_CLASSES}
 CASES = [
     ("delta", "org.apache.comet.contrib.delta.CometDeltaNativeScanSuite", [
         "-t", "plain delta table reads natively with identical results",
@@ -60,6 +82,31 @@ CASES = [
     ("ansi", "org.apache.comet.CometExpressionSuite", [
         "-z", "ANSI integral overflow fidelity",
     ], 6),
+    ("g08-udf", "org.apache.spark.sql.comet.CometUdfFunctionPoolSuite", [
+        "-t", "a real native project shares large UDF captures and retains Spark results",
+    ], 1),
+    ("g08-delta-serialization", "org.apache.comet.contrib.delta.CometDeltaNativeScanSuite", [
+        "-t", "stage task binaries over delta scans do not repeat the query text per expression",
+        "-t", "query-text interning preserves Delta opaque payload keys and SQL context positions",
+    ], 2),
+    ("g09-cost", "org.apache.comet.rules.CostBasedEngineCorrectnessSuite", [
+        "-t", "G09 mixed decimal boundaries preserve Spark rows: precision=38 AQE=true",
+        "-t", "G09 root scalar/nested decimal shuffles preserve Spark partition ids: 38",
+        "-t", "G09 Spark partial buffers feed the retained serialized native final",
+        "-t", "G09 cost/boundary choices retain G08 shared CAST mandatory ANSI errors",
+    ], 4),
+    ("g09-wide-sort", "org.apache.comet.rules.WideRowSortFallbackSuite", [
+        "-t", "a sort moved to Spark stays there on repeated runs with boundary formats",
+    ], 1),
+    ("g09-wide-shuffle", "org.apache.comet.rules.WideRowShuffleFallbackSuite", [
+        "-t", "boundary formats keep a wide shuffle in Spark",
+    ], 1),
+    ("g09-range", "org.apache.comet.exec.CometNativeShuffleSuite", [
+        "-t", "wide decimals remain supported in shuffle payloads, ranges and single partitions",
+    ], 1),
+    ("g07-kryo", "org.apache.spark.sql.comet.CometBroadcastDefaultKryoSuite", [
+        "-t", "string distinct broadcast with default Kryo registration: aqe=true",
+    ], 1),
 ]
 
 # Reflection keeps this helper independent of the Scala/ScalaTest ABI at compile time.
@@ -73,6 +120,8 @@ import java.security.MessageDigest;
 import java.util.*;
 
 public final class RcPackagedSmoke {
+  private static final String[] CORE_CLASSES = {__CORE_CLASSES__};
+  private static final String[] DELTA_CLASSES = {__DELTA_CLASSES__};
   private static void require(boolean ok, String message) {
     if (!ok) throw new IllegalStateException(message);
   }
@@ -86,6 +135,15 @@ public final class RcPackagedSmoke {
   private static String quote(String value) {
     return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"")
         .replace("\n", "\\n").replace("\r", "\\r") + "\"";
+  }
+  private static String classOrigin(String name, Path jar, String jarHash) throws Exception {
+    ClassLoader loader = ClassLoader.getSystemClassLoader();
+    Class<?> cls = Class.forName(name, false, loader);
+    require(Files.isSameFile(origin(cls), jar), name + " did not load from final JAR");
+    int resources = Collections.list(loader.getResources(name.replace('.', '/') + ".class")).size();
+    require(resources == 1, "Duplicate " + name + " on test classpath");
+    return quote(name) + ":{\"jar_name\":" + quote(jar.getFileName().toString())
+        + ",\"jar_sha256\":" + quote(jarHash) + ",\"resource_count\":" + resources + "}";
   }
   public static void main(String[] args) throws Exception {
     require(Runtime.version().feature() == 17, "Packaged smoke requires Java 17");
@@ -117,20 +175,28 @@ public final class RcPackagedSmoke {
     String nativeHash = hash(extracted.toPath());
     require(nativeHash.equals(System.getProperty("rc.native.sha256")),
         "Loaded native library differs from the final JAR entry");
+    String coreHash = hash(core);
+    List<String> classOrigins = new ArrayList<>();
+    for (String name : CORE_CLASSES) classOrigins.add(classOrigin(name, core, coreHash));
     if (Boolean.getBoolean("rc.require.delta")) {
       Class<?> delta = Class.forName("org.apache.spark.sql.comet.CometDeltaNativeScanExec");
-      require(Files.isSameFile(origin(delta), Paths.get(System.getProperty("rc.delta"))),
+      Path deltaJar = Paths.get(System.getProperty("rc.delta"));
+      require(Files.isSameFile(origin(delta), deltaJar),
           "Delta scan did not load from final Delta JAR");
+      String deltaHash = hash(deltaJar);
+      for (String name : DELTA_CLASSES) classOrigins.add(classOrigin(name, deltaJar, deltaHash));
     }
     Files.writeString(Paths.get(System.getProperty("rc.proof")),
-        "{\"architecture\":" + quote(arch) + ",\"core_jar_sha256\":" + quote(hash(core))
+        "{\"architecture\":" + quote(arch) + ",\"core_jar_sha256\":" + quote(coreHash)
         + ",\"loaded_native_sha256\":" + quote(nativeHash)
         + ",\"loaded_native_path\":" + quote(extracted.toString())
         + ",\"spark_version\":" + quote(sparkVersion)
-        + ",\"java_version\":" + quote(System.getProperty("java.version")) + "}\n");
+        + ",\"java_version\":" + quote(System.getProperty("java.version"))
+        + ",\"class_origins\":{" + String.join(",", classOrigins) + "}}\n");
   }
 }
-'''
+'''.replace("__CORE_CLASSES__", ", ".join(json.dumps(name) for name in CORE_ORIGIN_CLASSES)) \
+    .replace("__DELTA_CLASSES__", ", ".join(json.dumps(name) for name in DELTA_ORIGIN_CLASSES))
 
 
 def require(condition, message):
@@ -172,11 +238,28 @@ def release_validator(repo, out, commit, lock):
     module.validate(out, commit, lock)
 
 
-def check_test_jar(path):
+def production_classes(out):
+    # Derive every Comet/Spark production definition from the final JARs, including
+    # nested classes and relocated project dependencies. External test libraries
+    # may supply ordinary unshaded third-party dependencies, never project copies.
+    classes = set()
+    for name in [CORE, DELTA]:
+        with zipfile.ZipFile(out / name) as archive:
+            classes.update(member for member in archive.namelist()
+                           if member.endswith(".class")
+                           and member.startswith(("org/apache/comet/", "org/apache/spark/")))
+    return classes
+
+
+def check_test_jar(path, final_classes=()):
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
-        require(not FORBIDDEN_CLASSES.intersection(names),
-                "test support contains production classes: " + str(path))
+        # A multi-release support JAR must not hide a second production definition.
+        definitions = {re.sub(r"^META-INF/versions/[0-9]+/", "", name) for name in names}
+        duplicate = (FORBIDDEN_CLASSES | set(final_classes)).intersection(definitions)
+        require(not duplicate,
+                "test support contains production classes: " + str(path) + ": "
+                + ", ".join(sorted(duplicate)))
         require(not any(name.endswith(("libcomet.so", "libcomet.dylib", "comet.dll"))
                         for name in names), "test support contains a native library")
 
@@ -225,9 +308,10 @@ def prepare(args):
     subprocess.run([str(Path(os.environ["JAVA_HOME"]) / "bin/javac"), "--release", "17",
                     "-d", str(support / "probe"), str(source)], check=True)
     classpath.append("probe")
+    final_classes = production_classes(out)
     for name in classpath:
         if name.endswith(".jar"):
-            check_test_jar(support / name)
+            check_test_jar(support / name, final_classes)
     files = {path.relative_to(support).as_posix(): digest(path)
              for path in sorted(support.rglob("*")) if path.is_file()}
     manifest = {"format": 1, "commit": args.commit, "cargo_lock_sha256": args.lock_sha256,
@@ -255,13 +339,18 @@ def validate_support(out, commit, lock):
     require(manifest["classpath"][:2] == ["core-tests.jar", "delta-tests.jar"]
             and manifest["classpath"][-1] == "probe", "unexpected test classpath")
     classpath = [str(out / CORE), str(out / DELTA)]
+    final_classes = production_classes(out)
     for name in manifest["classpath"]:
         if name == "probe":
             require((support / "probe/RcPackagedSmoke.class").is_file(), "missing Java smoke probe")
+            probe_files = {p.relative_to(support / "probe").as_posix()
+                           for p in (support / "probe").rglob("*") if p.is_file()}
+            require(probe_files <= {"RcPackagedSmoke.class", "RcPackagedSmoke.java"},
+                    "unexpected class or file in Java smoke probe directory")
             classpath.append(str(support / "probe"))
         else:
             path = safe_file(support, name)
-            check_test_jar(path)
+            check_test_jar(path, final_classes)
             classpath.append(str(path))
     return manifest, classpath
 
@@ -273,6 +362,20 @@ def assert_test_summary(text, expected):
             "packaged smoke failed, skipped tests, or ran the wrong number of tests")
     require(re.search(r"Suites: completed \d+, aborted 0", text) is not None,
             "packaged smoke suite aborted or did not report")
+
+
+def validate_class_origins(loaded, jar_hashes, group):
+    expected = {name: {"jar_name": CORE, "jar_sha256": jar_hashes[CORE], "resource_count": 1}
+                for name in CORE_ORIGIN_CLASSES}
+    if group in DELTA_GROUPS:
+        expected.update({name: {"jar_name": DELTA, "jar_sha256": jar_hashes[DELTA],
+                               "resource_count": 1} for name in DELTA_ORIGIN_CLASSES})
+    origins = loaded.get("class_origins")
+    require(isinstance(origins, dict) and set(origins) == set(expected),
+            "missing or unexpected final-JAR class origins")
+    for name, proof in origins.items():
+        require(isinstance(proof, dict) and type(proof.get("resource_count")) is int
+                and proof == expected[name], "class origin proof mismatch: " + name)
 
 
 def run(args):
@@ -316,7 +419,7 @@ def run(args):
             "-Dspark.hadoop.fs.s3a.committer.magic.enabled=false",
             "-Drc.arch=" + args.architecture, "-Drc.core=" + str(out / CORE),
             "-Drc.delta=" + str(out / DELTA), "-Drc.native.sha256=" + native_sha,
-            "-Drc.proof=" + str(proof), "-Drc.require.delta=" + str(label == "delta").lower(),
+            "-Drc.proof=" + str(proof), "-Drc.require.delta=" + str(label in DELTA_GROUPS).lower(),
             "-Xlog:class+load=info:file=" + str(case_dir / "classes.log"),
         ]
         command = [str(java_home / "bin/java")] + case_flags + [
@@ -335,8 +438,10 @@ def run(args):
         require(loaded["architecture"] == args.architecture
                 and loaded["core_jar_sha256"] == manifest["release_jar_sha256"][CORE]
                 and loaded["loaded_native_sha256"] == native_sha, "loaded library proof mismatch")
+        validate_class_origins(loaded, manifest["release_jar_sha256"], label)
         results.append({"group": label, "passed": expected, "failed": 0, "canceled": 0,
-                        "ignored": 0, "bundled_native_and_class_origins": "VERIFIED",
+                        "ignored": 0, "pending": 0,
+                        "bundled_native_and_class_origins": "VERIFIED",
                         "loaded_native_proof": loaded})
         print(args.architecture, label, expected, "packaged tests passed", flush=True)
     # Checking again makes the result identify the exact bytes before AND after execution.

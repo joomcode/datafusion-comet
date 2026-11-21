@@ -30,7 +30,34 @@ import sys
 sys.dont_write_bytecode = True
 CORE = "comet-spark-spark4.2_2.13-1.2.0.jar"
 DELTA = "comet-contrib-delta-spark4.2_2.13-1.2.0.jar"
-COUNTS = {"delta": 4, "dpp": 1, "reload": 1, "ansi": 6}
+COUNTS = {"delta": 4, "dpp": 1, "reload": 1, "ansi": 6,
+          "g08-udf": 1, "g08-delta-serialization": 2, "g09-cost": 4,
+          "g09-wide-sort": 1, "g09-wide-shuffle": 1, "g09-range": 1,
+          "g07-kryo": 1}
+CORE_ORIGIN_CLASSES = (
+    "org.apache.comet.NativeBase",
+    "org.apache.comet.udf.codegen.CometUdfFunctionPool$",
+    "org.apache.comet.udf.codegen.CometUdfFunctionPool$PlanPayload",
+    "org.apache.comet.udf.codegen.CometSharedFunctionRef",
+    "org.apache.comet.udf.codegen.CometSharedFunctionRef$",
+    "org.apache.comet.udf.codegen.CometScalaUDFCodegen",
+    "org.apache.comet.serde.QueryContextInterner$",
+    "org.apache.comet.serde.QueryContextInterner$Pool",
+    "org.apache.comet.rules.BoundaryFormats$",
+    "org.apache.comet.rules.ChooseBoundaryFormats",
+    "org.apache.comet.rules.CostBasedEngineChoice",
+    "org.apache.comet.rules.EngineCostModel",
+    "org.apache.comet.rules.WideRowSortFallback",
+    "org.apache.comet.rules.WideRowShuffleFallback$",
+    "org.apache.spark.CometPlugin",
+    "org.apache.comet.CometKryoRegistrator",
+    "org.apache.spark.sql.comet.CometBroadcastExchangeExec",
+)
+DELTA_ORIGIN_CLASSES = (
+    "org.apache.spark.sql.comet.CometDeltaNativeScanExec",
+    "org.apache.spark.sql.comet.DeltaPlanDataInjector",
+)
+DELTA_GROUPS = {"delta", "g08-delta-serialization"}
 
 
 def require(condition, message):
@@ -54,6 +81,51 @@ def module(name):
     return loaded
 
 
+def unique_receipt_object(pairs):
+    value = {}
+    for key, item in pairs:
+        require(key not in value, "duplicate JSON field in smoke receipt: " + key)
+        value[key] = item
+    return value
+
+
+def validate_class_origins(proof, group, jar_hashes):
+    expected = {name: CORE for name in CORE_ORIGIN_CLASSES}
+    if group in DELTA_GROUPS:
+        expected.update({name: DELTA for name in DELTA_ORIGIN_CLASSES})
+    origins = proof.get("class_origins")
+    require(isinstance(origins, dict) and set(origins) == set(expected),
+            "missing or extra final-JAR class origins: " + group)
+    for name, jar in expected.items():
+        origin = origins[name]
+        require(isinstance(origin, dict)
+                and set(origin) == {"jar_name", "jar_sha256", "resource_count"}
+                and origin["jar_name"] == jar
+                and origin["jar_sha256"] == jar_hashes[jar]
+                and type(origin["resource_count"]) is int
+                and origin["resource_count"] == 1,
+                "wrong or nonunique final-JAR class origin: " + group + "/" + name)
+
+
+def validate_case_proof(case, arch, jar_hashes, native_hash):
+    """Check one receipt group without filesystem access, including final-JAR origins."""
+    group = case["group"]
+    require(group in COUNTS, "unexpected smoke group: " + group)
+    require(case["passed"] == COUNTS[group]
+            and all(case[key] == 0 for key in ["failed", "canceled", "ignored", "pending"])
+            and case["bundled_native_and_class_origins"] == "VERIFIED",
+            "smoke group failed or skipped cases: " + arch + "/" + group)
+    proof = case.get("loaded_native_proof")
+    require(isinstance(proof, dict), "missing loaded-native proof: " + arch)
+    require(proof["architecture"] == arch
+            and proof["core_jar_sha256"] == jar_hashes[CORE]
+            and proof["loaded_native_sha256"] == native_hash
+            and proof["java_version"].split(".")[0] == "17"
+            and proof["spark_version"] == "4.2.1",
+            "missing or inconsistent loaded-native proof: " + arch)
+    validate_class_origins(proof, group, jar_hashes)
+
+
 def validate_receipts(out, reports, commit, lock):
     jar_hashes = {name: digest(out / name) for name in [CORE, DELTA]}
     checksum_hash = digest(out / "sha256.txt")
@@ -62,7 +134,7 @@ def validate_receipts(out, reports, commit, lock):
     require(len(files) == 2, "expected exactly two packaged smoke receipts")
     receipts = {}
     for path in files:
-        result = json.loads(path.read_text())
+        result = json.loads(path.read_text(), object_pairs_hook=unique_receipt_object)
         arch = result["architecture"]
         require(arch in ["amd64", "aarch64"] and arch not in receipts,
                 "duplicate or unexpected smoke architecture")
@@ -81,17 +153,7 @@ def validate_receipts(out, reports, commit, lock):
                 "missing, duplicate or extra smoke groups: " + arch)
         require(result["total_passed"] == sum(COUNTS.values()), "incomplete smoke: " + arch)
         for case in cases:
-            require(case["passed"] == COUNTS[case["group"]]
-                    and all(case[key] == 0 for key in ["failed", "canceled", "ignored"])
-                    and case["bundled_native_and_class_origins"] == "VERIFIED",
-                    "smoke group failed or skipped cases: " + arch + "/" + case["group"])
-            proof = case["loaded_native_proof"]
-            require(proof["architecture"] == arch
-                    and proof["core_jar_sha256"] == jar_hashes[CORE]
-                    and proof["loaded_native_sha256"] == native_hash
-                    and proof["java_version"].split(".")[0] == "17"
-                    and proof["spark_version"] == "4.2.1",
-                    "missing or inconsistent loaded-native proof: " + arch)
+            validate_case_proof(case, arch, jar_hashes, native_hash)
         receipts[arch] = {"result": result, "receipt_sha256": digest(path),
                           "directory": path.parent}
     require(set(receipts) == {"amd64", "aarch64"}, "both architectures must pass")
@@ -119,7 +181,10 @@ def export(out, reports, commit, lock, destination):
                      destination / "linux" / arch / "build-provenance.json")
     proof = {"source_commit": commit, "cargo_lock_sha256": lock,
              "qualification": "RELEASE_BUILD_AND_PACKAGED_SMOKE_PASSED",
-             "scope": "G01 baseline; later Joom feature groups and production GCP qualification remain",
+             "scope": "Targeted final-JAR runtime smoke for Delta, DPP, native reload, ANSI, "
+                      "G07 default Kryo, G08 UDF/serialization and G09 engine/boundary paths; "
+                      "full Comet CI and production GCP qualification are separate",
+             "packaged_smoke_groups": COUNTS,
              "release_jar_sha256": {name: digest(destination / name) for name in [CORE, DELTA]},
              "checksum_manifest_sha256": digest(destination / "sha256.txt"),
              "test_support_manifest_sha256": digest(out / "test-support/manifest.json"),

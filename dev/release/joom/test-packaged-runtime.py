@@ -36,10 +36,10 @@ spec.loader.exec_module(runtime)
 class PackagedRuntimeFaults(unittest.TestCase):
     def test_summary_requires_exact_executed_test_count(self):
         good = ("Suites: completed 1, aborted 0\n"
-                "Tests: succeeded 12, failed 0, canceled 0, ignored 0, pending 0\n")
-        runtime.assert_test_summary(good, 12)
+                "Tests: succeeded 23, failed 0, canceled 0, ignored 0, pending 0\n")
+        runtime.assert_test_summary(good, 23)
         for malformed in [
-            good.replace("succeeded 12", "succeeded 11"),
+            good.replace("succeeded 23", "succeeded 22"),
             good.replace("failed 0", "failed 1"),
             good.replace("canceled 0", "canceled 1"),
             good.replace("ignored 0", "ignored 1"),
@@ -49,7 +49,7 @@ class PackagedRuntimeFaults(unittest.TestCase):
             "All tests passed.\n",
         ]:
             with self.subTest(summary=malformed), self.assertRaises(ValueError):
-                runtime.assert_test_summary(malformed, 12)
+                runtime.assert_test_summary(malformed, 23)
 
     def setUp(self):
         # The caller chooses an explicit task/project output location, never /tmp.
@@ -75,6 +75,11 @@ class PackagedRuntimeFaults(unittest.TestCase):
             with self.subTest(member=member), self.assertRaises(ValueError):
                 runtime.check_test_jar(self.jar("bad-%d.jar" % index, member))
 
+    def test_multi_release_support_cannot_hide_production_classes(self):
+        member = "META-INF/versions/17/org/apache/comet/udf/codegen/CometUdfFunctionPool$.class"
+        with self.assertRaisesRegex(ValueError, "production classes"):
+            runtime.check_test_jar(self.jar("multi-release.jar", member))
+
     def test_support_paths_cannot_escape_bundle(self):
         bundle = self.root / "bundle"
         bundle.mkdir()
@@ -90,8 +95,10 @@ class PackagedRuntimeFaults(unittest.TestCase):
     def fixture(self):
         out = self.root / "release"
         out.mkdir()
-        (out / runtime.CORE).write_bytes(b"final core bytes")
-        (out / runtime.DELTA).write_bytes(b"final delta bytes")
+        with zipfile.ZipFile(out / runtime.CORE, "w") as jar:
+            jar.writestr("org/apache/comet/FixtureProduction.class", b"final core bytes")
+        with zipfile.ZipFile(out / runtime.DELTA, "w") as jar:
+            jar.writestr("fixture.txt", b"final delta bytes")
         (out / "effective-pom.xml").write_text("<project />")
         support = out / "test-support"
         support.mkdir()
@@ -111,6 +118,61 @@ class PackagedRuntimeFaults(unittest.TestCase):
         }
         (support / "manifest.json").write_text(json.dumps(manifest))
         return out, manifest
+
+    def refresh_manifest(self, out, manifest):
+        support = out / "test-support"
+        manifest["files"] = {p.relative_to(support).as_posix(): runtime.digest(p)
+                             for p in support.rglob("*")
+                             if p.is_file() and p.name != "manifest.json"}
+        (support / "manifest.json").write_text(json.dumps(manifest))
+
+    def test_support_rejects_unlisted_final_production_classes(self):
+        out, manifest = self.fixture()
+        with zipfile.ZipFile(out / "test-support/core-tests.jar", "a") as jar:
+            jar.writestr("org/apache/comet/FixtureProduction.class", b"foreign main class")
+        # Recompute the support checksum so this tests the production-definition
+        # guard, rather than failing earlier on an unrelated checksum mismatch.
+        self.refresh_manifest(out, manifest)
+        with self.assertRaisesRegex(ValueError, "production classes"):
+            runtime.validate_support(out, "a" * 40, "b" * 64)
+
+    def test_probe_directory_cannot_supply_production_classes(self):
+        out, manifest = self.fixture()
+        injected = out / "test-support/probe/org/apache/comet/udf/codegen/CometUdfFunctionPool$.class"
+        injected.parent.mkdir(parents=True)
+        injected.write_bytes(b"foreign main class")
+        self.refresh_manifest(out, manifest)
+        with self.assertRaisesRegex(ValueError, "unexpected class or file"):
+            runtime.validate_support(out, "a" * 40, "b" * 64)
+
+    def test_every_required_origin_must_be_unique_and_match_final_jar(self):
+        hashes = {runtime.CORE: "a" * 64, runtime.DELTA: "b" * 64}
+        core = {name: {"jar_name": runtime.CORE, "jar_sha256": hashes[runtime.CORE],
+                       "resource_count": 1} for name in runtime.CORE_ORIGIN_CLASSES}
+        delta = {name: {"jar_name": runtime.DELTA, "jar_sha256": hashes[runtime.DELTA],
+                        "resource_count": 1} for name in runtime.DELTA_ORIGIN_CLASSES}
+        runtime.validate_class_origins({"class_origins": core}, hashes, "g08-udf")
+        runtime.validate_class_origins({"class_origins": dict(core, **delta)}, hashes,
+                                       "g08-delta-serialization")
+        pool = "org.apache.comet.udf.codegen.CometUdfFunctionPool$"
+        broken = []
+        missing = json.loads(json.dumps(core))
+        del missing[pool]
+        broken.append(missing)
+        for key, value in [("jar_name", runtime.DELTA), ("jar_sha256", "c" * 64),
+                           ("resource_count", 2), ("resource_count", True)]:
+            wrong = json.loads(json.dumps(core))
+            wrong[pool][key] = value
+            broken.append(wrong)
+        broken.append(dict(core, unexpected=core[pool]))
+        for origins in broken:
+            with self.subTest(origins=origins), self.assertRaises(ValueError):
+                runtime.validate_class_origins({"class_origins": origins}, hashes, "g08-udf")
+        with self.assertRaises(ValueError):
+            runtime.validate_class_origins({}, hashes, "g08-udf")
+        with self.assertRaises(ValueError):
+            runtime.validate_class_origins({"class_origins": core}, hashes,
+                                           "g08-delta-serialization")
 
     def test_manifest_binds_support_to_release_and_source(self):
         out, manifest = self.fixture()
@@ -167,15 +229,32 @@ public final class package$ {
 }
 """,
         }
+        for name in runtime.CORE_ORIGIN_CLASSES + runtime.DELTA_ORIGIN_CLASSES:
+            if name == "org.apache.comet.NativeBase":
+                continue
+            package, simple = name.rsplit(".", 1)
+            # A post-test provenance inspection must not initialize Scala modules
+            # (or any other newly checked definition) after Spark teardown.
+            initializer = ("" if name.endswith("CometDeltaNativeScanExec") else
+                           'static { if (Boolean.getBoolean("fake.origin.init.fail")) '
+                           'throw new IllegalStateException("origin initialized"); }')
+            files[simple + ".java"] = ("package " + package + ";\npublic final class "
+                                       + simple + " { " + initializer + " }\n")
         for name, text in files.items():
             (source / name).write_text(text)
         subprocess.run([str(java / "javac"), "--release", "17", "-d", str(classes)]
                        + [str(source / name) for name in files], check=True,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        core = self.root / "core.jar"
+        core = self.root / runtime.CORE
         with zipfile.ZipFile(core, "w") as jar:
-            path = classes / "org/apache/comet/NativeBase.class"
-            jar.write(path, "org/apache/comet/NativeBase.class")
+            for name in runtime.CORE_ORIGIN_CLASSES:
+                member = name.replace(".", "/") + ".class"
+                jar.write(classes / member, member)
+        delta = self.root / runtime.DELTA
+        with zipfile.ZipFile(delta, "w") as jar:
+            for name in runtime.DELTA_ORIGIN_CLASSES:
+                member = name.replace(".", "/") + ".class"
+                jar.write(classes / member, member)
         runner = self.root / "runner.jar"
         with zipfile.ZipFile(runner, "w") as jar:
             for member in ["org/scalatest/tools/Runner.class", "org/apache/spark/package$.class"]:
@@ -188,12 +267,21 @@ public final class package$ {
         native.write_bytes(b"synthetic already-loaded native fixture")
         proof = self.root / "proof.json"
         command = [str(java / "java"), "-Dos.arch=amd64", "-Drc.arch=amd64",
-                   "-Drc.core=" + str(core), "-Dfake.native.file=" + str(native),
+                   "-Drc.core=" + str(core), "-Drc.delta=" + str(delta),
+                   "-Dfake.native.file=" + str(native), "-Dfake.origin.init.fail=true",
                    "-Drc.native.sha256=" + runtime.digest(native), "-Drc.proof=" + str(proof)]
-        cp = ["-cp", os.pathsep.join(map(str, [core, runner, probe])), "RcPackagedSmoke"]
+        cp = ["-cp", os.pathsep.join(map(str, [core, delta, runner, probe])), "RcPackagedSmoke"]
         result = subprocess.run(command + cp, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(proof.read_text())["loaded_native_sha256"], runtime.digest(native))
+        loaded = json.loads(proof.read_text())
+        self.assertEqual(loaded["loaded_native_sha256"], runtime.digest(native))
+        hashes = {runtime.CORE: runtime.digest(core), runtime.DELTA: runtime.digest(delta)}
+        runtime.validate_class_origins(loaded, hashes, "g08-udf")
+        result = subprocess.run(command + ["-Drc.require.delta=true"] + cp,
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runtime.validate_class_origins(json.loads(proof.read_text()), hashes,
+                                       "g08-delta-serialization")
         for extra in [["-Drc.native.sha256=" + "0" * 64],
                       ["-Drc.core=" + str(runner)], ["-Dfake.tests.fail=true"],
                       ["-Dfake.spark.version=4.2.0"]]:
@@ -203,6 +291,29 @@ public final class package$ {
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(proof.exists())
             # Leave a marker only so the next iteration removes a task-owned file.
+            proof.write_text("{}")
+
+        pool = "org/apache/comet/udf/codegen/CometUdfFunctionPool$.class"
+        foreign = self.root / "foreign.jar"
+        with zipfile.ZipFile(foreign, "w") as jar:
+            jar.write(classes / pool, pool)
+        incomplete = self.root / "incomplete-core.jar"
+        with zipfile.ZipFile(incomplete, "w") as target, zipfile.ZipFile(core) as original:
+            for member in original.namelist():
+                if member != pool:
+                    target.writestr(member, original.read(member))
+        for origin, jars, error in [
+            (core, [core, delta, runner, foreign, probe], "Duplicate org.apache.comet.udf.codegen"),
+            (incomplete, [incomplete, delta, runner, foreign, probe],
+             "org.apache.comet.udf.codegen.CometUdfFunctionPool$ did not load from final JAR"),
+        ]:
+            proof.unlink()
+            classpath = ["-cp", os.pathsep.join(map(str, jars)), "RcPackagedSmoke"]
+            result = subprocess.run(command + ["-Drc.core=" + str(origin)] + classpath,
+                                    capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(error, result.stderr)
+            self.assertFalse(proof.exists())
             proof.write_text("{}")
 
 

@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-21",
-  "phase": "G10_REPLACEMENT_SOURCE_FROZEN_POST_COMMIT_QUALIFICATION_REQUIRED",
+  "phase": "G10_FINAL_SOURCE_FROZEN_FULL_QUALIFICATION_REQUIRED",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -389,7 +389,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Publish replacement G10 candidate; full Comet CI, CodeQL/Miri and RC Build & Smoke on the exact new SHA. Poll every five minutes and inspect early failures. Verify final downloaded artifacts and all deferred cases, report before merge or stable tag.",
+  "next_step": "Publish finalG10candidate; qualify its exactSHA with full Comet CI,CodeQL,Miri and23case nativeAMD64/ARM64 RC. Require actual deferred-case evidence and independently verify downloaded final JARs. Report before merge/stabletag.",
   "qualification": "G09 accepted:230 native and495 unique JVM/SQL/Delta cases locally passed. Qualified source/test/CI bytes are preserved; final full agreed CI/Linux/release/exact-JAR qualification remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -2406,12 +2406,12 @@
     ]
   },
   "g10": {
-    "status": "REPLACEMENT_SOURCE_FROZEN_LOCAL_QUALITY_PASSED_POST_COMMIT_QUALIFICATION_REQUIRED",
+    "status": "FINAL_SOURCE_FROZEN_EXPANDED_PACKAGED_COVERAGE_POST_COMMIT_QUALIFICATION_REQUIRED",
     "branch": "joom/1.2-release-qualification",
     "base": "4467d0337089036d3f01d28375260ce3dbcaaca5",
     "authorization_ref": "decisions.json#g10_authorization",
     "evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10",
-    "checkpoint": "Exact strictSpark3.5+Delta and Spark4.2+Delta package/fullsemanticScalafix passed after early CI fixes; evaluated literal bytes and original assertions retained. Publish and qualify replacement exact SHA; no active old workflows.",
+    "checkpoint": "All bounded local corrections,11additional real shaded tests,new19-origin positive,11runtime/18receipt fault controls and complete secondary-suite source/binary inventory passed.23packaged cases perarch nowrequired. Production source unchanged from040f83bac. Publish final frozen SHA and run full CI/Miri/CodeQL/RC; actual Linux verdicts remain pending.",
     "full_gha_allowed": true,
     "rc_build_smoke_allowed": true,
     "merge_allowed": false,
@@ -2429,8 +2429,10 @@
     "post_commit_qualification_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json",
     "first_candidate": "68133883ea32f6ab8c758f2b9d87f4aa7a36e642",
     "external_live_checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/execution-checkpoint.json",
-    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v2.json",
-    "source_manifest_sha256": "7f330714d31202dfd844a1bf5a8d774a1b89f725df606f94ba6e3d6be30ef9e5",
-    "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v2.json"
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v3.json",
+    "source_manifest_sha256": "05d9a9a502cb84d89d141dfb71fd3010fc5dc8a287163f1733143f0bf8d1687f",
+    "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v3.json",
+    "previous_candidate": "040f83bac15d335a40d5903366210d6dde1d4c13",
+    "active_workers": []
   }
 }

@@ -167,3 +167,35 @@ The exact strict Spark 3.5 + Delta reactor and Spark 4.2 + Delta semantic Scalaf
 are checked locally before publishing the replacement candidate. Actual command
 receipts and source hashes are retained externally. The replacement SHA still
 requires complete CI and exact-SHA dualarch RC qualification.
+
+## Complete final-JAR integration coverage
+
+The first two candidates remain historical; stopped CI/RC/Miri runs never count
+as successful acceptance. The final backlog audit required direct packaged linkage
+checks beyond the original 12 G01 cases. The RC workflow now selects 23 existing
+test registrations per architecture: the original 12, UDF pool (1), opaque Delta
+serialization (2), cost/mixed/ANSI (4), wide sort (1), wide shuffle (1), wide decimal
+range (1), and real default Kryo broadcast (1). Full functional CI runs all agreed
+suites; packaged smoke checks representative linkage of the final bytes.
+
+Each group proves 17 unique classes originate in the final Core JAR. Both Delta
+groups also prove two final Delta classes and the actual bundled native hashes.
+Support archives cannot shadow production classes. Receipt validation rejects
+incomplete groups, pending/skipped cases, wrong/duplicate origins and duplicate
+JSON fields, while preserving the original source/lock/native/JAR guards. The
+obsolete G01-only export scope is replaced with truthful targeted final-feature
+coverage and a separate full-CI gate.
+
+All 11 additional registrations passed locally from the same Darwin shaded JARs;
+one real native Delta case also passed the new 19-class probe. These are prechecks,
+not Linux or final-SHA qualification. Runtime fault controls (11/11) and receipt
+contract controls (18/18) passed. Python 3.8 grammar/API review passed; actual Focal
+execution remains a remote gate. Production code and dependency pins remain
+unchanged from `040f83bac`.
+
+The existing `CometBroadcastDefaultKryoSuite` was a second class omitted from
+filename-based workflow lists. Both Linux/macOS lists now run its two AQE cases.
+Independent source and compiled inventories found all 17 concrete secondary suites
+listed and no other unexpected runnable omission. All 15 backlog entries have
+explicit evidence requirements in the external acceptance map. Actual final gates
+and source/JAR receipts must pass before merge or stable-tag approval is requested.
