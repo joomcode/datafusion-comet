@@ -131,3 +131,24 @@ Preserve old manifests, controls and receipts. Download and independently verify
 final JARs, then reconcile every backlog item before reporting. Do not amend tested
 source merely for status updates. Report before merge/stable tag; main,
 branch-1.2, release tags, external publication, production and datasci are excluded.
+
+## G10 final Miri-first checkpoint
+
+One existing dictionary roundtrip test now retains both supported Rust codecs
+under Miri; ordinary native tests still run uncompressed, LZ4 and Zstd. All data,
+writer/checksum/decoded-row assertions and 19 test registrations are unchanged.
+Native19/fmt/strictClippy pass; production code is unchanged. All previous source
+manifests and interrupted-run receipts remain preserved.
+
+Local official nightly installation succeeded (about 520 MiB; stable default
+unchanged). Miri sysroot preparation could not create its standard cache inside
+sandbox, and the user rejected escalated setup. Do not repeat escalation or
+relocate caches. No local Miri test executed or is counted as passed.
+
+Read STATE.json#g10/G10-results.json and external candidate-v4.json. All local
+processes are done. Publish the candidate and run ONLY Miri GHA first, with
+CodeQL automatic. After Miri succeeds, dispatch full Comet CI and the23-case
+nativeAMD64/ARM64 RC on that SAME frozen SHA. Inspect statuses every five minutes,
+classify actual failures, preserve receipts and require all15backlog items and
+actual final JAR/origin proofs. Report before merge/stabletag; no main/branch-1.2,
+release tag, external publication, production or datasci changes are authorized.

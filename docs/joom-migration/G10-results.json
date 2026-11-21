@@ -1,7 +1,7 @@
 {
   "date": "2026-11-21",
   "group": "G10",
-  "status": "FINAL_SOURCE_FROZEN_EXPANDED_PACKAGED_COVERAGE_POST_COMMIT_QUALIFICATION_REQUIRED",
+  "status": "FINAL_SOURCE_FROZEN_MIRI_FIRST_FULL_QUALIFICATION_REQUIRED",
   "branch": "joom/1.2-release-qualification",
   "base_commit": "4467d0337089036d3f01d28375260ce3dbcaaca5",
   "cards": "All agreed 58 active cards, plus preservation of historical H01; no scope is automatically excluded.",
@@ -15,8 +15,8 @@
     "jvm_arrow": "18.3.0",
     "java": "17.0.19-tem"
   },
-  "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v3.json",
-  "source_manifest_sha256": "05d9a9a502cb84d89d141dfb71fd3010fc5dc8a287163f1733143f0bf8d1687f",
+  "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v4.json",
+  "source_manifest_sha256": "58bcbc49d70282df029af6a5016138403ff67220828631349de03c9ae597528f",
   "changed_source_sha256": {
     ".github/actions/java-test/action.yaml": "3ff24f865e0b76d1e8fb7f991f7ac201294c4fcc7a9491feeb28a3b96823edc2",
     ".github/actions/rust-test/action.yaml": "ae1207a8c531775baf0db3698ea232171ec203675105cf886e87a17198e7016d",
@@ -35,6 +35,7 @@
     "dev/release/joom/verify-rc-result.py": "1bea6c32adb244785cfb003d3b769691793d37948308ef119bdf4b9a34de5489",
     "docs/source/contributor-guide/ci.md": "036cdc86a743069db2edd50fef11166e1b2692bb473379e6983a7497a7ec8b5b",
     "docs/source/contributor-guide/memory_management.md": "0f2c26937260892a239593f7f90d1675a9f54b9412420337f4e0071a4773c36e",
+    "native/shuffle/src/spark_unsafe/row.rs": "22c6488f885e95ab56e8b8e2254afbf371d0fde2b31cc9b16cb6f836ade7317b",
     "native/vendor/datafusion-physical-plan/src/aggregates/hash_stream.rs": "57c59676b56d3de9e94bddebac2f9b64ac2e3aa4f25d09a54003fee6a407b953",
     "native/vendor/datafusion-physical-plan/src/aggregates/ordered_final_stream.rs": "21c5bc0f4451828979c85aa4fcaeb63a8a7de1f36d0b24ad88549904845cb9fd",
     "native/vendor/datafusion-physical-plan/src/aggregates/ordered_partial_stream.rs": "4adcf32d051690581f9302ad2a317b94b39549dec4a0400835a625d8c7f9c42e",
@@ -432,6 +433,18 @@
     {
       "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/compiled-secondary-suite-crosscheck.json",
       "sha256": "f618bcd62884aaded025d5274f401be0bfe2613ff59bcaf87f6e5658f6f43764"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/miri-ffi-fixture-fix-results.json",
+      "sha256": "f7b7106a89605700c8c98c50f870486f0f64f2bfde4e3b8ca000c7a7bbe4a11c"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/miri-row-source-preservation.json",
+      "sha256": "989ce4c0259730aa7e507f7ce1bff93fccce5df2ce60d676c8f3998d916b2fbe"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_ci-audit/miri-row-final-source-review.json",
+      "sha256": "9c98a0846c1a6d892ed9123b5528707f18056c6b5c5e6396d9e233efb9975125"
     }
   ],
   "superseded_remote_attempts": [
@@ -460,6 +473,17 @@
       "observed_failures_before_stop": 0,
       "qualification_credit": false,
       "reason": "Direct final-JAR coverage needed for G08/G09 and default Kryo; original12G01smoke cases insufficient to close those explicit backlog promises."
+    },
+    {
+      "source_commit": "f9af0dae0ac27919312a733031a2bb1ced17b4a9",
+      "full_ci": 44929654353,
+      "rc": 44929659544,
+      "miri": 44929656976,
+      "codeql": 44929648135,
+      "status": "CI_RC_MIRI_CANCELED_FOR_TEST_ONLY_MIRI_C_CODEC_ADAPTATION_CODEQL_PASSED",
+      "preflight_network_retry": "OfficialRAT0.16.1transient404; sameSHAfailed-jobsrerunaccepted201 andpreflightpassed. No licenseexemption/sourceversionchange.",
+      "miri_failure": "UnsupportedZSTD_createCCtxCFFI, notUBdiagnostic, in newG07dictionaryroundtriptest.",
+      "qualification_credit": false
     }
   ],
   "previous_source_manifests": [
@@ -472,6 +496,11 @@
       "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v2.json",
       "sha256": "7f330714d31202dfd844a1bf5a8d774a1b89f725df606f94ba6e3d6be30ef9e5",
       "source": "040f83bac15d335a40d5903366210d6dde1d4c13"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v3.json",
+      "sha256": "05d9a9a502cb84d89d141dfb71fd3010fc5dc8a287163f1733143f0bf8d1687f",
+      "source": "f9af0dae0ac27919312a733031a2bb1ced17b4a9"
     }
   ],
   "corrective_local_quality": {
@@ -579,5 +608,13 @@
     "ci_secondary_suite": "Existing CometBroadcastDefaultKryoSuite added beside PayloadSuite in Linux/macOS lists;2actualAQEcases per applicable profile. Source/compiled census finds no other unexpected omission.",
     "python38": "Grammar/API compatibility review passed; actual Focal release execution remains remote gate."
   },
-  "backlog_map": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v2.json"
+  "backlog_map": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v2.json",
+  "miri_codec_adaptation": {
+    "scope": "One existing test fixture only; same19test registrations and full production prefix preserved.",
+    "normal_native": "None,Lz4Frame,Zstd(1), bothwriterentrypoints, sameallfixtures/checksums/byteanddecodedrowassertions. Native19/19pass.",
+    "miri": "None+pureRustLz4Frame; onlyunsupportedZstdCFFI omittedwithinthatfixture, no ignoredtest or validationflagchange.",
+    "quality": "Fmt andstrictshuffleall-targetClippy passed; actualLinuxMiri is required before expensive fullCI/RC.",
+    "local_environment": "Officialdatednightlyinstalled520MiB,stabledefaultunchanged. LocalMiri setup couldnotcreateitsstandardcacheinside sandbox; requestedone-offescalationuserrejected. No localMiritests executed; no cache relocation or further escalation.",
+    "execution_order": "Push finalcandidate\u2192MiriGHAonly+automaticCodeQL\u2192afterMiri succeeds fullCometCI+23caseRC on SAMEfrozenSHA."
+  }
 }

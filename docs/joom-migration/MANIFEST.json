@@ -13,7 +13,7 @@
     },
     {
       "path": "CLEANUP.md",
-      "sha256": "91a806a251da623c16d9c5b1a2051cce5ef34670c0ed547b0ac15a086cdc8a32"
+      "sha256": "fa5a4488f4d576a7e99fce62951341234efe87bb4566b7c99cbded756b3f6061"
     },
     {
       "path": "G01-CLOSEOUT.md",
@@ -137,11 +137,11 @@
     },
     {
       "path": "G10-report.md",
-      "sha256": "2331089049d83afa64f19cc27738d87cbcf26ab6081bf6d40c662d19ebf55f6e"
+      "sha256": "21959e9e0be261b93b417009289435f389a95221490871dfd51d913af1d448ae"
     },
     {
       "path": "G10-results.json",
-      "sha256": "5b880617bfaf1f15dc6b3e19e08515cba5cdbc7097bf14ad39896080b4f67653"
+      "sha256": "59656cd60971e1661f0b0dd341a5cd4dd1985109f903024f5ba982de7b454cad"
     },
     {
       "path": "HANDOFF.md",
@@ -157,7 +157,7 @@
     },
     {
       "path": "PAUSED.md",
-      "sha256": "c36d48e5c12e6f4a0b17122f0eea5f658fb01ce7d6999fe5ffb2e15461eb2db0"
+      "sha256": "7c85dfde1f3d1fe0f84b4768b620b38bec682fce3b3af72d040bc5bd716288a6"
     },
     {
       "path": "PERFORMANCE.md",
@@ -173,7 +173,7 @@
     },
     {
       "path": "STATE.json",
-      "sha256": "783c644ea58600ec3e888866ddafc866ef92c898f00ab40a7ca2b7de2ee97963"
+      "sha256": "4a993e7f70c6f263b0b5e0181548c7e3ac99475177879101197329f95837bfab"
     },
     {
       "path": "approved-plan.json",
@@ -185,7 +185,7 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "9c7c79a98d7c68f5498a62ee3f399efb2f8c5e34e93f35e777a40bef25c8aa2e"
+      "sha256": "afe4732b8431d9c5bde55e84fada4cdcdad357f364ec6595292bf15ced5f98f8"
     },
     {
       "path": "correctness-test-plan.txt",

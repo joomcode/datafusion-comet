@@ -2342,11 +2342,17 @@ mod test {
                 .iter()
                 .map(|&(p, offset, _, _)| ((p as i64) << 40) | offset as i64)
                 .collect::<Vec<_>>();
-            for codec in [
+            // Miri cannot execute Zstd's C FFI. Keep both Rust codecs under the
+            // interpreter; ordinary native tests retain the complete codec matrix.
+            #[cfg(miri)]
+            let codecs = [CompressionCodec::None, CompressionCodec::Lz4Frame];
+            #[cfg(not(miri))]
+            let codecs = [
                 CompressionCodec::None,
                 CompressionCodec::Lz4Frame,
                 CompressionCodec::Zstd(1),
-            ] {
+            ];
+            for codec in codecs {
                 for algo in [0, 1, 2] {
                     let dir = tempfile::tempdir().unwrap();
                     let single = dir.path().join("per-partition");

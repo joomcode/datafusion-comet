@@ -1015,10 +1015,23 @@
     "plan_generations": "Pre-counter-fix current-task snapshots were archived and restored before accepted oldest-to-newest all-profile generation. Intermediate failures retained, not counted as passes.",
     "replacement_source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v2.json",
     "first_remote_attempt": "68133883e CI/RC/Miri canceled after early quality findings; retained, no qualification credit. CodeQL success belongs only to that source.",
-    "final_source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v3.json",
+    "final_source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v4.json",
     "packaged_expansion_directory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_packaged-expansion",
     "packaged_expansion_precheck_size_mib": 49,
     "contains_expansion": "Existing harness/test-support copies,11Darwinshadedcase receipts,newactual19originprobe,Pythonfaultcontrols,source/binarysuiteaudits; no globaltoolchain/cache/Dockerimage installed by this phase.",
-    "retention": "Preserve all3candidate manifests and canceled/positive receipts through final acceptance. Actual final artifact path/runIDs/sizes are post-commit facts in completion.json; no automaticcleanup."
+    "retention": "Preserve all3candidate manifests and canceled/positive receipts through final acceptance. Actual final artifact path/runIDs/sizes are post-commit facts in completion.json; no automaticcleanup.",
+    "added_nightly": {
+      "toolchain": "nightly-2026-11-21-aarch64-apple-darwin",
+      "path": "${HOME}/.rustup/toolchains/nightly-2026-11-21-aarch64-apple-darwin",
+      "size_kib": 532552,
+      "components": [
+        "miri",
+        "rust-src"
+      ],
+      "install_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/install-pinned-miri.json",
+      "default_toolchain": "stable unchanged",
+      "sysroot": "Setupblocked;noactuallocalMiritests;escalationuserrejected",
+      "manual_cleanup": "Aftermigrationcompletionanduserdecision:rustuptoolchainuninstallnightly-2026-11-21; do notremove sharedstable/toolchains/caches."
+    }
   }
 }

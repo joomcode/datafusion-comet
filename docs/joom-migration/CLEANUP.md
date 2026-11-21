@@ -298,3 +298,13 @@ receipts separately before choosing manual cleanup. No automatic deletion of
 source checkouts, shared caches, migration evidence or user resources is authorized.
 After all builds stop and evidence is preserved, use this guide's existing guarded
 manual target-cleaning commands; deleting a shared target forces future rebuilds.
+
+## G10 additional Rust safety toolchain
+
+The task installed official `nightly-2026-11-21-aarch64-apple-darwin` with Miri and
+rust-src under `${HOME}/.rustup/toolchains/` (532,552 KiB, about 520 MiB). Stable
+remains the default. Local Miri sysroot setup was blocked by sandbox permissions;
+no local Miri tests ran and no standard cache was relocated. After completion and
+an explicit user cleanup decision, `rustup toolchain uninstall nightly-2026-11-21`
+removes only this added toolchain. Keep shared stable Rust and package caches.
+No toolchain or migration evidence is deleted automatically.

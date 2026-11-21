@@ -199,3 +199,22 @@ Independent source and compiled inventories found all 17 concrete secondary suit
 listed and no other unexpected runnable omission. All 15 backlog entries have
 explicit evidence requirements in the external acceptance map. Actual final gates
 and source/JAR receipts must pass before merge or stable-tag approval is requested.
+
+## Miri codec compatibility and final execution order
+
+A new dictionary writer regression reached `ZSTD_createCCtx`, which Miri cannot
+interpret. The diagnostic was an unsupported C call, not undefined behavior.
+Only that test's codec fixture is adapted: ordinary native testing retains the
+original uncompressed/LZ4/Zstd matrix; Miri retains uncompressed and pure Rust LZ4.
+Both writer entry points, all row/dictionary/checksum/byte assertions and all 19
+selected test registrations remain. No ignored test or Miri validation flag is
+added. Exact reverse reconstruction preserves the production prefix and all other
+source bytes. Native tests (19/19), formatting and strict shuffle Clippy passed.
+
+An official dated nightly/Miri installation added about 520 MiB while leaving
+stable as default. Local sysroot setup was blocked by sandbox cache permissions;
+the user rejected a one-off escalated setup. No local Miri test executed and no
+cache was relocated. The final candidate therefore runs Miri GHA first, followed
+by full Comet CI and the 23-case dualarch RC after Miri succeeds, all on the same
+frozen SHA. CodeQL runs automatically. Previous interrupted runs do not qualify
+the final source. All actual remote verdicts remain mandatory post-commit facts.
