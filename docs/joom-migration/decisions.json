@@ -1169,5 +1169,22 @@
       "active_implementation_group": null,
       "next_group_requires_separate_approval": "G04"
     }
+  },
+  "g10_target_workload_scope": {
+    "date": "2026-11-21",
+    "source": "Explicit user confirmation; original Russian reply is preserved outside Git.",
+    "workloads": {
+      "Parquet": true,
+      "Delta": true,
+      "Iceberg": false
+    },
+    "target_Spark42_Iceberg_tests": "Not applicable to the explicitly confirmed target workload; not counted as passes.",
+    "older_profile_Iceberg_jobs": "All 32 agreed jobs remain required, unchanged.",
+    "Rust_applicability": "Four approved HDFS tests and three manual benchmarks are separate from JVM scan cancellations.",
+    "migration_scope": "All 58 active cards and historical H01 remain unchanged.",
+    "raw_user_evidence": {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/user-iceberg-scope-20261121.json",
+      "sha256": "5883131ff4304bc7cb4775f516ef89a1dfdfa0e7034dfdfe1fa577dede6cef48"
+    }
   }
 }

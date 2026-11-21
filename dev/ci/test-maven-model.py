@@ -48,13 +48,25 @@ calls = json.loads(log.read_text()) if log.exists() else []
 calls.append(sys.argv[1:])
 log.write_text(json.dumps(calls))
 mode = os.environ['MODEL_TEST_MODE']
-if mode == 'recover' and len(calls) > 1:
+if mode in ('recover', 'known-root-recover') and len(calls) > 1:
  print('[INFO] BUILD SUCCESS'); sys.exit(0)
 if mode == 'invalid':
  print('[ERROR] Non-parseable POM'); sys.exit(17)
 if mode == 'enforcer':
  print('[INFO] Building parent 1.2.0')
  print('[ERROR] Enforcer rule failed'); sys.exit(17)
+if mode.startswith('known-root') or mode in ('wrong-root', 'wrong-coordinate', 'wrong-url'):
+ root = 'org.apache.datafusion:comet-parent-spark${spark.version.short}_${scala.binary.version}:1.2.0'
+ coordinate = 'org.apache:apache:pom:23'
+ url = 'https://repo.maven.apache.org/maven2'
+ if mode == 'wrong-root': root = 'org.example:dependency-parent:1'
+ if mode == 'wrong-coordinate': coordinate = 'org.apache:apache:pom:24'
+ if mode == 'wrong-url': url = 'https://mirror.example.invalid/maven2'
+ if mode == 'known-root-started': print('[INFO] Building parent 1.2.0')
+ print('[FATAL] Non-resolvable parent POM for ' + root + ': The following artifacts could not '
+       + 'be resolved: ' + coordinate + ' (absent): Could not find artifact ' + coordinate
+       + ' in central (' + url + ") and 'parent.relativePath' points at wrong local POM")
+ sys.exit(17)
 if mode == 'started':
  print('[INFO] Building parent 1.2.0')
 code = '404' if mode == 'not-found' else '429'
@@ -88,6 +100,37 @@ sys.exit(17)
         result, calls = self.run_model("exhaust")
         self.assertEqual(result.returncode, 17)
         self.assertEqual(len(calls), 3)
+
+    def test_known_immutable_root_lookup_recovers_only_model(self):
+        result, calls = self.run_model("known-root-recover", "-Prelease", "-DskipTests",
+                                       "-Pspark-3.4", "-Pscala-2.13")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(calls), 2)
+        for call in calls:
+            self.assertEqual(call, ["-B", "-N", "-U", "-Dstyle.color=never", "-Prelease",
+                                    "-DskipTests", "-Pspark-3.4", "-Pscala-2.13", "validate"])
+
+    def test_known_root_lookup_exhaustion_preserves_failure(self):
+        result, calls = self.run_model("known-root-exhaust")
+        self.assertEqual(result.returncode, 17)
+        self.assertEqual(len(calls), 3)
+
+    def test_known_root_classifier_rejects_other_roots_coordinates_and_repositories(self):
+        for mode in ("wrong-root", "wrong-coordinate", "wrong-url", "known-root-started"):
+            with self.subTest(mode=mode):
+                (self.root / "calls.json").unlink(missing_ok=True)
+                result, calls = self.run_model(mode)
+                self.assertEqual(result.returncode, 17, result.stdout + result.stderr)
+                self.assertEqual(len(calls), 1)
+
+    def test_log_pipeline_failure_is_not_retried_or_hidden(self):
+        tee = self.root / "bin/tee"
+        tee.write_text("#!/bin/sh\ncat > /dev/null\nexit 19\n")
+        tee.chmod(0o755)
+        result, calls = self.run_model("known-root-exhaust")
+        self.assertEqual(result.returncode, 19, result.stdout + result.stderr)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("Could not record Maven model output", result.stderr)
 
     def test_other_failures_are_not_retried(self):
         for mode in ("not-found", "invalid", "enforcer", "started"):

@@ -308,3 +308,19 @@ no local Miri tests ran and no standard cache was relocated. After completion an
 an explicit user cleanup decision, `rustup toolchain uninstall nightly-2026-11-21`
 removes only this added toolchain. Keep shared stable Rust and package caches.
 No toolchain or migration evidence is deleted automatically.
+
+### G10 scan and SQL correction evidence
+
+Keep the scan-contract-fix, fallback-plan-audit, metric-audit and broad-test-evidence
+subdirectories under `${MIGRATION_AUX_ROOT}/20261121_comet12-g10`. They preserve
+failed and positive cohorts, original SQL copies, profile/XML logs, source proofs
+and deduplicated case evidence. No extra tools or shared-cache changes were needed.
+Treat older candidate artifacts as historical; final corrected JARs and their actual
+RC directory/checksums remain pending. Do not delete evidence, shared caches or
+user resources automatically.
+
+The measured G10 task-tree inventory includes two large copied cumulative Spark
+unit-tests logs containing history since November 17; they are not the size of
+one new profile run. Keep those copies and receipt paths. Future captures record
+only newly appended ranges. Shared package caches and project build directories
+are separate from task-only occupancy. No cleanup is performed automatically.

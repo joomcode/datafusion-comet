@@ -144,6 +144,8 @@ jobs:
           path: native/target/release/
       - name: Build Comet
         run: |
+          # Resolve the known immutable root parent before the one-shot build.
+          dev/ci/prepare-maven-model.sh -Prelease -DskipTests -Pspark-${{ inputs.spark-short }} -Pscala-${{ inputs.scala }}
           ./mvnw install -Prelease -DskipTests -Pspark-${{ inputs.spark-short }} -Pscala-${{ inputs.scala }}
       - name: Setup Iceberg
         uses: ./.github/actions/setup-iceberg-builder
@@ -226,6 +228,8 @@ jobs:
           path: native/target/release/
       - name: Build Comet
         run: |
+          # Resolve the known immutable root parent before the one-shot build.
+          dev/ci/prepare-maven-model.sh -Prelease -DskipTests -Pspark-${{ inputs.spark-short }} -Pscala-${{ inputs.scala }}
           ./mvnw install -Prelease -DskipTests -Pspark-${{ inputs.spark-short }} -Pscala-${{ inputs.scala }}
       - name: Setup Iceberg
         uses: ./.github/actions/setup-iceberg-builder
@@ -275,6 +279,8 @@ jobs:
           path: native/target/release/
       - name: Build Comet
         run: |
+          # Resolve the known immutable root parent before the one-shot build.
+          dev/ci/prepare-maven-model.sh -Prelease -DskipTests -Pspark-${{ inputs.spark-short }} -Pscala-${{ inputs.scala }}
           ./mvnw install -Prelease -DskipTests -Pspark-${{ inputs.spark-short }} -Pscala-${{ inputs.scala }}
       - name: Setup Iceberg
         uses: ./.github/actions/setup-iceberg-builder

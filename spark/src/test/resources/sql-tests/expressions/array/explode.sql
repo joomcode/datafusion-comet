@@ -40,14 +40,14 @@ INSERT INTO test_explode_int VALUES
   (NULL, array()),
   (NULL, NULL)
 
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Generate, Filter)
 SELECT id, explode(arr) AS v FROM test_explode_int
 
 query
 SELECT id, explode_outer(arr) AS v FROM test_explode_int
 
 -- LATERAL VIEW forms round-trip through the same Generate operator
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Generate, Filter)
 SELECT id, v FROM test_explode_int LATERAL VIEW explode(arr) t AS v
 
 query

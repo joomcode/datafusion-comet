@@ -152,3 +152,15 @@ nativeAMD64/ARM64 RC on that SAME frozen SHA. Inspect statuses every five minute
 classify actual failures, preserve receipts and require all15backlog items and
 actual final JAR/origin proofs. Report before merge/stabletag; no main/branch-1.2,
 release tag, external publication, production or datasci changes are authorized.
+
+## G10 scan and SQL contract correction checkpoint
+
+Read G10-results.json#local_scan_SQL_contract_qualification and STATE.json#g10.
+The previous frozen-source note is historical. All planned local gates must have
+actual completed receipts before this update is applied, including current-source
+replay and both restored readers on Spark 4.1. Keep any bounded cohort composition
+and genuine version-N/A registration explicit; a failed invocation stays failed. Retain every failed/intermediate
+receipt. Do not count cancellations, ignores or censored SQL prefixes as passes.
+Freeze the new source manifest, then complete same-SHA full CI and dualarch
+23-case packaged qualification, verify final artifacts and report before merge
+or stable tag. All merge, stable-tag and production permissions remain false.

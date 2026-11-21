@@ -294,7 +294,7 @@ object CometDivide extends CometExpressionSerde[Divide] with MathBase {
     // For now, use NullIf to swap zeros with nulls.
     val rightExpr =
       if (expr.evalMode != EvalMode.ANSI) nullIfWhenPrimitive(expr.right) else expr.right
-    createMathExpression(
+    val result = createMathExpression(
       expr.left,
       rightExpr,
       inputs,
@@ -302,6 +302,12 @@ object CometDivide extends CometExpressionSerde[Divide] with MathBase {
       expr.dataType,
       expr.evalMode,
       (builder, mathExpr) => builder.setDivide(mathExpr))
+    if (result.isEmpty && !(rightExpr eq expr.right)) {
+      // The zero guard is a synthesized tree, so its rejection tags are otherwise absent
+      // from the original plan. Preserve diagnostics without changing conversion eligibility.
+      QueryPlanSerde.liftFallbackReasons(rightExpr, expr)
+    }
+    result
   }
 }
 

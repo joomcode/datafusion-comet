@@ -66,7 +66,7 @@ SELECT id FROM nested_float_strict ORDER BY array(IF(s, -d, d)), id
 query
 SELECT id FROM nested_float_strict ORDER BY named_struct('x', IF(s, -f, f)) DESC, id
 
-query
+query expect_fallback_plan(Conditional shared-expression evaluation order requires Spark; TakeOrderedAndProject)
 SELECT id FROM nested_float_strict ORDER BY array(IF(s, -d, d)), id LIMIT 4
 
 query
@@ -101,7 +101,7 @@ SELECT id FROM nested_float_strict ORDER BY array(coalesce(IF(s, -d, d), 0.0D)) 
 query
 SELECT id FROM nested_float_strict ORDER BY named_struct('x', coalesce(IF(s, -f, f), 0.0F)) DESC, id
 
-query
+query expect_fallback_plan(Conditional shared-expression evaluation order requires Spark; TakeOrderedAndProject)
 SELECT id FROM nested_float_strict ORDER BY array(coalesce(IF(s, -d, d), 0.0D)) DESC, id LIMIT 4
 
 query

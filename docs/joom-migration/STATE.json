@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-21",
-  "phase": "G10_FINAL_SOURCE_FROZEN_FULL_QUALIFICATION",
+  "phase": "G10_LOCAL_CORRECTNESS_FOLLOWUP_FINAL_QUALIFICATION_PENDING",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -389,7 +389,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Push final frozen candidate; run full Comet CI, Miri and 23-case dualarch RC on the same SHA, with automatic CodeQL. Five-minute polling; actual backlog closure and final downloaded-artifact verification. Report before merge/stable tag.",
+  "next_step": "Prepare one coherent English correction commit after the completed local gates, freeze its source, then run complete same-SHA GHA/CodeQL/Miri/RC and verify downloaded final artifacts. Retain the 1,390 executed positives, 20 explicit SQL version-N/A registrations and 372 canceled case reconciliation as overlapping local cohorts, not one full run. Report before merge or stable tag; production remains unauthorized.",
   "qualification": "G09 accepted:230 native and495 unique JVM/SQL/Delta cases locally passed. Qualified source/test/CI bytes are preserved; final full agreed CI/Linux/release/exact-JAR qualification remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -2406,12 +2406,12 @@
     ]
   },
   "g10": {
-    "status": "FINAL_SOURCE_FROZEN_FULL_QUALIFICATION_REQUIRED",
+    "status": "LOCAL_CORRECTIONS_VERIFIED_FINAL_SOURCE_FREEZE_AND_REMOTE_QUALIFICATION_REQUIRED",
     "branch": "joom/1.2-release-qualification",
     "base": "4467d0337089036d3f01d28375260ce3dbcaaca5",
     "authorization_ref": "decisions.json#g10_authorization",
     "evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10",
-    "checkpoint": "Actual F700 Miri107 and CodeQL passed; failed packaged fixture fixed only in automatic test-support preparation. Raw negative reproduced; actual helper-generated Core/Delta support passed all23 unchanged local shaded-JAR cases, contracts14+18. Final same-SHA full CI/Miri/RC and artifact/backlog gates remain pending.",
+    "checkpoint": "All planned local profile/TPC/strict checks and the final current-source 49-case replay are verified, retaining the explicit Spark3.4 version-N/A registration and bounded Spark3.5 source-equivalent TPC composition. Earlier complete scans (422), aggregates (203) and the deduplicated correction union (1,390 executed positives, 20 explicit SQL version-N/A registrations, 372 cancellations across 1,782 unique registrations) remain scoped cohort evidence. Both restored readers also passed Spark 4.1; actual raw invocation results and all prior failures are preserved. Final exact-SHA remote CI/RC and artifact delivery remain pending.",
     "full_gha_allowed": true,
     "rc_build_smoke_allowed": true,
     "merge_allowed": false,
@@ -2429,13 +2429,308 @@
     "post_commit_qualification_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json",
     "first_candidate": "68133883ea32f6ab8c758f2b9d87f4aa7a36e642",
     "external_live_checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/execution-checkpoint.json",
-    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v5.json",
-    "source_manifest_sha256": "27d9e07a8d776af4631b08d004ac8fd586448f420d835b021a1e0f5495ed4025",
-    "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v5.json",
-    "previous_candidate": "f700491ad3fd88d62bc573a2ee8aa714d445e5f2",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v7.json",
+    "source_manifest_sha256": "f39abf3c6ca2e21008400528acfb47c1f33f91dcb8e2dd95da95a0e9384b0026",
+    "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v7.json",
+    "previous_candidate": "7b9b135e47236a2d5215d4ec158d4555312fd70f",
     "active_workers": [],
     "local_added_toolchain": "nightly-2026-11-21-aarch64-apple-darwin (official, defaultstableunchanged)",
     "local_miri_runner": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/run-pinned-miri.py (setup blocked; no actual local Miri tests executed)",
-    "actual_execution_progress": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/execution-checkpoint.json"
+    "actual_execution_progress": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/execution-checkpoint.json",
+    "historical_checkpoint_before_contract_corrections": {
+      "disposition": "HISTORICAL_ONLY; preserved without transferring qualification to the corrected source.",
+      "status": "FINAL_SOURCE_FROZEN_FULL_QUALIFICATION_REQUIRED",
+      "checkpoint": "Actual F700 Miri107 and CodeQL passed; failed packaged fixture fixed only in automatic test-support preparation. Raw negative reproduced; actual helper-generated Core/Delta support passed all23 unchanged local shaded-JAR cases, contracts14+18. Final same-SHA full CI/Miri/RC and artifact/backlog gates remain pending.",
+      "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v5.json",
+      "previous_candidate": "f700491ad3fd88d62bc573a2ee8aa714d445e5f2",
+      "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v5.json",
+      "source_manifest_sha256": "27d9e07a8d776af4631b08d004ac8fd586448f420d835b021a1e0f5495ed4025",
+      "post_commit_qualification_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json"
+    },
+    "local_contract_qualification_ref": "G10-results.json#local_scan_SQL_contract_qualification",
+    "approved_target_workload": "Parquet and Delta are in scope; Iceberg is not used, by explicit user confirmation. All 32 older-profile Iceberg jobs remain mandatory.",
+    "candidate_receipt_status": "EXPECTED_AFTER_CORRECTION_COMMIT_NOT_FINAL_QUALIFICATION",
+    "backlog_map_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v7.json",
+    "future_source_commit": "Bound externally after committing this source; intentionally absent from pre-commit hashes.",
+    "actual_local_contract_gates": {
+      "status": "ALL_REQUIRED_LOCAL_GATES_VERIFIED",
+      "source_sha256": {
+        "pom.xml": "448654ea53df040b516f983a171f2f4ee18f8f4766f47818a95f32fc13012020",
+        "spark/src/main/scala/org/apache/comet/serde/arithmetic.scala": "742322b7476a7634b481a0b7854982c1085a50585a453fa8759688a726b03aef",
+        "spark/src/test/scala/org/apache/spark/sql/CometTestBase.scala": "dda910a2b5a3712de22f3a5c86d59983210a3da824db08670729cf57f14a185e",
+        "spark/src/test/scala/org/apache/comet/parquet/ParquetReadSuite.scala": "8e8ba0e7b4e72fdb0036504f9f9cf953395367bf70fd8277495bd6e9e5c8abfe",
+        "spark/src/test/scala/org/apache/comet/exec/CometNativeReaderSuite.scala": "62771146cedc6861c699bc7b8fd7591c98808a8cbbf0508c2036ea6153ad65c3",
+        "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "ce998b0eab782b9a3e22db44b15215bb64e051ebc1792082527d787245345060",
+        "spark/src/test/scala/org/apache/comet/CometSqlFileTestSuite.scala": "cbad7a1b5fc4aef9a5aa5cfe4404fed4cbec7649a0d9794fb17e5ac2737f4b3d",
+        "spark/src/test/scala/org/apache/comet/SqlFileTestParser.scala": "c1167548a3bc375edc72284a2c9533471452e3961987dca97ae961120f012cf2",
+        "spark/src/test/scala/org/apache/comet/SqlFileTestParserSuite.scala": "d2056f7b55a3c4230e0326d3a1bc166d63fb836f587b3eba21ef876b521fd071",
+        "spark/src/test/scala/org/apache/comet/serde/QueryPlanSerdeSuite.scala": "d495613e31c3910f5cf5df35aa70d9d53fa64de9823d97d9db09fd1c5040ac27",
+        "spark/src/test/resources/sql-tests/expressions/aggregate/regr.sql": "8f708aa948d6a8eb9adb8c8ff0caca511152274a33c80fbfd904590c6c88c891",
+        "spark/src/test/resources/sql-tests/expressions/array/arrays_overlap.sql": "52acec160176e48dfba78bf9d42a85f1e2009ce0a3d002c59e6638b270db1c35",
+        "spark/src/test/resources/sql-tests/expressions/array/arrays_zip.sql": "4b01c274641033125ace6db58e9be1bacd89e715e5a9a2563a4fee83a3e000e3",
+        "spark/src/test/resources/sql-tests/expressions/array/explode.sql": "ec35c4ecfb371fa68ed1d6ef057dafdaf26f71abbb8348579155069f12de33b0",
+        "spark/src/test/resources/sql-tests/expressions/array/posexplode.sql": "5edef028ed058d2c1e70db12eeefaef6c7237ca3d7d829a7088cad377cbf0468",
+        "spark/src/test/resources/sql-tests/expressions/datetime/window.sql": "7e2aeb3f21d03d1df7d39a364895e991bdc288d31843dd31e21c5d662310b60f",
+        "spark/src/test/resources/sql-tests/expressions/decimal/decimal_ops.sql": "ed2ac211d50be5b79aa3da2ac38bb8f038f65aa37c3a63b467d17f4df8f43122",
+        "spark/src/test/resources/sql-tests/expressions/math/arithmetic.sql": "de0b77cd57b304f157b63b5eae2cab930b71552727cee441ff12022ed6db015f",
+        "spark/src/test/resources/sql-tests/expressions/math/atan2.sql": "d7945864aa5cfd4d6622d5cac09af29b2a7cd4b6a86b29f5ec4ccd5dead17929",
+        "spark/src/test/resources/sql-tests/expressions/math/nan_divisor.sql": "5a4e65fed41c0c12fd04e5c365e3147e16b57a562aafad81406dbefcb73ac033",
+        "spark/src/test/resources/sql-tests/expressions/window/lag_lead.sql": "82e71d880126e6b9a54f7fbaf9a78c3a2a52e8b69f41535e7317885d351542d3",
+        "spark/src/test/resources/sql-tests/windows/nested_float_order_keys.sql": "5c66126c49fcbde14d71b128cdc00024041f30db0116a557b2a6a179aeea2c9a",
+        "spark/src/test/resources/sql-tests/windows/nested_float_order_keys_strict.sql": "ae3b4298a9c6d5cc34d3c0132935561ce6be8d7ca1155c8abe4e17ec5323f0ea",
+        "spark/src/test/resources/sql-tests/windows/window_functions.sql": "3b542ff4f174bd2ed598272350694367aff8fb9bf79f3a1f22d183cedbde3c5f",
+        "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q66/extended.txt": "c943ab611608e4654b375d35cca1f5f0998d42024440d9a2a4a5af947e24769e",
+        "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q49/extended.txt": "62d919b50ab46d8616997a350bc683aacf568ec7a1bb6d436249a5a047cceae2",
+        "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q66/extended.txt": "1f20bb20c79744e4e017d64b64a1e0560203792dccad567293d072b047fb5290",
+        "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q49/extended.txt": "62d919b50ab46d8616997a350bc683aacf568ec7a1bb6d436249a5a047cceae2"
+      },
+      "gates": [
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/diagnostic-verify-spark42.json",
+          "receipt_sha256": "d237d6a9e0f853c68948ad55998180c372e1b6ec7dc3606142b9ef4f8e427f7a",
+          "log_sha256": "c9bd6c53dcd9c79a1904868718381bed80994e24bcf3513a5a6e1a874d230253",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 31.32,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 129,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark42-plans",
+          "status": "PASSED"
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark42-delta-semantic-v2.json",
+          "receipt_sha256": "c289cf343a73fb334005f2580f23910d9b5a9ac64907cf96c434fd1e4ee6490a",
+          "log_sha256": "beea24214674d41761a7ee1575972bd2ca29b63448ebd060a59e34077058bb4c",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 136.16,
+          "actual_ScalaTest_summaries": [],
+          "id": "spark42-delta-semantic",
+          "status": "PASSED"
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark41-bounded.json",
+          "receipt_sha256": "aabce8394d16ac0a168e804b6ec69f4a1aaa155cb501cf6edc68839800b056d6",
+          "log_sha256": "8710e822e89f3877a14c29f1ece4bccbb5d6012955684ea36d2928aa0260f1c9",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 129.3,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 182,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark41-bounded",
+          "status": "PASSED"
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/diagnostic-verify-spark41.json",
+          "receipt_sha256": "d3c02b582fda5f38ff25f0f2fceb46ef65b08b8eaf6520eb14895163954ac2e2",
+          "log_sha256": "38cfbe3b435b7aa1224b8d73a27cde0e0de5e68bdc342f831bb8ab1461ef32c8",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 31.14,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 129,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark41-final-plans",
+          "status": "PASSED"
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark40-bounded.json",
+          "receipt_sha256": "14ebf8be065d68cda108f1ee12d1e94e73ca845e44ccb885fa4ed0c7f95de50b",
+          "log_sha256": "ae8acd019e339b9c750e42a17a3fa5174df7a8eb42d51ed5aa7a4acf7915f839",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 129.36,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 180,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark40-bounded",
+          "status": "PASSED"
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/diagnostic-verify-spark40.json",
+          "receipt_sha256": "607080ccb6b0e93672f2ed31b0e24943ead221ad0292f1e1487dc298bcf95751",
+          "log_sha256": "b8489b8e1580a78bc02e5b0248fa254d38c7adb7770f56ba633e92e0b14f214e",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 33.34,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 129,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark40-final-plans",
+          "status": "PASSED"
+        },
+        {
+          "id": "spark35-bounded",
+          "status": "SOURCE_EQUIVALENT_LOCAL_COHORTS_VERIFIED",
+          "unique_current_executed_positive_case_count": 180,
+          "unique_current_registration_count": 180,
+          "historical_failed_invocation": {
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark35-bounded-v2.json",
+            "receipt_sha256": "75c35220e2673b07bf5e6a3e26045cdd45f88ab1ca9b0f2f0b64039df47d3ec1",
+            "log_sha256": "09e295eea2692a6b794e269f46a63ffb93c4e2640e0c7b35ef4fc78db2026a33",
+            "raw_exit_code": 1,
+            "elapsed_seconds": 121.92,
+            "actual_ScalaTest_summaries": [
+              {
+                "passed": 177,
+                "failed": 3,
+                "canceled": 0,
+                "ignored": 0,
+                "pending": 0
+              }
+            ]
+          },
+          "ordinary_final_TPC_invocation": {
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/diagnostic-verify-spark35.json",
+            "receipt_sha256": "1f986ba4efce07b2e670fcfff63aeeb59763be827354889d40e7e16ddec8dcad",
+            "log_sha256": "cded551a0d82a01f4607387e0cc7d457da6f04359c8d53ecf39b1b13342a9fdb",
+            "raw_exit_code": 0,
+            "elapsed_seconds": 31.43,
+            "actual_ScalaTest_summaries": [
+              {
+                "passed": 129,
+                "failed": 0,
+                "canceled": 0,
+                "ignored": 0,
+                "pending": 0
+              }
+            ]
+          },
+          "source_equivalence_proof": {
+            "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/final-local-profile-qualification.json",
+            "sha256": "184d0536ad7f5fb8d0c5430154db1cac1a2869b457abe02b4921ff8f96298bcd"
+          },
+          "qualification_limit": "The unchanged non-TPC registrations plus final ordinary TPC129 proof replace only the three known diagnostic-golden failures. The exact Spark3.4 version-N/A registration receives no executed-pass credit. This is not one passing 180-case invocation; final same-SHA full CI remains mandatory."
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark35-delta-strict-v2.json",
+          "receipt_sha256": "5deb764ec549c3e9e5497ec0e767e06a4ea1ab7775fdcdac463c343d35e9d1b2",
+          "log_sha256": "9f486ecd3a1dd495afc77a0f417fd70410e21f879a43603bed6a96900cef9a70",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 19.13,
+          "actual_ScalaTest_summaries": [],
+          "id": "spark35-delta-strict",
+          "status": "PASSED"
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark35-final-helper-controls.json",
+          "receipt_sha256": "1c5f98285b3d8539a7e87c4c111079e075020309543739554d06e53f1aabb9c1",
+          "log_sha256": "f06edd676d30e370914aab10512685bffaf838903d538f950a020059e90f8e23",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 91.04,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 2,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark35-final-helper-controls",
+          "status": "PASSED"
+        },
+        {
+          "id": "spark34-bounded",
+          "status": "SOURCE_EQUIVALENT_LOCAL_COHORTS_VERIFIED",
+          "unique_current_executed_positive_case_count": 179,
+          "unique_current_registration_count": 180,
+          "historical_failed_invocation": {
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark34-bounded.json",
+            "receipt_sha256": "70d4a7b12f1bc9b6a5d2f5f75d0e0303c1460698ede3cd44e6623a53a35d889c",
+            "log_sha256": "779f55228b5f699037d58ef8e0c7c3af617f9e7eacf2f586f104fe756c2eafc6",
+            "raw_exit_code": 1,
+            "elapsed_seconds": 113.01,
+            "actual_ScalaTest_summaries": [
+              {
+                "passed": 177,
+                "failed": 3,
+                "canceled": 0,
+                "ignored": 0,
+                "pending": 0
+              }
+            ]
+          },
+          "ordinary_final_TPC_invocation": {
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/diagnostic-verify-spark34.json",
+            "receipt_sha256": "37b69ea841052629f557377e8121e0b4d382f72b03348419c6f83d4885e2c481",
+            "log_sha256": "637017cde4e2b1c9363104e4ea7687d3516f245575aec5fe51fda91e75719af8",
+            "raw_exit_code": 0,
+            "elapsed_seconds": 31.14,
+            "actual_ScalaTest_summaries": [
+              {
+                "passed": 129,
+                "failed": 0,
+                "canceled": 0,
+                "ignored": 0,
+                "pending": 0
+              }
+            ]
+          },
+          "source_equivalence_proof": {
+            "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/final-local-profile-qualification.json",
+            "sha256": "184d0536ad7f5fb8d0c5430154db1cac1a2869b457abe02b4921ff8f96298bcd"
+          },
+          "qualification_limit": "The unchanged non-TPC registrations plus final ordinary TPC129 proof replace only the three known diagnostic-golden failures. The exact Spark3.4 version-N/A registration receives no executed-pass credit. This is not one passing 180-case invocation; final same-SHA full CI remains mandatory.",
+          "raw_runner_successful_registrations_in_original_bounded_attempt": 177,
+          "unique_current_executed_positive_registrations": 179,
+          "registered_version_NA": {
+            "suite": "org.apache.comet.CometSqlFileTestSuite",
+            "test": "sql-file: expressions/array/explode.sql",
+            "reason": "requires Spark >= 3.5",
+            "count": 1
+          },
+          "applicability_log": {
+            "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark34-bounded-unit-tests.log",
+            "sha256": "c1a98b9a9b803b69979b5a6633d7fe45befd91819d4a61f987a5af160e435e36"
+          }
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/final-current49-spark42.json",
+          "receipt_sha256": "7e2a4ae0deef85255fff9f806b2bac91c3b137c0ff52a94477ece1fb730cc4b9",
+          "log_sha256": "047fc417bf7e8eac4b104c74c994f93f65b5d53ff9efa0381a6f14f80fd45c74",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 118.18,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 49,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark42-final49",
+          "status": "PASSED"
+        }
+      ],
+      "limits": "Overlapping local cohorts are not one complete final-source run. Raw runner success can include an explicitly identified version-N/A registration. Final same-SHA Linux CI/RC and final JAR delivery remain pending."
+    }
   }
 }

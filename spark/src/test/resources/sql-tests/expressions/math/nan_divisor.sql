@@ -26,14 +26,14 @@ CREATE TABLE nan_divisor(d double, f float) USING parquet
 statement
 INSERT INTO nan_divisor VALUES (double('NaN'), float('NaN')), (1.5, float(1.5)), (NULL, NULL)
 
-query
+query expect_fallback_plan(Conditional shared-expression evaluation order requires Spark; Project; ansi=false)
 SELECT hash(1.0D / (-d)), xxhash64(1.0D / (-d)), hash(1.0D % (-d)), xxhash64(1.0D % (-d))
 FROM nan_divisor
 
 query
 SELECT hash(1.0F % (-f)), xxhash64(1.0F % (-f)) FROM nan_divisor
 
-query
+query expect_fallback_plan(Conditional shared-expression evaluation order requires Spark; Project; ansi=false)
 SELECT least(1.0D / (-d), 0.0D), greatest(1.0D / (-d), 0.0D), least(1.0D % (-d), 0.0D),
   greatest(1.0F % (-f), 0.0F)
 FROM nan_divisor

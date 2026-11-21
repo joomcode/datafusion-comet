@@ -273,6 +273,33 @@ class SqlFileTestParserSuite extends AnyFunSuite {
       modeOf("query ignore(https://example.com/issue)") === Ignore("https://example.com/issue"))
   }
 
+  test("fallback plan directives name a closed exact operator boundary") {
+    assert(
+      modeOf("query expect_fallback_plan(Filter ordering; Project, Filter)") ===
+        ExpectFallbackPlan("Filter ordering", Seq("Project", "Filter")))
+    assert(
+      modeOf("query expect_fallback_plan(Conditional ordering; Project; ansi=false)") ===
+        ExpectFallbackPlan("Conditional ordering", Seq("Project"), ansiDisabledOnly = true))
+    assert(modeOf(
+      "query expect_fallback_plan(Conditional ordering; HashAggregate, Exchange, AQEShuffleRead)") ===
+      ExpectFallbackPlan(
+        "Conditional ordering",
+        Seq("HashAggregate", "Exchange", "AQEShuffleRead")))
+    Seq(
+      "query expect_fallback_plan()",
+      "query expect_fallback_plan(; Project)",
+      "query expect_fallback_plan(reason;)",
+      "query expect_fallback_plan(reason; Project,)",
+      "query expect_fallback_plan(reason; FileSourceScan)",
+      "query expect_fallback_plan(reason; Project, Project)",
+      "query expect_fallback_plan(reason; Project; ansi=true)",
+      "query expect_fallback_plan(reason; Project; native_scan=false)",
+      "query expect_fallback_plan(reason; Project; ansi=false; ignored)",
+      "query expect_fallback_plan broken").foreach { directive =>
+      assert(intercept[IllegalArgumentException](modeOf(directive)).getMessage.contains("line 1"))
+    }
+  }
+
   test("query mode and SQL text are associated with the right record") {
     val queries = parseQueries(
       "query expect_native(abs)",

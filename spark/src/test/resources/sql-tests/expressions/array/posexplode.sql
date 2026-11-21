@@ -30,11 +30,11 @@ INSERT INTO test_posexplode_int VALUES
   (5, NULL)
 
 -- basic posexplode over an int array column
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Generate, Filter)
 SELECT id, posexplode(arr) FROM test_posexplode_int
 
 -- posexplode with explicit pos/value aliasing
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Generate, Filter)
 SELECT id, pos, value FROM test_posexplode_int LATERAL VIEW posexplode(arr) p AS pos, value
 
 -- posexplode_outer keeps rows whose array is NULL or empty. Comet emits one
@@ -56,7 +56,7 @@ INSERT INTO test_posexplode_str VALUES
   (3, array('f'))
 
 -- posexplode over a string array
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Generate, Filter)
 SELECT id, posexplode(arr) FROM test_posexplode_str
 
 statement
@@ -69,7 +69,7 @@ INSERT INTO test_posexplode_nullable VALUES
   (3, array(6))
 
 -- posexplode preserves null elements within the array
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Generate, Filter)
 SELECT id, posexplode(arr) FROM test_posexplode_nullable
 
 statement
@@ -82,7 +82,7 @@ INSERT INTO test_posexplode_struct VALUES
   (3, array())
 
 -- posexplode over an array of structs, then project struct fields out of the unnested column
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Project, Generate, Filter)
 SELECT id, pos, value.v1 AS v1, value.v2 AS v2 FROM test_posexplode_struct LATERAL VIEW posexplode(arr) p AS pos, value
 
 statement
@@ -94,7 +94,7 @@ INSERT INTO test_posexplode_map VALUES
   (2, map('c', 3))
 
 -- posexplode over a map falls back to Spark (Comet only supports array inputs, not maps)
-query expect_fallback(Comet only supports explode/explode_outer for arrays, not maps)
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Generate, Filter)
 SELECT id, posexplode(m) FROM test_posexplode_map
 
 -- ===== posexplode_outer across non-int element types =====
@@ -209,13 +209,13 @@ SELECT id, posexplode_outer(arr) FROM test_posexplode_all_null
 -- or NULL-swapped-with-zero indices could still match on golden row order.
 -- These queries force value-level assertions on the position column.
 
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Project, Generate, Filter, HashAggregate, Exchange, AQEShuffleRead)
 SELECT pos, count(*) AS c
 FROM test_posexplode_int LATERAL VIEW posexplode(arr) p AS pos, value
 GROUP BY pos
 ORDER BY pos
 
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Generate, Filter, AQEShuffleRead)
 SELECT id, pos, value
 FROM test_posexplode_int LATERAL VIEW posexplode(arr) p AS pos, value
 WHERE pos = 0
@@ -233,7 +233,7 @@ FROM test_posexplode_int LATERAL VIEW OUTER posexplode(arr) p AS pos, value
 WHERE pos IS NOT NULL
 ORDER BY id, pos
 
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Project, Generate, Filter, HashAggregate, AQEShuffleRead)
 SELECT id, MAX(pos) AS max_pos
 FROM test_posexplode_int LATERAL VIEW posexplode(arr) p AS pos, value
 GROUP BY id
@@ -241,7 +241,7 @@ ORDER BY id
 
 -- Reconstruct the original array by ordering `value` by `pos`: a strong
 -- regression net against pos/value branch misalignment (see #5224).
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Generate, Filter, AQEShuffleRead)
 SELECT id, collect_list(value) AS values_ordered_by_pos
 FROM (
   SELECT id, pos, value

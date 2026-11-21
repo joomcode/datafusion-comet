@@ -39,7 +39,7 @@ query
 SELECT cast(100.00 as decimal(10,2)) + b, cast(100.00 as decimal(10,2)) - b, cast(100.00 as decimal(10,2)) * b FROM test_decimal
 
 -- literal + literal
-query
+query expect_fallback_plan(Conditional shared-expression evaluation order requires Spark; Project, OneRowRelation)
 SELECT cast(10.50 as decimal(10,2)) + cast(3.20 as decimal(10,2)), cast(10.50 as decimal(10,2)) - cast(3.20 as decimal(10,2)), cast(10.50 as decimal(10,2)) * cast(3.20 as decimal(10,2)), cast(10.50 as decimal(10,2)) / cast(3.20 as decimal(10,2))
 
 -- Mixed precision

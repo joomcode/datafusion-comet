@@ -68,10 +68,10 @@ SELECT id, array(IF(s, -d, d)) AS k, named_struct('x', IF(s, -f, f)) AS t
 FROM nested_float_keys ORDER BY k, id DESC
 
 -- TopK
-query
+query expect_fallback_plan(Conditional shared-expression evaluation order requires Spark; TakeOrderedAndProject)
 SELECT id FROM nested_float_keys ORDER BY array(IF(s, -d, d)) DESC, id LIMIT 4
 
-query
+query expect_fallback_plan(Conditional shared-expression evaluation order requires Spark; TakeOrderedAndProject)
 SELECT id FROM nested_float_keys ORDER BY named_struct('x', IF(s, -f, f)), id DESC LIMIT 4
 
 -- Window order keys: peers share a rank, and the default RANGE frame of a running sum spans

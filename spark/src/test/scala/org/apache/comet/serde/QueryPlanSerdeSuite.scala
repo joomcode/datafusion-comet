@@ -21,15 +21,45 @@ package org.apache.comet.serde
 
 import org.scalatest.funsuite.AnyFunSuite
 
-import org.apache.spark.sql.catalyst.expressions.{ArrayContains, ArrayPosition, AttributeReference, Cast, Divide}
+import org.apache.spark.sql.catalyst.expressions.{ArrayContains, ArrayPosition, AttributeReference, Cast, Divide, EvalMode, Literal, Remainder, UnaryMinus}
 import org.apache.spark.sql.comet.DecimalPrecision
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 
+import org.apache.comet.CometExplainInfo
 import org.apache.comet.CometSparkSessionExtensions.{isSpark40Plus, isSpark41Plus}
 import org.apache.comet.serde.QueryPlanSerde.{canShortCircuitNulls, canSkipEvaluation, supportedDataType, withSharedSubexpressions}
 
 class QueryPlanSerdeSuite extends AnyFunSuite {
+
+  test("division retains a rejected synthesized zero guard's original fallback reason") {
+    val conf = new SQLConf
+    conf.setConf(SQLConf.SUBEXPRESSION_ELIMINATION_ENABLED, true)
+    SQLConf.withExistingConf(conf) {
+      val value = AttributeReference("d", DoubleType)()
+      val divisor = UnaryMinus(value)
+      val expression = Divide(Literal(1.0d), divisor, EvalMode.LEGACY)
+      val shared = Seq(expression, Remainder(Literal(1.0d), divisor, EvalMode.LEGACY))
+      val reason = "Conditional shared-expression evaluation order requires Spark"
+      withSharedSubexpressions(shared) {
+        // Negative control: the existing synthesized expression rejects conversion and carries
+        // the reason, but the original Divide does not contain that synthetic node's tags.
+        val zeroGuard = CometDivide.nullIfWhenPrimitive(divisor)
+        assert(QueryPlanSerde.exprToProtoInternal(zeroGuard, Seq(value), binding = true).isEmpty)
+        assert(
+          zeroGuard.getTagValue(CometExplainInfo.FALLBACK_REASONS).exists(_.contains(reason)))
+        assert(expression.getTagValue(CometExplainInfo.FALLBACK_REASONS).isEmpty)
+        assert(QueryPlanSerde.exprToProto(expression, Seq(value)).isEmpty)
+        assert(
+          expression.getTagValue(CometExplainInfo.FALLBACK_REASONS).exists(_.contains(reason)))
+      }
+      val native = Divide(Literal(1.0d), value, EvalMode.LEGACY)
+      withSharedSubexpressions(Seq(native)) {
+        assert(QueryPlanSerde.exprToProto(native, Seq(value)).isDefined)
+        assert(native.getTagValue(CometExplainInfo.FALLBACK_REASONS).isEmpty)
+      }
+    }
+  }
 
   test("supportedDataType matches each caller boundary") {
     val complex = ArrayType(IntegerType)

@@ -1144,7 +1144,14 @@ class CometNativeReaderSuite extends CometTestBase with AdaptiveSparkPlanHelper 
         |    named_struct('first', 'Alice', 'middle', 'A.', 'last', 'Jones')
         |  ) as friends
         |""".stripMargin,
-      "select friends.middle from tbl where friends.first[0] = 'Susan'")
+      "select friends.middle from tbl where friends.first[0] = 'Susan'",
+      debugCometDF = df => {
+        checkSparkAnswerAndNativeScanFilter(
+          df,
+          "Filter shared-expression evaluation order requires Spark")
+        ()
+      },
+      checkCometOperator = false)
   }
 
   // SPARK-39393: bare "repeated int32" (protobuf-style, no wrapping list group)
@@ -1312,15 +1319,9 @@ class CometNativeReaderSuite extends CometTestBase with AdaptiveSparkPlanHelper 
   }
 
   test("issue #4136: struct with only NullType fields in file (SPARK-54220)") {
-    // The upstream SPARK-54220 test writes `Tuple1((null, null))` which is inferred as a struct
-    // of NullType fields on disk; reading with a schema that asks for Int/String on top of
-    // NullType fails at parquet decode time because Spark encodes NullType as
-    // `BOOLEAN + LogicalType::Unknown` but parquet-rs only accepts `INT32 + Unknown`. See
-    // #4199 for the upstream compatibility gap.
-    assume(
-      false,
-      "Skipped until parquet-rs accepts BOOLEAN + Unknown for NullType " +
-        "(https://github.com/apache/datafusion-comet/issues/4199)")
+    // Spark writes NullType as BOOLEAN + UNKNOWN. Pinned parquet-rs accepts UNKNOWN for
+    // every physical type, so keep parent-null validity covered for both legacy settings.
+    assume(isSpark41Plus, "Parquet NullType writes require Spark 4.1+")
 
     val tableSchema = new StructType().add(
       "_1",
@@ -1353,7 +1354,16 @@ class CometNativeReaderSuite extends CometTestBase with AdaptiveSparkPlanHelper 
         "spark.sql.legacy.parquet.returnNullStructIfAllFieldsMissing" -> legacy,
         "spark.sql.columnVector.offheap.enabled" -> offheapEnabled) {
         val df = spark.read.schema(readSchema).parquet(path.getCanonicalPath)
-        checkSparkAnswer(df)
+        val (_, plan) = checkSparkAnswer(df)
+        val expected = if (legacy.toBoolean) {
+          Seq.fill(3)(Row(null))
+        } else {
+          Seq(Row(Row(null, null)), Row(Row(null, null)), Row(null))
+        }
+        checkAnswer(df, expected)
+        assert(
+          collect(plan) { case scan: CometNativeScanExec => scan }.size == 1,
+          s"Expected the full native DataFusion reader for NullType fields:\n$plan")
       }
     }
   }

@@ -1,7 +1,7 @@
 {
   "date": "2026-11-21",
   "group": "G10",
-  "status": "FINAL_SOURCE_FROZEN_FULL_QUALIFICATION_REQUIRED",
+  "status": "LOCAL_CORRECTIONS_VERIFIED_FINAL_SOURCE_FREEZE_AND_REMOTE_QUALIFICATION_REQUIRED",
   "branch": "joom/1.2-release-qualification",
   "base_commit": "4467d0337089036d3f01d28375260ce3dbcaaca5",
   "cards": "All agreed 58 active cards, plus preservation of historical H01; no scope is automatically excluded.",
@@ -15,18 +15,21 @@
     "jvm_arrow": "18.3.0",
     "java": "17.0.19-tem"
   },
-  "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v5.json",
-  "source_manifest_sha256": "27d9e07a8d776af4631b08d004ac8fd586448f420d835b021a1e0f5495ed4025",
+  "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v7.json",
+  "source_manifest_sha256": "f39abf3c6ca2e21008400528acfb47c1f33f91dcb8e2dd95da95a0e9384b0026",
   "changed_source_sha256": {
     ".github/actions/java-test/action.yaml": "3ff24f865e0b76d1e8fb7f991f7ac201294c4fcc7a9491feeb28a3b96823edc2",
     ".github/actions/rust-test/action.yaml": "ae1207a8c531775baf0db3698ea232171ec203675105cf886e87a17198e7016d",
     ".github/workflows/README.md": "895632fc8075642f4fd1f750df8850e8f97513f296d0b688d3882b2be2e1489f",
     ".github/workflows/codeql.yml": "6cf63c424f89916956f0e6be94cae161afcb0cfc8e1c95826f9e09641ac43c8d",
+    ".github/workflows/iceberg_spark_test_reusable.yml": "e89053000def4131912673c7fa3584a171f2ae1825116a03b5e59e948226571f",
     ".github/workflows/pr_build_linux.yml": "e06705eba74ed57777d4cf6656c1f1ef09c80dcb4e6ddee94b681780009e8d66",
     ".github/workflows/pr_build_macos.yml": "02480e6e6e6f1a3a7ea18b31a3d1c9b3289ad6c0e829a7b2009edc88066ee75b",
     "contrib/delta-spark/src/main/scala/org/apache/comet/contrib/delta/CometDeltaNativeScan.scala": "a64544ed87f9a2713548add46bee20aecea010a1f85494c7b41508ac42e46600",
     "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/CometDeltaS3Suite.scala": "66fb0061324315cc8fd0d0c5d4992a1864b55ae6280a1d52f64fc75eaf299b33",
     "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/DeltaScanContribSuite.scala": "6291496717e08f5322b560b0642ab81bb26822d57de517c77e66162da659f395",
+    "dev/ci/prepare-maven-model.sh": "3027c506fd17a5e8ef198f8ea37137e79b37539412bd5ba33007063217ef0676",
+    "dev/ci/test-maven-model.py": "ae5479b128bd44e4f4ad8fc14d05032ac871e6861fa1316c96c6b38fb285688e",
     "dev/ci/verify-native-windows.py": "38d49357b2672501704f9efa3dcb74ee746e9e06b6ee27f3acb4013d3e9e28cd",
     "dev/release/joom/build-release.sh": "e2ed184d3cf3f7442346115ba1db647519d1f09972abcd4e01e130a7734ec365",
     "dev/release/joom/test-packaged-runtime.py": "347c4626b49eff7a700388f8efb746a6041d74e32bac0a34f2ffe1eb214494d5",
@@ -46,9 +49,24 @@
     "pom.xml": "448654ea53df040b516f983a171f2f4ee18f8f4766f47818a95f32fc13012020",
     "spark/src/main/scala/org/apache/comet/CometExecIterator.scala": "3f6a20db8512e0cb8003387d2037eec4f7169c73963369694ea4837801fe3a22",
     "spark/src/main/scala/org/apache/comet/rules/CostBasedEngineChoice.scala": "a39888c83aabd0043b985337b86f806df13cfd6672aa2714d195aa08540c5b59",
+    "spark/src/main/scala/org/apache/comet/serde/arithmetic.scala": "742322b7476a7634b481a0b7854982c1085a50585a453fa8759688a726b03aef",
     "spark/src/main/scala/org/apache/comet/udf/codegen/CometUdfFunctionPool.scala": "d9c73e1d3926234901943fde75b662984e4b70ad5ae5d198ce797d470ab4a279",
     "spark/src/main/scala/org/apache/spark/sql/comet/CometColumnarToRowExec.scala": "00f6be2ffe65acc9bd271ea7873fd4fc8654a50afb50dc67164e22ae7054a824",
     "spark/src/main/scala/org/apache/spark/sql/comet/operators.scala": "697533e0b31d32037c40fad42c721532b066635260415d6d4c89863931ba4858",
+    "spark/src/test/resources/sql-tests/expressions/aggregate/regr.sql": "8f708aa948d6a8eb9adb8c8ff0caca511152274a33c80fbfd904590c6c88c891",
+    "spark/src/test/resources/sql-tests/expressions/array/arrays_overlap.sql": "52acec160176e48dfba78bf9d42a85f1e2009ce0a3d002c59e6638b270db1c35",
+    "spark/src/test/resources/sql-tests/expressions/array/arrays_zip.sql": "4b01c274641033125ace6db58e9be1bacd89e715e5a9a2563a4fee83a3e000e3",
+    "spark/src/test/resources/sql-tests/expressions/array/explode.sql": "ec35c4ecfb371fa68ed1d6ef057dafdaf26f71abbb8348579155069f12de33b0",
+    "spark/src/test/resources/sql-tests/expressions/array/posexplode.sql": "5edef028ed058d2c1e70db12eeefaef6c7237ca3d7d829a7088cad377cbf0468",
+    "spark/src/test/resources/sql-tests/expressions/datetime/window.sql": "7e2aeb3f21d03d1df7d39a364895e991bdc288d31843dd31e21c5d662310b60f",
+    "spark/src/test/resources/sql-tests/expressions/decimal/decimal_ops.sql": "ed2ac211d50be5b79aa3da2ac38bb8f038f65aa37c3a63b467d17f4df8f43122",
+    "spark/src/test/resources/sql-tests/expressions/math/arithmetic.sql": "de0b77cd57b304f157b63b5eae2cab930b71552727cee441ff12022ed6db015f",
+    "spark/src/test/resources/sql-tests/expressions/math/atan2.sql": "d7945864aa5cfd4d6622d5cac09af29b2a7cd4b6a86b29f5ec4ccd5dead17929",
+    "spark/src/test/resources/sql-tests/expressions/math/nan_divisor.sql": "5a4e65fed41c0c12fd04e5c365e3147e16b57a562aafad81406dbefcb73ac033",
+    "spark/src/test/resources/sql-tests/expressions/window/lag_lead.sql": "82e71d880126e6b9a54f7fbaf9a78c3a2a52e8b69f41535e7317885d351542d3",
+    "spark/src/test/resources/sql-tests/windows/nested_float_order_keys.sql": "5c66126c49fcbde14d71b128cdc00024041f30db0116a557b2a6a179aeea2c9a",
+    "spark/src/test/resources/sql-tests/windows/nested_float_order_keys_strict.sql": "ae3b4298a9c6d5cc34d3c0132935561ce6be8d7ca1155c8abe4e17ec5323f0ea",
+    "spark/src/test/resources/sql-tests/windows/window_functions.sql": "3b542ff4f174bd2ed598272350694367aff8fb9bf79f3a1f22d183cedbde3c5f",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark3_5/q58/extended.txt": "aff3cbd2b32a73889c36982b5b944f366545e642e0d307dfd7e11600c7d5da59",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q11/extended.txt": "80dd784089616a8645a18fef701e28c21cd2ef19aab15ad98dc139c086c9db14",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q14b/extended.txt": "df0f036b026cec54a331ce5c37f20e560fcb2e1eb3bec3a32e403a0ba974c117",
@@ -67,6 +85,7 @@
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q6/extended.txt": "f63ae33464e522f652aeb16440eed952069ebb244d3e78f9e5a925d2b86fc796",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q62/extended.txt": "e3ea70c82fccb285dabf50ae77db224a6b557d9f160226676e66f66cd80c818c",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q64/extended.txt": "2011f80d6db8a45e4ed3eaedd13d7e1fdbe4327a35f384a2712bce2b6ec3f07a",
+    "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q66/extended.txt": "c943ab611608e4654b375d35cca1f5f0998d42024440d9a2a4a5af947e24769e",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q74/extended.txt": "5def298a574a1127ee6c3c47e8ffe9cd10350f6fb8ea086bafcd14ad756a2bed",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q8/extended.txt": "9164437519b7150f76e04ea60dbc88d7ffb3289d4da9010a8d1054f7838a8f08",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q81/extended.txt": "c5139d6304c9d7d2c5d156d7c3e305b315ca1350d9318223598393328bc897c6",
@@ -99,7 +118,7 @@
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q41/extended.txt": "2bed347dcfa82d3f2b556c34e609557c17f2f4b58259c0b6652f277dab123a2a",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q46/extended.txt": "4ed43fc1d49b72efc3f0bf99055b61733f1edde87feb75a0d3a6d68eee9a3c16",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q48/extended.txt": "29632ea49465ebe54fc12b9e85cf3644d4bb4fa1fb9054fc918bcf4c89972b6c",
-    "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q49/extended.txt": "f0de63fc9aba731b2dc7bb20da23f4824158ab56f2692a8c77606e2c7578a4d0",
+    "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q49/extended.txt": "62d919b50ab46d8616997a350bc683aacf568ec7a1bb6d436249a5a047cceae2",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q53/extended.txt": "635196b2c8f1437ac97fb10af17ab3c2ffdab8508f5aa2731e0d803afb6b0006",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q54/extended.txt": "5fb7227e6cab633ad2f19991724809ad50bafdb71a2c8e1b27e6163d9c4e85b1",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q58/extended.txt": "b144cfdf455b1ba80ded3ef0bb88a29902789093e1c6a9f5e53c9418ab044a26",
@@ -107,7 +126,7 @@
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q61/extended.txt": "6ba313e02c4067d1792c958f876d1c0faabc59bb96aeaef587af9fa6705e50cc",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q63/extended.txt": "635196b2c8f1437ac97fb10af17ab3c2ffdab8508f5aa2731e0d803afb6b0006",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q64/extended.txt": "35fbb44ff46625e29f76f125ded042f44087029935cb909fe6cecd9a1e33f289",
-    "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q66/extended.txt": "c943ab611608e4654b375d35cca1f5f0998d42024440d9a2a4a5af947e24769e",
+    "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q66/extended.txt": "1f20bb20c79744e4e017d64b64a1e0560203792dccad567293d072b047fb5290",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q68/extended.txt": "f0f5017f19280668b98a8c50a2db6b3d7cc9bc444992aa5ce654579f48e70d69",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q69/extended.txt": "394d2b3b993bc452b7ec0b7fa5bef483b8f1a74bff90b3fb146266938e307fb5",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q7/extended.txt": "df9f7ac8c5ad5d8fb40050d8dca856aebfd6685b233f6a8b414865716080eefa",
@@ -147,7 +166,7 @@
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q27a/extended.txt": "998bca26e766f87f66ee69c28fd2b85e993c5b58cd6b744055e2e49b38180579",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q34/extended.txt": "062ecfd90ca3529276eeb890fa9966eed4d3f8899ccf2b4bc1426ad7ff1768f3",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q36a/extended.txt": "4e851d4b97211a7194d34fcd74e820ca2ef939793b70d4b8eee5fd3bc57bbfda",
-    "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q49/extended.txt": "f0de63fc9aba731b2dc7bb20da23f4824158ab56f2692a8c77606e2c7578a4d0",
+    "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q49/extended.txt": "62d919b50ab46d8616997a350bc683aacf568ec7a1bb6d436249a5a047cceae2",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q6/extended.txt": "f2fa9c99e5c7cb0cc595df13069f5071f55ca7953ce2dffa4fcaf0cd4b5c5578",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q64/extended.txt": "35fbb44ff46625e29f76f125ded042f44087029935cb909fe6cecd9a1e33f289",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q72/extended.txt": "fe61198c03f67950f2623f193783915ff28bc3e1a177a9664daa2012519fb0cb",
@@ -156,19 +175,25 @@
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q80a/extended.txt": "a34a9335a066614f68f632bd865cd50b11842114daa87695209e76116683e878",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q98/extended.txt": "52b4f6b9d05da636f0edcc5f0e6991ed344742a32fe6ecb7f5a993d52fb75414",
     "spark/src/test/scala/org/apache/comet/CometCoverageStatsSuite.scala": "72737f506b1e83df3e708bd135fa4c9566634d2362f96bc47bdfe2af70ba33f4",
-    "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "d4a77914ab1088af612ba733131230d4cfd5abd259db7dd6df8bc117a2463dcf",
+    "spark/src/test/scala/org/apache/comet/CometSqlFileTestSuite.scala": "cbad7a1b5fc4aef9a5aa5cfe4404fed4cbec7649a0d9794fb17e5ac2737f4b3d",
+    "spark/src/test/scala/org/apache/comet/SqlFileTestParser.scala": "c1167548a3bc375edc72284a2c9533471452e3961987dca97ae961120f012cf2",
+    "spark/src/test/scala/org/apache/comet/SqlFileTestParserSuite.scala": "d2056f7b55a3c4230e0326d3a1bc166d63fb836f587b3eba21ef876b521fd071",
+    "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "ce998b0eab782b9a3e22db44b15215bb64e051ebc1792082527d787245345060",
     "spark/src/test/scala/org/apache/comet/exec/CometExec3_4PlusSuite.scala": "fe4a840958ad279578d39058ba07ae4b92497264678d2d286bf6e860fa3fc19f",
     "spark/src/test/scala/org/apache/comet/exec/CometExecSuite.scala": "abaff3006f8c42f8124e69bd307394f791373f4a1544f732c2a0d5bbf97bb1f2",
     "spark/src/test/scala/org/apache/comet/exec/CometJoinSuite.scala": "fd58b3303eafabd1936355c3c40dcc71cd3c0591da6bf56d83ffd93ed934f695",
+    "spark/src/test/scala/org/apache/comet/exec/CometNativeReaderSuite.scala": "62771146cedc6861c699bc7b8fd7591c98808a8cbbf0508c2036ea6153ad65c3",
     "spark/src/test/scala/org/apache/comet/exec/CometOffTaskThreadSuite.scala": "628e6db98bfa529311e5b79539e7cdb6bce9d9cc857f1cd4f23f3c6968c6827b",
     "spark/src/test/scala/org/apache/comet/exec/CometShuffleReadCoalesceSuite.scala": "e6f2f647f32d608e888c5a68e557194c8734a4ff0a72631118af779b05ddc5ae",
     "spark/src/test/scala/org/apache/comet/exec/CometSmjJoinFilterAnsiSuite.scala": "093dca07de63e4043773b29a13a759ddb7c05e98e19341913c64963fff9d6b1b",
     "spark/src/test/scala/org/apache/comet/exec/CometWindowExecSuite.scala": "406a06290bc837fb8956d513b90013552a110545c97e9e37dbc22ba2addf497a",
     "spark/src/test/scala/org/apache/comet/exec/CometWindowSemanticsSuite.scala": "8c255386c129bffa584e4b772a1633dc35c946d85ceb39815f48408682ce053e",
+    "spark/src/test/scala/org/apache/comet/parquet/ParquetReadSuite.scala": "8e8ba0e7b4e72fdb0036504f9f9cf953395367bf70fd8277495bd6e9e5c8abfe",
     "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineChoiceSuite.scala": "5bfa4bdc933ff13bd38c01c13353f8eafeb043bc1ece4f97946b0c529b7bfb62",
     "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineCorrectnessSuite.scala": "6ed84735ce378b361873a2ff93d88729babcb688d2341f92b4f80628e7b816df",
+    "spark/src/test/scala/org/apache/comet/serde/QueryPlanSerdeSuite.scala": "d495613e31c3910f5cf5df35aa70d9d53fa64de9823d97d9db09fd1c5040ac27",
     "spark/src/test/scala/org/apache/spark/shuffle/sort/CometShuffleExternalSorterSpillSuite.scala": "99882cc39f16d48594f55626b110ab4dcb866f60203fd70810e6850f73bd2b59",
-    "spark/src/test/scala/org/apache/spark/sql/CometTestBase.scala": "a4c623c3caadc88c43d9fb5b7d777255ede2e2335a051a6855021f132781e49c",
+    "spark/src/test/scala/org/apache/spark/sql/CometTestBase.scala": "dda910a2b5a3712de22f3a5c86d59983210a3da824db08670729cf57f14a185e",
     "spark/src/test/scala/org/apache/spark/sql/comet/CometTaskMetricsSuite.scala": "9545a591ec8ae4ded81430ae0d185d0f516027ab8680400ea9cb424ee2ffebf3",
     "spark/src/test/scala/org/apache/spark/sql/comet/CometUdfFunctionPoolSuite.scala": "c62facf136a0cc18f98f97b38d1812fe4f9e941c86c5ba938d5303af483d3fd0",
     "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometBlockStoreShuffleReaderSuite.scala": "30907ed867fbca7e203dfb90454839d7746768cb6916190c3846e23b663a3865",
@@ -521,6 +546,11 @@
       "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v4.json",
       "sha256": "58bcbc49d70282df029af6a5016138403ff67220828631349de03c9ae597528f",
       "source": "f700491ad3fd88d62bc573a2ee8aa714d445e5f2"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v5.json",
+      "sha256": "27d9e07a8d776af4631b08d004ac8fd586448f420d835b021a1e0f5495ed4025",
+      "disposition": "Historical candidate preserved; superseded by the final local correction source manifest."
     }
   ],
   "corrective_local_quality": {
@@ -628,7 +658,7 @@
     "ci_secondary_suite": "Existing CometBroadcastDefaultKryoSuite added beside PayloadSuite in Linux/macOS lists;2actualAQEcases per applicable profile. Source/compiled census finds no other unexpected omission.",
     "python38": "Grammar/API compatibility review passed; actual Focal release execution remains remote gate."
   },
-  "backlog_map": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v2.json",
+  "backlog_map": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v7.json",
   "miri_codec_adaptation": {
     "scope": "One existing test fixture only; same19test registrations and full production prefix preserved.",
     "normal_native": "None,Lz4Frame,Zstd(1), bothwriterentrypoints, sameallfixtures/checksums/byteanddecodedrowassertions. Native19/19pass.",
@@ -636,7 +666,7 @@
     "quality": "Actual F700 Linux Miri passed107/0failed/0ignored. Native sources and Miri workflow unchanged by support-only fix; exact new-SHA Miri remains mandatory.",
     "local_environment": "Officialdatednightlyinstalled520MiB,stabledefaultunchanged. LocalMiri setup couldnotcreateitsstandardcacheinside sandbox; requestedone-offescalationuserrejected. No localMiritests executed; no cache relocation or further escalation.",
     "execution_order": "FullCI/Miri/dualarchRC parallel on SAME frozen SHA, CodeQL automatic; no qualification credit until all actual final gates pass.",
-    "previous_execution_order": "Push finalcandidate\u2192MiriGHAonly+automaticCodeQL\u2192afterMiri succeeds fullCometCI+23caseRC on SAMEfrozenSHA."
+    "previous_execution_order": "Push finalcandidate→MiriGHAonly+automaticCodeQL→afterMiri succeeds fullCometCI+23caseRC on SAMEfrozenSHA."
   },
   "packaged_test_support_abi_fix": {
     "scope": "Only release test-support preparation and its contract tests; no production source/POM/algorithm changes.",
@@ -654,5 +684,785 @@
     "raw_negative_reproduced": "IncompatibleClassChangeError com.google.protobuf.Message",
     "support_policy": "Both Core/Delta test JARs, exact resolved effective-POM Jar/Shade/ASM pins and relocations, offline dependency-free helper; final production-class guards retained.",
     "final_execution_order": "FullCI/Miri/dualarchRC parallel on SAME frozen SHA, CodeQL automatic; no qualification credit until all actual final gates pass."
-  }
+  },
+  "historical_source_bound_references_before_contract_corrections": {
+    "disposition": "HISTORICAL_ONLY; no old source/test/artifact hash is claimed to qualify the corrected tree.",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v5.json",
+    "source_manifest_sha256": "27d9e07a8d776af4631b08d004ac8fd586448f420d835b021a1e0f5495ed4025",
+    "changed_source_sha256": {
+      ".github/actions/java-test/action.yaml": "3ff24f865e0b76d1e8fb7f991f7ac201294c4fcc7a9491feeb28a3b96823edc2",
+      ".github/actions/rust-test/action.yaml": "ae1207a8c531775baf0db3698ea232171ec203675105cf886e87a17198e7016d",
+      ".github/workflows/README.md": "895632fc8075642f4fd1f750df8850e8f97513f296d0b688d3882b2be2e1489f",
+      ".github/workflows/codeql.yml": "6cf63c424f89916956f0e6be94cae161afcb0cfc8e1c95826f9e09641ac43c8d",
+      ".github/workflows/pr_build_linux.yml": "e06705eba74ed57777d4cf6656c1f1ef09c80dcb4e6ddee94b681780009e8d66",
+      ".github/workflows/pr_build_macos.yml": "02480e6e6e6f1a3a7ea18b31a3d1c9b3289ad6c0e829a7b2009edc88066ee75b",
+      "contrib/delta-spark/src/main/scala/org/apache/comet/contrib/delta/CometDeltaNativeScan.scala": "a64544ed87f9a2713548add46bee20aecea010a1f85494c7b41508ac42e46600",
+      "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/CometDeltaS3Suite.scala": "66fb0061324315cc8fd0d0c5d4992a1864b55ae6280a1d52f64fc75eaf299b33",
+      "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/DeltaScanContribSuite.scala": "6291496717e08f5322b560b0642ab81bb26822d57de517c77e66162da659f395",
+      "dev/ci/verify-native-windows.py": "38d49357b2672501704f9efa3dcb74ee746e9e06b6ee27f3acb4013d3e9e28cd",
+      "dev/release/joom/build-release.sh": "e2ed184d3cf3f7442346115ba1db647519d1f09972abcd4e01e130a7734ec365",
+      "dev/release/joom/test-packaged-runtime.py": "347c4626b49eff7a700388f8efb746a6041d74e32bac0a34f2ffe1eb214494d5",
+      "dev/release/joom/test-rc-result.py": "805d1030a6adeef3e0ab46eddd0ecaa57459fccafc755e3510bf14bef71c5461",
+      "dev/release/joom/verify-packaged-runtime.py": "e3134c375393bfc68b4fea877687c6cff03f322ccd8d5773af8d3d351c7db27b",
+      "dev/release/joom/verify-rc-result.py": "1bea6c32adb244785cfb003d3b769691793d37948308ef119bdf4b9a34de5489",
+      "docs/source/contributor-guide/ci.md": "036cdc86a743069db2edd50fef11166e1b2692bb473379e6983a7497a7ec8b5b",
+      "docs/source/contributor-guide/memory_management.md": "0f2c26937260892a239593f7f90d1675a9f54b9412420337f4e0071a4773c36e",
+      "native/shuffle/src/spark_unsafe/row.rs": "22c6488f885e95ab56e8b8e2254afbf371d0fde2b31cc9b16cb6f836ade7317b",
+      "native/vendor/datafusion-physical-plan/src/aggregates/hash_stream.rs": "57c59676b56d3de9e94bddebac2f9b64ac2e3aa4f25d09a54003fee6a407b953",
+      "native/vendor/datafusion-physical-plan/src/aggregates/ordered_final_stream.rs": "21c5bc0f4451828979c85aa4fcaeb63a8a7de1f36d0b24ad88549904845cb9fd",
+      "native/vendor/datafusion-physical-plan/src/aggregates/ordered_partial_stream.rs": "4adcf32d051690581f9302ad2a317b94b39549dec4a0400835a625d8c7f9c42e",
+      "native/vendor/datafusion-physical-plan/src/aggregates/partial_reduce_stream.rs": "94d38bbb9ab5b8ef4411f1b8ead168e2a63425129a9caa61eb53bf83e50b17d8",
+      "native/vendor/datafusion-physical-plan/src/aggregates/replay_budget.rs": "ecc58c9c70412a1a57d41a504260fdc0a965d50749f8c685c73950ffd0abe780",
+      "native/vendor/datafusion-physical-plan/src/aggregates/replay_budget_tests.rs": "130430df00c3ed7955e37dcbe9a7da588efc3ed8902fdf9299c3215e699800fa",
+      "native/vendor/datafusion-physical-plan/src/aggregates/single_stream.rs": "c24ee05527eed64d757705ce623ae7e49c3f23e981d7fb3185ba82f6294b42fa",
+      "pom.xml": "448654ea53df040b516f983a171f2f4ee18f8f4766f47818a95f32fc13012020",
+      "spark/src/main/scala/org/apache/comet/CometExecIterator.scala": "3f6a20db8512e0cb8003387d2037eec4f7169c73963369694ea4837801fe3a22",
+      "spark/src/main/scala/org/apache/comet/rules/CostBasedEngineChoice.scala": "a39888c83aabd0043b985337b86f806df13cfd6672aa2714d195aa08540c5b59",
+      "spark/src/main/scala/org/apache/comet/udf/codegen/CometUdfFunctionPool.scala": "d9c73e1d3926234901943fde75b662984e4b70ad5ae5d198ce797d470ab4a279",
+      "spark/src/main/scala/org/apache/spark/sql/comet/CometColumnarToRowExec.scala": "00f6be2ffe65acc9bd271ea7873fd4fc8654a50afb50dc67164e22ae7054a824",
+      "spark/src/main/scala/org/apache/spark/sql/comet/operators.scala": "697533e0b31d32037c40fad42c721532b066635260415d6d4c89863931ba4858",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark3_5/q58/extended.txt": "aff3cbd2b32a73889c36982b5b944f366545e642e0d307dfd7e11600c7d5da59",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q11/extended.txt": "80dd784089616a8645a18fef701e28c21cd2ef19aab15ad98dc139c086c9db14",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q14b/extended.txt": "df0f036b026cec54a331ce5c37f20e560fcb2e1eb3bec3a32e403a0ba974c117",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q19/extended.txt": "38b5aa98c28ab790d64cdc92fbff2f6dd882ee80c9680348fee7d3f0a10abe66",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q24a/extended.txt": "6a88802174b8e354853be83e3647fb5ba8cd2d69a055bb3f313afb516ed116e4",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q24b/extended.txt": "6a88802174b8e354853be83e3647fb5ba8cd2d69a055bb3f313afb516ed116e4",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q30/extended.txt": "5a04664faa8d34974f5c258a6d7a6ec72b4bf9d0db9b5b0b349b0ff5233e4e17",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q4/extended.txt": "9d2615b4a9bdf804a16ba0f828bc9596a04fb95da08a41a90204157c56ff45e1",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q47/extended.txt": "7f2c8855ea866efa9697dc97e869e0312a2fc4a288e35783da75717a5f4ddece",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q49/extended.txt": "f39cf067fc0b02555008a00e29383d134f96bcf423228ae5dc9964af30fd8a98",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q50/extended.txt": "5d70e467ada649b45d6566a7ec1944fcfb5cef2cbc080d2a12937ee59dfbaef5",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q54/extended.txt": "9f07dc9960e3ae454ff844c7219f04ae8a669a9a6a4665a0ddd16ac5af82a5ed",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q57/extended.txt": "6e94c73922b828029a2117bb49731f3f3251dddae8d020bf618392d32ae6a41d",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q58/extended.txt": "2cde524ecd771e9ae1ce74d8dae6dc8fe0d485c30102ac18b2662f7ce55102e7",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q59/extended.txt": "f8a2f31a601e007988a8a09946a8d0fcde600351a392fd3eb9f187371bc08b14",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q6/extended.txt": "f63ae33464e522f652aeb16440eed952069ebb244d3e78f9e5a925d2b86fc796",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q62/extended.txt": "e3ea70c82fccb285dabf50ae77db224a6b557d9f160226676e66f66cd80c818c",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q64/extended.txt": "2011f80d6db8a45e4ed3eaedd13d7e1fdbe4327a35f384a2712bce2b6ec3f07a",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q74/extended.txt": "5def298a574a1127ee6c3c47e8ffe9cd10350f6fb8ea086bafcd14ad756a2bed",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q8/extended.txt": "9164437519b7150f76e04ea60dbc88d7ffb3289d4da9010a8d1054f7838a8f08",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q81/extended.txt": "c5139d6304c9d7d2c5d156d7c3e305b315ca1350d9318223598393328bc897c6",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q83.ansi/extended.txt": "dd07cd7ee9c0f5b16e6f8f70a1fd2a366dde2c85e40be19d3ac21cafc9f77da4",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q85/extended.txt": "f4ba7d917abdcffa4e464869057fc5adf5021606a46b0c9335dfcdb702c10719",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q99/extended.txt": "8a8e231e2b3c731149f31473ed1601eb0ba054046a7c05161828b7df9f180ca3",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_1/q66/extended.txt": "ef387f87e6cb9d6e803a77383951646477dcad9fa2916f2b1f189e7890d7556e",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q1/extended.txt": "8a2801508fc8c9821d3266087b33b9ee5659be7010d9973d6e56d85f3c32b283",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q10/extended.txt": "78cca2fa06fe377d0ec04d0c56e6686135ab9d21990b440d8b861edaa9eaa82b",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q12/extended.txt": "990aa5a041a0b775fbbf17f8bdead3556411b5b15c1c495536943a29d0d70330",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q13/extended.txt": "525ca0dfc78880ce0c219796b3624f82cd618bc3f11f8603072d34afe1ad4e8d",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q14b/extended.txt": "34f409f8ecd9b56888970670f7185e9e4180a4f138e57f0bd4bc2f2870d79c40",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q16/extended.txt": "03a95213329a4937f744a2900a452bff6fb2e7dc4965a87adf5c2cf109074a8e",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q17/extended.txt": "e98c78da0fec5c686f23ab888b3bf2e5f7c617ab9080cbdf8b5398d4c083c748",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q18/extended.txt": "9b9e568a3899505d1b5b8f43975d82741b6564cdcf0a969fcd1d916748d34ccb",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q20/extended.txt": "f0814bec24470361c40e1659ccd83168d13654547bc6a16a79adbfa0546625db",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q21/extended.txt": "0e2734593eca7959d7945d3550fa7fcdee853373a66d4b901ec7411c9ceaed78",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q23a/extended.txt": "cd5958e4658200e3bb6a78ebfeacb78ede1764e54d76cfb59c4a57b8f906c578",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q23b/extended.txt": "4108122a7c7d5dc72c5973bbbef64bd4132972a11b77d01a060d1eb6c1f955b5",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q24a/extended.txt": "1ea32a8676f2ecede0234c160c5e76d1d888e3f12cfa91c29e0df4d375af3640",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q24b/extended.txt": "1ea32a8676f2ecede0234c160c5e76d1d888e3f12cfa91c29e0df4d375af3640",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q26/extended.txt": "001ca2b4a1958c08f2513393bd370724c20694aa1c8637ef52df11f938963a64",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q27/extended.txt": "c04f8d03d39c07a921e0b49e8a57f30e7071f83418acccae2e1e860066ba726f",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q29/extended.txt": "89fbb6d2082ea0ff80cd0306912ecbba5b58401995ac1ce71ea6b85e47f5b71d",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q30/extended.txt": "b00fcff06c0223ed22c466808eae09d02a2657ab5174127f5a80ba0962e26dc4",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q34/extended.txt": "062ecfd90ca3529276eeb890fa9966eed4d3f8899ccf2b4bc1426ad7ff1768f3",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q36/extended.txt": "10d41abf1e8fb4672af929e754be4175aec3b871e075edf50f36d94dea272b8d",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q37/extended.txt": "dc53f8d8bb7fe22b2d40c755f25af833fecc8e321b119990b03132c7593ddb8e",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q39b/extended.txt": "5cb4a6f73a5f8a11fba8f49efce88d8e3365ae4558ac5a7d6e52d7dd5e5da018",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q41/extended.txt": "2bed347dcfa82d3f2b556c34e609557c17f2f4b58259c0b6652f277dab123a2a",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q46/extended.txt": "4ed43fc1d49b72efc3f0bf99055b61733f1edde87feb75a0d3a6d68eee9a3c16",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q48/extended.txt": "29632ea49465ebe54fc12b9e85cf3644d4bb4fa1fb9054fc918bcf4c89972b6c",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q49/extended.txt": "f0de63fc9aba731b2dc7bb20da23f4824158ab56f2692a8c77606e2c7578a4d0",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q53/extended.txt": "635196b2c8f1437ac97fb10af17ab3c2ffdab8508f5aa2731e0d803afb6b0006",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q54/extended.txt": "5fb7227e6cab633ad2f19991724809ad50bafdb71a2c8e1b27e6163d9c4e85b1",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q58/extended.txt": "b144cfdf455b1ba80ded3ef0bb88a29902789093e1c6a9f5e53c9418ab044a26",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q6/extended.txt": "f2fa9c99e5c7cb0cc595df13069f5071f55ca7953ce2dffa4fcaf0cd4b5c5578",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q61/extended.txt": "6ba313e02c4067d1792c958f876d1c0faabc59bb96aeaef587af9fa6705e50cc",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q63/extended.txt": "635196b2c8f1437ac97fb10af17ab3c2ffdab8508f5aa2731e0d803afb6b0006",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q64/extended.txt": "35fbb44ff46625e29f76f125ded042f44087029935cb909fe6cecd9a1e33f289",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q66/extended.txt": "c943ab611608e4654b375d35cca1f5f0998d42024440d9a2a4a5af947e24769e",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q68/extended.txt": "f0f5017f19280668b98a8c50a2db6b3d7cc9bc444992aa5ce654579f48e70d69",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q69/extended.txt": "394d2b3b993bc452b7ec0b7fa5bef483b8f1a74bff90b3fb146266938e307fb5",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q7/extended.txt": "df9f7ac8c5ad5d8fb40050d8dca856aebfd6685b233f6a8b414865716080eefa",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q71/extended.txt": "8635b6f5ad6b80d7fc016dd427643e7048a10b4e2eea2f224e3fd5a87a720f42",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q72/extended.txt": "fe61198c03f67950f2623f193783915ff28bc3e1a177a9664daa2012519fb0cb",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q73/extended.txt": "46fcc4bc7abfef5eecf2aa7e9de596903366e04acff4f86c3f97de95ad0a90c3",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q74/extended.txt": "a76c4d65e890d23f9f0cf4855a68b39e1dee61671bec5c3c77f71cac4530599a",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q75/extended.txt": "aac6fd1a3c0415b0106d651d8496c51db48499451759aec95910b451dc27bf0f",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q79/extended.txt": "cf995550081e4fee0dcb97712cd952cb743cd9c874099f5b7a2139e92dbc19d9",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q8/extended.txt": "276cd2351259339ca0070614196d3198c53dac365daae1e3ea24cd4ca87d2901",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q80/extended.txt": "b6012fd08808d02109bdfe3d6565af4c7f0ed84e99ab215d309a289613203099",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q81/extended.txt": "c362c1d8872649fcdcb6db9d56c2c57204bc145d52b296edeaa5d06420a5fac6",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q82/extended.txt": "7a5d86e362f6696e5ed065a188d31c851054b64cc23060f0f958a42928a53327",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q85/extended.txt": "4b7f1637f10296446082f798223d4d940ef5af161dca8a29e368f79b136e978b",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q89/extended.txt": "be65845e5a644b405b1bb8d4b2d08d61fdd9b0cf03a228c4115b8291f8ac803b",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q9/extended.txt": "050896c44784661f75387c018a1e35b04835ea41c5b2e7cbbdd618380b56f848",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q91/extended.txt": "ca096e2b4b5a5ea3fbac2be5117784fafb758de00887d2570fb31e9e1c61c7b4",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q93/extended.txt": "aa3c32df285d7c0a1a05b64346ac3bce5821846329f0b54731e5beae6babc16a",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q94/extended.txt": "5eabf739453d143e9c12dc20879f18e6b7e4acb2333ce7f8b105fecdfc9803da",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q95/extended.txt": "8f37c738f22575fb0c6c5f36a298f171a8277c44c1bcd034befc206c4e82c691",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q98/extended.txt": "e6210002cb1eb56a0790edcf52cb52ca61e5d7f6dfb7e00b351d80c1494b20d9",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7-spark4_0/q11/extended.txt": "b9d1005e8ae7a9e9b0953ce64f7d5a24caf85acfdd5c41522dc165b714b6e25c",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7-spark4_0/q14/extended.txt": "df0f036b026cec54a331ce5c37f20e560fcb2e1eb3bec3a32e403a0ba974c117",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7-spark4_0/q24/extended.txt": "cd86b3e16deb821fec81db7f456ba9053cc4571dabbc47c2a25bc0e4c824ee78",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7-spark4_0/q47/extended.txt": "7f2c8855ea866efa9697dc97e869e0312a2fc4a288e35783da75717a5f4ddece",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7-spark4_0/q49/extended.txt": "f39cf067fc0b02555008a00e29383d134f96bcf423228ae5dc9964af30fd8a98",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7-spark4_0/q57/extended.txt": "6e94c73922b828029a2117bb49731f3f3251dddae8d020bf618392d32ae6a41d",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7-spark4_0/q6/extended.txt": "f63ae33464e522f652aeb16440eed952069ebb244d3e78f9e5a925d2b86fc796",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7-spark4_0/q64/extended.txt": "2011f80d6db8a45e4ed3eaedd13d7e1fdbe4327a35f384a2712bce2b6ec3f07a",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7-spark4_0/q74/extended.txt": "5def298a574a1127ee6c3c47e8ffe9cd10350f6fb8ea086bafcd14ad756a2bed",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q10a/extended.txt": "e86eeb5dcdb2e3c259daf98cf0e8559fa5a0736df93cc52b4cbacd342c40eac9",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q12/extended.txt": "990aa5a041a0b775fbbf17f8bdead3556411b5b15c1c495536943a29d0d70330",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q14/extended.txt": "34f409f8ecd9b56888970670f7185e9e4180a4f138e57f0bd4bc2f2870d79c40",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q18a/extended.txt": "4bceaf92e56068f3238ff8b157471f856c29e947de9ec3fba8f8c5b1c6ea4fd3",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q20/extended.txt": "f0814bec24470361c40e1659ccd83168d13654547bc6a16a79adbfa0546625db",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q24/extended.txt": "9fec21f5be7d45678f78a07d04a34101fff7f744dcef45809e0f959050f71039",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q27a/extended.txt": "998bca26e766f87f66ee69c28fd2b85e993c5b58cd6b744055e2e49b38180579",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q34/extended.txt": "062ecfd90ca3529276eeb890fa9966eed4d3f8899ccf2b4bc1426ad7ff1768f3",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q36a/extended.txt": "4e851d4b97211a7194d34fcd74e820ca2ef939793b70d4b8eee5fd3bc57bbfda",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q49/extended.txt": "f0de63fc9aba731b2dc7bb20da23f4824158ab56f2692a8c77606e2c7578a4d0",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q6/extended.txt": "f2fa9c99e5c7cb0cc595df13069f5071f55ca7953ce2dffa4fcaf0cd4b5c5578",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q64/extended.txt": "35fbb44ff46625e29f76f125ded042f44087029935cb909fe6cecd9a1e33f289",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q72/extended.txt": "fe61198c03f67950f2623f193783915ff28bc3e1a177a9664daa2012519fb0cb",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q74/extended.txt": "a76c4d65e890d23f9f0cf4855a68b39e1dee61671bec5c3c77f71cac4530599a",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q75/extended.txt": "aac6fd1a3c0415b0106d651d8496c51db48499451759aec95910b451dc27bf0f",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q80a/extended.txt": "a34a9335a066614f68f632bd865cd50b11842114daa87695209e76116683e878",
+      "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q98/extended.txt": "52b4f6b9d05da636f0edcc5f0e6991ed344742a32fe6ecb7f5a993d52fb75414",
+      "spark/src/test/scala/org/apache/comet/CometCoverageStatsSuite.scala": "72737f506b1e83df3e708bd135fa4c9566634d2362f96bc47bdfe2af70ba33f4",
+      "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "d4a77914ab1088af612ba733131230d4cfd5abd259db7dd6df8bc117a2463dcf",
+      "spark/src/test/scala/org/apache/comet/exec/CometExec3_4PlusSuite.scala": "fe4a840958ad279578d39058ba07ae4b92497264678d2d286bf6e860fa3fc19f",
+      "spark/src/test/scala/org/apache/comet/exec/CometExecSuite.scala": "abaff3006f8c42f8124e69bd307394f791373f4a1544f732c2a0d5bbf97bb1f2",
+      "spark/src/test/scala/org/apache/comet/exec/CometJoinSuite.scala": "fd58b3303eafabd1936355c3c40dcc71cd3c0591da6bf56d83ffd93ed934f695",
+      "spark/src/test/scala/org/apache/comet/exec/CometOffTaskThreadSuite.scala": "628e6db98bfa529311e5b79539e7cdb6bce9d9cc857f1cd4f23f3c6968c6827b",
+      "spark/src/test/scala/org/apache/comet/exec/CometShuffleReadCoalesceSuite.scala": "e6f2f647f32d608e888c5a68e557194c8734a4ff0a72631118af779b05ddc5ae",
+      "spark/src/test/scala/org/apache/comet/exec/CometSmjJoinFilterAnsiSuite.scala": "093dca07de63e4043773b29a13a759ddb7c05e98e19341913c64963fff9d6b1b",
+      "spark/src/test/scala/org/apache/comet/exec/CometWindowExecSuite.scala": "406a06290bc837fb8956d513b90013552a110545c97e9e37dbc22ba2addf497a",
+      "spark/src/test/scala/org/apache/comet/exec/CometWindowSemanticsSuite.scala": "8c255386c129bffa584e4b772a1633dc35c946d85ceb39815f48408682ce053e",
+      "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineChoiceSuite.scala": "5bfa4bdc933ff13bd38c01c13353f8eafeb043bc1ece4f97946b0c529b7bfb62",
+      "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineCorrectnessSuite.scala": "6ed84735ce378b361873a2ff93d88729babcb688d2341f92b4f80628e7b816df",
+      "spark/src/test/scala/org/apache/spark/shuffle/sort/CometShuffleExternalSorterSpillSuite.scala": "99882cc39f16d48594f55626b110ab4dcb866f60203fd70810e6850f73bd2b59",
+      "spark/src/test/scala/org/apache/spark/sql/CometTestBase.scala": "a4c623c3caadc88c43d9fb5b7d777255ede2e2335a051a6855021f132781e49c",
+      "spark/src/test/scala/org/apache/spark/sql/comet/CometTaskMetricsSuite.scala": "9545a591ec8ae4ded81430ae0d185d0f516027ab8680400ea9cb424ee2ffebf3",
+      "spark/src/test/scala/org/apache/spark/sql/comet/CometUdfFunctionPoolSuite.scala": "c62facf136a0cc18f98f97b38d1812fe4f9e941c86c5ba938d5303af483d3fd0",
+      "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometBlockStoreShuffleReaderSuite.scala": "30907ed867fbca7e203dfb90454839d7746768cb6916190c3846e23b663a3865",
+      "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometShuffleWriterSemanticsSuite.scala": "7dcca7d052879b3c5d6ba7b74ea5237517a16d63b8fe0281cb38afef11366294",
+      "spark/src/test/scala/org/apache/spark/sql/comet/util/UtilsSuite.scala": "36ddcd4a4828de773e60593208e93054c90af6a917010cd9ea95ae191873c943"
+    },
+    "backlog_map": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v2.json",
+    "post_commit_completion": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json",
+    "artifact_receipt": "target/joom-release/gha-<RC_RUN_ID>/release-qualification.json"
+  },
+  "local_scan_SQL_contract_qualification": {
+    "status": "ALL_PLANNED_LOCAL_GATES_VERIFIED_FINAL_REMOTE_AND_DELIVERY_PENDING",
+    "first_full_local_cohort": {
+      "registered_including_ignore": 1781,
+      "active_expected_excluding_ignore": 1780,
+      "passed": 1393,
+      "failed": 14,
+      "canceled": 373,
+      "ignored": 1,
+      "pending": 0,
+      "scan_passed": 422,
+      "aggregate_passed": 203,
+      "SQL_passed": 740,
+      "SQL_failed": 14,
+      "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/consolidated-spark42.json",
+      "overall_success": false,
+      "passed_count_definition": "Raw ScalaTest runner count. Twenty SQL registrations log a preserved version guard and return without executing their SQL; they are not executed-positive coverage."
+    },
+    "overlapping_targeted_history": [
+      {
+        "cohort": "targeted-spark42",
+        "registrations": 49,
+        "passed": 41,
+        "failed": 8,
+        "canceled": 0,
+        "ignored": 0,
+        "pending": 0
+      },
+      {
+        "cohort": "targeted-v3-spark42",
+        "registrations": 31,
+        "passed": 26,
+        "failed": 5,
+        "canceled": 0,
+        "ignored": 0,
+        "pending": 0
+      },
+      {
+        "cohort": "targeted-v4-spark42",
+        "registrations": 5,
+        "passed": 2,
+        "failed": 3,
+        "canceled": 0,
+        "ignored": 0,
+        "pending": 0
+      },
+      {
+        "cohort": "targeted-v5-spark42",
+        "registrations": 3,
+        "passed": 2,
+        "failed": 1,
+        "canceled": 0,
+        "ignored": 0,
+        "pending": 0
+      },
+      {
+        "cohort": "targeted-v6-spark42",
+        "registrations": 1,
+        "passed": 0,
+        "failed": 1,
+        "canceled": 0,
+        "ignored": 0,
+        "pending": 0
+      },
+      {
+        "cohort": "targeted-v7-spark42",
+        "registrations": 1,
+        "passed": 0,
+        "failed": 1,
+        "canceled": 0,
+        "ignored": 0,
+        "pending": 0
+      },
+      {
+        "cohort": "targeted-v8-spark42",
+        "registrations": 1,
+        "passed": 0,
+        "failed": 1,
+        "canceled": 0,
+        "ignored": 0,
+        "pending": 0
+      },
+      {
+        "cohort": "targeted-v9-spark42",
+        "registrations": 1,
+        "passed": 0,
+        "failed": 1,
+        "canceled": 0,
+        "ignored": 0,
+        "pending": 0
+      },
+      {
+        "cohort": "targeted-v10-spark42",
+        "registrations": 1,
+        "passed": 0,
+        "failed": 1,
+        "canceled": 0,
+        "ignored": 0,
+        "pending": 0
+      },
+      {
+        "cohort": "targeted-v11-spark42",
+        "registrations": 1,
+        "passed": 1,
+        "failed": 0,
+        "canceled": 0,
+        "ignored": 0,
+        "pending": 0
+      }
+    ],
+    "later_single_file_attempts": "The posexplode retries v6-v10 failed individual plan contracts and remain preserved. The v11 retry completed the entire file with one pass and no failure, cancellation, ignored or pending case. Earlier successful query prefixes receive no separate acceptance credit.",
+    "reconciliation_snapshot": {
+      "receipt": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/local-wip-reconciliation-v9-completed-corrective-files.json",
+        "sha256": "ca00029aab8d1269f64072f5c80c793681f89a7eeb07c1ac7d69ff07ec67a8d0"
+      },
+      "unique_case_keys": 1782,
+      "canceled": 372,
+      "failed": 0,
+      "unresolved_current_files": 0,
+      "complete_affected_current_SQL_file_configurations": 17,
+      "affected_SQL_files": 14,
+      "new_registration": "precise fallback plans inspect unlisted operators inside real adaptive stages",
+      "not_one_full_run": true,
+      "case_keys_and_all_history_preserved": true,
+      "requires_remaining_profile_TPC_strict_and_final_same_SHA_gates": true,
+      "raw_framework_successful_registrations": 1410,
+      "executed_positive_outcomes": 1390,
+      "SQL_version_NA_counted_successfully_by_framework": 20,
+      "not_applicable_cases_receive_no_execution_credit": true
+    },
+    "restored_Parquet_coverage": {
+      "Spark4_2_actual_passed_registrations": 2,
+      "original_matrix_actions": 6,
+      "optional_parent_dictionary_variants": 2,
+      "NullType_offheap_legacy_variants": 4,
+      "same_original_Spark_oracle": true,
+      "explicit_known_rows": true,
+      "actual_full_native_DataFusion_scan": true,
+      "production_reader_fix_required": false,
+      "Spark4_1_repeat": "ACTUAL_PASS_IN_182_CASE_LOCAL_PROFILE",
+      "writer_capability_guard": "isSpark41Plus replaces the old unconditional NullType cancellation; older official Parquet writers do not support writing the fixture.",
+      "receipt": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/restored-parquet-readers-spark42-acceptance-v7.json",
+        "sha256": "9f56f10504a136108a6ffa9d37c45159887de7489911f4caf01881f8fc51af74"
+      },
+      "version_proof": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/scan-nulltype-writer-version-proof-v7.json",
+        "sha256": "b9a095bb9357e76579530fb7ffeea40d69e59854212dff6907d853641ebd146a"
+      },
+      "Spark4_1_receipt": {
+        "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark41-bounded.json",
+        "receipt_sha256": "aabce8394d16ac0a168e804b6ec69f4a1aaa155cb501cf6edc68839800b056d6",
+        "log_sha256": "8710e822e89f3877a14c29f1ece4bccbb5d6012955684ea36d2928aa0260f1c9",
+        "raw_exit_code": 0,
+        "elapsed_seconds": 129.3,
+        "actual_ScalaTest_summaries": [
+          {
+            "passed": 182,
+            "failed": 0,
+            "canceled": 0,
+            "ignored": 0,
+            "pending": 0
+          }
+        ],
+        "id": "spark41-bounded",
+        "status": "PASSED"
+      }
+    },
+    "source_preservation": {
+      "all_original_SQL_data_config_error_bytes": "Preserved by exact reverse reconstruction of header-only edits across all 14 resources.",
+      "default_runner_and_parser_methods": "Original method text/tokens remain identical after removing only new named-mode branches.",
+      "default_mode_proof": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_fallback-plan-audit/default-mode-equivalence-proof.json",
+        "sha256": "d869f8ae4b6d9bf11b18bf9a452a84ad94722656cb37246e63dec322dc133b9e"
+      },
+      "native_arrays_zip": "Restore plain native expectation wherever actual conversion remains supported; do not replace all cases with fallback.",
+      "aggregate": "Original query, g/v/null values, two partial files, exact variance expectations and tolerance retained; physical negative input supplies equivalent true-native merge proof.",
+      "production_followup": "Only CometDivide diagnostic lifting after an existing None result; no production eligibility, result/error algorithm, default, dependency or native source change in this correction series.",
+      "current_SQL_harness_and_all_original_SQL_bytes": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_fallback-plan-audit/final-sql-contract-preservation-v3.json",
+        "sha256": "19589b3d00b36f5ce59979c3a97a19765d4ced8839c71f374983a9b55c879664",
+        "limits": "Current formatter-confirmed SQL harness uses explicit Seq[Class[_]] element types/upcast and an immutable .toSeq normalization for Scala2.12/2.13 compatibility. The class set/order, original default methods and all14 SQL file hashes/49 assertion headers are unchanged; actual final profile checks are recorded separately."
+      }
+    },
+    "local_gates_still_pending_at_proposal": [],
+    "final_remote_and_delivery_gates": [
+      "Freeze one source SHA after local gates and English documentation.",
+      "Full agreed GHA, CodeQL and selected Miri gates for the final source, with every applicable job/case disposition.",
+      "RC Build & Smoke: all 23 cases on both native Linux AMD64 and ARM64 from the same final source/JAR bytes.",
+      "Download final artifacts; independently verify checksums, class/native origins, lock/build provenance and backlog evidence.",
+      "Report before branch-1.2 merge or stable tag; no external publication or production."
+    ],
+    "merge_authorized": false,
+    "stable_tag_authorized": false,
+    "production_authorized": false,
+    "current_SQL_and_source_proof": {
+      "final_SQL_preservation": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_fallback-plan-audit/final-sql-contract-preservation.json",
+        "sha256": "fbac8af8e7fa8e854553a61a28f1c8254b2ed6ecefe8341d517ab63596a05066"
+      },
+      "reconstructed_header_stages": 11,
+      "all14original_resource_SHA256_reconstructed_exactly": true,
+      "complete_current_file_config_passes": 17,
+      "default_mode_proof": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_fallback-plan-audit/default-mode-equivalence-proof.json",
+        "sha256": "d869f8ae4b6d9bf11b18bf9a452a84ad94722656cb37246e63dec322dc133b9e"
+      },
+      "limits": "This is cohort and source-equivalence evidence, not one full 1,782-case run or final same-SHA Linux/artifact qualification."
+    },
+    "infrastructure_followup_proposal": {
+      "status": "COORDINATOR_APPROVED_BOUNDED_ROOT_MODEL_PREFLIGHT_FIX_FINAL_REMOTE_RECOVERY_PENDING",
+      "receipt": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/iceberg-root-model-preflight-proposal-v1.json",
+        "sha256": "678faeae603cf7b688f11229147da971f547b4faa1140a38734e1ebb4e399596"
+      },
+      "scope": "Use the existing root-model-only Maven helper before all three Iceberg Build Comet installations. Retry only transient model transfer failures or the observed known immutable org.apache:apache:pom:23 root-parent lookup failure, before project build starts; retain the three-attempt budget. Real install and tests remain single-shot. Lint retry budget, mirrors, dependencies and caches are unchanged. Source/self-test proof is required from the implementing CI review; actual remote recovery remains pending.",
+      "not_claimed": [
+        "The earlier NotFound log does not prove a particular HTTP status.",
+        "No remote recovery is established before the final actual run."
+      ]
+    },
+    "cross_profile_followup": {
+      "Scala2_12": "Explicit Seq[Class[_]] element types/upcast and immutable .toSeq normalization in the test-only native-scan helper; same class set/order and assertions across Scala2.12/2.13.",
+      "TPC_plans": "Only propagated fallback diagnostic text on already Spark operators; use official generator and require ordinary non-generation checks. Preserve failed original invocations and exact profile/case/source-equivalence receipts.",
+      "Spark3_4_version_NA": "The existing explode.sql MinSparkVersion3.5 guard logs and returns. Raw runner success is not proof of SQL execution; classify the exact registration separately from executed positives.",
+      "final_local_evidence": "The gate index supplies actual raw invocation summaries, composed-case evidence where explicitly approved, source hashes and final-current49 outcome. Final exact-source remote qualification is still pending."
+    },
+    "SQL_version_guard_applicability": {
+      "status": "EXACT_20_REGISTRATIONS_CLASSIFIED_NOT_EXECUTED_NOT_PASSES",
+      "cases": 20,
+      "raw_success_refinement": {
+        "runner_successes": 1410,
+        "executed_positive_outcomes": 1390,
+        "version_NA_runner_successes": 20,
+        "canceled_separate": 372,
+        "unique_registered": 1782
+      },
+      "actual_first_cohort_guard_log_lines": 20,
+      "case_level_receipt": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_final-docs/target-spark42-sql-version-applicability.json",
+        "sha256": "a7fef6753fcef5995eb5326c2002654bf6899ed3314e67e9e67b86242837c0da"
+      },
+      "limits": "The four Iceberg SQL fixtures also fall outside the user workload, but are counted once here under their explicit version guard. Final remote evidence must make the same runner-success versus actual-execution distinction."
+    },
+    "TPC_diagnostic_baseline_refresh": {
+      "status": "ALL_FIVE_PROFILES_GENERATION_AND_ORDINARY_VERIFICATION_PASSED",
+      "profiles": [
+        "3.4",
+        "3.5",
+        "4.0",
+        "4.1",
+        "4.2"
+      ],
+      "generation_per_profile": 135,
+      "ordinary_verification_per_profile": 129,
+      "reason_for_different_counts": "The existing generator includes six v1.4 queries intentionally excluded from ordinary plan verification. These plan counts are not SQL row-result coverage.",
+      "effective_changes": [
+        {
+          "profile": "3.4",
+          "query_file": "v1_4/q49/extended.txt",
+          "diagnostic_additions": 3
+        },
+        {
+          "profile": "3.4",
+          "query_file": "v1_4/q66/extended.txt",
+          "diagnostic_additions": 1
+        },
+        {
+          "profile": "3.4",
+          "query_file": "v2_7/q49/extended.txt",
+          "diagnostic_additions": 3
+        },
+        {
+          "profile": "3.5",
+          "query_file": "v1_4/q49/extended.txt",
+          "diagnostic_additions": 3
+        },
+        {
+          "profile": "3.5",
+          "query_file": "v1_4/q66/extended.txt",
+          "diagnostic_additions": 1
+        },
+        {
+          "profile": "3.5",
+          "query_file": "v2_7/q49/extended.txt",
+          "diagnostic_additions": 3
+        }
+      ],
+      "raw_changed_files": [
+        "approved-plans-v1_4-spark4_0/q66/extended.txt",
+        "approved-plans-v1_4/q49/extended.txt",
+        "approved-plans-v1_4/q66/extended.txt",
+        "approved-plans-v2_7/q49/extended.txt"
+      ],
+      "Spark4_x_effective_plans": "Unchanged; the Spark4.0 q66 override preserves the prior effective plan while shared base diagnostic text is refreshed for Spark3.4/3.5.",
+      "receipt": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/diagnostic-golden-complete.json",
+        "sha256": "deed1c5ef656b99e48f79553cdacf40d5eb3f247fa8030086c23d7f0d91e4b26"
+      },
+      "failed_attempts": "Original Spark3.4/3.5 three-golden failures and Spark4.0 helper compile failure remain preserved, not counted as successful runs."
+    },
+    "actual_remaining_local_gates": {
+      "status": "ALL_REQUIRED_LOCAL_GATES_VERIFIED",
+      "source_sha256": {
+        "pom.xml": "448654ea53df040b516f983a171f2f4ee18f8f4766f47818a95f32fc13012020",
+        "spark/src/main/scala/org/apache/comet/serde/arithmetic.scala": "742322b7476a7634b481a0b7854982c1085a50585a453fa8759688a726b03aef",
+        "spark/src/test/scala/org/apache/spark/sql/CometTestBase.scala": "dda910a2b5a3712de22f3a5c86d59983210a3da824db08670729cf57f14a185e",
+        "spark/src/test/scala/org/apache/comet/parquet/ParquetReadSuite.scala": "8e8ba0e7b4e72fdb0036504f9f9cf953395367bf70fd8277495bd6e9e5c8abfe",
+        "spark/src/test/scala/org/apache/comet/exec/CometNativeReaderSuite.scala": "62771146cedc6861c699bc7b8fd7591c98808a8cbbf0508c2036ea6153ad65c3",
+        "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "ce998b0eab782b9a3e22db44b15215bb64e051ebc1792082527d787245345060",
+        "spark/src/test/scala/org/apache/comet/CometSqlFileTestSuite.scala": "cbad7a1b5fc4aef9a5aa5cfe4404fed4cbec7649a0d9794fb17e5ac2737f4b3d",
+        "spark/src/test/scala/org/apache/comet/SqlFileTestParser.scala": "c1167548a3bc375edc72284a2c9533471452e3961987dca97ae961120f012cf2",
+        "spark/src/test/scala/org/apache/comet/SqlFileTestParserSuite.scala": "d2056f7b55a3c4230e0326d3a1bc166d63fb836f587b3eba21ef876b521fd071",
+        "spark/src/test/scala/org/apache/comet/serde/QueryPlanSerdeSuite.scala": "d495613e31c3910f5cf5df35aa70d9d53fa64de9823d97d9db09fd1c5040ac27",
+        "spark/src/test/resources/sql-tests/expressions/aggregate/regr.sql": "8f708aa948d6a8eb9adb8c8ff0caca511152274a33c80fbfd904590c6c88c891",
+        "spark/src/test/resources/sql-tests/expressions/array/arrays_overlap.sql": "52acec160176e48dfba78bf9d42a85f1e2009ce0a3d002c59e6638b270db1c35",
+        "spark/src/test/resources/sql-tests/expressions/array/arrays_zip.sql": "4b01c274641033125ace6db58e9be1bacd89e715e5a9a2563a4fee83a3e000e3",
+        "spark/src/test/resources/sql-tests/expressions/array/explode.sql": "ec35c4ecfb371fa68ed1d6ef057dafdaf26f71abbb8348579155069f12de33b0",
+        "spark/src/test/resources/sql-tests/expressions/array/posexplode.sql": "5edef028ed058d2c1e70db12eeefaef6c7237ca3d7d829a7088cad377cbf0468",
+        "spark/src/test/resources/sql-tests/expressions/datetime/window.sql": "7e2aeb3f21d03d1df7d39a364895e991bdc288d31843dd31e21c5d662310b60f",
+        "spark/src/test/resources/sql-tests/expressions/decimal/decimal_ops.sql": "ed2ac211d50be5b79aa3da2ac38bb8f038f65aa37c3a63b467d17f4df8f43122",
+        "spark/src/test/resources/sql-tests/expressions/math/arithmetic.sql": "de0b77cd57b304f157b63b5eae2cab930b71552727cee441ff12022ed6db015f",
+        "spark/src/test/resources/sql-tests/expressions/math/atan2.sql": "d7945864aa5cfd4d6622d5cac09af29b2a7cd4b6a86b29f5ec4ccd5dead17929",
+        "spark/src/test/resources/sql-tests/expressions/math/nan_divisor.sql": "5a4e65fed41c0c12fd04e5c365e3147e16b57a562aafad81406dbefcb73ac033",
+        "spark/src/test/resources/sql-tests/expressions/window/lag_lead.sql": "82e71d880126e6b9a54f7fbaf9a78c3a2a52e8b69f41535e7317885d351542d3",
+        "spark/src/test/resources/sql-tests/windows/nested_float_order_keys.sql": "5c66126c49fcbde14d71b128cdc00024041f30db0116a557b2a6a179aeea2c9a",
+        "spark/src/test/resources/sql-tests/windows/nested_float_order_keys_strict.sql": "ae3b4298a9c6d5cc34d3c0132935561ce6be8d7ca1155c8abe4e17ec5323f0ea",
+        "spark/src/test/resources/sql-tests/windows/window_functions.sql": "3b542ff4f174bd2ed598272350694367aff8fb9bf79f3a1f22d183cedbde3c5f",
+        "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q66/extended.txt": "c943ab611608e4654b375d35cca1f5f0998d42024440d9a2a4a5af947e24769e",
+        "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q49/extended.txt": "62d919b50ab46d8616997a350bc683aacf568ec7a1bb6d436249a5a047cceae2",
+        "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4/q66/extended.txt": "1f20bb20c79744e4e017d64b64a1e0560203792dccad567293d072b047fb5290",
+        "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q49/extended.txt": "62d919b50ab46d8616997a350bc683aacf568ec7a1bb6d436249a5a047cceae2"
+      },
+      "gates": [
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/diagnostic-verify-spark42.json",
+          "receipt_sha256": "d237d6a9e0f853c68948ad55998180c372e1b6ec7dc3606142b9ef4f8e427f7a",
+          "log_sha256": "c9bd6c53dcd9c79a1904868718381bed80994e24bcf3513a5a6e1a874d230253",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 31.32,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 129,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark42-plans",
+          "status": "PASSED"
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark42-delta-semantic-v2.json",
+          "receipt_sha256": "c289cf343a73fb334005f2580f23910d9b5a9ac64907cf96c434fd1e4ee6490a",
+          "log_sha256": "beea24214674d41761a7ee1575972bd2ca29b63448ebd060a59e34077058bb4c",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 136.16,
+          "actual_ScalaTest_summaries": [],
+          "id": "spark42-delta-semantic",
+          "status": "PASSED"
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark41-bounded.json",
+          "receipt_sha256": "aabce8394d16ac0a168e804b6ec69f4a1aaa155cb501cf6edc68839800b056d6",
+          "log_sha256": "8710e822e89f3877a14c29f1ece4bccbb5d6012955684ea36d2928aa0260f1c9",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 129.3,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 182,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark41-bounded",
+          "status": "PASSED"
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/diagnostic-verify-spark41.json",
+          "receipt_sha256": "d3c02b582fda5f38ff25f0f2fceb46ef65b08b8eaf6520eb14895163954ac2e2",
+          "log_sha256": "38cfbe3b435b7aa1224b8d73a27cde0e0de5e68bdc342f831bb8ab1461ef32c8",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 31.14,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 129,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark41-final-plans",
+          "status": "PASSED"
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark40-bounded.json",
+          "receipt_sha256": "14ebf8be065d68cda108f1ee12d1e94e73ca845e44ccb885fa4ed0c7f95de50b",
+          "log_sha256": "ae8acd019e339b9c750e42a17a3fa5174df7a8eb42d51ed5aa7a4acf7915f839",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 129.36,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 180,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark40-bounded",
+          "status": "PASSED"
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/diagnostic-verify-spark40.json",
+          "receipt_sha256": "607080ccb6b0e93672f2ed31b0e24943ead221ad0292f1e1487dc298bcf95751",
+          "log_sha256": "b8489b8e1580a78bc02e5b0248fa254d38c7adb7770f56ba633e92e0b14f214e",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 33.34,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 129,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark40-final-plans",
+          "status": "PASSED"
+        },
+        {
+          "id": "spark35-bounded",
+          "status": "SOURCE_EQUIVALENT_LOCAL_COHORTS_VERIFIED",
+          "unique_current_executed_positive_case_count": 180,
+          "unique_current_registration_count": 180,
+          "historical_failed_invocation": {
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark35-bounded-v2.json",
+            "receipt_sha256": "75c35220e2673b07bf5e6a3e26045cdd45f88ab1ca9b0f2f0b64039df47d3ec1",
+            "log_sha256": "09e295eea2692a6b794e269f46a63ffb93c4e2640e0c7b35ef4fc78db2026a33",
+            "raw_exit_code": 1,
+            "elapsed_seconds": 121.92,
+            "actual_ScalaTest_summaries": [
+              {
+                "passed": 177,
+                "failed": 3,
+                "canceled": 0,
+                "ignored": 0,
+                "pending": 0
+              }
+            ]
+          },
+          "ordinary_final_TPC_invocation": {
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/diagnostic-verify-spark35.json",
+            "receipt_sha256": "1f986ba4efce07b2e670fcfff63aeeb59763be827354889d40e7e16ddec8dcad",
+            "log_sha256": "cded551a0d82a01f4607387e0cc7d457da6f04359c8d53ecf39b1b13342a9fdb",
+            "raw_exit_code": 0,
+            "elapsed_seconds": 31.43,
+            "actual_ScalaTest_summaries": [
+              {
+                "passed": 129,
+                "failed": 0,
+                "canceled": 0,
+                "ignored": 0,
+                "pending": 0
+              }
+            ]
+          },
+          "source_equivalence_proof": {
+            "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/final-local-profile-qualification.json",
+            "sha256": "184d0536ad7f5fb8d0c5430154db1cac1a2869b457abe02b4921ff8f96298bcd"
+          },
+          "qualification_limit": "The unchanged non-TPC registrations plus final ordinary TPC129 proof replace only the three known diagnostic-golden failures. The exact Spark3.4 version-N/A registration receives no executed-pass credit. This is not one passing 180-case invocation; final same-SHA full CI remains mandatory."
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark35-delta-strict-v2.json",
+          "receipt_sha256": "5deb764ec549c3e9e5497ec0e767e06a4ea1ab7775fdcdac463c343d35e9d1b2",
+          "log_sha256": "9f486ecd3a1dd495afc77a0f417fd70410e21f879a43603bed6a96900cef9a70",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 19.13,
+          "actual_ScalaTest_summaries": [],
+          "id": "spark35-delta-strict",
+          "status": "PASSED"
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark35-final-helper-controls.json",
+          "receipt_sha256": "1c5f98285b3d8539a7e87c4c111079e075020309543739554d06e53f1aabb9c1",
+          "log_sha256": "f06edd676d30e370914aab10512685bffaf838903d538f950a020059e90f8e23",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 91.04,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 2,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark35-final-helper-controls",
+          "status": "PASSED"
+        },
+        {
+          "id": "spark34-bounded",
+          "status": "SOURCE_EQUIVALENT_LOCAL_COHORTS_VERIFIED",
+          "unique_current_executed_positive_case_count": 179,
+          "unique_current_registration_count": 180,
+          "historical_failed_invocation": {
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark34-bounded.json",
+            "receipt_sha256": "70d4a7b12f1bc9b6a5d2f5f75d0e0303c1460698ede3cd44e6623a53a35d889c",
+            "log_sha256": "779f55228b5f699037d58ef8e0c7c3af617f9e7eacf2f586f104fe756c2eafc6",
+            "raw_exit_code": 1,
+            "elapsed_seconds": 113.01,
+            "actual_ScalaTest_summaries": [
+              {
+                "passed": 177,
+                "failed": 3,
+                "canceled": 0,
+                "ignored": 0,
+                "pending": 0
+              }
+            ]
+          },
+          "ordinary_final_TPC_invocation": {
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/diagnostic-verify-spark34.json",
+            "receipt_sha256": "37b69ea841052629f557377e8121e0b4d382f72b03348419c6f83d4885e2c481",
+            "log_sha256": "637017cde4e2b1c9363104e4ea7687d3516f245575aec5fe51fda91e75719af8",
+            "raw_exit_code": 0,
+            "elapsed_seconds": 31.14,
+            "actual_ScalaTest_summaries": [
+              {
+                "passed": 129,
+                "failed": 0,
+                "canceled": 0,
+                "ignored": 0,
+                "pending": 0
+              }
+            ]
+          },
+          "source_equivalence_proof": {
+            "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/final-local-profile-qualification.json",
+            "sha256": "184d0536ad7f5fb8d0c5430154db1cac1a2869b457abe02b4921ff8f96298bcd"
+          },
+          "qualification_limit": "The unchanged non-TPC registrations plus final ordinary TPC129 proof replace only the three known diagnostic-golden failures. The exact Spark3.4 version-N/A registration receives no executed-pass credit. This is not one passing 180-case invocation; final same-SHA full CI remains mandatory.",
+          "raw_runner_successful_registrations_in_original_bounded_attempt": 177,
+          "unique_current_executed_positive_registrations": 179,
+          "registered_version_NA": {
+            "suite": "org.apache.comet.CometSqlFileTestSuite",
+            "test": "sql-file: expressions/array/explode.sql",
+            "reason": "requires Spark >= 3.5",
+            "count": 1
+          },
+          "applicability_log": {
+            "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/profile-spark34-bounded-unit-tests.log",
+            "sha256": "c1a98b9a9b803b69979b5a6633d7fe45befd91819d4a61f987a5af160e435e36"
+          }
+        },
+        {
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_scan-contract-fix/final-current49-spark42.json",
+          "receipt_sha256": "7e2a4ae0deef85255fff9f806b2bac91c3b137c0ff52a94477ece1fb730cc4b9",
+          "log_sha256": "047fc417bf7e8eac4b104c74c994f93f65b5d53ff9efa0381a6f14f80fd45c74",
+          "raw_exit_code": 0,
+          "elapsed_seconds": 118.18,
+          "actual_ScalaTest_summaries": [
+            {
+              "passed": 49,
+              "failed": 0,
+              "canceled": 0,
+              "ignored": 0,
+              "pending": 0
+            }
+          ],
+          "id": "spark42-final49",
+          "status": "PASSED"
+        }
+      ],
+      "limits": "Overlapping local cohorts are not one complete final-source run. Raw runner success can include an explicitly identified version-N/A registration. Final same-SHA Linux CI/RC and final JAR delivery remain pending."
+    }
+  },
+  "approved_target_workload_applicability": {
+    "target_workload": {
+      "Parquet": true,
+      "Delta": true,
+      "Iceberg": false,
+      "basis": "Explicit user confirmation, 2026-11-21. Original Russian message remains outside Git; committed documentation contains this English summary only.",
+      "raw_user_evidence": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/user-iceberg-scope-20261121.json",
+        "sha256": "5883131ff4304bc7cb4775f516ef89a1dfdfa0e7034dfdfe1fa577dede6cef48"
+      }
+    },
+    "expected_target_scan_nonpasses_after_restorations": {
+      "canceled": 372,
+      "ignored": 0,
+      "Iceberg_user_confirmed_target_not_applicable": 358,
+      "Iceberg_availability_guard": 357,
+      "Iceberg_REST_Spark42_guard": 1,
+      "genuine_older_Spark_version_guards": 14,
+      "actual_final_counts": "Must be read from final exact-source jobs; these are applicability expectations, not observed final pass totals."
+    },
+    "older_profile_Iceberg_jobs": {
+      "required_jobs": 32,
+      "status": "STILL_MANDATORY_UNCHANGED"
+    },
+    "Rust_only_applicability": "Four approved HDFS-environment tests and three manual performance benchmarks are separate from JVM scan cancellations.",
+    "migration_feature_scope": "All agreed 58 active cards and historical H01 remain unchanged; workload applicability does not remove implementations or tests."
+  },
+  "backlog_map_status": "CURRENT_SOURCE_REQUIREMENTS_ONLY; actual commit binding and qualification evidence remain pending after the correction commit.",
+  "candidate_receipt_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v7.json",
+  "candidate_receipt_status": "EXPECTED_POST_COMMIT; no future source commit hash is embedded in this pre-commit documentation.",
+  "previous_status_before_contract_corrections": "FINAL_SOURCE_FROZEN_FULL_QUALIFICATION_REQUIRED"
 }

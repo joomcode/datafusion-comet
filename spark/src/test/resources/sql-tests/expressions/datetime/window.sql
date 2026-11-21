@@ -35,23 +35,23 @@ INSERT INTO window_tbl VALUES
   (NULL, NULL)
 
 -- Tumbling window: Project + HashAggregate + Exchange, all native.
-query
+query expect_fallback_plan(Conditional shared-expression evaluation order requires Spark; Project, HashAggregate, Exchange, AQEShuffleRead)
 SELECT window(ts, '10 minutes').start AS s, window(ts, '10 minutes').end AS e, count(*)
 FROM window_tbl GROUP BY window(ts, '10 minutes') ORDER BY s, e
 
 -- Sliding window: overlapping windows introduce an Expand operator.
-query
+query expect_fallback_plan(Conditional shared-expression evaluation order requires Spark; Expand, HashAggregate, Exchange, AQEShuffleRead)
 SELECT window(ts, '10 minutes', '5 minutes').start AS s, count(*)
 FROM window_tbl GROUP BY window(ts, '10 minutes', '5 minutes') ORDER BY s
 
 -- window_time extracts the event-time from the window struct (applied after aggregation).
-query
+query expect_fallback_plan(Conditional shared-expression evaluation order requires Spark; Project, HashAggregate, Exchange, AQEShuffleRead)
 SELECT window_time(w) AS wt, cnt FROM (
   SELECT window(ts, '10 minutes') AS w, count(*) AS cnt
   FROM window_tbl GROUP BY window(ts, '10 minutes')) ORDER BY wt
 
 -- TimestampNTZ input: PreciseTimestampConversion also reinterprets TimestampNTZType.
-query
+query expect_fallback_plan(Conditional shared-expression evaluation order requires Spark; Project, HashAggregate, Exchange, AQEShuffleRead)
 SELECT window(ts_ntz, '10 minutes').start AS s, count(*)
 FROM window_tbl GROUP BY window(ts_ntz, '10 minutes') ORDER BY s
 

@@ -1041,7 +1041,18 @@ abstract class ParquetReadSuite extends CometTestBase {
           .parquet(dir.getCanonicalPath)
           .filter($"_metadata.file_size" === largerSize && $"id" > 1500)
           .select($"id")
-        checkSparkAnswerAndOperator(df)
+        checkSparkAnswerAndNativeScanFilter(
+          df,
+          "Filter inferred null-check evaluation order requires Spark")
+        // The precise Filter allowance must never let a read silently fall back too.
+        withSQLConf(CometConf.COMET_NATIVE_SCAN_ENABLED.key -> "false") {
+          val error = intercept[org.scalatest.exceptions.TestFailedException] {
+            checkSparkAnswerAndNativeScanFilter(
+              df,
+              "Filter inferred null-check evaluation order requires Spark")
+          }
+          assert(error.getMessage.contains("expected exactly one native scan"))
+        }
       }
     }
   }
@@ -1306,7 +1317,7 @@ abstract class ParquetReadSuite extends CometTestBase {
           checkSparkAnswer(df)
 
           // Missing optional struct field with nested required field
-          // TODO: This produces incorrect results in the native Parquet scan
+          // Covered by the dedicated optional-parent/required-child projection test below.
           //          df = sql("select a, c.c1 from complex_types")
           //          checkSparkAnswer(df)
 
@@ -1319,8 +1330,8 @@ abstract class ParquetReadSuite extends CometTestBase {
     }
   }
 
-  // TODO: This test fails for the native Parquet scan
-  ignore(" Missing optional struct field with nested required field") {
+  // A missing nullable parent must keep required descendants null.
+  test(" Missing optional struct field with nested required field") {
     Seq(true, false).foreach { dictionaryEnabled =>
       def makeRawParquetFile(path: Path): Unit = {
         val schemaStr =
@@ -1368,9 +1379,13 @@ abstract class ParquetReadSuite extends CometTestBase {
 
         withParquetTable(spark.read.format("parquet").load(path.toString), "complex_types") {
           // Missing optional struct field with nested required field
-          // TODO: This produces incorrect results in the native Parquet scan
+          // Required leaf metadata must not erase the optional parent's validity.
           val df = sql("select a, c.c1 from complex_types")
-          checkSparkAnswer(df)
+          val (_, plan) = checkSparkAnswer(df)
+          checkAnswer(df, Seq(Row(1, 1), Row(2, null)))
+          assert(
+            collect(plan) { case scan: CometNativeScanExec => scan }.size == 1,
+            s"Expected the full native DataFusion reader for optional-parent projection:\n$plan")
 
         }
       }
@@ -2399,8 +2414,17 @@ abstract class ParquetReadSuite extends CometTestBase {
                 val hasRootId = !pruning || !isSpark35Plus
                 def read(): DataFrame =
                   spark.read.schema(readSchema).parquet(dir.getCanonicalPath)
-                def checkRead(query: => DataFrame, expected: Seq[Row]): Unit = {
-                  val (_, plan) = checkSparkAnswerAndOperator(query)
+                def checkRead(
+                    query: => DataFrame,
+                    expected: Seq[Row],
+                    filterFallback: Boolean = false): Unit = {
+                  val (_, plan) = if (filterFallback) {
+                    checkSparkAnswerAndNativeScanFilter(
+                      query,
+                      "Filter shared-expression evaluation order requires Spark")
+                  } else {
+                    checkSparkAnswerAndOperator(query)
+                  }
                   val scans = collect(plan) { case scan: CometNativeScanExec => scan }
                   assert(scans.size == 1, s"expected one CometNativeScanExec:\n$plan")
                   val root = scans.head.requiredSchema("renamed")
@@ -2420,11 +2444,13 @@ abstract class ParquetReadSuite extends CometTestBase {
                   if (hasRootId) projected else Seq.fill(rows.size)(Row(null)))
                 checkRead(
                   read().where(predicate).select("renamed.a"),
-                  if (hasRootId) filtered else Seq.empty)
+                  if (hasRootId) filtered else Seq.empty,
+                  filterFallback = true)
                 // A filter-only nested root must not shift the data or partition outputs.
                 checkRead(
                   read().where(predicate).select("id", "part"),
-                  if (hasRootId) filteredIds else Seq.empty)
+                  if (hasRootId) filteredIds else Seq.empty,
+                  filterFallback = true)
                 checkRead(
                   read().selectExpr("count(renamed.a)"),
                   Seq(Row(if (hasRootId) nonNullCount else 0L)))

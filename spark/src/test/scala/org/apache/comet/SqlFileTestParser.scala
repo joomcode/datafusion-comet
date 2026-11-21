@@ -54,6 +54,13 @@ case object CheckCoverageAndAnswer extends QueryAssertionMode
 case object SparkAnswerOnly extends QueryAssertionMode
 case class WithTolerance(tol: Double) extends QueryAssertionMode
 case class ExpectFallback(reason: String) extends QueryAssertionMode
+
+/** Checks the exact Spark operator boundary while retaining native file scans. */
+case class ExpectFallbackPlan(
+    reason: String,
+    operators: Seq[String],
+    ansiDisabledOnly: Boolean = false)
+    extends QueryAssertionMode
 case class Ignore(reason: String) extends QueryAssertionMode
 
 /**
@@ -237,6 +244,20 @@ object SqlFileTestParser {
   }
 
   private val FallbackPattern = """query\s+expect_fallback\((.+)\)""".r
+  private val FallbackPlanPattern = """query\s+expect_fallback_plan\((.*)\)""".r
+  private val InvalidFallbackPlanPattern = """query\s+expect_fallback_plan\b.*""".r
+  val fallbackPlanOperators: Set[String] =
+    Set(
+      "Project",
+      "Filter",
+      "Window",
+      "HashAggregate",
+      "Exchange",
+      "AQEShuffleRead",
+      "Expand",
+      "TakeOrderedAndProject",
+      "Generate",
+      "OneRowRelation")
   private val IgnorePattern = """query\s+ignore\((.+)\)""".r
   private val ErrorPattern = """query\s+expect_error\((.+)\)""".r
   private val ErrorClassPattern =
@@ -247,6 +268,23 @@ object SqlFileTestParser {
 
   private def parseQueryAssertionMode(directive: String, line: Int): QueryAssertionMode = {
     directive match {
+      case FallbackPlanPattern(arguments) =>
+        val parts = arguments.split(";", -1).map(_.trim).toSeq
+        require(
+          parts.size >= 2 && parts.size <= 3 && parts.head.nonEmpty,
+          s"line $line: expect_fallback_plan requires a reason and explicit operators")
+        val operators = parts(1).split(",", -1).map(_.trim).toSeq
+        require(
+          operators.nonEmpty && operators.forall(fallbackPlanOperators) &&
+            operators.distinct.size == operators.size,
+          s"line $line: invalid or duplicate expect_fallback_plan operators: ${parts(1)}")
+        require(
+          parts.size == 2 || parts(2) == "ansi=false",
+          s"line $line: only the condition ansi=false is supported by expect_fallback_plan")
+        ExpectFallbackPlan(parts.head, operators, ansiDisabledOnly = parts.size == 3)
+      case InvalidFallbackPlanPattern() =>
+        throw new IllegalArgumentException(
+          s"line $line: malformed expect_fallback_plan directive")
       case FallbackPattern(reason) =>
         ExpectFallback(reason.trim)
       case IgnorePattern(reason) =>

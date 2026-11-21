@@ -41,7 +41,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.expressions.{BoundReference, InterpretedOrdering, SortDirection, SortOrder}
 import org.apache.spark.sql.catalyst.plans.logical
 import org.apache.spark.sql.catalyst.util.sideBySide
-import org.apache.spark.sql.comet.{CometInMemoryTableScanExec, CometPlanChecker}
+import org.apache.spark.sql.comet.{CometInMemoryTableScanExec, CometNativeScanExec, CometPlanChecker}
 import org.apache.spark.sql.comet.execution.shuffle.{CometColumnarShuffle, CometNativeShuffle, CometShuffleExchangeExec}
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AdaptiveSparkPlanHelper, AQEShuffleReadExec, QueryStageExec}
@@ -250,6 +250,33 @@ abstract class CometTestBase
    */
   protected def checkSparkAnswer(df: => DataFrame): (SparkPlan, SparkPlan) = {
     internalCheckSparkAnswer(df, assertCometNative = false)
+  }
+
+  /** Check a native read whose Filter retains Spark's mandatory evaluation order. */
+  protected def checkSparkAnswerAndNativeScanFilter(
+      df: => DataFrame,
+      fallbackReason: String): (SparkPlan, SparkPlan) = {
+    val plans = checkSparkAnswerAndOperator(df, classOf[FilterExec], classOf[ProjectExec])
+    val plan = plans._2
+    val scans = collect(plan) { case scan: CometNativeScanExec => scan }
+    assert(scans.size == 1, s"expected exactly one native scan:\n$plan")
+    val filters = collect(plan) { case filter: FilterExec => filter }
+    assert(filters.size == 1, s"expected exactly one Spark Filter:\n$plan")
+    val filter = filters.head
+    assert(
+      filter.getTagValue(CometExplainInfo.FALLBACK_REASONS).contains(Set(fallbackReason)),
+      s"unexpected Spark Filter fallback reason:\n${new ExtendedExplainInfo().generateExtendedInfo(plan)}")
+    assert(collect(filter.child) { case scan: CometNativeScanExec => scan } == scans, plan)
+    val projects = collect(plan) { case project: ProjectExec => project }
+    // Only the projection dependent on this row Filter may also remain in Spark.
+    assert(projects.size <= 1, plan)
+    assert(
+      projects.forall(project =>
+        collect(project.child) {
+          case child: FilterExec if child eq filter => child
+        }.size == 1),
+      plan)
+    plans
   }
 
   /**

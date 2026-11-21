@@ -32,7 +32,7 @@ import org.apache.spark.sql.catalyst.expressions.{Cast, Expression, ExpressionIn
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateMode, BloomFilterAggregate, CollectSet, Corr, Final, Partial, PartialMerge, RegrR2}
 import org.apache.spark.sql.catalyst.optimizer.EliminateSorts
 import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, RangePartitioning}
-import org.apache.spark.sql.comet.{CometBaseAggregateExec, CometBroadcastHashJoinExec, CometFilterExec, CometHashAggregateExec, CometNativeExec, CometProjectExec, CometSortAggregateExec, CometSortExec, CometSortMergeJoinExec}
+import org.apache.spark.sql.comet.{CometBaseAggregateExec, CometBroadcastHashJoinExec, CometFilterExec, CometHashAggregateExec, CometNativeExec, CometNativeScanExec, CometProjectExec, CometSortAggregateExec, CometSortExec, CometSortMergeJoinExec}
 import org.apache.spark.sql.comet.execution.shuffle.{CometColumnarShuffle, CometNativeShuffle, CometShuffleExchangeExec}
 import org.apache.spark.sql.execution.{LocalTableScanExec, SortExec, SparkPlan}
 import org.apache.spark.sql.execution.SQLExecution
@@ -43,7 +43,7 @@ import org.apache.spark.sql.functions.{avg, col, collect_list, collect_set, coun
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{ArrayType, DataTypes, StructField, StructType}
 
-import org.apache.comet.CometConf
+import org.apache.comet.{CometConf, CometExplainInfo}
 import org.apache.comet.CometConf.COMET_EXEC_STRICT_FLOATING_POINT
 import org.apache.comet.CometSparkSessionExtensions.{isSpark35Plus, isSpark40Plus, isSpark41Plus, isSpark42Plus}
 import org.apache.comet.rules.CometExecRule
@@ -3808,8 +3808,9 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
         // Two constant-valued files produce separate partials with zero M2. The
         // old merge returns 576 instead of 1024, regardless of which partial arrives first.
         for (value <- Seq(1e17 - 96, 1e17 - 32)) {
-          (Seq.fill(3)((0, Option(value))) ++ Seq((0, None), (1, None)))
-            .toDF("g", "v")
+          (Seq.fill(3)((0, Option(value), Option(-value))) ++
+            Seq((0, None, None), (1, None, None)))
+            .toDF("g", "v", "negative_v")
             .coalesce(1)
             .write
             .mode("append")
@@ -3827,11 +3828,46 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
             val expected = Seq(Row(1024.0, 1228.8, 32.0, math.sqrt(1228.8))) ++
               (if (groupBy.isEmpty) Seq.empty else Seq(Row(null, null, null, null)))
             checkAnswer(sql(query), expected)
-            checkSparkAnswerWithTolAndNumOfAggregates(
+            val regressionQuery =
               "SELECT covar_pop(v, -v), covar_samp(v, -v), corr(v, -v), regr_r2(v, -v), " +
                 "regr_sxx(v, -v), regr_syy(v, -v), regr_sxy(v, -v), " +
-                "regr_slope(v, -v), regr_intercept(v, -v) FROM merged_moments" + groupBy,
-              2)
+                "regr_slope(v, -v), regr_intercept(v, -v) FROM merged_moments" + groupBy
+            // The shared negation inside Spark's regression conditionals retains the approved
+            // evaluation-order fallback. Do not recover native coverage by weakening that guard.
+            val fallback = sql(regressionQuery)
+            checkSparkAnswerWithTolerance(fallback, 1e-6)
+            val fallbackPlan = stripAQEPlan(fallback.queryExecution.executedPlan)
+            assert(fallbackPlan.collect { case a: CometHashAggregateExec => a }.isEmpty)
+            assert(fallbackPlan.collect { case scan: CometNativeScanExec => scan }.size == 1)
+            val sparkAggregates = fallbackPlan.collect { case a: HashAggregateExec => a }
+            assert(sparkAggregates.size == 2)
+            val sparkPartial =
+              sparkAggregates.filter(_.aggregateExpressions.exists(_.mode == Partial))
+            assert(sparkPartial.size == 1)
+            assert(sparkAggregates.exists(_.aggregateExpressions.exists(_.mode == Final)))
+            assert(
+              sparkPartial.head
+                .getTagValue(CometExplainInfo.FALLBACK_REASONS)
+                .contains(Set(
+                  "Unsupported aggregate expression(s)",
+                  "Child expression or data type not supported",
+                  "Conditional shared-expression evaluation order requires Spark",
+                  "OR shared-expression evaluation order requires Spark")),
+              fallbackPlan)
+
+            // A physical column supplies the identical negative values without a shared
+            // expression, so the native merge algorithm remains covered with both partials.
+            val materializedQuery = regressionQuery.replace("-v", "negative_v")
+            withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+              checkAnswer(sql(materializedQuery), sql(regressionQuery).collect().toSeq)
+            }
+            val (_, nativePlan) = checkSparkAnswerAndOperatorWithTol(sql(materializedQuery))
+            val nativeRegressionAggregates = nativePlan.collect {
+              case a: CometHashAggregateExec => a
+            }
+            assert(nativeRegressionAggregates.size == 2)
+            assert(nativeRegressionAggregates.exists(_.modes.contains(Partial)))
+            assert(nativeRegressionAggregates.exists(_.modes.contains(Final)))
           }
         }
       }
@@ -4579,7 +4615,9 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
     val actualNumAggregates = getNumCometHashAggregate(df)
     assert(
       actualNumAggregates == numAggregates,
-      s"Expected $numAggregates Comet aggregate operators, but found $actualNumAggregates")
+      s"Expected $numAggregates Comet aggregate operators, but found $actualNumAggregates.\n" +
+        s"plan: ${new org.apache.comet.ExtendedExplainInfo()
+            .generateExtendedInfo(df.queryExecution.executedPlan)}")
   }
 
   def getNumCometHashAggregate(df: DataFrame): Int = {

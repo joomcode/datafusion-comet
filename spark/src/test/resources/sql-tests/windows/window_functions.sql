@@ -204,7 +204,7 @@ FROM emp
 -- DataFrame API, which emits Literal(-N) without needing the optimizer.
 -- ============================================================
 
-query
+query expect_fallback_plan(Suffix SUM/AVG requires Spark's forward accumulation order; Window, AQEShuffleRead)
 SELECT dept, id, salary,
   SUM(salary) OVER (PARTITION BY dept ORDER BY id
                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS s_run,
@@ -377,7 +377,7 @@ FROM emp
 -- 2.3: LAG / LEAD RESPECT NULLS (default) vs IGNORE NULLS
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window, AQEShuffleRead)
 SELECT dept, id, salary,
   LAG(salary)              OVER (PARTITION BY dept ORDER BY id) AS lag_respect,
   LAG(salary) IGNORE NULLS OVER (PARTITION BY dept ORDER BY id) AS lag_ignore,
@@ -458,7 +458,7 @@ INSERT INTO avg_nulls_trailing VALUES
   (3, NULL),
   (4, NULL)
 
-query
+query expect_fallback_plan(Suffix SUM/AVG requires Spark's forward accumulation order; Project, Window)
 SELECT i,
   AVG(v) OVER (ORDER BY i
                ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS a

@@ -119,12 +119,12 @@ FROM test_lag_lead
 -- lag IGNORE NULLS: basic
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window)
 SELECT id, val,
   LAG(val) IGNORE NULLS OVER (ORDER BY id) as lag_val
 FROM test_nulls
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window, AQEShuffleRead)
 SELECT grp, id, val,
   LAG(val) IGNORE NULLS OVER (PARTITION BY grp ORDER BY id) as lag_val
 FROM test_nulls
@@ -133,7 +133,7 @@ FROM test_nulls
 -- lag IGNORE NULLS: all values null in a group
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window, AQEShuffleRead)
 SELECT grp, id, val,
   LAG(val) IGNORE NULLS OVER (PARTITION BY grp ORDER BY id) as lag_val
 FROM test_all_nulls
@@ -142,7 +142,7 @@ FROM test_all_nulls
 -- lag IGNORE NULLS: single row
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window)
 SELECT id, val,
   LAG(val) IGNORE NULLS OVER (ORDER BY id) as lag_val
 FROM test_single_row
@@ -151,7 +151,7 @@ FROM test_single_row
 -- lag IGNORE NULLS: multiple data types
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Project, Window, AQEShuffleRead)
 SELECT grp, id,
   LAG(i_val) IGNORE NULLS OVER (PARTITION BY grp ORDER BY id),
   LAG(l_val) IGNORE NULLS OVER (PARTITION BY grp ORDER BY id),
@@ -163,7 +163,7 @@ FROM test_types
 -- lag IGNORE NULLS: with offset > 1
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window)
 SELECT id, val,
   LAG(val, 2) IGNORE NULLS OVER (ORDER BY id) as lag_val_2
 FROM test_nulls
@@ -172,7 +172,7 @@ FROM test_nulls
 -- lag: contrast IGNORE NULLS vs RESPECT NULLS
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window)
 SELECT id, val,
   LAG(val) OVER (ORDER BY id) as lag_respect,
   LAG(val) IGNORE NULLS OVER (ORDER BY id) as lag_ignore
@@ -218,12 +218,12 @@ FROM test_lag_lead
 -- lead IGNORE NULLS: basic
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window)
 SELECT id, val,
   LEAD(val) IGNORE NULLS OVER (ORDER BY id) as lead_val
 FROM test_nulls
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window, AQEShuffleRead)
 SELECT grp, id, val,
   LEAD(val) IGNORE NULLS OVER (PARTITION BY grp ORDER BY id) as lead_val
 FROM test_nulls
@@ -232,7 +232,7 @@ FROM test_nulls
 -- lead IGNORE NULLS: all values null in a group
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window, AQEShuffleRead)
 SELECT grp, id, val,
   LEAD(val) IGNORE NULLS OVER (PARTITION BY grp ORDER BY id) as lead_val
 FROM test_all_nulls
@@ -241,7 +241,7 @@ FROM test_all_nulls
 -- lead IGNORE NULLS: single row
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window)
 SELECT id, val,
   LEAD(val) IGNORE NULLS OVER (ORDER BY id) as lead_val
 FROM test_single_row
@@ -250,7 +250,7 @@ FROM test_single_row
 -- lead IGNORE NULLS: multiple data types
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Project, Window, AQEShuffleRead)
 SELECT grp, id,
   LEAD(i_val) IGNORE NULLS OVER (PARTITION BY grp ORDER BY id),
   LEAD(l_val) IGNORE NULLS OVER (PARTITION BY grp ORDER BY id),
@@ -262,7 +262,7 @@ FROM test_types
 -- lead IGNORE NULLS: with offset > 1
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window)
 SELECT id, val,
   LEAD(val, 2) IGNORE NULLS OVER (ORDER BY id) as lead_val_2
 FROM test_nulls
@@ -271,7 +271,7 @@ FROM test_nulls
 -- lead: contrast IGNORE NULLS vs RESPECT NULLS
 -- ============================================================
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window)
 SELECT id, val,
   LEAD(val) OVER (ORDER BY id) as lead_respect,
   LEAD(val) IGNORE NULLS OVER (ORDER BY id) as lead_ignore
@@ -287,7 +287,7 @@ SELECT id, val,
   LEAD(val) OVER (ORDER BY id) as lead_val
 FROM test_lag_lead
 
-query
+query expect_fallback_plan(LEAD/LAG IGNORE NULLS requires Spark's cross-batch offset handling; Window, AQEShuffleRead)
 SELECT grp, id, val,
   LAG(val) IGNORE NULLS OVER (PARTITION BY grp ORDER BY id) as lag_ignore,
   LEAD(val) IGNORE NULLS OVER (PARTITION BY grp ORDER BY id) as lead_ignore

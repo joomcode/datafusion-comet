@@ -21,13 +21,20 @@ package org.apache.comet
 
 import java.io.File
 
+import scala.collection.mutable.ArrayBuffer
 import scala.util.{Failure, Success, Try}
 
 import org.scalatest.exceptions.TestFailedException
 
 import org.apache.spark.sql.CometTestBase
 import org.apache.spark.sql.catalyst.expressions.{Abs, CreateArray, Literal}
-import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.comet.CometNativeScanExec
+import org.apache.spark.sql.execution.{ExpandExec, FileSourceScanExec, FilterExec, GenerateExec, ProjectExec, SparkPlan, TakeOrderedAndProjectExec}
+import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanHelper, AQEShuffleReadExec, QueryStageExec}
+import org.apache.spark.sql.execution.aggregate.HashAggregateExec
+import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
+import org.apache.spark.sql.execution.exchange.{ReusedExchangeExec, ShuffleExchangeExec}
+import org.apache.spark.sql.execution.window.WindowExec
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.ArrayType
 
@@ -206,6 +213,13 @@ class CometSqlFileTestSuite extends CometTestBase with AdaptiveSparkPlanHelper {
                     checkSparkAnswerAndOperatorWithTolerance(sql, tol)
                   case ExpectFallback(reason) =>
                     checkSparkAnswerAndFallbackReason(sql, reason)
+                  case expectation: ExpectFallbackPlan =>
+                    if (expectation.ansiDisabledOnly && SQLConf.get.ansiEnabled) {
+                      // The alternate configuration still has the original fully native contract.
+                      checkSparkAnswerAndOperator(sql)
+                    } else {
+                      checkFallbackPlan(sql, expectation)
+                    }
                   case ExpectDispatch(names) =>
                     checkSparkAnswerAndImpl(sql, native = Seq.empty, dispatched = names)
                   case ExpectNative(names) =>
@@ -237,6 +251,149 @@ class CometSqlFileTestSuite extends CometTestBase with AdaptiveSparkPlanHelper {
               case e: Exception =>
                 throw new RuntimeException(s"Error executing SQL '$sql' ${e.getMessage}", e)
             }
+        }
+      }
+    }
+  }
+
+  private val fallbackOperatorClasses: Map[String, Class[_]] = Map(
+    "Project" -> classOf[ProjectExec],
+    "Filter" -> classOf[FilterExec],
+    "Window" -> classOf[WindowExec],
+    "HashAggregate" -> classOf[HashAggregateExec],
+    "Exchange" -> classOf[ShuffleExchangeExec],
+    "AQEShuffleRead" -> classOf[AQEShuffleReadExec],
+    "Expand" -> classOf[ExpandExec],
+    "TakeOrderedAndProject" -> classOf[TakeOrderedAndProjectExec],
+    "Generate" -> classOf[GenerateExec])
+  require(
+    fallbackOperatorClasses.keySet + "OneRowRelation" ==
+      SqlFileTestParser.fallbackPlanOperators)
+
+  private def checkFallbackPlan(query: String, expectation: ExpectFallbackPlan): Unit = {
+    val (sparkPlan, cometPlan) = checkSparkAnswerAndFallbackReason(query, expectation.reason)
+    // Query stages and reused exchanges are structural leaves in SparkPlan.foreach. Inspect
+    // every actual inner plan as well, so permitting their wrappers cannot hide another fallback.
+    val actualPlans = ArrayBuffer.empty[SparkPlan]
+    val visited = new java.util.IdentityHashMap[SparkPlan, java.lang.Boolean]()
+    def addActualPlan(plan: SparkPlan): Unit = {
+      if (visited.put(plan, java.lang.Boolean.TRUE) == null) {
+        val _ = actualPlans += plan
+        collect(plan) {
+          case stage: QueryStageExec => stage.plan
+          case reused: ReusedExchangeExec => reused.child
+        }.foreach(addActualPlan)
+      }
+    }
+    addActualPlan(stripAQEPlan(cometPlan))
+    val actualNodes = actualPlans.flatMap(plan => collect(plan) { case op => op })
+    val expected: Seq[Class[_]] = expectation.operators.flatMap {
+      case "OneRowRelation" =>
+        // Spark 4.2 has OneRowRelationExec; older profiles use an empty-output RDDScanExec.
+        // Match that precise leaf contract without importing an unavailable versioned API.
+        val leaves = actualNodes.collect {
+          case op
+              if op.nodeName == "Scan OneRowRelation" && op.output.isEmpty &&
+                op.children.isEmpty =>
+            op
+        }
+        assert(leaves.nonEmpty, s"Expected OneRowRelation fallback leaf is absent:\n$cometPlan")
+        val classes: Seq[Class[_]] = leaves.map(op => op.getClass: Class[_]).distinct.toSeq
+        classes.foreach { cls =>
+          assert(actualNodes.filter(cls.isInstance).forall(leaves.contains))
+        }
+        classes
+      case name => Seq(fallbackOperatorClasses(name))
+    }
+    expected.foreach { cls =>
+      assert(
+        actualNodes.exists(cls.isInstance),
+        s"Expected fallback operator ${cls.getSimpleName} is absent:\n$cometPlan")
+    }
+    val fileInputs = collect(sparkPlan) {
+      case scan: FileSourceScanExec => scan: SparkPlan
+      case scan: BatchScanExec => scan: SparkPlan
+    }
+    if (fileInputs.nonEmpty) {
+      val nativeScans = collect(cometPlan) { case scan: CometNativeScanExec => scan }
+      assert(
+        nativeScans.size == fileInputs.size,
+        s"Expected ${fileInputs.size} retained native file scans, found ${nativeScans.size}:\n" +
+          cometPlan.toString)
+    }
+    val allowed = expected ++ Seq(classOf[QueryStageExec], classOf[ReusedExchangeExec])
+    actualPlans.foreach(checkCometOperators(_, allowed: _*))
+  }
+
+  test("precise fallback plans reject wrong reasons, extra operators and missing native scans") {
+    withTempPath { path =>
+      spark.range(3).write.parquet(path.getCanonicalPath)
+      withTempView("fallback_plan_input") {
+        spark.read.parquet(path.getCanonicalPath).createOrReplaceTempView("fallback_plan_input")
+        val query = "SELECT id + 1 FROM fallback_plan_input"
+        val reason = "Native support for operator ProjectExec is disabled"
+        val expectation = ExpectFallbackPlan(reason, Seq("Project"))
+        withSQLConf(CometConf.COMET_EXEC_PROJECT_ENABLED.key -> "false") {
+          checkFallbackPlan(query, expectation)
+          assert(intercept[TestFailedException] {
+            checkFallbackPlan(query, expectation.copy(reason = "wrong fallback reason"))
+          }.getMessage.contains("wrong fallback reason"))
+          assert(intercept[TestFailedException] {
+            checkFallbackPlan(query, expectation.copy(operators = Seq("Project", "Filter")))
+          }.getMessage.contains("FilterExec is absent"))
+          withSQLConf(CometConf.COMET_EXEC_FILTER_ENABLED.key -> "false") {
+            assert(intercept[TestFailedException] {
+              checkFallbackPlan(
+                query + " WHERE id > 0",
+                expectation.copy(reason = "Native support for operator FilterExec is disabled"))
+            }.getMessage.contains("found Filter"))
+          }
+          withSQLConf(CometConf.COMET_NATIVE_SCAN_ENABLED.key -> "false") {
+            assert(intercept[TestFailedException] {
+              checkFallbackPlan(query, expectation.copy(reason = "Comet Scan is not enabled"))
+            }.getMessage.contains("retained native file scans"))
+          }
+          withSQLConf(SQLConf.ANSI_ENABLED.key -> "true") {
+            val fixture = SqlFileTestParser.parse(Seq(
+              "-- Config: spark.sql.ansi.enabled=true",
+              s"-- Config: ${CometConf.COMET_EXEC_PROJECT_ENABLED.key}=false",
+              s"query expect_fallback_plan($reason; Project; ansi=false)",
+              query))
+            val error = intercept[RuntimeException](runTestFile("conditional-plan.sql", fixture))
+            assert(error.getCause.getMessage.contains("Expected only Comet native operators"))
+          }
+        }
+      }
+    }
+  }
+
+  test("precise fallback plans inspect unlisted operators inside real adaptive stages") {
+    withTempPath { path =>
+      spark.range(3).write.parquet(path.getCanonicalPath)
+      withTempView("fallback_stage_input") {
+        spark.read.parquet(path.getCanonicalPath).createOrReplaceTempView("fallback_stage_input")
+        withSQLConf(
+          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
+          SQLConf.COALESCE_PARTITIONS_ENABLED.key -> "false",
+          CometConf.COMET_SHUFFLE_ENABLED.key -> "false",
+          CometConf.COMET_EXEC_PROJECT_ENABLED.key -> "false",
+          CometConf.COMET_EXEC_FILTER_ENABLED.key -> "false") {
+          val query = "SELECT /*+ REPARTITION(2) */ id + 1 AS v " +
+            "FROM fallback_stage_input WHERE id > 0"
+          val reason = "Native support for operator FilterExec is disabled"
+          val (_, plan) = checkSparkAnswerAndFallbackReason(query, reason)
+          val stages = collect(plan) { case stage: QueryStageExec => stage.plan }
+          assert(stages.nonEmpty, s"Expected a materialized adaptive stage:\n$plan")
+          assert(stages.exists(p => collect(p) { case filter: FilterExec => filter }.nonEmpty))
+          // The old root-only check sees an opaque stage and would miss the unlisted Filter.
+          checkCometOperators(
+            stripAQEPlan(plan),
+            classOf[ProjectExec],
+            classOf[ShuffleExchangeExec],
+            classOf[QueryStageExec])
+          assert(intercept[TestFailedException] {
+            checkFallbackPlan(query, ExpectFallbackPlan(reason, Seq("Project", "Exchange")))
+          }.getMessage.contains("found Filter"))
         }
       }
     }

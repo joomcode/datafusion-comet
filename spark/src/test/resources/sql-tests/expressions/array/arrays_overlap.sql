@@ -51,15 +51,15 @@ statement
 INSERT INTO test_overlap_nulls VALUES (array(1, NULL, 3), array(4, 5)), (array(1, NULL, 3), array(1, 5)), (array(1, NULL), array(NULL, 2)), (array(NULL), array(NULL)), (array(NULL, NULL), array(NULL, NULL)), (array(1, NULL), array(2, NULL)), (array(NULL, 2), array(1, NULL))
 
 -- no match + has NULL => NULL
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Project, Filter)
 SELECT arrays_overlap(a, b) FROM test_overlap_nulls WHERE a = array(1, NULL, 3) AND b = array(4, 5)
 
 -- has match + has NULL => true (match found, NULL irrelevant)
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Project, Filter)
 SELECT arrays_overlap(a, b) FROM test_overlap_nulls WHERE a = array(1, NULL, 3) AND b = array(1, 5)
 
 -- NULL vs NULL elements => NULL (NULL != NULL)
-query
+query expect_fallback_plan(Filter shared-expression evaluation order requires Spark; Project, Filter)
 SELECT arrays_overlap(a, b) FROM test_overlap_nulls WHERE a = array(NULL) AND b = array(NULL)
 
 -- all rows

@@ -104,7 +104,7 @@ query tolerance=1e-6
 SELECT regr_slope(2.0, x), regr_intercept(2.0, x), regr_sxy(2.0, x) FROM test_regr
 
 -- literal independent variable mixed with a column dependent variable
-query tolerance=1e-6
+query expect_fallback_plan(Conditional shared-expression evaluation order requires Spark; HashAggregate, Exchange)
 SELECT regr_slope(y, 3.0), regr_sxx(y, 3.0), regr_r2(y, 3.0) FROM test_regr
 
 -- edge case: all-NULL input returns NULL for all functions

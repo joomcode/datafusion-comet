@@ -78,7 +78,7 @@ query
 select arrays_zip(array(1), array('a', 'b', 'c'));
 
 -- empty arrays
-query
+query expect_fallback_plan(unsupported arguments for ArraysZip; Project, OneRowRelation)
 select arrays_zip(array(), array());
 
 -- one empty, one non-empty

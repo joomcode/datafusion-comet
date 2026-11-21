@@ -11,7 +11,7 @@ CometColumnarToRow
                :           +- CometWindowExec
                :              +- CometSort
                :                 +- CometColumnarExchange
-               :                    +-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum]
+               :                    +-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum, Conditional shared-expression evaluation order requires Spark]
                :                       +- Exchange
                :                          +-  HashAggregate [COMET: Partial aggregate disabled: corresponding final aggregate cannot be converted to Comet and intermediate buffer formats are incompatible]
                :                             +- CometColumnarToRow
@@ -42,7 +42,7 @@ CometColumnarToRow
                :           +- CometWindowExec
                :              +- CometSort
                :                 +- CometColumnarExchange
-               :                    +-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum]
+               :                    +-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum, Conditional shared-expression evaluation order requires Spark]
                :                       +- Exchange
                :                          +-  HashAggregate [COMET: Partial aggregate disabled: corresponding final aggregate cannot be converted to Comet and intermediate buffer formats are incompatible]
                :                             +- CometColumnarToRow
@@ -69,7 +69,7 @@ CometColumnarToRow
                            +- CometWindowExec
                               +- CometSort
                                  +- CometColumnarExchange
-                                    +-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum]
+                                    +-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum, Conditional shared-expression evaluation order requires Spark]
                                        +- Exchange
                                           +-  HashAggregate [COMET: Partial aggregate disabled: corresponding final aggregate cannot be converted to Comet and intermediate buffer formats are incompatible]
                                              +- CometColumnarToRow

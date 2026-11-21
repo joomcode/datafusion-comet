@@ -251,3 +251,89 @@ Miri has now actually passed the identical native sources, Miri, full Comet CI
 and dualarch RC may run in parallel, with automatic CodeQL. All actual final
 verdicts, backlog closure and downloaded-artifact verification remain mandatory
 post-commit gates. Report before merge or stable tag; protected refs stay unchanged.
+
+## Existing scan and SQL contract qualification
+
+The first full local Spark 4.2 correction cohort registered 1,781 cases:
+1,393 passed, 14 failed, 373 were canceled and one was ignored. The scan portion
+had 422 passes plus explicitly classified nonpasses; all 203 aggregate cases
+passed. SQL
+failures exposed stale plan expectations under the accepted G06/G08 safety
+fallbacks; the reported failures did not show a Spark row-result mismatch.
+This is finite evidence, not a claim of universal equivalence.
+
+Per-query SQL expectations now require the observed Spark boundary and reason,
+retained native file scans, and native execution for all other operators. Actual
+AQE stages are inspected so wrappers cannot hide an unexpected Spark operator.
+Negative controls reject missing scans, wrong reasons and unlisted operators.
+Every original SQL statement, input, configuration and error expectation is
+preserved; only assertion directives change. Already supported empty-array
+ARRAYS_ZIP cases retain their original native assertions. ANSI-specific routes
+retain the original fully native requirement when ANSI is enabled.
+
+The aggregate regression keeps the original shared-negation query as an explicit
+accepted fallback check. An equivalent query over a materialized negative input
+independently matches original Spark and requires native Partial/Final aggregates.
+Its input values, exact variance expectations and numerical tolerance are preserved.
+The only production change in this correction series copies fallback diagnostics
+from a synthesized Divide guard after conversion has already returned None; it
+changes neither eligibility nor execution.
+
+Two inherited Parquet coverage gaps were restored. The missing optional parent
+with a required child passes both dictionary variants. The NullType case passes
+all four off-heap/legacy combinations. Both keep the original Spark oracle, add
+explicit expected rows and prove full native DataFusion scans; no production
+reader change was needed. The stale NullType cancellation is replaced by the
+actual Spark 4.1+ Parquet writer capability guard. Both restored cases also pass the complete Spark 4.1 local profile.
+
+Later targeted cohorts overlap the first run and must not be added together.
+The completed correction reconciliation records 1,782 unique case keys across
+cohorts, including one new AQE control: 1,410 framework-success registrations and 372
+canceled cases, with no unresolved case. Twenty framework successes are explicit
+version-N/A SQL fixtures: their unchanged guard logs and returns before executing
+the SQL body. Exact case/configuration keys and 20 actual guard log lines refine
+the union to 1,390 executed positive outcomes, 20 version-N/A registrations and
+372 separately classified cancellations. No N/A case receives executed-pass credit. All 17 modified SQL file/configuration
+registrations passed their complete current resource; posexplode passed only on
+its final full-file retry. Failed earlier query prefixes receive no acceptance
+credit. This is not one full 1,782-case run. The remaining profile/strict and current-source replay gates must pass before
+this checkpoint is applied; final same-SHA remote receipts control qualification.
+
+The user confirmed Parquet and Delta workloads and no Iceberg workloads. The
+expected remaining target-scan cancellations are 358 Iceberg cases outside that
+workload and 14 genuine older-Spark version cases; they are not passes. All
+32 agreed older-profile Iceberg jobs remain mandatory. Rust's four HDFS tests
+and three manual benchmarks are a separate applicability policy. The 58-card
+migration scope is unchanged.
+
+The completed local gate index records actual profile, TPC plan, strict-quality
+and current-source replay results, preserving every failed invocation and any
+bounded source-equivalent cohort composition. A logged Spark-version guard is
+not executed coverage even if its framework registration reports success. Full GHA and final artifact gates remain open
+until their own exact-source receipts pass. All final CI and 23-case AMD64/ARM64
+packaged smoke results must bind the same newly frozen source and final JARs.
+The 7b9b135e candidate's runs or artifacts remain historical. Final artifact
+download/verification, backlog closure and reporting before merge or stable tag
+are still required; production remains unauthorized.
+
+Iceberg setup now receives a root-model-only preflight with a bounded retry for
+the observed, known immutable Apache parent POM lookup failure. Install and tests
+remain single-shot; compiler and test failures are not retried. The existing Lint
+retry budget is unchanged. No mirror, dependency or cache policy changes were
+introduced. The earlier log proves an artifact lookup failure, not its exact HTTP
+status or recovery; actual remote success must still be observed.
+
+The new native-scan assertion helper uses explicit Seq[Class[_]] element types and
+immutable .toSeq normalization for Scala 2.12/2.13 compatibility; its class set, routing requirements and row assertions
+are unchanged. Existing TPC plan baselines are refreshed only with the official
+generator for newly propagated fallback diagnostics on already Spark operators.
+Their exact profile/case disposition and ordinary non-generation verification
+remain bound to the completed local gate receipts. No plan eligibility or SQL
+semantics is changed by these test-only compiler and diagnostic-baseline fixes.
+
+The official plan generator passed 135 cases on each of Spark 3.4, 3.5, 4.0,
+4.1 and 4.2; ordinary verification then passed 129 on each profile. The six-case
+difference is the existing generator-only coverage policy. Only shared extended
+plan diagnostics changed for q49/q66 on Spark 3.4/3.5; a Spark 4.0 q66 override
+preserves the prior effective Spark 4.x plan. Three shared base files and that
+one override changed. These are plan checks, not SQL row-result counts.

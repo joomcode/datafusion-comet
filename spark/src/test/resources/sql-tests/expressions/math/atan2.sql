@@ -50,7 +50,7 @@ SELECT atan2(0.0, 0.0), atan2(0.0, double('-0.0')), atan2(0.0, 1.0), atan2(0.0, 
 -- signed-zero: Spark adds +0.0 to both args, so these are all +0.0.
 -- Exact comparison so a leftover -0.0 is distinguished (tolerance uses
 -- absolute difference). ±π cases stay on the tolerance queries above.
-query
+query expect_fallback_plan(Filter shared-expression evaluation order requires Spark; Project, Filter)
 SELECT atan2(y, x) FROM test_atan2 WHERE y = 0.0 AND x = 0.0
 
 query
