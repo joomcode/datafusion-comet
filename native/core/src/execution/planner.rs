@@ -3598,16 +3598,18 @@ mod tests {
                     for index in [0, 1, 2, 8, 9] {
                         assert_eq!(rows.row(index), boundaries[usize::from(!descending)].row());
                     }
-                    // Match the range shuffle writer's binary-search routing.
+                    // Spark RangePartitioner treats its sampled bounds as inclusive upper bounds:
+                    // equal keys stay in the lower partition. Spark also equates both zero
+                    // signs and all NaN payloads (SQLOrderingUtil.compareFloats/Doubles).
                     let partitions = rows
                         .iter()
-                        .map(|row| boundaries.partition_point(|bound| bound.row() <= row))
+                        .map(|row| boundaries.partition_point(|bound| bound.row() < row))
                         .collect::<Vec<_>>();
                     let null_partition = if nulls_first { 0 } else { 2 };
                     let expected = if descending {
-                        vec![1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 2, 2, null_partition, 2]
+                        vec![0, 0, 0, 1, 1, 2, 1, 1, 0, 0, 1, 1, null_partition, 2]
                     } else {
-                        vec![2, 2, 2, 1, 1, 0, 1, 1, 2, 2, 1, 1, null_partition, 0]
+                        vec![1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, null_partition, 0]
                     };
                     assert_eq!(
                         partitions, expected,

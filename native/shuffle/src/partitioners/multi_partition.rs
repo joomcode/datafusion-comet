@@ -361,11 +361,11 @@ impl<T: PartitionWriter> MultiPartitionShuffleRepartitioner<T> {
                         let row_batch = row_converter.convert_columns(arrays.as_slice())?;
                         let partition_ids = &mut scratch.partition_ids[..num_rows];
 
+                        // Spark RangePartitioner advances only when the key is strictly
+                        // greater than a bound. Equality stays in that bound's partition.
                         row_batch.iter().enumerate().for_each(|(row_idx, row)| {
-                            partition_ids[row_idx] = bounds
-                                .as_slice()
-                                .partition_point(|bound| bound.row() <= row)
-                                as u32
+                            partition_ids[row_idx] =
+                                bounds.as_slice().partition_point(|bound| bound.row() < row) as u32
                         });
                     }
 
@@ -744,6 +744,7 @@ impl<T: PartitionWriter> Debug for MultiPartitionShuffleRepartitioner<T> {
 mod tests {
     use super::*;
     use arrow::array::{ArrayRef, Int64Array};
+    use arrow::compute::SortOptions;
     use datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
 
     #[derive(Default)]
@@ -1205,6 +1206,206 @@ mod tests {
         ) -> datafusion::common::Result<()> {
             Ok(())
         }
+    }
+
+    /// Routes tagged rows through the real writer, so NULL/equal keys remain distinguishable
+    /// and a partition check also rejects lost or duplicated rows.
+    async fn range_partition_ids(
+        values: &[Option<i64>],
+        bounds: &[Option<i64>],
+        options: SortOptions,
+    ) -> Vec<u32> {
+        use arrow::datatypes::DataType;
+        use arrow::row::{RowConverter, SortField};
+        use datafusion::physical_expr::expressions::Column;
+        use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
+
+        let converter =
+            RowConverter::new(vec![SortField::new_with_options(DataType::Int64, options)]).unwrap();
+        let boundary_array: ArrayRef = Arc::new(Int64Array::from(bounds.to_vec()));
+        let boundary_rows = converter.convert_columns(&[boundary_array]).unwrap();
+        let owned_bounds = boundary_rows.iter().map(|row| row.owned()).collect();
+        let ordering = LexOrdering::new(vec![PhysicalSortExpr {
+            expr: Arc::new(Column::new("key", 1)),
+            options,
+        }])
+        .unwrap();
+        let runtime = Arc::new(RuntimeEnv::default());
+        let mut repartitioner = MultiPartitionShuffleRepartitioner::try_new(
+            0,
+            CollectingPartitionWriter::default(),
+            CometPartitioning::RangePartitioning(
+                ordering,
+                bounds.len() + 1,
+                Arc::new(converter),
+                owned_bounds,
+            ),
+            ShufflePartitionerMetrics::new(&ExecutionPlanMetricsSet::new(), 0),
+            Arc::clone(&runtime),
+            values.len().max(1),
+            false,
+            None,
+        )
+        .unwrap();
+        let batch = RecordBatch::try_from_iter([
+            (
+                "row_id",
+                Arc::new(Int64Array::from_iter_values(0..values.len() as i64)) as ArrayRef,
+            ),
+            (
+                "key",
+                Arc::new(Int64Array::from(values.to_vec())) as ArrayRef,
+            ),
+        ])
+        .unwrap();
+        repartitioner.insert_batch(batch).await.unwrap();
+        repartitioner.shuffle_write().unwrap();
+        let mut actual = vec![u32::MAX; values.len()];
+        for (partition, row_ids) in &repartitioner.partition_writer().written {
+            for row_id in row_ids {
+                let index = usize::try_from(*row_id).unwrap();
+                assert!(index < actual.len(), "unexpected row id {index}");
+                assert_eq!(actual[index], u32::MAX, "row {index} was duplicated");
+                actual[index] = *partition as u32;
+            }
+        }
+        assert!(actual.iter().all(|partition| *partition != u32::MAX));
+        drop(repartitioner);
+        assert_eq!(runtime.memory_pool.reserved(), 0);
+        actual
+    }
+
+    #[tokio::test]
+    async fn range_partition_equal_bounds_match_spark() {
+        // Immutable oracle: Apache Spark v4.2.1 RangePartitioner.getPartition advances while
+        // ordering.gt(key, rangeBounds(partition)); equality does not advance. These fixed
+        // expected ids are independent of the Arrow/native search implementation.
+        // https://github.com/apache/spark/blob/v4.2.1/core/src/main/scala/org/apache/spark/Partitioner.scala
+        let options = SortOptions {
+            descending: false,
+            nulls_first: true,
+        };
+        assert_eq!(
+            range_partition_ids(&[Some(0), Some(0), Some(2)], &[Some(0), Some(2)], options).await,
+            vec![0, 0, 1]
+        );
+        assert_eq!(
+            range_partition_ids(
+                &[
+                    Some(-1),
+                    Some(0),
+                    Some(0),
+                    Some(1),
+                    Some(2),
+                    Some(2),
+                    Some(3)
+                ],
+                &[Some(0), Some(0), Some(2)],
+                options,
+            )
+            .await,
+            vec![0, 0, 0, 2, 2, 2, 3]
+        );
+    }
+
+    #[tokio::test]
+    async fn range_partition_null_ordering_matches_spark() {
+        let values = [
+            None,
+            Some(-1),
+            Some(0),
+            Some(0),
+            Some(1),
+            Some(2),
+            Some(2),
+            Some(3),
+            None,
+        ];
+        // The explicit bounds are ordered by the same SQL null/direction ordering as the keys.
+        // Spark's strict-bound rule gives these ids, including equality to a NULL bound.
+        for (descending, nulls_first, bounds, expected) in [
+            (
+                false,
+                true,
+                vec![None, Some(0), Some(2)],
+                vec![0, 1, 1, 1, 2, 2, 2, 3, 0],
+            ),
+            (
+                false,
+                false,
+                vec![Some(0), Some(2), None],
+                vec![2, 0, 0, 0, 1, 1, 1, 2, 2],
+            ),
+            (
+                true,
+                true,
+                vec![None, Some(2), Some(0)],
+                vec![0, 3, 2, 2, 2, 1, 1, 1, 0],
+            ),
+            (
+                true,
+                false,
+                vec![Some(2), Some(0), None],
+                vec![2, 2, 1, 1, 1, 0, 0, 0, 2],
+            ),
+        ] {
+            assert_eq!(
+                range_partition_ids(
+                    &values,
+                    &bounds,
+                    SortOptions {
+                        descending,
+                        nulls_first,
+                    },
+                )
+                .await,
+                expected,
+                "descending={descending}, nulls_first={nulls_first}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn range_partition_descending_equal_bounds_match_spark() {
+        assert_eq!(
+            range_partition_ids(
+                &[
+                    Some(-1),
+                    Some(0),
+                    Some(0),
+                    Some(1),
+                    Some(2),
+                    Some(2),
+                    Some(3)
+                ],
+                &[Some(2), Some(0)],
+                SortOptions {
+                    descending: true,
+                    nulls_first: false,
+                },
+            )
+            .await,
+            vec![2, 1, 1, 1, 0, 0, 0]
+        );
+    }
+
+    #[tokio::test]
+    async fn range_partition_many_equal_bounds_match_spark() {
+        // Spark uses binary search beyond128 bounds. Distinct bounds still keep each equal key
+        // at its matching index rather than the insertion point after it.
+        let bounds: Vec<_> = (0..129).map(Some).collect();
+        assert_eq!(
+            range_partition_ids(
+                &[Some(-1), Some(0), Some(64), Some(128), Some(129)],
+                &bounds,
+                SortOptions {
+                    descending: false,
+                    nulls_first: true,
+                },
+            )
+            .await,
+            vec![0, 0, 64, 128, 129]
+        );
     }
 
     /// A positional repartitioner over a single non-null i64 column.
