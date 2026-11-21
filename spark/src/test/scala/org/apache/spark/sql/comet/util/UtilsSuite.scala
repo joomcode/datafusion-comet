@@ -572,7 +572,7 @@ class UtilsSuite extends CometTestBase {
       val validity = allValid(sliceLength)
       val stringSlice = new VarCharVector("s", CometArrowAllocator)
       stringSlice.loadFieldBuffers(
-        new ArrowFieldNode(sliceLength, 0),
+        new ArrowFieldNode(sliceLength.toLong, 0L),
         java.util.Arrays.asList(
           validity,
           sliceOffsets(parentStrings.getOffsetBuffer, start, sliceLength),
@@ -581,13 +581,13 @@ class UtilsSuite extends CometTestBase {
       val listSlice = ListVector.empty("l", CometArrowAllocator)
       listSlice.addOrGetVector[IntVector](FieldType.nullable(new ArrowType.Int(32, true)))
       listSlice.loadFieldBuffers(
-        new ArrowFieldNode(sliceLength, 0),
+        new ArrowFieldNode(sliceLength.toLong, 0L),
         java.util.Arrays
           .asList(validity, sliceOffsets(parentLists.getOffsetBuffer, start, sliceLength)))
       val elementCount = parentElements.getValueCount
       val elementValidity = allValid(elementCount)
       listSlice.getDataVector.loadFieldBuffers(
-        new ArrowFieldNode(elementCount, 0),
+        new ArrowFieldNode(elementCount.toLong, 0L),
         java.util.Arrays.asList(elementValidity, parentElements.getDataBuffer))
       elementValidity.close()
       validity.close()
@@ -646,7 +646,7 @@ class UtilsSuite extends CometTestBase {
     val slices = Seq(8, 16).map { start =>
       val vector = new VarBinaryVector("payload", allocator)
       vector.loadFieldBuffers(
-        new ArrowFieldNode(8, values.slice(start, start + 8).count(_ == null)),
+        new ArrowFieldNode(8L, values.slice(start, start + 8).count(_ == null).toLong),
         Seq(
           parent.getValidityBuffer.slice(start / 8L, 1),
           parent.getOffsetBuffer.slice(start * 4L, 9 * 4L),

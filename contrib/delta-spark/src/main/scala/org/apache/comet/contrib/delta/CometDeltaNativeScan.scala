@@ -30,7 +30,7 @@ import org.apache.spark.sql.delta.RowIndexFilterType
 import org.apache.spark.sql.delta.actions.DeletionVectorDescriptor
 import org.apache.spark.sql.execution.{FileSourceScanExec, ScalarSubquery => ExecScalarSubquery}
 import org.apache.spark.sql.execution.datasources.{FilePartition, PartitionedFile}
-import org.apache.spark.sql.types.{ByteType, LongType, MetadataBuilder, StructField, StructType}
+import org.apache.spark.sql.types.{ByteType, LongType, StructField, StructType}
 
 import org.apache.comet.CometSparkSessionExtensions.withFallbackReason
 import org.apache.comet.objectstore.NativeConfig

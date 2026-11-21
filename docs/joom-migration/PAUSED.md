@@ -88,3 +88,21 @@ Smoke pass, download and independently verify the final archive, JAR checksums,
 source/lock/build provenance and both architecture smoke receipts. Save completion.json
 externally and report before merge and stable tag. Do not amend the tested source
 merely to record post-commit results; a real source change requires requalification.
+
+## G10 replacement frozen-source checkpoint
+
+The initial `68133883e` candidate remains preserved with its failed/canceled
+receipts. Exact strict Spark 3.5 + Delta and Spark 4.2 + Delta package/semantic
+Scalafix now pass after the bounded quality fixes. Dollar-placeholder literals
+have compiler-proven identical runtime bytes; no SQL or assertion is changed.
+See G10-results.json, STATE.json#g10, the replacement source manifest and the
+external candidate-v2.json for the final frozen source. No old workflow is active.
+
+Publish and qualify the replacement SHA with complete Comet CI, CodeQL, Miri and
+RC Build & Smoke on native AMD64/ARM64. Poll every five minutes; analyze new
+failures promptly and cancel superseded source runs if necessary. Preserve every
+candidate, failed/positive control and immutable job/artifact receipt. Verify the
+actual final JARs and reconcile every validation-backlog item before reporting.
+Do not amend the qualified source merely to record post-commit outcomes.
+Report before merge/stable tag; main, branch-1.2, release tags, external artifact
+publication, production and datasci remain outside the authorized write scope.

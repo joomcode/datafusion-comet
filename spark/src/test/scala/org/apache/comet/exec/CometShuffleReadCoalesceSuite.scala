@@ -46,7 +46,7 @@ class CometShuffleReadCoalesceSuite extends CometTestBase with AdaptiveSparkPlan
   private def withTable(f: => Unit): Unit = {
     withTempPath { dir =>
       spark
-        .range(rows)
+        .range(rows.toLong)
         .selectExpr(
           "id",
           "cast(id % 13 AS int) AS k",

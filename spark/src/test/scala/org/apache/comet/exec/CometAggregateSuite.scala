@@ -5059,7 +5059,7 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
                 s"SELECT /*+ REPARTITION(2, m) */ k, m FROM ($grouped) a " +
                   "WHERE rand(42L) < 0.5"
               case "project" =>
-                s"SELECT /*+ REPARTITION(2, m) */ k, m, " +
+                "SELECT /*+ REPARTITION(2, m) */ k, m, " +
                   s"monotonically_increasing_id() AS row_id FROM ($grouped) a"
               case "aggregate result" =>
                 "SELECT /*+ REPARTITION(2, m) */ k, max(v) AS m, rand(42L) AS r " +

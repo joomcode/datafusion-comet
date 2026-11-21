@@ -980,7 +980,9 @@ under the License.
       These filters avoid adding profile-dependent `@nowarn` annotations: an annotation
       needed under one Scala version can be unused under another. Existing shuffle
       annotations for Scala 2.13 private-type warnings have a scoped unused-nowarn
-      exception on Scala 2.12. `-Xlint:unused` enables
+      exception on Scala 2.12, limited to the two shuffle-manager source files.
+      UnusedNowarn has an empty compiler warning site, so a method-site filter
+      cannot match it. Other warning categories remain strict. `-Xlint:unused` enables
       `-Ywarn-unused:nowarn`, which `-Xfatal-warnings` promotes to an error.
 
       `-Ywarn-value-discard` stays on for main sources, where a discarded result is
@@ -1026,7 +1028,7 @@ under the License.
                     <arg>-Wconf:cat=unused-params&amp;site=org\.apache\.comet\.udf\.CometUDF\.releasePlan\.planId:s</arg>
                     <arg>-Wconf:cat=unused-params&amp;site=org\.apache\.spark\.sql\.comet\.CometBaseAggregate\.operatorSupportLevel\.op:s</arg>
                     <!-- These annotations suppress Scala 2.13 private-type warnings only. -->
-                    <arg>-Wconf:cat=unused-nowarn&amp;site=org\.apache\.spark\.sql\.comet\.execution\.shuffle\.Comet(Celeborn)?ShuffleManager\.get(Reader|Writer):s</arg>
+                    <arg>-Wconf:cat=unused-nowarn&amp;src=.*/src/main/scala/org/apache/spark/sql/comet/execution/shuffle/Comet(Celeborn)?ShuffleManager\.scala:s</arg>
                     <!-- Scan factories keep the common session-taking API used across versions. -->
                     <arg>-Wconf:cat=unused-params&amp;site=org\.apache\.spark\.sql\.comet\.CometIcebergNativeScanExec\.apply\.session:s</arg>
                     <arg>-Wconf:cat=unused-params&amp;site=org\.apache\.spark\.sql\.comet\.CometNativeScanExec\.apply\.session:s</arg>
@@ -1071,7 +1073,7 @@ under the License.
                     <arg>-Wconf:cat=unused-params&amp;site=org\.apache\.comet\.udf\.CometUDF\.releasePlan\.planId:s</arg>
                     <arg>-Wconf:cat=unused-params&amp;site=org\.apache\.spark\.sql\.comet\.CometBaseAggregate\.operatorSupportLevel\.op:s</arg>
                     <!-- These annotations suppress Scala 2.13 private-type warnings only. -->
-                    <arg>-Wconf:cat=unused-nowarn&amp;site=org\.apache\.spark\.sql\.comet\.execution\.shuffle\.Comet(Celeborn)?ShuffleManager\.get(Reader|Writer):s</arg>
+                    <arg>-Wconf:cat=unused-nowarn&amp;src=.*/src/main/scala/org/apache/spark/sql/comet/execution/shuffle/Comet(Celeborn)?ShuffleManager\.scala:s</arg>
                     <!-- Scan factories keep the common session-taking API used across versions. -->
                     <arg>-Wconf:cat=unused-params&amp;site=org\.apache\.spark\.sql\.comet\.CometIcebergNativeScanExec\.apply\.session:s</arg>
                     <arg>-Wconf:cat=unused-params&amp;site=org\.apache\.spark\.sql\.comet\.CometNativeScanExec\.apply\.session:s</arg>

@@ -44,7 +44,7 @@ class CometOffTaskThreadSuite extends CometTestBase with AdaptiveSparkPlanHelper
   private def withTable(f: DataFrame => Unit): Unit = {
     withTempPath { dir =>
       spark
-        .range(rows)
+        .range(rows.toLong)
         .selectExpr(
           s"date_add(DATE'2026-10-01', cast(id % $days AS int)) AS date",
           "concat('team', cast(id % 7 AS string)) AS team",

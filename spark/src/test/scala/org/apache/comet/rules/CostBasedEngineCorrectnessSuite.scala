@@ -210,7 +210,7 @@ class CostBasedEngineCorrectnessSuite extends CometTestBase with AdaptiveSparkPl
             withClue(s"$name\n") {
               withSQLConf(configuration: _*) {
                 Seq("k", "named_struct('d', k, 'a', array(k, k))").foreach { key =>
-                  val query = s"SELECT id, k, spark_partition_id() AS p FROM " +
+                  val query = "SELECT id, k, spark_partition_id() AS p FROM " +
                     s"(SELECT /*+ REPARTITION(7, partition_key) */ id, k, $key AS partition_key " +
                     "FROM g09_decimal_native)"
                   val plan = compare(query)

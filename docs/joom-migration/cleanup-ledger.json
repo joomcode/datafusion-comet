@@ -1012,6 +1012,8 @@
       "auxiliary": 9992
     },
     "tooling": "Reuse standard Maven/Cargo/Scala caches and existing Java17/Rust. No new host Docker images/global tools. Actual sizes and run IDs are post-commit facts in final receipt.",
-    "plan_generations": "Pre-counter-fix current-task snapshots were archived and restored before accepted oldest-to-newest all-profile generation. Intermediate failures retained, not counted as passes."
+    "plan_generations": "Pre-counter-fix current-task snapshots were archived and restored before accepted oldest-to-newest all-profile generation. Intermediate failures retained, not counted as passes.",
+    "replacement_source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v2.json",
+    "first_remote_attempt": "68133883e CI/RC/Miri canceled after early quality findings; retained, no qualification credit. CodeQL success belongs only to that source."
   }
 }

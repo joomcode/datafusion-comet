@@ -28,7 +28,7 @@ import org.apache.spark.sql.comet._
 import org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec
 import org.apache.spark.sql.execution.{CommandResultExec, ExpandExec, ProjectExec, SortExec, SparkPlan}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, LogicalQueryStage, QueryStageExec}
-import org.apache.spark.sql.execution.aggregate.{HashAggregateExec, ObjectHashAggregateExec, SortAggregateExec}
+import org.apache.spark.sql.execution.aggregate.{HashAggregateExec, SortAggregateExec}
 import org.apache.spark.sql.execution.exchange.ReusedExchangeExec
 import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, SortMergeJoinExec}
 import org.apache.spark.sql.functions.{col, sum}
@@ -711,7 +711,11 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     def sortCost(rows: Int): Double = {
       var cost = Double.NaN
       withTempPath { dir =>
-        spark.range(rows).selectExpr("id AS k", "id + 1 AS v").write.parquet(dir.getCanonicalPath)
+        spark
+          .range(rows.toLong)
+          .selectExpr("id AS k", "id + 1 AS v")
+          .write
+          .parquet(dir.getCanonicalPath)
         withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
           val plan =
             runUnordered(spark.read.parquet(dir.getCanonicalPath).sortWithinPartitions("k"))
@@ -946,14 +950,14 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
               count(plan) { case a: CometHashAggregateExec => a },
               count(plan) { case a: HashAggregateExec => a })
           val (off, on) = offAndOn(runUnordered(starQuery))
-          assert(aggregates(off) == (2, 0), s"plan:\n$off")
-          assert(aggregates(on) == (0, 2), s"plan:\n$on")
+          assert(aggregates(off) == ((2, 0)), s"plan:\n$off")
+          assert(aggregates(on) == ((0, 2)), s"plan:\n$on")
           withSQLConf(
             flag -> "true",
             costTable -> ("aggArrayKey.comet=0,0,0;aggArrayKey.spark=0,0;" +
               "codegenDispatch.comet=0,0,0;codegenDispatch.spark=0,0")) {
             val before = runUnordered(starQuery)
-            assert(aggregates(before) == (2, 0), s"plan:\n$before")
+            assert(aggregates(before) == ((2, 0)), s"plan:\n$before")
           }
         }
       }
@@ -1034,24 +1038,24 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
           val equi = "SELECT a.k, a.v, b.s FROM t a JOIN t b ON a.k = b.k"
           val band = equi + " AND a.v <= b.v AND b.v <= a.v + 13"
           val (off, on) = offAndOn(run(equi))
-          assert(joins(off) == (1, 0), s"plan:\n$off")
-          assert(joins(on) == (1, 0), s"plan:\n$on")
+          assert(joins(off) == ((1, 0)), s"plan:\n$off")
+          assert(joins(on) == ((1, 0)), s"plan:\n$on")
           assert(cometOperatorNames(off) == cometOperatorNames(on), s"$off\n$on")
           for (query <- Seq(band, crossCaseOnT)) {
             val (guardedOff, guardedOn) = offAndOn(run(query))
-            assert(joins(guardedOff) == (0, 1), s"plan:\n$guardedOff")
-            assert(joins(guardedOn) == (0, 1), s"plan:\n$guardedOn")
+            assert(joins(guardedOff) == ((0, 1)), s"plan:\n$guardedOff")
+            assert(joins(guardedOn) == ((0, 1)), s"plan:\n$guardedOn")
           }
           val (crossOff, crossOn) = offAndOn(run(safeCrossCaseOnT))
-          assert(joins(crossOff) == (1, 0), s"plan:\n$crossOff")
-          assert(joins(crossOn) == (0, 1), s"plan:\n$crossOn")
+          assert(joins(crossOff) == ((1, 0)), s"plan:\n$crossOff")
+          assert(joins(crossOn) == ((0, 1)), s"plan:\n$crossOn")
           withSQLConf(
             flag -> "true",
             costTable -> "smjCrossCondition.comet=0,0,0;smjCrossCondition.spark=0,0") {
             val plan = run(safeCrossCaseOnT)
-            assert(joins(plan) == (1, 0), s"plan:\n$plan")
+            assert(joins(plan) == ((1, 0)), s"plan:\n$plan")
             // A zero price must not override an execution-correctness restriction.
-            assert(joins(run(crossCaseOnT)) == (0, 1))
+            assert(joins(run(crossCaseOnT)) == ((0, 1)))
           }
         }
       }
@@ -1196,12 +1200,12 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
           // COALESCE, checked arithmetic, temporal functions and parsing in a skipped
           // operand are deliberately not declared eagerly safe by the accepted G05 guard.
           val expected = Seq(
-            interval -> (0, 1),
-            otherConditions(1) -> (1, 0),
-            crossInputBounds -> (2, 0),
-            unchargedConditions(0) -> (1, 0)) ++
-            unchargedConditions.drop(1).map(_ -> (0, 1)) ++
-            crossConditionals.map(_ -> (0, 1))
+            interval -> ((0, 1)),
+            otherConditions(1) -> ((1, 0)),
+            crossInputBounds -> ((2, 0)),
+            unchargedConditions(0) -> ((1, 0))) ++
+            unchargedConditions.drop(1).map(_ -> ((0, 1))) ++
+            crossConditionals.map(_ -> ((0, 1)))
           for ((query, shape) <- expected) {
             val (off, on) = offAndOn(run(query))
             assert(joins(off) == shape, s"query=$query\nplan:\n$off")
@@ -1210,12 +1214,12 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
           val safeCase = "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
             "AND CASE WHEN e.s = d.s THEN e.v >= d.l ELSE e.v < d.l END"
           val (off, on) = offAndOn(run(safeCase))
-          assert(joins(off) == (1, 0), s"plan:\n$off")
-          assert(joins(on) == (0, 1), s"plan:\n$on")
+          assert(joins(off) == ((1, 0)), s"plan:\n$off")
+          assert(joins(on) == ((0, 1)), s"plan:\n$on")
           withSQLConf(
             flag -> "true",
             costTable -> "smjCrossCondition.comet=0,0,0;smjCrossCondition.spark=0,0") {
-            assert(joins(run(safeCase)) == (1, 0))
+            assert(joins(run(safeCase)) == ((1, 0)))
           }
         }
       }
@@ -1566,7 +1570,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
           }
           val (off, on) = offAndOn(run(fbjOrderType))
           assert(
-            conditions(off) == (Seq("band"), Seq("forward", "replenishment", "replenishment")),
+            conditions(off) == ((Seq("band"), Seq("forward", "replenishment", "replenishment"))),
             s"plan:\n$off")
           val (native, spark) = conditions(on)
           assert(native.contains("band") && !spark.contains("band"), s"plan:\n$on")
@@ -1612,7 +1616,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
         same(model.operatorCost(expand, Engine.Spark), 0)
         val narrow = new EngineCostModel(EngineCostTable.default, -1, 0, Map.empty, 1)
         assert(narrow.terms(expand, Engine.Spark) == Seq(Term(ExpandNoCodegen, w, 3)))
-        same(narrow.operatorCost(expand, Engine.Spark), 3 * 21 * w.leaves)
+        same(narrow.operatorCost(expand, Engine.Spark), (3 * 21 * w.leaves).toDouble)
 
         val exploded = run("SELECT k, explode(array(v, v + 1)) AS e FROM t")
         val generate = nodes(exploded)

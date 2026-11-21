@@ -138,3 +138,32 @@ aggregate-buffer fallbacks. No new unsafe path is admitted and PR #5889 remains
 excluded. Original q2/q3/q77a plan oracles also passed before regeneration.
 The focused final C2R/pooling and conditional-evaluation regressions passed on
 Spark 4.2.1, retaining original Spark result/error and native/fallback assertions.
+
+## Early remote quality feedback
+
+The first candidate `68133883ea32f6ab8c758f2b9d87f4aa7a36e642` exposed syntactic
+and semantic Scalafix findings and strict Scala 2.12 warnings. The affected CI,
+Miri and RC runs were stopped promptly; no canceled run counts as qualification.
+CodeQL passed that earlier SHA and must run again for the final candidate.
+
+The corrections remove redundant string-interpolation prefixes and unused
+imports, explicitly discard three already ignored return values, and make
+existing numeric and tuple adaptations explicit, including test fixtures.
+Thirty-seven Delta dollar-placeholder literals use constant concatenation: both
+Scala compilers confirm identical original UTF-8 bytes and strict-lint success.
+The older Scalafix automatic rewrite would change those values, so its unsafe
+suggestion is rejected and retained as a negative control.
+Two Bloom fixture identifiers retain their inferred type explicitly for Scalafix.
+Two unused default SPI
+parameters retain their required signatures with parameter-local annotations.
+Existing shuffle-manager annotations address Scala 2.13 private-type warnings;
+the inherited unused-annotation exception now selects the two exact source files,
+because this compiler diagnostic has an empty method site. Compiler controls
+confirm an unrelated source file still fails. Remaining warning categories and
+all SQL/result/error/native assertions stay strict. No execution algorithm,
+configuration default, calibrated cost or public method signature changes.
+
+The exact strict Spark 3.5 + Delta reactor and Spark 4.2 + Delta semantic Scalafix
+are checked locally before publishing the replacement candidate. Actual command
+receipts and source hashes are retained externally. The replacement SHA still
+requires complete CI and exact-SHA dualarch RC qualification.

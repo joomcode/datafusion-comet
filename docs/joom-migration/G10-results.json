@@ -1,7 +1,7 @@
 {
   "date": "2026-11-21",
   "group": "G10",
-  "status": "SOURCE_FROZEN_LOCAL_CHECKS_PASSED_POST_COMMIT_QUALIFICATION_REQUIRED",
+  "status": "REPLACEMENT_SOURCE_FROZEN_LOCAL_QUALITY_PASSED_POST_COMMIT_QUALIFICATION_REQUIRED",
   "branch": "joom/1.2-release-qualification",
   "base_commit": "4467d0337089036d3f01d28375260ce3dbcaaca5",
   "cards": "All agreed 58 active cards, plus preservation of historical H01; no scope is automatically excluded.",
@@ -15,14 +15,17 @@
     "jvm_arrow": "18.3.0",
     "java": "17.0.19-tem"
   },
-  "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest.json",
-  "source_manifest_sha256": "a2b931fabcb01a8fead9269b3bf33e059fc82d0849b2002c8cf3f62f93a5c27f",
+  "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v2.json",
+  "source_manifest_sha256": "7f330714d31202dfd844a1bf5a8d774a1b89f725df606f94ba6e3d6be30ef9e5",
   "changed_source_sha256": {
     ".github/actions/java-test/action.yaml": "3ff24f865e0b76d1e8fb7f991f7ac201294c4fcc7a9491feeb28a3b96823edc2",
     ".github/actions/rust-test/action.yaml": "ae1207a8c531775baf0db3698ea232171ec203675105cf886e87a17198e7016d",
     ".github/workflows/README.md": "895632fc8075642f4fd1f750df8850e8f97513f296d0b688d3882b2be2e1489f",
     ".github/workflows/codeql.yml": "6cf63c424f89916956f0e6be94cae161afcb0cfc8e1c95826f9e09641ac43c8d",
     ".github/workflows/pr_build_linux.yml": "458ce73cc318519f0b8d3924708f82da6109f1aae50fe6c957533d884f20f42e",
+    "contrib/delta-spark/src/main/scala/org/apache/comet/contrib/delta/CometDeltaNativeScan.scala": "a64544ed87f9a2713548add46bee20aecea010a1f85494c7b41508ac42e46600",
+    "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/CometDeltaS3Suite.scala": "66fb0061324315cc8fd0d0c5d4992a1864b55ae6280a1d52f64fc75eaf299b33",
+    "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/DeltaScanContribSuite.scala": "6291496717e08f5322b560b0642ab81bb26822d57de517c77e66162da659f395",
     "dev/ci/verify-native-windows.py": "38d49357b2672501704f9efa3dcb74ee746e9e06b6ee27f3acb4013d3e9e28cd",
     "dev/release/joom/build-release.sh": "e2ed184d3cf3f7442346115ba1db647519d1f09972abcd4e01e130a7734ec365",
     "docs/source/contributor-guide/ci.md": "036cdc86a743069db2edd50fef11166e1b2692bb473379e6983a7497a7ec8b5b",
@@ -34,9 +37,12 @@
     "native/vendor/datafusion-physical-plan/src/aggregates/replay_budget.rs": "ecc58c9c70412a1a57d41a504260fdc0a965d50749f8c685c73950ffd0abe780",
     "native/vendor/datafusion-physical-plan/src/aggregates/replay_budget_tests.rs": "130430df00c3ed7955e37dcbe9a7da588efc3ed8902fdf9299c3215e699800fa",
     "native/vendor/datafusion-physical-plan/src/aggregates/single_stream.rs": "c24ee05527eed64d757705ce623ae7e49c3f23e981d7fb3185ba82f6294b42fa",
-    "pom.xml": "5f1e379f8063556fa53f81bda0429b28835a2f93497cfc9032d2c7bf3fd1050f",
+    "pom.xml": "448654ea53df040b516f983a171f2f4ee18f8f4766f47818a95f32fc13012020",
+    "spark/src/main/scala/org/apache/comet/CometExecIterator.scala": "3f6a20db8512e0cb8003387d2037eec4f7169c73963369694ea4837801fe3a22",
+    "spark/src/main/scala/org/apache/comet/rules/CostBasedEngineChoice.scala": "a39888c83aabd0043b985337b86f806df13cfd6672aa2714d195aa08540c5b59",
+    "spark/src/main/scala/org/apache/comet/udf/codegen/CometUdfFunctionPool.scala": "d9c73e1d3926234901943fde75b662984e4b70ad5ae5d198ce797d470ab4a279",
     "spark/src/main/scala/org/apache/spark/sql/comet/CometColumnarToRowExec.scala": "00f6be2ffe65acc9bd271ea7873fd4fc8654a50afb50dc67164e22ae7054a824",
-    "spark/src/main/scala/org/apache/spark/sql/comet/operators.scala": "5ac8fa1e52da9a92bfcfb3b30c3e8659170ce72aaa889b6e9bd36479d26cfea3",
+    "spark/src/main/scala/org/apache/spark/sql/comet/operators.scala": "697533e0b31d32037c40fad42c721532b066635260415d6d4c89863931ba4858",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark3_5/q58/extended.txt": "aff3cbd2b32a73889c36982b5b944f366545e642e0d307dfd7e11600c7d5da59",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q11/extended.txt": "80dd784089616a8645a18fef701e28c21cd2ef19aab15ad98dc139c086c9db14",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v1_4-spark4_0/q14b/extended.txt": "df0f036b026cec54a331ce5c37f20e560fcb2e1eb3bec3a32e403a0ba974c117",
@@ -143,21 +149,25 @@
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q75/extended.txt": "aac6fd1a3c0415b0106d651d8496c51db48499451759aec95910b451dc27bf0f",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q80a/extended.txt": "a34a9335a066614f68f632bd865cd50b11842114daa87695209e76116683e878",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q98/extended.txt": "52b4f6b9d05da636f0edcc5f0e6991ed344742a32fe6ecb7f5a993d52fb75414",
-    "spark/src/test/scala/org/apache/comet/CometCoverageStatsSuite.scala": "3b742ebe2f832197e4c8ddc88728d985a724f538bfa1989271021b539d7f285a",
-    "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "36ec202581247169d39b25a38963ca426ce38b6087c7d342fcb07aab98a876b3",
-    "spark/src/test/scala/org/apache/comet/exec/CometExec3_4PlusSuite.scala": "99d67d7e0e91136fb84e1b3d76e4c1fcbc27cb170b0201fe4941d24618c0d17c",
-    "spark/src/test/scala/org/apache/comet/exec/CometExecSuite.scala": "565f74276fd29584c51baaa7306fc7c135e08bf9d3cf7cc548519a6f60f632d6",
+    "spark/src/test/scala/org/apache/comet/CometCoverageStatsSuite.scala": "72737f506b1e83df3e708bd135fa4c9566634d2362f96bc47bdfe2af70ba33f4",
+    "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "d4a77914ab1088af612ba733131230d4cfd5abd259db7dd6df8bc117a2463dcf",
+    "spark/src/test/scala/org/apache/comet/exec/CometExec3_4PlusSuite.scala": "fe4a840958ad279578d39058ba07ae4b92497264678d2d286bf6e860fa3fc19f",
+    "spark/src/test/scala/org/apache/comet/exec/CometExecSuite.scala": "abaff3006f8c42f8124e69bd307394f791373f4a1544f732c2a0d5bbf97bb1f2",
     "spark/src/test/scala/org/apache/comet/exec/CometJoinSuite.scala": "fd58b3303eafabd1936355c3c40dcc71cd3c0591da6bf56d83ffd93ed934f695",
-    "spark/src/test/scala/org/apache/comet/exec/CometOffTaskThreadSuite.scala": "39dc0134e8814694a283d96f935a8296db726e70f405320a99ea660ef48c22bf",
-    "spark/src/test/scala/org/apache/comet/exec/CometShuffleReadCoalesceSuite.scala": "c02a4622680d98ff0998c9043e9e01520d1e5285cbf6057d611cb5447462555e",
+    "spark/src/test/scala/org/apache/comet/exec/CometOffTaskThreadSuite.scala": "628e6db98bfa529311e5b79539e7cdb6bce9d9cc857f1cd4f23f3c6968c6827b",
+    "spark/src/test/scala/org/apache/comet/exec/CometShuffleReadCoalesceSuite.scala": "e6f2f647f32d608e888c5a68e557194c8734a4ff0a72631118af779b05ddc5ae",
+    "spark/src/test/scala/org/apache/comet/exec/CometSmjJoinFilterAnsiSuite.scala": "093dca07de63e4043773b29a13a759ddb7c05e98e19341913c64963fff9d6b1b",
     "spark/src/test/scala/org/apache/comet/exec/CometWindowExecSuite.scala": "406a06290bc837fb8956d513b90013552a110545c97e9e37dbc22ba2addf497a",
     "spark/src/test/scala/org/apache/comet/exec/CometWindowSemanticsSuite.scala": "8c255386c129bffa584e4b772a1633dc35c946d85ceb39815f48408682ce053e",
-    "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineChoiceSuite.scala": "eb48ae28784cecd5c184779228384c3d35f467e4dd5877915b6c8d8bf4964659",
-    "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineCorrectnessSuite.scala": "68e5e2f5fd2c9e972f18f25888791e2d1b14e08fbf489645405c668f4dba339f",
+    "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineChoiceSuite.scala": "5bfa4bdc933ff13bd38c01c13353f8eafeb043bc1ece4f97946b0c529b7bfb62",
+    "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineCorrectnessSuite.scala": "6ed84735ce378b361873a2ff93d88729babcb688d2341f92b4f80628e7b816df",
+    "spark/src/test/scala/org/apache/spark/shuffle/sort/CometShuffleExternalSorterSpillSuite.scala": "99882cc39f16d48594f55626b110ab4dcb866f60203fd70810e6850f73bd2b59",
     "spark/src/test/scala/org/apache/spark/sql/CometTestBase.scala": "a4c623c3caadc88c43d9fb5b7d777255ede2e2335a051a6855021f132781e49c",
     "spark/src/test/scala/org/apache/spark/sql/comet/CometTaskMetricsSuite.scala": "9545a591ec8ae4ded81430ae0d185d0f516027ab8680400ea9cb424ee2ffebf3",
     "spark/src/test/scala/org/apache/spark/sql/comet/CometUdfFunctionPoolSuite.scala": "c62facf136a0cc18f98f97b38d1812fe4f9e941c86c5ba938d5303af483d3fd0",
-    "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometShuffleWriterSemanticsSuite.scala": "7dcca7d052879b3c5d6ba7b74ea5237517a16d63b8fe0281cb38afef11366294"
+    "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometBlockStoreShuffleReaderSuite.scala": "30907ed867fbca7e203dfb90454839d7746768cb6916190c3846e23b663a3865",
+    "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometShuffleWriterSemanticsSuite.scala": "7dcca7d052879b3c5d6ba7b74ea5237517a16d63b8fe0281cb38afef11366294",
+    "spark/src/test/scala/org/apache/spark/sql/comet/util/UtilsSuite.scala": "36ddcd4a4828de773e60593208e93054c90af6a917010cd9ea95ae191873c943"
   },
   "plan_profiles": [
     {
@@ -357,6 +367,151 @@
     {
       "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_ci-audit/ci-final-scope-review.json",
       "sha256": "e780acc8d43ada45e99deefccc584fb05b072476b8145f0c7e9999009f1315f5"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_strict-scala/strict-fix-semantics-review.json",
+      "sha256": "b7c5253811a99d40d5f8e0b4a0fb3d1329e9d68adb1b32a85d2b5a0ad190e88b"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_strict-scala/annotation-source-scope-controls.json",
+      "sha256": "cf3be9a1b9f245b3a0d47dbda06291022ca6e50e5f3579603a4ac685affadbda"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_coverage-audit/strict-choice-explicit-adaptation-proof.json",
+      "sha256": "0b11a5d2067288862b2d86998e47608f6a83c1fbaf4538e81d3bb7d1e2394888"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_coverage-audit/syntactic-test-prefix-only-proof.json",
+      "sha256": "bb190470eee21218036698db0e348ce35230dcd96b8c7d8556c4b585ad993547"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/shuffle-nowarn-crossprofile-review.json",
+      "sha256": "6226301e3c172316a6cc4fbcb18c0eebe8a01051fedc2131daf3fa6ab2588508"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_coverage-audit/20261121_delta-dollar-literals/final-constant-applied-proof.json",
+      "sha256": "8c21987b5d621498b4ddf07b45d66a10ad0d3c352fbe386f5d9f4ee8b9a907db"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_strict-scala/final-local-qualification-review.json",
+      "sha256": "7e193287dc4399c878ceffe4911f43d1a210637d289290b18b08adac67e1429c"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/final-followup-review-68133883e.json",
+      "sha256": "0756bb1cb91426bd63ceeb6ee88ecc7b2b35a1a66bb5c5837b75d02467baca5a"
     }
-  ]
+  ],
+  "superseded_remote_attempts": [
+    {
+      "source_commit": "68133883ea32f6ab8c758f2b9d87f4aa7a36e642",
+      "full_ci": 44923497989,
+      "rc": 44923503155,
+      "miri": 44923500545,
+      "codeql": 44923472731,
+      "status": "CI_RC_MIRI_CANCELED_AFTER_EARLY_SOURCE_QUALITY_FAILURES_CODEQL_PASSED",
+      "failures": [
+        "Syntactic Scalafix redundant interpolation",
+        "Strict Scala2.12 discarded values/numeric widening/unused metadata",
+        "Semantic Scalafix same prefixes plus two unused imports"
+      ],
+      "evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/cancel-first-candidate.json",
+      "final_qualification_credit": false
+    }
+  ],
+  "previous_source_manifests": [
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest.json",
+      "sha256": "a2b931fabcb01a8fead9269b3bf33e059fc82d0849b2002c8cf3f62f93a5c27f",
+      "source": "68133883ea32f6ab8c758f2b9d87f4aa7a36e642"
+    }
+  ],
+  "corrective_local_quality": {
+    "strict_spark35_delta": {
+      "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_strict-scala/strict-spark35-delta-constant-qualified.json",
+      "receipt_sha256": "f480ff8c2d65e55671b24b3467c2d261741f054ce249f20edb95499387cefdc4",
+      "command_result": {
+        "status": "PASSED",
+        "command": [
+          "./mvnw",
+          "-B",
+          "test-compile",
+          "-Pspark-3.5,delta",
+          "-Pstrict-warnings",
+          "-DskipTests"
+        ],
+        "exit": 0,
+        "elapsed_seconds": 79.73263502120972,
+        "java_home": "${HOME}/.sdkman/candidates/java/17.0.19-tem",
+        "log": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_strict-scala/strict-spark35-delta-constant-qualified.log",
+        "source_sha256": {
+          "contrib/delta-spark/src/main/scala/org/apache/comet/contrib/delta/CometDeltaNativeScan.scala": "a64544ed87f9a2713548add46bee20aecea010a1f85494c7b41508ac42e46600",
+          "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/CometDeltaS3Suite.scala": "66fb0061324315cc8fd0d0c5d4992a1864b55ae6280a1d52f64fc75eaf299b33",
+          "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/DeltaScanContribSuite.scala": "6291496717e08f5322b560b0642ab81bb26822d57de517c77e66162da659f395",
+          "pom.xml": "448654ea53df040b516f983a171f2f4ee18f8f4766f47818a95f32fc13012020",
+          "spark/src/main/scala/org/apache/comet/CometExecIterator.scala": "3f6a20db8512e0cb8003387d2037eec4f7169c73963369694ea4837801fe3a22",
+          "spark/src/main/scala/org/apache/comet/rules/CostBasedEngineChoice.scala": "a39888c83aabd0043b985337b86f806df13cfd6672aa2714d195aa08540c5b59",
+          "spark/src/main/scala/org/apache/comet/udf/codegen/CometUdfFunctionPool.scala": "d9c73e1d3926234901943fde75b662984e4b70ad5ae5d198ce797d470ab4a279",
+          "spark/src/main/scala/org/apache/spark/sql/comet/operators.scala": "697533e0b31d32037c40fad42c721532b066635260415d6d4c89863931ba4858",
+          "spark/src/test/scala/org/apache/comet/CometCoverageStatsSuite.scala": "72737f506b1e83df3e708bd135fa4c9566634d2362f96bc47bdfe2af70ba33f4",
+          "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "d4a77914ab1088af612ba733131230d4cfd5abd259db7dd6df8bc117a2463dcf",
+          "spark/src/test/scala/org/apache/comet/exec/CometExec3_4PlusSuite.scala": "fe4a840958ad279578d39058ba07ae4b92497264678d2d286bf6e860fa3fc19f",
+          "spark/src/test/scala/org/apache/comet/exec/CometExecSuite.scala": "abaff3006f8c42f8124e69bd307394f791373f4a1544f732c2a0d5bbf97bb1f2",
+          "spark/src/test/scala/org/apache/comet/exec/CometOffTaskThreadSuite.scala": "628e6db98bfa529311e5b79539e7cdb6bce9d9cc857f1cd4f23f3c6968c6827b",
+          "spark/src/test/scala/org/apache/comet/exec/CometShuffleReadCoalesceSuite.scala": "e6f2f647f32d608e888c5a68e557194c8734a4ff0a72631118af779b05ddc5ae",
+          "spark/src/test/scala/org/apache/comet/exec/CometSmjJoinFilterAnsiSuite.scala": "093dca07de63e4043773b29a13a759ddb7c05e98e19341913c64963fff9d6b1b",
+          "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineChoiceSuite.scala": "5bfa4bdc933ff13bd38c01c13353f8eafeb043bc1ece4f97946b0c529b7bfb62",
+          "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineCorrectnessSuite.scala": "6ed84735ce378b361873a2ff93d88729babcb688d2341f92b4f80628e7b816df",
+          "spark/src/test/scala/org/apache/spark/shuffle/sort/CometShuffleExternalSorterSpillSuite.scala": "99882cc39f16d48594f55626b110ab4dcb866f60203fd70810e6850f73bd2b59",
+          "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometBlockStoreShuffleReaderSuite.scala": "30907ed867fbca7e203dfb90454839d7746768cb6916190c3846e23b663a3865",
+          "spark/src/test/scala/org/apache/spark/sql/comet/util/UtilsSuite.scala": "36ddcd4a4828de773e60593208e93054c90af6a917010cd9ea95ae191873c943"
+        }
+      }
+    },
+    "spark42_delta_package_semantic_scalafix": {
+      "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_strict-scala/spark42-delta-package-scalafix-constant-qualified.json",
+      "receipt_sha256": "44a4ab8e6cba78a2100b4096bf5393b78e95ab41d8b04ca72e7a020f677c7e88",
+      "command_result": {
+        "status": "PASSED",
+        "command": [
+          "./mvnw",
+          "-B",
+          "package",
+          "-DskipTests",
+          "-Psemanticdb",
+          "-Pspark-4.2,delta",
+          "scalafix:scalafix",
+          "-Dscalafix.mode=CHECK"
+        ],
+        "exit": 0,
+        "elapsed_seconds": 60.00809192657471,
+        "java_home": "${HOME}/.sdkman/candidates/java/17.0.19-tem",
+        "log": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_strict-scala/spark42-delta-package-scalafix-constant-qualified.log",
+        "source_sha256": {
+          "contrib/delta-spark/src/main/scala/org/apache/comet/contrib/delta/CometDeltaNativeScan.scala": "a64544ed87f9a2713548add46bee20aecea010a1f85494c7b41508ac42e46600",
+          "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/CometDeltaS3Suite.scala": "66fb0061324315cc8fd0d0c5d4992a1864b55ae6280a1d52f64fc75eaf299b33",
+          "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/DeltaScanContribSuite.scala": "6291496717e08f5322b560b0642ab81bb26822d57de517c77e66162da659f395",
+          "pom.xml": "448654ea53df040b516f983a171f2f4ee18f8f4766f47818a95f32fc13012020",
+          "spark/src/main/scala/org/apache/comet/CometExecIterator.scala": "3f6a20db8512e0cb8003387d2037eec4f7169c73963369694ea4837801fe3a22",
+          "spark/src/main/scala/org/apache/comet/rules/CostBasedEngineChoice.scala": "a39888c83aabd0043b985337b86f806df13cfd6672aa2714d195aa08540c5b59",
+          "spark/src/main/scala/org/apache/comet/udf/codegen/CometUdfFunctionPool.scala": "d9c73e1d3926234901943fde75b662984e4b70ad5ae5d198ce797d470ab4a279",
+          "spark/src/main/scala/org/apache/spark/sql/comet/operators.scala": "697533e0b31d32037c40fad42c721532b066635260415d6d4c89863931ba4858",
+          "spark/src/test/scala/org/apache/comet/CometCoverageStatsSuite.scala": "72737f506b1e83df3e708bd135fa4c9566634d2362f96bc47bdfe2af70ba33f4",
+          "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "d4a77914ab1088af612ba733131230d4cfd5abd259db7dd6df8bc117a2463dcf",
+          "spark/src/test/scala/org/apache/comet/exec/CometExec3_4PlusSuite.scala": "fe4a840958ad279578d39058ba07ae4b92497264678d2d286bf6e860fa3fc19f",
+          "spark/src/test/scala/org/apache/comet/exec/CometExecSuite.scala": "abaff3006f8c42f8124e69bd307394f791373f4a1544f732c2a0d5bbf97bb1f2",
+          "spark/src/test/scala/org/apache/comet/exec/CometOffTaskThreadSuite.scala": "628e6db98bfa529311e5b79539e7cdb6bce9d9cc857f1cd4f23f3c6968c6827b",
+          "spark/src/test/scala/org/apache/comet/exec/CometShuffleReadCoalesceSuite.scala": "e6f2f647f32d608e888c5a68e557194c8734a4ff0a72631118af779b05ddc5ae",
+          "spark/src/test/scala/org/apache/comet/exec/CometSmjJoinFilterAnsiSuite.scala": "093dca07de63e4043773b29a13a759ddb7c05e98e19341913c64963fff9d6b1b",
+          "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineChoiceSuite.scala": "5bfa4bdc933ff13bd38c01c13353f8eafeb043bc1ece4f97946b0c529b7bfb62",
+          "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineCorrectnessSuite.scala": "6ed84735ce378b361873a2ff93d88729babcb688d2341f92b4f80628e7b816df",
+          "spark/src/test/scala/org/apache/spark/shuffle/sort/CometShuffleExternalSorterSpillSuite.scala": "99882cc39f16d48594f55626b110ab4dcb866f60203fd70810e6850f73bd2b59",
+          "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometBlockStoreShuffleReaderSuite.scala": "30907ed867fbca7e203dfb90454839d7746768cb6916190c3846e23b663a3865",
+          "spark/src/test/scala/org/apache/spark/sql/comet/util/UtilsSuite.scala": "36ddcd4a4828de773e60593208e93054c90af6a917010cd9ea95ae191873c943"
+        }
+      }
+    },
+    "runtime_tests_note": "These are build/quality checks, not additional runtime-test pass counts. Earlier129-per-profile plan and34C2R/conditional runtime evidence is retained; final exact-SHA full CI remains required.",
+    "preservation": "Explicit adaptations and compiler-proven literal bytes; no SQL/result/error/native assertion is relaxed. No new allocation policy, cost coefficient, configuration default, dependency pin or production algorithm changes.",
+    "literal_proof_binding": "Original compiler-tested literals precede formatting; independent final-followup review binds actual formatted files and proves full Delta source-token equivalence against original68133883e, covering layout-only hash drift."
+  }
 }

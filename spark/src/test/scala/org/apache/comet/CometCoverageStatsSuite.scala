@@ -33,8 +33,6 @@ import org.apache.spark.sql.internal.SQLConf
  */
 class CometCoverageStatsSuite extends CometTestBase {
 
-  import testImplicits._
-
   for ((name, predicate, nativeAnd, sparkFallback) <- Seq(
       ("native conjunction", "_1 > 1 AND _1 < 5", true, false),
       ("single predicate", "_1 IS NOT NULL", false, false),

@@ -48,8 +48,8 @@ class CometExec3_4PlusSuite extends CometTestBase {
     if (isSpark42Plus) new FunctionIdentifier(name, Some("builtin"), Some("system"))
     else new FunctionIdentifier(name)
 
-  val func_might_contain = bloomFunctionIdentifier("might_contain")
-  val func_bloom_filter_agg = bloomFunctionIdentifier("bloom_filter_agg")
+  val func_might_contain: FunctionIdentifier = bloomFunctionIdentifier("might_contain")
+  val func_bloom_filter_agg: FunctionIdentifier = bloomFunctionIdentifier("bloom_filter_agg")
 
   override def beforeAll(): Unit = {
     super.beforeAll()

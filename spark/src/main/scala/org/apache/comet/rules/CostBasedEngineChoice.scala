@@ -149,13 +149,14 @@ class EngineCostModel(
       case (Window, window: WindowExec) =>
         val functions = window.windowExpression.map(windowFunctionClass)
         Term(Window, widthOf(window.child.output)) +: functions.distinct.map { c =>
-          Term(c, Width(functions.size, 0), functions.count(_ == c))
+          Term(c, Width(functions.size, 0), functions.count(_ == c).toDouble)
         }
       case (WglPartial | WglFinal, _) =>
         val mode = ShimCometWindowGroupLimit.extract(op).map(_.mode)
         val phase = if (mode.contains("Partial")) WglPartial else WglFinal
         if (phase == costClass) Seq(Term(phase, out)) else Nil
-      case (Expand, expand: ExpandExec) => Seq(Term(Expand, out, expand.projections.size))
+      case (Expand, expand: ExpandExec) =>
+        Seq(Term(Expand, out, expand.projections.size.toDouble))
       case (Predicate, filter: FilterExec) =>
         Seq(Term(Predicate, widthOf(filter.condition.references.toSeq)))
       case (ProjectPassThrough, _) => if (sparkOverScan) Nil else Seq(Term(costClass, out))
@@ -165,7 +166,7 @@ class EngineCostModel(
         if (computed == 0) {
           Nil
         } else {
-          Seq(Term(if (sparkOverScan) ExprOverScan else Expr, out, computed))
+          Seq(Term(if (sparkOverScan) ExprOverScan else Expr, out, computed.toDouble))
         }
       case (Agg, agg: BaseAggregateExec) =>
         val share = aggregateShare(agg)

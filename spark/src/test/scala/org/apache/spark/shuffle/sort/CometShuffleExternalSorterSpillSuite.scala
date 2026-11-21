@@ -91,9 +91,9 @@ class CometShuffleExternalSorterSpillSuite extends CometTestBase {
     val bytes = new Array[Byte](4 + 16)
     ByteBuffer.wrap(bytes).putInt(16)
     val row = new UnsafeRow(1)
-    row.pointTo(bytes, Platform.BYTE_ARRAY_OFFSET + 4, 16)
+    row.pointTo(bytes, (Platform.BYTE_ARRAY_OFFSET + 4).toLong, 16)
     row.setInt(0, value)
-    sorter.insertRecord(bytes, Platform.BYTE_ARRAY_OFFSET, bytes.length, value % 2)
+    sorter.insertRecord(bytes, Platform.BYTE_ARRAY_OFFSET.toLong, bytes.length, value % 2)
   }
 
   test("buffered records are spilled when another consumer of the task needs memory") {

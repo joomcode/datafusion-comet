@@ -414,7 +414,7 @@ class CometExecIterator(
       }
       attempt(nativeUtil.close())
       shuffleBlockIterators.values.foreach(it => attempt(it.close()))
-      attempt(killWatch.cancel(false))
+      attempt { val _ = killWatch.cancel(false) }
       attempt(planLock.synchronized { planReleased = true })
 
       // Released last and exactly once, even if the teardown above failed: dropping the native
@@ -492,7 +492,7 @@ object CometExecIterator extends Logging {
             } catch {
               case NonFatal(e) =>
                 logWarning(
-                  s"Failed to cancel the native plan of killed task " +
+                  "Failed to cancel the native plan of killed task " +
                     s"${context.taskAttemptId()}",
                   e)
             }

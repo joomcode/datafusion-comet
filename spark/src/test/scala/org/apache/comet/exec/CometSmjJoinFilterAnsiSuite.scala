@@ -107,7 +107,7 @@ class CometSmjJoinFilterAnsiSuite extends CometTestBase {
 
   for (adaptive <- Seq(false, true); batchSize <- Seq(7, 64)) {
     test(
-      s"ANSI=true filtered SMJ retains duplicates and unmatched FULL rows: " +
+      "ANSI=true filtered SMJ retains duplicates and unmatched FULL rows: " +
         s"AQE=$adaptive batch=$batchSize") {
       withJoinConfs(adaptive, batchSize) {
         // Identical physical rows intentionally repeat. A key->row map or a set would hide losses.
@@ -142,7 +142,7 @@ class CometSmjJoinFilterAnsiSuite extends CometTestBase {
     }
 
     test(
-      s"ANSI=true filtered SMJ preserves lazy branches and mandatory errors: " +
+      "ANSI=true filtered SMJ preserves lazy branches and mandatory errors: " +
         s"AQE=$adaptive batch=$batchSize") {
       withJoinConfs(adaptive, batchSize) {
         // Mixed guards force vector evaluation. An all-true/all-false batch can hide eager RHS
@@ -187,7 +187,7 @@ class CometSmjJoinFilterAnsiSuite extends CometTestBase {
                 // Keep a mixed-side nullable LHS so it cannot move into one input scan.
                 val nullableQuery = query(
                   kind,
-                  s"(CASE WHEN l._3 + r._2 <= l._4 THEN CAST(NULL AS BOOLEAN) " +
+                  "(CASE WHEN l._3 + r._2 <= l._4 THEN CAST(NULL AS BOOLEAN) " +
                     s"ELSE l._5 END) $op CAST(l._2 AS INT) > r._2")
                 // Default Catalyst replaces this literal NULL with false in an ON predicate:
                 // AND skips the cast, whereas OR still has to evaluate it. Check that contract.

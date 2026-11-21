@@ -116,7 +116,9 @@ private[comet] trait PlanDataInjector {
    */
   def inject(op: Operator, preparedCommon: Prepared, partitionBytes: Array[Byte]): Operator
 
-  def internScan(op: Operator, pool: QueryContextInterner.Pool): Operator = op
+  def internScan(
+      op: Operator,
+      @annotation.nowarn("cat=unused") pool: QueryContextInterner.Pool): Operator = op
 
   /**
    * Messages hidden inside an opaque scan envelope, invisible to protobuf field traversal. Keep
@@ -124,7 +126,8 @@ private[comet] trait PlanDataInjector {
    * bytecode relocates Message but whose Scala signatures retain its original name. Core
    * validates these objects against its actual protobuf Message before traversal.
    */
-  def embeddedFunctionMessages(op: Operator): Seq[AnyRef] = Seq.empty
+  def embeddedFunctionMessages(@annotation.nowarn("cat=unused") op: Operator): Seq[AnyRef] =
+    Seq.empty
 
   /**
    * Finalized scan predicates can introduce JVM UDF references after scalar subqueries resolve.

@@ -239,7 +239,7 @@ object CometUdfFunctionPool {
         // The closed flag also rejects an add/resolve racing that completion.
         context.addTaskCompletionListener[Unit] { _ =>
           fresh.close()
-          tasks.remove(taskId, fresh)
+          val _ = tasks.remove(taskId, fresh)
         }
       } catch {
         case failure: Throwable =>
@@ -274,7 +274,7 @@ object CometUdfFunctionPool {
           require(existing eq value, s"Conflicting UDF function identity $id inside one task")
         }
       }
-      functions ++= ids.zip(values)
+      val _ = functions ++= ids.zip(values)
     }
     def resolve(id: Long): Option[AnyRef] = synchronized {
       require(!closed, "Cannot resolve UDF functions after task completion")

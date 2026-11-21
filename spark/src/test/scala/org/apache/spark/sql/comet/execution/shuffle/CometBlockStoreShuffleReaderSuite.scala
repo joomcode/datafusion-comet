@@ -81,7 +81,8 @@ class CometBlockStoreShuffleReaderSuite extends CometTestBase {
       Iterator(
         (
           remote,
-          (0 until blocks).map(i => (ShuffleBlockId(0, i, 0): BlockId, blockSize.toLong, i)))),
+          (0 until blocks).map(i =>
+            (ShuffleBlockId(0, i.toLong, 0): BlockId, blockSize.toLong, i)))),
       (_, in) => in,
       48L * 1024 * 1024,
       Int.MaxValue,

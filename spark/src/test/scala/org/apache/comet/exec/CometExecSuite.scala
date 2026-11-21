@@ -3548,7 +3548,7 @@ class CometExecSuite extends CometTestBase {
 
   for (dictionaryEnabled <- Seq(false, true)) {
     test(
-      s"sort wide binary payload preserves values across the native boundary, " +
+      "sort wide binary payload preserves values across the native boundary, " +
         s"dictionary=$dictionaryEnabled") {
       // A small batch forces repeated output handoffs. Nulls and distinct backing buffers
       // catch a view retaining the wrong payload, with both Parquet binary representations.
