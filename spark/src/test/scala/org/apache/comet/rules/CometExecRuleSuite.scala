@@ -369,6 +369,55 @@ class CometExecRuleSuite extends CometTestBase {
     nativeLeaves(OperatorOuterClass.Operator.parseFrom(op.serializedPlanOpt.plan.get))
       .map(_.getOpStructCase.name)
 
+  /**
+   * A deliberately stale Scan over an existing shuffle stage. The ordinary first pass can already
+   * choose ShuffleScan, so a test of the refresh path must build the old representation
+   * explicitly rather than depend on an obsolete planner limitation.
+   */
+  private def createAdaptiveAggregateWithStaleScan(): CometHashAggregateExec = {
+    val aggregate = createAdaptiveAggregate()
+    def staleScan(op: OperatorOuterClass.Operator): OperatorOuterClass.Operator = {
+      if (op.hasShuffleScan) {
+        val input = op.getShuffleScan
+        op.toBuilder
+          .clearShuffleScan()
+          .setScan(
+            OperatorOuterClass.Scan
+              .newBuilder()
+              .addAllFields(input.getFieldsList)
+              .setSource(input.getSource))
+          .build()
+      } else {
+        op.toBuilder
+          .clearChildren()
+          .addAllChildren(op.getChildrenList.asScala.map(staleScan).asJava)
+          .build()
+      }
+    }
+    val originalLeaves = nativeLeaves(aggregate.nativeOp)
+    assert(originalLeaves.forall(leaf => leaf.hasScan || leaf.hasShuffleScan))
+    val stale = aggregate.copy(
+      nativeOp = staleScan(aggregate.nativeOp),
+      serializedPlanOpt = SerializedPlan(None))
+    stale.copyTagsFrom(aggregate)
+    val fixture = CometExecRule.convertBlocks(stale).asInstanceOf[CometHashAggregateExec]
+    val staleLeaves = nativeLeaves(fixture.nativeOp)
+    assert(staleLeaves.forall(_.hasScan))
+    assert(staleLeaves.size == originalLeaves.size)
+    staleLeaves.zip(originalLeaves).foreach { case (scan, original) =>
+      val fields =
+        if (original.hasShuffleScan) original.getShuffleScan.getFieldsList
+        else original.getScan.getFieldsList
+      val source =
+        if (original.hasShuffleScan) original.getShuffleScan.getSource
+        else original.getScan.getSource
+      assert(scan.getScan.getFieldsList == fields)
+      assert(scan.getScan.getSource == source)
+    }
+    assert(serializedLeafKinds(fixture) == Seq.fill(staleLeaves.size)("SCAN"))
+    fixture
+  }
+
   private def withAdaptiveAggregateConf(f: => Unit): Unit =
     withSQLConf(
       SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
@@ -377,7 +426,7 @@ class CometExecRuleSuite extends CometTestBase {
 
   test("CometExecRule points an AQE-reused aggregate's stale Scan at its ShuffleScan stage") {
     withAdaptiveAggregateConf {
-      val reused = createAdaptiveAggregate()
+      val reused = createAdaptiveAggregateWithStaleScan()
       assert(nativeLeaves(reused.nativeOp).map(_.getOpStructCase.name) == Seq("SCAN"))
 
       val refreshed = applyCometExecRule(reused).asInstanceOf[CometHashAggregateExec]
@@ -396,7 +445,7 @@ class CometExecRuleSuite extends CometTestBase {
   test("CometExecRule keeps an AQE-reused aggregate's Scan with shuffle direct read off") {
     withAdaptiveAggregateConf {
       withSQLConf(CometConf.COMET_SHUFFLE_DIRECT_READ_ENABLED.key -> "false") {
-        val reused = createAdaptiveAggregate()
+        val reused = createAdaptiveAggregateWithStaleScan()
         val result = applyCometExecRule(reused).asInstanceOf[CometHashAggregateExec]
         assert(result.nativeOp eq reused.nativeOp)
         assert(serializedLeafKinds(result) == Seq("SCAN"))
@@ -409,7 +458,7 @@ class CometExecRuleSuite extends CometTestBase {
     withAdaptiveAggregateConf {
       // AQE adopts a replan that differs from its current plan, so the stale Scan is left for
       // the preparation of the stage or final plan that the aggregate ends up in.
-      val reused = createAdaptiveAggregate()
+      val reused = createAdaptiveAggregateWithStaleScan()
       val result = CometExecRule(spark, queryStagePrep = true)
         .apply(reused)
         .asInstanceOf[CometHashAggregateExec]
@@ -423,7 +472,7 @@ class CometExecRuleSuite extends CometTestBase {
     withAdaptiveAggregateConf {
       // AQE can put a read between the stage and the aggregate before preparing the stage that
       // the aggregate is in. The ShuffleScan then reads the partitions that the read specifies.
-      val reused = createAdaptiveAggregate()
+      val reused = createAdaptiveAggregateWithStaleScan()
       val read = AQEShuffleReadExec(reused.child, Seq(CoalescedPartitionSpec(0, 2, Some(16L))))
       val refreshed = applyCometExecRule(reused.withNewChildren(Seq(read)))
         .asInstanceOf[CometHashAggregateExec]
@@ -457,12 +506,19 @@ class CometExecRuleSuite extends CometTestBase {
       Seq("field types" -> (retype _), "leaf count" -> (addScanLeaf _)).foreach {
         case (mismatch, change) =>
           withClue(s"$mismatch: ") {
-            val reused = createAdaptiveAggregate()
-            val mismatched = reused.copy(nativeOp = change(reused.nativeOp))
+            val reused = createAdaptiveAggregateWithStaleScan()
+            val mismatched = reused.copy(
+              nativeOp = change(reused.nativeOp),
+              serializedPlanOpt = SerializedPlan(None))
 
             val result = applyCometExecRule(mismatched).asInstanceOf[CometHashAggregateExec]
             assert(result.nativeOp eq mismatched.nativeOp)
             assert(nativeLeaves(result.nativeOp).forall(_.hasScan))
+            val serializedLeaves = nativeLeaves(
+              OperatorOuterClass.Operator.parseFrom(result.serializedPlanOpt.plan.get))
+            assert(
+              serializedLeaves.map(_.getScan.getFieldsList) ==
+                nativeLeaves(result.nativeOp).map(_.getScan.getFieldsList))
             // The node stays native, with an info message rather than a fallback reason.
             val info = CometExecRule.STALE_SCAN_KEPT
             assert(result.getTagValue(CometExplainInfo.EXTENSION_INFO).contains(Set(info)))

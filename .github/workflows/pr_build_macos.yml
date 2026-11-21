@@ -271,6 +271,11 @@ jobs:
               org.apache.comet.rules.CometScanSchemeFallbackSuite
               org.apache.comet.rules.CometMultiStoreScanSuite
               org.apache.comet.rules.CometExecRuleSuite
+              org.apache.comet.rules.ChooseBoundaryFormatsSuite
+              org.apache.comet.rules.WideRowSortFallbackSuite
+              org.apache.comet.rules.WideRowShuffleFallbackSuite
+              org.apache.comet.rules.CostBasedEngineChoiceSuite
+              org.apache.comet.rules.CostBasedEngineCorrectnessSuite
               org.apache.spark.sql.comet.CometPlanEqualitySuite
               org.apache.comet.rules.CometEmptyRelationExecRuleSuite
               org.apache.comet.rules.EliminateRedundantTransitionsSuite

@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-21",
-  "stage": "G06_IN_PROGRESS",
+  "stage": "G09_COMPLETED_INTEGRATED",
   "baseline": "resource-baseline.json",
   "no_dependency_downloads_or_release_outputs_yet": false,
   "entries": [
@@ -965,6 +965,34 @@
     "contains": "Qualified documentation archive, pre-integration source/ref snapshot, independent audit, preservation proof, formatting/static checks and exact publication/completion receipt.",
     "source_preservation": "refs/joom-migration/g08-qualified preserves2625e2c8e and its immutable original local qualification evidence.",
     "build_policy": "Documentation-only closeout; no runtime rebuild, release artifact, Docker image, dependency download or full GHA.",
+    "preservation": "Keep through final migration acceptance; no automatic deletion of evidence, recovery refs or shared caches."
+  },
+  "g09_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09",
+    "contains": "Initial documentation/ref/source snapshot, local command logs, independent source/semantics reviews and targeted test evidence.",
+    "build_policy": "Reuse project native/spark targets and standard Maven/Cargo caches; no automatic deletion, full per-group GHA or release generation.",
+    "preservation": "Keep evidence and user-provided sources through final acceptance.",
+    "whole_directory_sizes_kib": {
+      "native_target": 76899240,
+      "spark_target": 2196316,
+      "delta_target": 1752,
+      "auxiliary": 36808
+    },
+    "native_target_growth_kib_from_g08": 218312,
+    "spark_target_growth_kib_from_g08": 481164,
+    "attribution": "Whole reused target sizes are not G09-only usage. Offline Maven/Cargo reused caches, rebuilt debug library/native tests and developer Core/Delta JARs. No new Docker image, toolchain, package installation, publication or Linux release output. Final standard RAT may use its approved pinned official JAR.",
+    "developer_artifacts": [
+      "spark/target/comet-spark-spark4.2_2.13-1.2.0.jar",
+      "spark/target/comet-spark-spark4.2_2.13-1.2.0-tests.jar",
+      "contrib/delta-spark/target/comet-contrib-delta-spark4.2_2.13-1.2.0.jar"
+    ],
+    "cleanup": "CLEANUP.md guarded manual instructions after builds stop; preserve evidence through acceptance. Do not delete shared caches or user sources automatically."
+  },
+  "g09_integration_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09-integration",
+    "contains": "Qualified documentation archive, pre-integration source/ref snapshot, independent audits, acceptance preservation proof, static/license checks and actual publication/completion receipt.",
+    "source_preservation": "refs/joom-migration/g09-qualified preserves00f5c17bc and its immutable original local qualification evidence.",
+    "build_policy": "Documentation-only acceptance; no runtime rebuild, release artifact, Docker image or full per-group GHA. Standard pinned RAT check may use its normal tool-managed output/download.",
     "preservation": "Keep through final migration acceptance; no automatic deletion of evidence, recovery refs or shared caches."
   }
 }

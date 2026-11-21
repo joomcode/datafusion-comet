@@ -47,6 +47,21 @@ them. Spark's `RowToColumnarExec` alone does not satisfy this input contract.
 
 ## When Native Shuffle is Used
 
+The conditions below describe initial eligibility. With
+`spark.comet.exec.boundaryFormats.enabled`, `ChooseBoundaryFormats` also considers
+the consumer: a shuffle between Spark operators stays a Spark shuffle. With
+`spark.comet.exec.costBasedEngines.enabled`, `CostBasedEngineChoice` chooses
+operator engines and boundary formats together over the visible whole plan.
+Neither rule promotes an ineligible shuffle to native. Co-partitioned inputs
+must use compatible hashes, including materialized AQE stages and Spark buckets.
+These decisions retain the exchange's distribution, origin and advisory size.
+
+The separate `spark.comet.shuffle.wideRowFallback.minLeafColumns` heuristic keeps
+a shuffle on Spark when its payload has at least the configured number of leaf
+columns outside the partition key. It defaults to `0` (disabled) and is ignored
+when cost-based engine selection is enabled. Whole-plan engine choices are
+reconsidered during AQE re-optimization; stage-local conversion preserves them.
+
 Native shuffle (`CometExchange`) is selected when all of the following conditions are met:
 
 1. **Shuffle mode allows native**: `spark.comet.shuffle.mode` is `native` or `auto`.

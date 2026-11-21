@@ -3122,7 +3122,11 @@ case class CometSortAggregateExec(
     val ordering = restored.requiredChildOrdering.headOption.getOrElse(Nil)
     if (!preservesGroupingOrder &&
       !SortOrder.orderingSatisfies(restored.child.outputOrdering, ordering)) {
-      restored.copy(child = SortExec(ordering, global = false, restored.child))
+      val ordered = restored.copy(child = SortExec(ordering, global = false, restored.child))
+      // A case-class copy drops TreeNode tags. AQE must still link the aggregate, rather
+      // than its partial input stage, to the logical aggregate it represents.
+      ordered.copyTagsFrom(restored)
+      ordered
     } else {
       restored
     }

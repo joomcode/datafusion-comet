@@ -39,6 +39,46 @@ exceeds the threshold to Spark row-based execution — Comet removes the stage's
 mix of native and fallback operators joined by repeated conversions — which can be cheaper than paying the
 expensive conversions again and again.
 
+## Choosing Engines and Boundary Formats
+
+The following optional modes reduce conversions between Spark rows and Comet
+batches. They preserve operator eligibility and correctness fallbacks.
+
+| Setting                                                | Default | Behavior                                                                                                                                  |
+| ------------------------------------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `spark.comet.exec.boundaryFormats.enabled`             | `false` | Chooses shuffle and broadcast formats from both producer and consumer engines. A shuffle between Spark operators remains a Spark shuffle. |
+| `spark.comet.exec.costBasedEngines.enabled`            | `false` | Jointly chooses converted operators' engines and boundary formats by estimated cost over the whole plan.                                  |
+| `spark.comet.exec.sort.wideRowFallback.enabled`        | `false` | Keeps a wide-row sort on Spark when its consumer runs on Spark.                                                                           |
+| `spark.comet.exec.sort.wideRowFallback.minLeafColumns` | `50`    | Sort payload width threshold, excluding columns referenced by the sort key.                                                               |
+| `spark.comet.shuffle.wideRowFallback.minLeafColumns`   | `0`     | Shuffle payload width threshold, excluding partition-key columns; zero disables the heuristic.                                            |
+
+A struct contributes the leaves of its fields, an array the leaves of its element,
+and a map the leaves of its key and value. Other types contribute one leaf.
+Cost-based selection takes precedence over both wide-row heuristics and already
+includes boundary-format selection, so its operation does not require enabling
+`boundaryFormats` separately. These modes do not make unsupported operators or
+incompatible aggregate buffers eligible for mixed execution.
+
+The cost model estimates nanoseconds per row from operator classes, leaf counts,
+nested fractions, estimated row bytes and shuffle partition counts. It does not
+estimate selectivity or group reduction. The default table retains the Joom
+calibration from the previous runtime, including its production-size sort lines;
+measure representative workloads before changing the calibration. Whole-plan
+choices are repeated when AQE re-optimizes, while isolated stage preparation
+retains earlier choices. Already materialized stages cannot change their format.
+Inputs that must be co-partitioned retain compatible hash assignments.
+
+Use `spark.comet.exec.costBasedEngines.log.enabled=true` to inspect the chosen
+engines and prices. `spark.comet.exec.costBasedEngines.costTable` accepts
+semicolon-separated overrides; omitted entries retain their defaults. For example,
+`sort.flat.comet=0,0,0;sort.flat.spark=1000,0` changes only the flat sort lines.
+A cost-based engine decision must still pay the adjacent conversion costs.
+`spark.comet.exec.costBasedEngines.cometOperatorWeight` (default `-1`) and
+`spark.comet.exec.costBasedEngines.sparkOperatorWeight` (default `0`) price
+operators outside the table. `cometOperatorWeights` under the same prefix accepts
+comma-separated per-operator overrides, such as `ShuffledHashJoinExec=-0.5`.
+See the generated configuration reference for the complete override syntax.
+
 ## Experimental: Direct Columnar-to-Row Conversion
 
 When the JVM columnar-to-row operator is in use (`spark.comet.exec.columnarToRow.native.enabled=false`),

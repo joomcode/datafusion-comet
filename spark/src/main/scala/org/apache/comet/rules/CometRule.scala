@@ -91,6 +91,9 @@ object CometRule {
         within(classOf[InsertAdaptiveSparkPlan], "compileSubquery"))
   }
 
+  /** Whether the current plan feeds a subquery consumer outside the visible plan. */
+  private[rules] def inSubqueryPlanning: Boolean = planningContext().subquery
+
   /**
    * Whether plan-only mode should report `plan`, marking it reported if so.
    *
@@ -157,17 +160,36 @@ case class CometRule(session: SparkSession, queryStagePrep: Boolean = false)
 
   private val scanRule = CometScanRule(session)
   private val execRule = CometExecRule(session, queryStagePrep)
+  private val wholePlanExecRule = CometExecRule(session, queryStagePrep, wholePlan = true)
+  private val engineRule = CostBasedEngineChoice(session)
+  private val boundaryRule = ChooseBoundaryFormats(session)
+  private val sortRule = WideRowSortFallback(session)
 
   override def apply(plan: SparkPlan): SparkPlan = {
     if (CometRule.planOnlyApplies(conf, plan)) {
       reportPlanOnlyCoverage(plan)
       plan
     } else {
-      convert(plan)
+      convert(plan, wholePlan = isWholePlan(plan))
     }
   }
 
-  private def convert(plan: SparkPlan): SparkPlan = execRule.apply(scanRule.apply(plan))
+  /** Stage-local AQE passes cannot see the consumers used by whole-plan choices. */
+  private def isWholePlan(plan: SparkPlan): Boolean =
+    queryStagePrep || !conf.adaptiveExecutionEnabled ||
+      !(plan.isInstanceOf[Exchange] || plan.exists(_.isInstanceOf[QueryStageExec]))
+
+  private def convert(plan: SparkPlan, wholePlan: Boolean): SparkPlan = {
+    val exec = if (wholePlan) wholePlanExecRule else execRule
+    val converted = exec.apply(scanRule.apply(plan))
+    if (wholePlan) {
+      val keepRoot = CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.get(conf) &&
+        CometRule.inSubqueryPlanning
+      boundaryRule.apply(engineRule.apply(sortRule.apply(converted), keepRoot))
+    } else {
+      converted
+    }
+  }
 
   /** Logs the Comet plan for `plan` unless already reported. Never fails the query. */
   private def reportPlanOnlyCoverage(plan: SparkPlan): Unit = {
@@ -191,7 +213,7 @@ case class CometRule(session: SparkSession, queryStagePrep: Boolean = false)
    *   false for subquery plans, which Spark prepares without `ReuseExchangeAndSubquery`.
    */
   private def buildPreview(plan: SparkPlan, topLevel: Boolean): SparkPlan = {
-    val converted = convert(previewSubqueriesOf(plan))
+    val converted = convert(previewSubqueriesOf(plan), wholePlan = true)
     val withTransitions =
       ApplyColumnarRulesAndInsertTransitions(Seq.empty, outputsColumnar = false).apply(converted)
     val preview = CometRule

@@ -447,7 +447,6 @@
     "explicit_user_approval_per_group": true,
     "currently_authorized": [],
     "groups_not_authorized": [
-      "G09",
       "G10"
     ],
     "reaffirmed_on": "2026-11-21",
@@ -459,10 +458,11 @@
       "G05",
       "G06",
       "G07",
-      "G08"
+      "G08",
+      "G09"
     ],
     "active_implementation_group": null,
-    "next_group_requires_separate_approval": "G09",
+    "next_group_requires_separate_approval": "G10",
     "before_g06_final_checkpoint": {
       "explicit_user_approval_per_group": true,
       "currently_authorized": [
@@ -1032,6 +1032,72 @@
     "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g08-integration/completion.json",
     "excluded": [
       "G09-G10",
+      "full per-group GHA",
+      "main/tag changes",
+      "release publication",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g09_authorization": {
+    "recorded_on": "2026-11-21",
+    "status": "APPROVED_EXPLICITLY",
+    "request_translation": "Start G09 joom/1.2-cost-based-engines: BoundaryFormats, wide-row fallback and cost model according to the approved plan. Report after local builds and targeted tests before merge. Do not run full GHA or proceed to G10.",
+    "base_commit": "2dc13d5bd8697d32d8439e970fa1644cd0984d0e",
+    "cards": [
+      "I07",
+      "J01",
+      "J02",
+      "J03",
+      "J04"
+    ],
+    "constraints": [
+      "Preserve final tag13 cost coefficients/configuration defaults; no unapproved recalibration.",
+      "Keep accepted G08 and earlier correctness fallbacks.",
+      "Use upstream wide-decimal hashing; do not restore obsolete precision>18 restriction.",
+      "Preserve upstream distribution/AQE/native-shuffle/CapturedSQLConf contracts."
+    ],
+    "excluded": [
+      "push/merge before review",
+      "G10",
+      "full per-group GHA",
+      "main/tag/release changes",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g09_local_completion": {
+    "recorded_on": "2026-11-21",
+    "status": "LOCAL_TARGETED_QUALIFIED_AWAITING_REVIEW",
+    "cards": [
+      "I07",
+      "J01",
+      "J02",
+      "J03",
+      "J04"
+    ],
+    "source_and_results": "G09-results.json",
+    "correctness": "Keep original Spark4.2.1 rows/schema/required errors and accepted G05/G06/G08 guards. Use supported aggregate fallback and preserve AQE logical tags; strict upper-inclusive range equality matches original Spark.",
+    "performance": "Preserve final tag13 calibration and defaults, no unapproved tuning. Standard Spark Benchmark sysctl platform query blocked in sandbox; no substitute timing claim.",
+    "not_authorized": [
+      "push/merge before review",
+      "G10",
+      "full per-group GHA",
+      "main/tag/release changes",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g09_integration_authorization": {
+    "date": "2026-11-21",
+    "status": "APPROVED_EXPLICITLY",
+    "request_translation": "Push G09 to origin and merge into branch-1.2. After the merge verify the final state and report all included commits. Do not proceed to G10.",
+    "qualified_source_previously_verified": "00f5c17bcc8d5615f631bee7e3e9ebb0c1958fa0",
+    "method": "Keep the two substantive commits; fold acceptance documentation into the second unpushed commit and fast-forward without an extra merge or service commit.",
+    "scope": "Read origin refs, guarded atomic feature/integration publication, local fast-forward, exact source/document/local/remote verification.",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09-integration/completion.json",
+    "excluded": [
+      "G10",
       "full per-group GHA",
       "main/tag changes",
       "release publication",

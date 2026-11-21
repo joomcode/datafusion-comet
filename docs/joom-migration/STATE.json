@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-21",
-  "phase": "G08_COMPLETED_INTEGRATED",
+  "phase": "G09_COMPLETED_INTEGRATED",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -247,10 +247,16 @@
         "G07",
         "G08"
       ],
-      "status": "NOT_STARTED",
+      "status": "COMPLETED_INTEGRATED",
       "head_commit": null,
-      "tests": "NOT_RUN",
-      "handoff_report": null
+      "tests": "G09:230 native and495unique JVM/SQL/Delta cases passed locally; no selected failure/cancellation/ignore. Final Linux/release/full-CI qualification pending.",
+      "handoff_report": "G09-report.md",
+      "base_commit": "2dc13d5bd8697d32d8439e970fa1644cd0984d0e",
+      "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09",
+      "results": "G09-results.json",
+      "head_ref": "refs/heads/branch-1.2",
+      "functional_source_previously_verified": "00f5c17bcc8d5615f631bee7e3e9ebb0c1958fa0",
+      "integration_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09-integration/completion.json"
     }
   ],
   "reserve": {
@@ -382,8 +388,8 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Report verified G08 publication/integration. Await explicit authorization before G09.",
-  "qualification": "G08 accepted:52 unique native and446 unique JVM/SQL cases locally passed, with shaded developer-JAR origin/hash checks. All qualified source/test bytes preserved. Safe fallbacks accepted; final full CI/Linux/release/exact-JAR qualification remains mandatory.",
+  "next_step": "Report verified G09 publication/integration. Await explicit authorization before G10 or final qualification.",
+  "qualification": "G09 accepted:230 native and495 unique JVM/SQL/Delta cases locally passed. Qualified source/test/CI bytes are preserved; final full agreed CI/Linux/release/exact-JAR qualification remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
   "execution_model": {
@@ -606,17 +612,17 @@
     "source_commit": "b93d553856a0339af7468bcff2070e735a1a3c71",
     "rc_tag": "joom-1.2-1-rc1; authorized only after final qualification"
   },
-  "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04",
+  "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09",
   "integration_gate": {
-    "group": "G08",
+    "group": "G09",
     "status": "USER_ACCEPTED_INTEGRATION_ACTUAL_RESULT_IN_EXTERNAL_RECEIPT",
     "merge_authorized": true,
     "push_authorized": true,
     "method": "Fast-forward only; guarded atomic two-ref origin push.",
-    "actual_result": "${MIGRATION_AUX_ROOT}/20261121_comet12-g08-integration/completion.json",
+    "actual_result": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09-integration/completion.json",
     "next_group_authorized": false,
     "not_authorized": [
-      "G09-G10",
+      "G10",
       "full per-group GHA",
       "main/tag changes",
       "release publication",
@@ -1686,12 +1692,13 @@
         ],
         "behavior_or_test": "Run original skewed broadcast/C2R regression under both cost-based-engine flag settings after G09 implements that subsystem.",
         "required_inputs_and_settings": "Actual G09 cost model enabled/disabled; codegen.maxFields3/100; AQE skewed join, reused/staged Comet broadcast; compare complete original Spark rows and actual native/fallback plan.",
-        "reason_deferred": "User-approved per-group local checks; full final platform/release qualification after all groups. G09 implementation requires separate user authorization.",
+        "reason_deferred": "G09 implementation is complete and all four local cost/maxFields combinations pass; repeat in final agreed Linux qualification.",
         "owner": "Final migration qualification / G09 as specified",
         "intended_validation_command_or_job": "Repeat original J25 matrix and G07 C2R/broadcast regressions during authorized G09 integration, then final full CI.",
         "native_execution_requirement": "Actual native or explicitly safe fallback, full result/schema/mandatory-error oracle where applicable; final loaded artifacts verified. No ignored/canceled case counted as pass.",
-        "status": "PENDING_AUTHORIZED_G09_IMPLEMENTATION",
-        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/final-source-manifest.json; G07-results.json"
+        "status": "PASSED_LOCAL_G09_FINAL_PLATFORM_PENDING",
+        "evidence_path_and_source_sha": "G09-results.json; ${MIGRATION_AUX_ROOT}/20261121_comet12-g09/final-source-manifest.json",
+        "actual_evidence": "G09 final-qualified-regressions: four original skewed/staged broadcast cases with cost=false/true and maxFields3/100, complete Spark rows and actual expected native/fallback paths."
       },
       {
         "id": "G08-FINAL-LINUX-RELEASE-AND-FULL-CI",
@@ -1710,6 +1717,25 @@
         "native_execution_requirement": "Verify actual final classes/libraries and expected native/dispatcher/fallback plans; no canceled/ignored case counted passed.",
         "status": "DEFERRED_FINAL_QUALIFICATION",
         "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g08/final-source-manifest.json; final release SHA remains pending."
+      },
+      {
+        "id": "G09-FINAL-LINUX-RELEASE-AND-FULL-CI",
+        "group": "G09",
+        "feature_cards": [
+          "I07",
+          "J01",
+          "J02",
+          "J03",
+          "J04"
+        ],
+        "behavior_or_test": "Full final agreed profile matrix, native/vendor/Spark SQL/Delta and actual Spark4.2.1 TPC plan-stability coverage, plus exact final-JAR AMD64/ARM64 packaged smoke, including G09 cost/boundary/wide modes and mixed aggregate/hash/range paths. Regenerate any required snapshots only from real executions; never copy obsolete tag13 snapshots.",
+        "required_inputs_and_settings": "Spark4.2.1/ANSI=true/Java17; final shared lock/vendor/release graph, original Spark rows/schema/required-error oracle and actual native/fallback path assertions.",
+        "reason_deferred": "User-approved targeted local per-group policy; developer Darwin/debug JARs do not qualify final Linux release bytes.",
+        "owner": "Final migration qualification after explicit authorization",
+        "intended_validation_command_or_job": "Remove all tracked temporary CI mechanisms; full agreed Comet CI, then RC Build & Smoke of exact final bytes on native AMD64/ARM64.",
+        "native_execution_requirement": "Verify real producer/consumer/writer engines and loaded artifact provenance; do not count canceled/ignored as passed.",
+        "status": "DEFERRED_FINAL_QUALIFICATION",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09/final-source-manifest.json; G09-results.json"
       }
     ],
     "final_gate": "No unresolved/unverified applicable cases. Require actual passing evidence; retain only applicability exclusions explicitly agreed with the user (such as the existing HDFS-cluster exclusion)."
@@ -2283,6 +2309,88 @@
       "G09-G10",
       "full per-group GHA",
       "main/tag/release changes",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g08_accepted_integration_gate_history": {
+    "group": "G08",
+    "status": "USER_ACCEPTED_INTEGRATION_ACTUAL_RESULT_IN_EXTERNAL_RECEIPT",
+    "merge_authorized": true,
+    "push_authorized": true,
+    "method": "Fast-forward only; guarded atomic two-ref origin push.",
+    "actual_result": "${MIGRATION_AUX_ROOT}/20261121_comet12-g08-integration/completion.json",
+    "next_group_authorized": false,
+    "not_authorized": [
+      "G09-G10",
+      "full per-group GHA",
+      "main/tag changes",
+      "release publication",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g09": {
+    "status": "COMPLETED_INTEGRATED",
+    "branch": "joom/1.2-cost-based-engines",
+    "base": "2dc13d5bd8697d32d8439e970fa1644cd0984d0e",
+    "authorization_ref": "decisions.json#g09_authorization",
+    "evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09",
+    "merge_allowed": true,
+    "full_gha_allowed": false,
+    "checkpoint": {
+      "stage": "ACCEPTED_INTEGRATION_ACTUAL_RESULT_IN_EXTERNAL_RECEIPT",
+      "source_mutation_active": false,
+      "restoration_required_before_any_qualification_or_commit": false,
+      "positive_source_backups": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09/negative-control-backups.json",
+      "active_run": null,
+      "positive_evidence": [
+        "retained-buffers-and-tags.json: real SparkPartial/retainednativeFinal buffers plus logicaltagstructuraltest passed",
+        "reversion-and-buffers.log: actual unorderedSortAggregate bothAQE and fusedTopK bothAQE passed after fixes",
+        "engines-and-correctness.log: all137-era cost/boundary/wide tests passed, allmixeddecimal andfourG07skewbroadcast passed; supersededfixturefailures retained"
+      ],
+      "required_next": "Report verified G09 publication/integration. Await explicit authorization before G10 or final qualification.",
+      "restoration_verified": true,
+      "negative_control_restoration_proof": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09/negative-controls-restored.json"
+    },
+    "report": "G09-report.md",
+    "results": "G09-results.json",
+    "qualification": "PASSED_LOCAL_TARGETED_WITH_FINAL_PLATFORM_BACKLOG",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09/final-source-manifest.json",
+    "post_commit_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09/completion.json",
+    "push_performed": false,
+    "g10_started": false,
+    "integration_authorization_ref": "decisions.json#g09_integration_authorization",
+    "functional_source_previously_verified": "00f5c17bcc8d5615f631bee7e3e9ebb0c1958fa0",
+    "integration_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09-integration/completion.json",
+    "initial_review_gate_note": "The initial push_performed=false and implementation receipt describe the historical pre-review checkpoint; actual accepted publication is recorded in integration_receipt."
+  },
+  "g09_review_gate_history": {
+    "group": "G09",
+    "status": "AWAITING_EXPLICIT_G09_PUSH_AND_INTEGRATION_APPROVAL",
+    "push_authorized": false,
+    "merge_authorized": false,
+    "not_authorized": [
+      "G10",
+      "full per-group GHA",
+      "main/tag/release changes",
+      "production",
+      "datasci access"
+    ]
+  },
+  "g09_accepted_integration_gate_history": {
+    "group": "G09",
+    "status": "USER_ACCEPTED_INTEGRATION_ACTUAL_RESULT_IN_EXTERNAL_RECEIPT",
+    "merge_authorized": true,
+    "push_authorized": true,
+    "method": "Fast-forward only; guarded atomic two-ref origin push.",
+    "actual_result": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09-integration/completion.json",
+    "next_group_authorized": false,
+    "not_authorized": [
+      "G10",
+      "full per-group GHA",
+      "main/tag changes",
+      "release publication",
       "production",
       "datasci access"
     ]

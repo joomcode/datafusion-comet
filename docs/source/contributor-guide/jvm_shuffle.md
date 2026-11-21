@@ -38,6 +38,16 @@ The JVM shuffle is selected via `CometShuffleDependency.shuffleType`.
 
 ## When JVM Shuffle is Used
 
+These are initial eligibility rules. Optional whole-plan selection can subsequently
+choose Spark's shuffle, retaining rows between Spark producers and consumers.
+`ChooseBoundaryFormats` changes only shuffle/broadcast formats;
+`CostBasedEngineChoice` jointly chooses operator engines and formats using the cost
+table. Both preserve co-partitioned input hash compatibility. A Spark producer can
+feed a Comet consumer through an eligible JVM columnar shuffle; format selection
+does not turn that Spark producer into a native one. Materialized AQE stages keep
+their existing format. See [Native Shuffle](native_shuffle.md#when-native-shuffle-is-used)
+and [conversion tuning](../user-guide/latest/tuning/transitions.md).
+
 JVM shuffle (`CometColumnarExchange`) is used instead of native shuffle (`CometExchange`) in the following cases:
 
 1. **Shuffle mode is explicitly set to "jvm"**: When `spark.comet.shuffle.mode` is set to `jvm`.

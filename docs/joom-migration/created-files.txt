@@ -298,3 +298,21 @@ spark/src/test/scala/org/apache/comet/exec/CometFilterShortCircuitSuite.scala
 spark/src/test/scala/org/apache/comet/exec/CometTaskBinarySizeSuite.scala
 spark/src/test/scala/org/apache/spark/sql/comet/CometUdfFunctionPoolSuite.scala
 Source/auxiliary inventory: G08-results.json and ${MIGRATION_AUX_ROOT}/20261120_comet12-g08/completion.json.
+
+G09 project files (2026-11-21):
+docs/joom-migration/G09-report.md
+docs/joom-migration/G09-results.json
+spark/src/main/scala/org/apache/comet/rules/BoundaryFormats.scala
+spark/src/main/scala/org/apache/comet/rules/ChooseBoundaryFormats.scala
+spark/src/main/scala/org/apache/comet/rules/CostBasedEngineChoice.scala
+spark/src/main/scala/org/apache/comet/rules/EngineCostTable.scala
+spark/src/main/scala/org/apache/comet/rules/LeafColumns.scala
+spark/src/main/scala/org/apache/comet/rules/WideRowShuffleFallback.scala
+spark/src/main/scala/org/apache/comet/rules/WideRowSortFallback.scala
+spark/src/test/scala/org/apache/comet/rules/BoundaryTestHelpers.scala
+spark/src/test/scala/org/apache/comet/rules/ChooseBoundaryFormatsSuite.scala
+spark/src/test/scala/org/apache/comet/rules/CostBasedEngineChoiceSuite.scala
+spark/src/test/scala/org/apache/comet/rules/CostBasedEngineCorrectnessSuite.scala
+spark/src/test/scala/org/apache/comet/rules/WideRowShuffleFallbackSuite.scala
+spark/src/test/scala/org/apache/comet/rules/WideRowSortFallbackSuite.scala
+Source/auxiliary inventory: G09-results.json and ${MIGRATION_AUX_ROOT}/20261121_comet12-g09/completion.json.

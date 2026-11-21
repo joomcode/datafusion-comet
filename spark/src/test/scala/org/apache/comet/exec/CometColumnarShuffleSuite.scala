@@ -30,7 +30,7 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.{Partitioner, SparkConf}
 import org.apache.spark.sql.{CometTestBase, DataFrame, Row}
 import org.apache.spark.sql.comet.execution.shuffle.{CometShuffleDependency, CometShuffleExchangeExec, CometShuffleManager}
-import org.apache.spark.sql.execution.SQLExecution
+import org.apache.spark.sql.execution.{FilterExec, SQLExecution}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanHelper, AQEShuffleReadExec, ShuffleQueryStageExec}
 import org.apache.spark.sql.execution.exchange.{ReusedExchangeExec, ShuffleExchangeExec}
 import org.apache.spark.sql.execution.joins.SortMergeJoinExec
@@ -38,7 +38,7 @@ import org.apache.spark.sql.functions.col
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 
-import org.apache.comet.CometConf
+import org.apache.comet.{CometConf, CometExplainInfo}
 import org.apache.comet.CometSparkSessionExtensions.isSpark40Plus
 
 abstract class CometColumnarShuffleSuite extends CometTestBase with AdaptiveSparkPlanHelper {
@@ -942,20 +942,46 @@ class CometShuffleSuite extends CometColumnarShuffleSuite {
 
   test("Comet native operator after ShuffleQueryStage") {
     withSQLConf(
+      SQLConf.ANSI_ENABLED.key -> "true",
       SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
       SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
       CometConf.COMET_EXEC_ENABLED.key -> "true",
       CometConf.COMET_SHUFFLE_ENABLED.key -> "true",
       CometConf.COMET_SHUFFLE_MODE.key -> "jvm") {
-      withParquetTable((0 until 10).map(i => (i, i % 5)), "tbl_a") {
-        val df = sql("SELECT * FROM tbl_a")
-        val shuffled = df
-          .select($"_1" + 1 as ("a"))
-          .filter($"a" > 4)
-          .repartition(10)
-          .sortWithinPartitions($"a")
-          .filter($"a" >= 10)
-        checkSparkAnswerAndOperator(shuffled, classOf[ShuffleQueryStageExec])
+      for (arithmetic <- Seq(false, true)) {
+        // The alias-only fixture keeps the complete native path. The original ANSI-add
+        // fixture must retain G08's guard below the shuffle and the native sort above it.
+        val rows = (0 until 100).map(i => (if (arithmetic) i else i + 1, i % 5))
+        withParquetTable(rows, "tbl_a") {
+          val df = sql("SELECT * FROM tbl_a")
+          val projection = if (arithmetic) $"_1" + 1 else $"_1"
+          val shuffled = df
+            .select(projection.as("a"))
+            .filter($"a" > 4)
+            .repartition(10)
+            .sortWithinPartitions($"a")
+            .filter($"a" >= 10)
+          if (!arithmetic) {
+            checkSparkAnswerAndOperator(shuffled, classOf[ShuffleQueryStageExec])
+          } else {
+            val (_, plan) = checkSparkAnswer(shuffled)
+            assert(collect(plan) { case _: ShuffleQueryStageExec => 1 }.nonEmpty, plan)
+            assert(
+              collect(plan) { case _: org.apache.spark.sql.comet.CometSortExec =>
+                1
+              }.nonEmpty,
+              plan)
+            assert(
+              collect(plan) {
+                case filter: FilterExec
+                    if filter
+                      .getTagValue(CometExplainInfo.FALLBACK_REASONS)
+                      .exists(_.exists(_.contains("shared-expression evaluation order"))) =>
+                  filter
+              }.nonEmpty,
+              plan)
+          }
+        }
       }
     }
   }

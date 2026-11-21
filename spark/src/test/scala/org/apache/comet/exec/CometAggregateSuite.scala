@@ -4972,54 +4972,66 @@ class CometAggregateSuite extends CometTestBase with AdaptiveSparkPlanHelper {
     }
   }
 
-  test("G04 ANSI SUM merge overflow cannot succeed across mixed engines") {
-    withSQLConf(
-      SQLConf.ANSI_ENABLED.key -> "true",
-      SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
-      SQLConf.FILES_OPEN_COST_IN_BYTES.key -> (128L * 1024 * 1024).toString,
-      CometConf.COMET_SHUFFLE_ENABLED.key -> "true",
-      CometConf.COMET_SHUFFLE_MODE.key -> "jvm") {
-      withTempPath { dir =>
-        Seq((Long.MaxValue, 1), (1L, 1)).foreach { row =>
-          spark.createDataFrame(Seq(row)).write.mode("append").parquet(dir.getCanonicalPath)
-        }
-        withParquetTable(dir.getCanonicalPath, "g04_sum_overflow") {
-          val rowsPerPartition = spark
-            .table("g04_sum_overflow")
-            .rdd
-            .mapPartitions(rows => Iterator(rows.size))
-            .collect()
-          assert(rowsPerPartition.toSeq == Seq(1, 1), rowsPerPartition.mkString(","))
-          for ((partialEnabled, finalEnabled, nativeMode) <- Seq(
-              ("true", "false", Partial),
-              ("false", "true", Final))) {
-            withSQLConf(
-              CometConf.COMET_ENABLE_PARTIAL_HASH_AGGREGATE.key -> partialEnabled,
-              CometConf.COMET_ENABLE_FINAL_HASH_AGGREGATE.key -> finalEnabled) {
-              for (query <- Seq(
-                  "SELECT SUM(_1) FROM g04_sum_overflow",
-                  "SELECT _2, SUM(_1) FROM g04_sum_overflow GROUP BY _2")) {
-                val df = sql(query)
-                val plan = df.queryExecution.executedPlan
-                assert(nativeAggregates(plan).exists(_.modes == Seq(nativeMode)), plan)
-                assert(collect(plan) { case a: BaseAggregateExec => a }.nonEmpty, plan)
-                val (expected, actual) = checkSparkAnswerMaybeThrows(df)
-                def structured(error: Option[Throwable]): SparkThrowable = {
-                  val failure = error.getOrElse(fail(s"SUM must fail in ANSI mode: $query"))
-                  causeChain(failure).collect { case e: SparkThrowable => e }.last
+  for ((costBased, forceMixedNative) <- Seq((false, false), (true, false), (true, true))) {
+    test(
+      s"G04 ANSI SUM merge overflow cannot succeed across mixed engines (costBased=$costBased, forceMixedNative=$forceMixedNative)") {
+      withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
+        CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.key -> costBased.toString,
+        CometConf.COMET_EXEC_COST_BASED_ENGINES_COST_TABLE.key ->
+          (if (forceMixedNative)
+             "agg.comet=0,0,0;agg.spark=1000000,0;" +
+               "aggDeclarative.comet=0,0,0;aggDeclarative.spark=1000000,0"
+           else ""),
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+        SQLConf.FILES_OPEN_COST_IN_BYTES.key -> (128L * 1024 * 1024).toString,
+        CometConf.COMET_SHUFFLE_ENABLED.key -> "true",
+        CometConf.COMET_SHUFFLE_MODE.key -> "jvm") {
+        withTempPath { dir =>
+          Seq((Long.MaxValue, 1), (1L, 1)).foreach { row =>
+            spark.createDataFrame(Seq(row)).write.mode("append").parquet(dir.getCanonicalPath)
+          }
+          withParquetTable(dir.getCanonicalPath, "g04_sum_overflow") {
+            val rowsPerPartition = spark
+              .table("g04_sum_overflow")
+              .rdd
+              .mapPartitions(rows => Iterator(rows.size))
+              .collect()
+            assert(rowsPerPartition.toSeq == Seq(1, 1), rowsPerPartition.mkString(","))
+            for ((partialEnabled, finalEnabled, nativeMode) <- Seq(
+                ("true", "false", Partial),
+                ("false", "true", Final))) {
+              withSQLConf(
+                CometConf.COMET_ENABLE_PARTIAL_HASH_AGGREGATE.key -> partialEnabled,
+                CometConf.COMET_ENABLE_FINAL_HASH_AGGREGATE.key -> finalEnabled) {
+                for (query <- Seq(
+                    "SELECT SUM(_1) FROM g04_sum_overflow",
+                    "SELECT _2, SUM(_1) FROM g04_sum_overflow GROUP BY _2")) {
+                  val df = sql(query)
+                  val plan = df.queryExecution.executedPlan
+                  if (!costBased || forceMixedNative) {
+                    assert(nativeAggregates(plan).exists(_.modes == Seq(nativeMode)), plan)
+                  }
+                  assert(collect(plan) { case a: BaseAggregateExec => a }.nonEmpty, plan)
+                  val (expected, actual) = checkSparkAnswerMaybeThrows(df)
+                  def structured(error: Option[Throwable]): SparkThrowable = {
+                    val failure = error.getOrElse(fail(s"SUM must fail in ANSI mode: $query"))
+                    causeChain(failure).collect { case e: SparkThrowable => e }.last
+                  }
+                  val sparkError = structured(expected)
+                  val cometError = structured(actual)
+                  assert(sparkError.getErrorClass == "ARITHMETIC_OVERFLOW")
+                  assert(cometError.getErrorClass == sparkError.getErrorClass)
+                  assert(cometError.getSqlState == sparkError.getSqlState)
+                  assert(cometError.getMessageParameters == sparkError.getMessageParameters)
                 }
-                val sparkError = structured(expected)
-                val cometError = structured(actual)
-                assert(sparkError.getErrorClass == "ARITHMETIC_OVERFLOW")
-                assert(cometError.getErrorClass == sparkError.getErrorClass)
-                assert(cometError.getSqlState == sparkError.getSqlState)
-                assert(cometError.getMessageParameters == sparkError.getMessageParameters)
               }
             }
           }
         }
       }
     }
+
   }
 
   for (aqe <- Seq("false", "true"); observer <- Seq("filter", "project", "aggregate result")) {

@@ -54,6 +54,7 @@ import com.google.common.base.Objects
 import org.apache.comet.{CometConf, CometExplainInfo}
 import org.apache.comet.CometConf.{COMET_SHUFFLE_ENABLED, COMET_SHUFFLE_MODE}
 import org.apache.comet.CometSparkSessionExtensions.{cometCelebornShuffleFallbackReason, hasFallbackReason, isCometCelebornShuffleManagerEnabled, isCometShuffleManagerEnabled, isSpark40Plus, withFallbackReasons}
+import org.apache.comet.rules.WideRowShuffleFallback
 import org.apache.comet.serde.{Compatible, OperatorOuterClass, QueryPlanSerde, SupportLevel, Unsupported}
 import org.apache.comet.serde.operator.CometSink
 import org.apache.comet.shims.{CometTypeShim, ShimCometShuffleExchangeExec}
@@ -525,6 +526,13 @@ object CometShuffleExchangeExec
       case None =>
     }
 
+    WideRowShuffleFallback.fallbackReason(s) match {
+      case Some(reason) =>
+        withFallbackReasons(s, Set(reason))
+        return None
+      case None =>
+    }
+
     // A Comet shuffle wrapped around a stage that still contains a Spark FileSourceScanExec
     // with DPP produces inefficient row<->columnar transitions. This only happens when the
     // scan fell back to Spark (e.g., AQE DPP on Spark 3.4, or unsupported scan type).
@@ -580,6 +588,17 @@ object CometShuffleExchangeExec
     withFallbackReasons(s, (nativeReasons ++ columnarReasons).toSet)
     None
   }
+
+  /** Pure eligibility check for a whole-plan change to the JVM columnar format. */
+  def columnarShuffleAvailable(s: ShuffleExchangeExec): Boolean =
+    !hasFallbackReason(s) &&
+      isCometShuffleEnabledReason(s).isEmpty &&
+      WideRowShuffleFallback.fallbackReason(s).isEmpty &&
+      !isCometCelebornShuffleManagerEnabled(s.conf) &&
+      (isCometPlan(s.child) ||
+        CometConf.COMET_SHUFFLE_CONVERT_FROM_SPARK_PLAN_ENABLED.get(s.conf)) &&
+      !stageContainsDPPScan(s) &&
+      columnarShuffleFailureReasons(s).isEmpty
 
   /**
    * Whether a shuffle that would use the JVM columnar shuffle, because its child is a Spark
@@ -702,9 +721,12 @@ object CometShuffleExchangeExec
           reasons +=
             s"${CometConf.COMET_SHUFFLE_NATIVE_HASH_PARTITIONING_ENABLED.key} is disabled"
         }
-        for (expr <- expressions) {
-          if (QueryPlanSerde.exprToProto(expr, inputs).isEmpty) {
-            reasons += s"unsupported hash partitioning expression: $expr"
+        // Match the writer's projection-wide CSE context, including shared key subtrees.
+        QueryPlanSerde.withSharedSubexpressions(expressions) {
+          for (expr <- expressions) {
+            if (QueryPlanSerde.exprToProto(expr, inputs).isEmpty) {
+              reasons += s"unsupported hash partitioning expression: $expr"
+            }
           }
         }
         for (dt <- expressions.map(_.dataType).distinct) {
@@ -742,12 +764,14 @@ object CometShuffleExchangeExec
             s"${CometConf.COMET_SHUFFLE_NATIVE_RANGE_PARTITIONING_ENABLED.key} is disabled"
           return reasons.toSeq
         }
-        for (o <- orderings) {
-          if (QueryPlanSerde.exprToProto(o, inputs).isEmpty) {
-            reasons += s"unsupported range partitioning sort order: $o"
-            // Roll up fallback reasons recorded on the sort-order expression (e.g. strict
-            // floating-point sort) so they surface in the shuffle's explain output.
-            o.getTagValue(CometExplainInfo.FALLBACK_REASONS).foreach(reasons ++= _)
+        QueryPlanSerde.withSharedSubexpressions(orderings.map(_.child)) {
+          for (o <- orderings) {
+            if (QueryPlanSerde.exprToProto(o, inputs).isEmpty) {
+              reasons += s"unsupported range partitioning sort order: $o"
+              // Roll up fallback reasons recorded on the sort-order expression (e.g. strict
+              // floating-point sort) so they surface in the shuffle's explain output.
+              o.getTagValue(CometExplainInfo.FALLBACK_REASONS).foreach(reasons ++= _)
+            }
           }
         }
         for (dt <- orderings.map(_.dataType).distinct) {
@@ -809,9 +833,12 @@ object CometShuffleExchangeExec
     val partitioning = s.outputPartitioning
     partitioning match {
       case HashPartitioning(expressions, _) =>
-        for (expr <- expressions) {
-          if (QueryPlanSerde.exprToProto(expr, inputs).isEmpty) {
-            reasons += s"unsupported hash partitioning expression: $expr"
+        // Match the writer's projection-wide CSE context, including shared key subtrees.
+        QueryPlanSerde.withSharedSubexpressions(expressions) {
+          for (expr <- expressions) {
+            if (QueryPlanSerde.exprToProto(expr, inputs).isEmpty) {
+              reasons += s"unsupported hash partitioning expression: $expr"
+            }
           }
         }
         for (dt <- expressions.map(_.dataType).distinct) {
@@ -824,9 +851,11 @@ object CometShuffleExchangeExec
       case RoundRobinPartitioning(_) =>
       // we already checked that the input types are supported
       case RangePartitioning(orderings, _) =>
-        for (o <- orderings) {
-          if (QueryPlanSerde.exprToProto(o, inputs).isEmpty) {
-            reasons += s"unsupported range partitioning sort order: $o"
+        QueryPlanSerde.withSharedSubexpressions(orderings.map(_.child)) {
+          for (o <- orderings) {
+            if (QueryPlanSerde.exprToProto(o, inputs).isEmpty) {
+              reasons += s"unsupported range partitioning sort order: $o"
+            }
           }
         }
         for (dt <- orderings.map(_.dataType).distinct) {

@@ -5,7 +5,7 @@
   "files": [
     {
       "path": "AGENTS.md",
-      "sha256": "242a432f67121b46ef70f5f487d429334e261708d2e123f952899706e98ff13b"
+      "sha256": "e883ad74a7787e53a281acdf06ec7a254ba861c622c7262d1f51d372ef632e68"
     },
     {
       "path": "CHECKPOINT-VERIFICATION.json",
@@ -128,8 +128,16 @@
       "sha256": "616a8056c6e0ab3ca4ec0bb2d2c0ce2919480d175ad0ec51635f09c2f5287fae"
     },
     {
+      "path": "G09-report.md",
+      "sha256": "7e0d83406393f891f949dbe5718c086006ccc0574a8de2cacaae9b7d922d9d44"
+    },
+    {
+      "path": "G09-results.json",
+      "sha256": "c53a12dc045929be939ab85d91b260312b3ba3f3f70c97c175746183ce740961"
+    },
+    {
       "path": "HANDOFF.md",
-      "sha256": "cddc0f201ed83ca14214308516e10623a86704e2aa7e862f64ffb7a05383f349"
+      "sha256": "ecdcb5822f96bf178774cea11d1cabd66b169acac6ad8f24e93ac48274b004f8"
     },
     {
       "path": "NETWORK.md",
@@ -141,7 +149,7 @@
     },
     {
       "path": "PAUSED.md",
-      "sha256": "1ba589026bf92dbab33ecbb7ded994bd4c07a01686ff42e5973a8ddfc2d13714"
+      "sha256": "9e963469507e74560b43d0db54d849e9ed8477100729b6d8e1dc261e37c67eb9"
     },
     {
       "path": "PERFORMANCE.md",
@@ -153,11 +161,11 @@
     },
     {
       "path": "README.md",
-      "sha256": "66fb464500bfd0e5cf0ea1df737dcf62f55e508bee79dd0c8158f72d998c763d"
+      "sha256": "e09746304c54815138c29d09fdef30d61689ba1204bbbd1ce48a28576e0a4632"
     },
     {
       "path": "STATE.json",
-      "sha256": "d755dcbaa62bea9c39e40cde34ee0aa395004bec75d24e8686b294fececfb3b1"
+      "sha256": "39689fff9e89d88b53170023f1074808eb83130a8c0ce20bcc52848a482b0137"
     },
     {
       "path": "approved-plan.json",
@@ -169,7 +177,7 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "a8ce4743375a9fd5ebbc39ca74701291ee004da118c9999302c72d6099f57f6b"
+      "sha256": "29328de3eaa96138067b2e9fc61d48c325aa98bd5fc0040c9752dce2b34d05d7"
     },
     {
       "path": "correctness-test-plan.txt",
@@ -177,11 +185,11 @@
     },
     {
       "path": "created-files.txt",
-      "sha256": "34f689f0d45e29820e910ce2f5f11e8234edd8d011bb9d377af8b70012e7a560"
+      "sha256": "f365df6e41efd9e69abd081185835cc1f79157569f3277c2234c39959a5e6352"
     },
     {
       "path": "decisions.json",
-      "sha256": "175237c0bdb9ecc64175a54b17e7ead668bb7b4aa5dbd97bf55b64b0e2cdf0f6"
+      "sha256": "53c05765128192a53447f49252d5e7d2751c35bfcc0aea32fdd10660b933db62"
     },
     {
       "path": "feature-register.json",

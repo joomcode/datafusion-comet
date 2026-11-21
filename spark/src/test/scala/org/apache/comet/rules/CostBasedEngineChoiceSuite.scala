@@ -1,0 +1,1833 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+package org.apache.comet.rules
+
+import org.apache.spark.sql.{CometTestBase, DataFrame}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
+import org.apache.spark.sql.catalyst.expressions.aggregate.Partial
+import org.apache.spark.sql.catalyst.plans.logical.LocalRelation
+import org.apache.spark.sql.catalyst.plans.logical.statsEstimation.EstimationUtils
+import org.apache.spark.sql.comet._
+import org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec
+import org.apache.spark.sql.execution.{CommandResultExec, ExpandExec, ProjectExec, SortExec, SparkPlan}
+import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, LogicalQueryStage, QueryStageExec}
+import org.apache.spark.sql.execution.aggregate.{HashAggregateExec, ObjectHashAggregateExec, SortAggregateExec}
+import org.apache.spark.sql.execution.exchange.ReusedExchangeExec
+import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, SortMergeJoinExec}
+import org.apache.spark.sql.functions.{col, sum}
+import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.sql.types.{ArrayType, DataType, IntegerType, MapType, StringType, StructField, StructType}
+
+import org.apache.comet.CometConf
+import org.apache.comet.rules.BoundaryFormats.Engine
+import org.apache.comet.rules.BoundaryTestHelpers._
+import org.apache.comet.rules.EngineCostModel.Term
+import org.apache.comet.rules.EngineCostTable.{CostClass, Form, Line, Width}
+import org.apache.comet.rules.EngineCostTable.CostClass._
+
+class CostBasedEngineChoiceSuite extends CometTestBase {
+
+  private val sparkAggregates = CometConf.COMET_EXEC_AGGREGATE_ENABLED.key -> "false"
+
+  private val flag = CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.key
+  private val costTable = CometConf.COMET_EXEC_COST_BASED_ENGINES_COST_TABLE.key
+  private val expensiveNativeSort = costTable -> "sort.flat.comet=1000,0,0"
+  private val cheapNativeSort = costTable -> "sort.flat.comet=0,0,0"
+
+  private def same(actual: Double, expected: Double): Unit =
+    assert(math.abs(actual - expected) < 1e-9, s"$actual != $expected")
+
+  private def model: EngineCostModel = EngineCostModel(spark.sessionState.conf)
+
+  private def withTables(f: => Unit): Unit = {
+    withTempPath { dir =>
+      spark
+        .range(3000)
+        .selectExpr(
+          "cast(id % 211 AS int) AS k",
+          "cast((id * 7919) % 1000 AS int) AS v",
+          "concat('payload_', cast(id % 257 AS string)) AS s")
+        .write
+        .parquet(dir.getCanonicalPath)
+      spark.read.parquet(dir.getCanonicalPath).createOrReplaceTempView("t")
+      withTempView("t")(f)
+    }
+  }
+
+  /** Runs `f` with view `name`: an int key `k` and `payload` int columns `c1`, `c2`, ... */
+  private def withWide(name: String, payload: Int)(f: => Unit): Unit = {
+    withTempPath { dir =>
+      val columns = "cast(id % 97 AS int) AS k" +:
+        (1 to payload).map(i => s"cast((id * $i) % 1000 AS int) AS c$i")
+      spark.range(1000).selectExpr(columns: _*).write.parquet(dir.getCanonicalPath)
+      spark.read.parquet(dir.getCanonicalPath).createOrReplaceTempView(name)
+      withTempView(name)(f)
+    }
+  }
+
+  /** Runs `f` with view `star`, the schema of star_order_2020's purchases, 4 rows per order. */
+  private def withStar(f: => Unit): Unit = {
+    withTempPath { dir =>
+      spark
+        .range(2000)
+        .selectExpr(
+          "cast(id % 500 AS string) AS order_id",
+          "id AS event_ts",
+          "concat('c', cast(id % 37 AS string)) AS category_id",
+          "IF(id % 2 = 0, 'android', 'ios') AS os_type",
+          "array(named_struct('amount', cast(id % 13 AS double) / 4, 'type', 'coupon', " +
+            "'subType', cast(id % 3 AS string))) AS discounts",
+          "named_struct('name', cast(id % 7 AS string), 'activation_ts', id, " +
+            "'is_last_context', true, 'is_adtech_promoted', id % 5 = 0) AS last_context",
+          "array(named_struct('name', cast(id % 7 AS string), 'activation_ts', id, " +
+            "'is_last_context', true, 'is_adtech_promoted', false)) AS normalized_contexts",
+          "'joom' AS legal_entity",
+          "'joom' AS app_entity",
+          "'joom' AS app_entity_group",
+          "IF(id % 4 = 0, NULL, 'd') AS custom_domain")
+        .write
+        .parquet(dir.getCanonicalPath)
+      spark.read.parquet(dir.getCanonicalPath).createOrReplaceTempView("star")
+      withTempView("star")(f)
+    }
+  }
+
+  private val starColumns = "order_id, category_id, os_type, discounts, last_context, " +
+    "normalized_contexts, legal_entity, app_entity, app_entity_group, custom_domain"
+
+  /** The latest purchase of each order, deduplicated, as star_order_2020 reads them. */
+  private def starQuery: DataFrame =
+    sql(
+      s"SELECT DISTINCT $starColumns FROM (SELECT *, rank() OVER (PARTITION BY order_id " +
+        "ORDER BY event_ts DESC) AS r FROM star) WHERE r = 1")
+
+  private def run(df: => DataFrame): SparkPlan = checkSparkAnswer(df)._2
+
+  private def run(query: String): SparkPlan = run(sql(query))
+
+  /** The executed plan of `df`, whose rows are in no order Spark would reproduce. */
+  private def runUnordered(df: DataFrame): SparkPlan = {
+    df.collect()
+    df.queryExecution.executedPlan
+  }
+
+  private def withAqe(aqe: String, confs: (String, String)*)(f: => Unit): Unit =
+    withSQLConf((SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe) +: confs: _*)(f)
+
+  private def offAndOn(f: => SparkPlan): (SparkPlan, SparkPlan) = {
+    var off: SparkPlan = null
+    var on: SparkPlan = null
+    withSQLConf(flag -> "false") { off = f }
+    withSQLConf(flag -> "true") { on = f }
+    (off, on)
+  }
+
+  /** Every node of the executed plan, looking into query stages. */
+  private def nodes(plan: SparkPlan): Seq[SparkPlan] = {
+    def visit(node: SparkPlan): Seq[SparkPlan] = node match {
+      case a: AdaptiveSparkPlanExec => visit(a.executedPlan)
+      case s: QueryStageExec => s +: visit(s.plan)
+      case other => other +: other.children.flatMap(visit)
+    }
+    visit(plan)
+  }
+
+  private def count[T](plan: SparkPlan)(pf: PartialFunction[SparkPlan, T]): Int =
+    nodes(plan).collect(pf).size
+
+  /** The executed plan of `INSERT INTO target <query>`, checking the rows it wrote. */
+  private def insertPlan(schema: String, query: String): SparkPlan = {
+    val expected = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+      sql(query).collect().toSeq
+    }
+    var plan: SparkPlan = null
+    withTable("target") {
+      sql(s"CREATE TABLE target ($schema) USING parquet")
+      val df = sql(s"INSERT INTO target $query")
+      checkAnswer(spark.table("target"), expected)
+      plan = df.queryExecution.executedPlan match {
+        case c: CommandResultExec => c.commandPhysicalPlan
+        case other => other
+      }
+    }
+    plan
+  }
+
+  private def columnarBetweenSpark(plan: SparkPlan): Seq[Edge] =
+    edges(plan).filter(e => e.format == "columnar" && !e.consumerIsComet && !e.producerIsComet)
+
+  for (aqe <- Seq("false", "true")) {
+    test(s"a shuffle between Spark operators stays a Spark shuffle at any price (AQE=$aqe)") {
+      withWide("w", 20) {
+        withAqe(
+          aqe,
+          flag -> "true",
+          CometConf.COMET_EXEC_PROJECT_ENABLED.key -> "false",
+          CometConf.COMET_EXEC_UNION_ENABLED.key -> "false",
+          CometConf.COMET_EXEC_SORT_ENABLED.key -> "false",
+          costTable -> "shuffleWrite.flat.spark=100000,0") {
+          val payload = (1 to 20).map(i => s"c$i")
+          val schema = ("k INT" +: payload.map(c => s"$c INT")).mkString(", ")
+          val query =
+            "SELECT /*+ REPARTITION(37, k) */ * FROM (" +
+              s"SELECT k, ${payload.map(c => s"$c + 1 AS $c").mkString(", ")} FROM w " +
+              s"UNION ALL SELECT k, ${payload.mkString(", ")} FROM w) SORT BY k"
+          val plan = insertPlan(schema, query)
+          assert(columnarBetweenSpark(plan).isEmpty, s"columnar shuffle between Spark:\n$plan")
+          assert(
+            edges(plan).exists(e => e.format == "spark" && !e.producerIsComet),
+            s"expected a Spark shuffle under the write:\n$plan")
+        }
+      }
+    }
+
+    test(s"a native producer still writes a Comet shuffle for a Spark write (AQE=$aqe)") {
+      withWide("w", 20) {
+        withAqe(aqe, flag -> "true", costTable -> "shuffleWrite.flat.spark=100000,0") {
+          val payload = (1 to 20).map(i => s"c$i")
+          val schema = ("k INT" +: payload.map(c => s"$c INT")).mkString(", ")
+          val plan = insertPlan(
+            schema,
+            s"SELECT /*+ REPARTITION(37, k) */ k, ${payload.mkString(", ")} FROM w")
+          assert(
+            edges(plan).exists(e => e.format != "spark" && e.producerIsComet),
+            s"expected a Comet shuffle written by a native operator:\n$plan")
+        }
+      }
+    }
+  }
+
+  for (aqe <- Seq("false", "true")) {
+    test(s"native sorts read by Spark sort aggregates move only by their price (AQE=$aqe)") {
+      withTables {
+        withAqe(aqe, sparkAggregates) {
+          val query = "SELECT k, max(s) FROM t GROUP BY k"
+          val (off, on) = offAndOn(run(query))
+          assert(count(off) { case s: SortAggregateExec => s } == 2, s"plan:\n$off")
+          assert(count(off) { case s: CometSortExec => s } == 2, s"plan:\n$off")
+          assert(count(on) { case s: SortAggregateExec => s } == 2, s"plan:\n$on")
+          assert(count(on) { case s: CometSortExec => s } == 1, s"plan:\n$on")
+          assert(count(on) { case s: SortExec => s } == 1, s"plan:\n$on")
+          val mapSide = nodes(on).collectFirst { case s: CometSortExec => s }.get
+          assert(nodes(mapSide).exists(_.isInstanceOf[CometNativeScanExec]), s"plan:\n$on")
+          withSQLConf(flag -> "true", cheapNativeSort) {
+            val kept = run(query)
+            assert(count(kept) { case s: CometSortExec => s } == 2, s"plan:\n$kept")
+          }
+          withSQLConf(flag -> "true", expensiveNativeSort) {
+            val moved = run(query)
+            assert(count(moved) { case s: CometSortExec => s } == 0, s"plan:\n$moved")
+            assert(count(moved) { case s: SortExec => s } == 2, s"plan:\n$moved")
+          }
+        }
+      }
+    }
+
+    test(s"native filter and project feeding a Spark aggregate stay native (AQE=$aqe)") {
+      withTables {
+        withAqe(aqe, sparkAggregates) {
+          var on: SparkPlan = null
+          withSQLConf(flag -> "true") {
+            on = run(
+              "SELECT k2, max(s) FROM (SELECT k + 1 AS k2, s FROM t WHERE v > 10) GROUP BY k2")
+          }
+          assert(count(on) { case f: CometFilterExec => f } == 1, s"plan:\n$on")
+          assert(count(on) { case p: CometProjectExec => p } == 1, s"plan:\n$on")
+        }
+      }
+    }
+
+    test(s"a native filter between Spark operators runs in Spark (AQE=$aqe)") {
+      withAqe(aqe, CometConf.COMET_EXEC_PROJECT_ENABLED.key -> "false") {
+        val (off, on) = offAndOn(
+          run(spark.range(0, 1000).filter(col("id") % 3 === 0).select((col("id") + 1).as("x"))))
+        assert(count(off) { case f: CometFilterExec => f } == 1, s"plan:\n$off")
+        assert(count(off) { case r: CometSparkToColumnarExec => r } == 1, s"plan:\n$off")
+        assert(count(on) { case f: CometFilterExec => f } == 0, s"plan:\n$on")
+        assert(count(on) { case r: CometSparkToColumnarExec => r } == 0, s"plan:\n$on")
+      }
+    }
+
+    test(s"a Spark sort-merge join moves the native sort of its input by price (AQE=$aqe)") {
+      withTables {
+        withAqe(
+          aqe,
+          sparkAggregates,
+          SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+          SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+          val query = "SELECT a.k, a.m, b.v FROM (SELECT k, max(s) AS m FROM t GROUP BY k) a " +
+            "JOIN t b ON a.k = b.k"
+          def joinHasNativeSort(plan: SparkPlan): Boolean = {
+            assert(count(plan) { case j: SortMergeJoinExec => j } == 1, s"plan:\n$plan")
+            val join = nodes(plan).collect { case j: SortMergeJoinExec => j }.head
+            nodes(join).exists(_.isInstanceOf[CometSortExec])
+          }
+          val (off, on) = offAndOn(run(query))
+          assert(joinHasNativeSort(off), s"plan:\n$off")
+          assert(joinHasNativeSort(on), s"the native input keeps its native sort:\n$on")
+          withSQLConf(flag -> "true", expensiveNativeSort) {
+            val plan = run(query)
+            assert(!joinHasNativeSort(plan), s"plan:\n$plan")
+            assert(edges(plan).exists(_.format == "native"), s"plan:\n$plan")
+          }
+        }
+      }
+    }
+
+    test(s"a native stage keeps its native shuffle into a Spark stage (AQE=$aqe)") {
+      withTables {
+        withAqe(aqe, CometConf.COMET_EXEC_PROJECT_ENABLED.key -> "false", flag -> "true") {
+          val plan = run(
+            spark
+              .table("t")
+              .select("k", "v")
+              .repartition(col("k"))
+              .select(col("k"), (col("v") + 1).as("w")))
+          assert(edges(plan).map(_.format) == Seq("native"), s"plan:\n$plan")
+        }
+      }
+    }
+
+    test(s"a Spark stage keeps its columnar shuffle into a native stage (AQE=$aqe)") {
+      withTables {
+        withAqe(
+          aqe,
+          CometConf.COMET_EXEC_PROJECT_ENABLED.key -> "false",
+          flag -> "true",
+          costTable -> "agg.flat.spark=1000,0") {
+          val plan = run(
+            spark
+              .table("t")
+              .select(col("k"), (col("v") + 1).as("v"))
+              .repartition(col("k"))
+              .groupBy("k")
+              .agg(sum("v")))
+          assert(edges(plan).map(_.format) == Seq("columnar"), s"plan:\n$plan")
+          assert(edges(plan).head.consumerIsComet, s"plan:\n$plan")
+        }
+      }
+    }
+
+    test(s"a fully native query is unchanged (AQE=$aqe)") {
+      withTables {
+        withAqe(aqe) {
+          val (off, on) = offAndOn(run("SELECT k, sum(v) FROM t WHERE v > 3 GROUP BY k"))
+          assert(cometOperatorNames(off) == cometOperatorNames(on), s"$off\n$on")
+          assert(edges(on).map(_.format) == Seq("native"), s"plan:\n$on")
+        }
+      }
+    }
+
+    test(s"identical shuffles stay reused (AQE=$aqe)") {
+      withTables {
+        withAqe(aqe) {
+          val query = "WITH x AS (SELECT k, max(s) AS m FROM t GROUP BY k) " +
+            "SELECT * FROM x UNION ALL SELECT * FROM x"
+          val (off, on) = offAndOn(run(query))
+          def reused(plan: SparkPlan): Int = collectWithSubqueries(finalPlan(plan)) {
+            case r: ReusedExchangeExec => r
+            case s: QueryStageExec if s.plan.isInstanceOf[ReusedExchangeExec] => s
+          }.size
+          assert(reused(off) > 0, s"expected reuse without the rule:\n$off")
+          assert(reused(on) == reused(off), s"reuse lost:\n$on")
+        }
+      }
+    }
+
+    test(s"dynamic partition pruning still works (AQE=$aqe)") {
+      withTempDir { dir =>
+        val factPath = s"${dir.getCanonicalPath}/fact"
+        val dimPath = s"${dir.getCanonicalPath}/dim"
+        spark
+          .range(2000)
+          .selectExpr("id % 20 AS p", "id AS v", "cast(id % 7 AS string) AS s")
+          .write
+          .partitionBy("p")
+          .parquet(factPath)
+        spark
+          .range(20)
+          .selectExpr("id AS k", "concat('n', cast(id AS string)) AS name")
+          .write
+          .parquet(dimPath)
+        withAqe(aqe, flag -> "true", SQLConf.DYNAMIC_PARTITION_PRUNING_ENABLED.key -> "true") {
+          spark.read.parquet(factPath).createOrReplaceTempView("fact")
+          spark.read.parquet(dimPath).createOrReplaceTempView("dim")
+          withTempView("fact", "dim") {
+            val query = "SELECT f.p, max(f.s), count(*) FROM fact f JOIN dim d ON f.p = d.k " +
+              "WHERE d.name IN ('n3', 'n5') GROUP BY f.p"
+            run(query)
+            withSQLConf(
+              SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+              SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+              run(query)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  test("a cube over wide rows reads its Spark sort aggregates through Spark shuffles") {
+    withTempPath { dir =>
+      val columns = Seq("cast(id % 97 AS int) AS k", "cast(id % 13 AS int) AS a") ++
+        (1 to 20).map(i => s"concat('s', cast((id * $i) % 1000 AS string)) AS s$i") ++
+        (1 to 90).map(i => s"cast((id * $i) % 1000 AS double) AS d$i")
+      spark.range(1000).selectExpr(columns: _*).write.parquet(dir.getCanonicalPath)
+      spark.read.parquet(dir.getCanonicalPath).createOrReplaceTempView("w")
+      withTempView("w") {
+        withSQLConf(
+          sparkAggregates,
+          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+          SQLConf.SHUFFLE_PARTITIONS.key -> "1600") {
+          val aggs = ((1 to 20).map(i => s"max(s$i)") ++ (1 to 90).map(i => s"sum(d$i)"))
+            .mkString(", ")
+          val (off, on) =
+            offAndOn(runUnordered(sql(s"SELECT k, a, $aggs FROM w GROUP BY CUBE(k, a)")))
+          assert(edges(off).map(_.format) == Seq("columnar"), s"plan:\n$off")
+          assert(count(off) { case c: CometColumnarToRowExec => c } == 2, s"plan:\n$off")
+          assert(edges(on).map(_.format) == Seq("spark"), s"plan:\n$on")
+          assert(count(on) { case s: SortAggregateExec => s } == 2, s"plan:\n$on")
+          assert(count(on) { case c: CometColumnarToRowExec => c } == 1, s"plan:\n$on")
+          assert(count(on) { case e: CometExpandExec => e } == 1, s"plan:\n$on")
+        }
+      }
+    }
+  }
+
+  test("the rule leaves the plan unchanged when disabled") {
+    withTables {
+      withSQLConf(
+        sparkAggregates,
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+        flag -> "false") {
+        val plan = finalPlan(run("SELECT k, max(s) FROM t GROUP BY k"))
+        assert(CostBasedEngineChoice(spark).apply(plan) eq plan)
+        assert(edges(plan).exists(e => e.format == "columnar"), s"plan:\n$plan")
+      }
+    }
+  }
+
+  test("per-operator weights price operators outside the table") {
+    withTables {
+      withSQLConf(
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+        SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+        CometConf.COMET_EXEC_COST_BASED_ENGINES_OPERATOR_WEIGHTS.key ->
+          "ShuffledHashJoinExec=-5,SortExec=-7") {
+        val plan =
+          run("SELECT /*+ SHUFFLE_HASH(b) */ a.k, a.v, b.s FROM t a JOIN t b ON a.k = b.k")
+        val join = nodes(plan).collectFirst { case j: CometHashJoinExec => j }
+        assert(join.isDefined, s"plan:\n$plan")
+        assert(model.costClasses(join.get).isEmpty)
+        assert(model.operatorCost(join.get, Engine.Comet) == -5)
+        assert(model.operatorCost(join.get, Engine.Spark) == 0)
+        val sort = runUnordered(sql("SELECT * FROM t SORT BY k"))
+        val native = nodes(sort).collectFirst { case s: CometSortExec => s }.get
+        assert(model.costClasses(native) == Seq(Sort))
+        assert(model.operatorCost(native, Engine.Comet) != -7)
+      }
+    }
+  }
+
+  for (aqe <- Seq("false", "true")) {
+    test(s"a narrow schema stays native (AQE=$aqe)") {
+      withWide("t8", 7) {
+        withAqe(aqe) {
+          val (off, on) = offAndOn(
+            runUnordered(
+              spark
+                .table("t8")
+                .filter(col("c4") > 5)
+                .repartition(col("k"))
+                .sortWithinPartitions("k")
+                .select(col("k"), (col("c1") + col("c2")).as("s"), col("c3"))))
+          assert(cometOperatorNames(off) == cometOperatorNames(on), s"$off\n$on")
+          assert(count(on) { case s: SortExec => s } == 0, s"plan:\n$on")
+          assert(edges(on).map(_.format) == Seq("native"), s"plan:\n$on")
+        }
+      }
+    }
+
+    test(s"a wide sort and shuffle read by a Spark operator run in Spark (AQE=$aqe)") {
+      withWide("t300", 299) {
+        withAqe(
+          aqe,
+          CometConf.COMET_EXEC_PROJECT_ENABLED.key -> "false",
+          flag -> "true",
+          SQLConf.SHUFFLE_PARTITIONS.key -> "1000") {
+          val plan = runUnordered(
+            spark
+              .table("t300")
+              .repartition(col("k"))
+              .sortWithinPartitions("k")
+              .select(col("*"), (col("c1") + 1).as("x")))
+          assert(edges(plan).map(_.format) == Seq("spark"), s"plan:\n$plan")
+          assert(count(plan) { case s: CometSortExec => s } == 0, s"plan:\n$plan")
+          assert(count(plan) { case s: SortExec => s } == 1, s"plan:\n$plan")
+        }
+      }
+    }
+
+    test(s"a sort-merge join with one wide input runs in Spark (AQE=$aqe)") {
+      withWide("narrow", 7) {
+        withWide("wide", 499) {
+          withAqe(
+            aqe,
+            flag -> "true",
+            CometConf.COMET_EXEC_COST_BASED_ENGINES_LOG_ENABLED.key -> "true",
+            SQLConf.SHUFFLE_PARTITIONS.key -> "1000",
+            SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+            SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+            val plan = run("SELECT n.c1 AS n1, w.* FROM narrow n JOIN wide w ON n.k = w.k")
+            assert(count(plan) { case j: SortMergeJoinExec => j } == 1, s"plan:\n$plan")
+            assert(count(plan) { case j: CometSortMergeJoinExec => j } == 0, s"plan:\n$plan")
+            val join = nodes(plan).collectFirst { case j: SortMergeJoinExec => j }.get
+            val (wideSide, narrowSide) = join.children.partition(_.output.size > 100)
+            assert(wideSide.flatMap(nodes).count(_.isInstanceOf[SortExec]) == 1, s"plan:\n$plan")
+            assert(
+              narrowSide.flatMap(nodes).count(_.isInstanceOf[CometSortExec]) == 1,
+              s"plan:\n$plan")
+            val (wideInputs, narrowInputs) = edges(plan).partition(_.exchange.output.size > 100)
+            assert(wideInputs.map(_.format) == Seq("spark"), s"plan:\n$plan")
+            assert(narrowInputs.map(_.format) == Seq("native"), s"plan:\n$plan")
+          }
+        }
+      }
+    }
+
+    test(s"a native sort read by a Spark window moves only by its price (AQE=$aqe)") {
+      withWide("t8", 7) {
+        withAqe(aqe, flag -> "true", CometConf.COMET_EXEC_WINDOW_ENABLED.key -> "false") {
+          val query = "SELECT k, c1, row_number() OVER (PARTITION BY k ORDER BY c1) AS r FROM t8"
+          val mixed = run(query)
+          assert(count(mixed) { case s: CometSortExec => s } == 1, s"plan:\n$mixed")
+          withSQLConf(expensiveNativeSort) {
+            val moved = run(query)
+            assert(count(moved) { case s: CometSortExec => s } == 0, s"plan:\n$moved")
+            assert(count(moved) { case s: SortExec => s } == 1, s"plan:\n$moved")
+          }
+        }
+      }
+    }
+  }
+
+  test("a wide sort read by a native operator stays native or moves with its stage by cost") {
+    withWide("t300", 299) {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "true") {
+        def query: DataFrame =
+          spark.table("t300").sortWithinPartitions("k").select(col("*"), (col("c1") + 1).as("x"))
+        val kept = runUnordered(query)
+        assert(count(kept) { case s: CometSortExec => s } == 1, s"plan:\n$kept")
+        assert(count(kept) { case p: CometProjectExec => p } == 1, s"plan:\n$kept")
+        withSQLConf(costTable -> "sort.flat.comet=0,0,1") {
+          val moved = runUnordered(query)
+          assert(count(moved) { case s: CometSortExec => s } == 0, s"plan:\n$moved")
+          assert(count(moved) { case p: CometProjectExec => p } == 0, s"plan:\n$moved")
+          assert(count(moved) { case s: SortExec => s } == 1, s"plan:\n$moved")
+        }
+      }
+    }
+  }
+
+  test("the wide-row rules do not run with the cost-based choice") {
+    withWide("t60", 59) {
+      withSQLConf(
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+        CometConf.COMET_EXEC_PROJECT_ENABLED.key -> "false",
+        CometConf.COMET_EXEC_SORT_WIDE_ROW_FALLBACK_ENABLED.key -> "true",
+        CometConf.COMET_SHUFFLE_WIDE_ROW_FALLBACK_MIN_LEAF_COLUMNS.key -> "50") {
+        def query: DataFrame =
+          spark
+            .table("t60")
+            .repartition(col("k"))
+            .sortWithinPartitions("k")
+            .select(col("*"), (col("c1") + 1).as("x"))
+        val (off, on) = offAndOn(runUnordered(query))
+        assert(edges(off).map(_.format) == Seq("spark"), s"plan:\n$off")
+        assert(count(off) { case s: CometSortExec => s } == 0, s"plan:\n$off")
+        assert(edges(on).map(_.format) == Seq("native"), s"plan:\n$on")
+        assert(count(on) { case s: CometSortExec => s } == 1, s"plan:\n$on")
+      }
+    }
+  }
+
+  test("the cost table is overridden by its configuration") {
+    val table = EngineCostTable.parse(
+      " sort.flat.comet=1,2; shuffleRead.nested.spark = 3,4 ;shuffleWrite.flat.comet=5,6,7;" +
+        "shuffleWritePartitionSlope=0.5;shuffleWritePartitionSlopePerLeaf=0;" +
+        "shuffleWritePartitionBase=100;c2r.nested.comet=7,0;r2c.flat.comet=4,5;" +
+        "agg.nested.spark=8,9;aggCollectList.comet=1,2,3;windowAggregate.spark=10,11;" +
+        "filterPassThroughPerLeaf.comet=0.25;shuffleReadPerByte.comet=2;" +
+        "keepFiltersOverNativeScans=false;keepPartialAggregatesOverNativeInputs=false;" +
+        "shuffleReadPerByte.spark=3;cometShuffleBytesRatio=0.75;quadraticLeafCap=10;" +
+        "sortSpillFraction=0.5")
+    assert(table.line(Sort, Form.Flat) == Line(321, 1, 2, 432, 24.1))
+    assert(table.line(ShuffleRead, Form.Nested) == Line(0, 10.79, 0.019, 3, 4))
+    assert(table.line(ShuffleWrite, Form.Flat) == Line(5, 6, 7, 69, 67.21))
+    assert(table.line(C2R, Form.Nested).cometK0 == 7)
+    assert(table.line(R2C, Form.Flat) == Line(3.4, 4, 5, 0, 0))
+    assert(table.line(Agg, Form.Nested) == Line(564, 62.4, 0.242, 8, 9))
+    for (form <- Form.all) {
+      assert(table.line(AggCollectList, form) == Line(1, 2, 3, 1700, 0))
+      assert(table.line(WindowAggregate, form) == Line(380, 0, 0, 10, 11))
+    }
+    assert(table.shuffleWritePartitionFactor(100, 300) == 2)
+    assert(table.filterPassThroughPerLeafComet == 0.25)
+    assert(table.filterPassThroughPerLeafSpark == 0)
+    same(table.cometShuffleBytes(100), (0.5 + 2) * 0.75 * 100)
+    same(table.sparkShuffleBytes(100), (3.6 + 3) * 100)
+    same(table.comet(Sort, Width(20, 0)), 321 + 1 * 20 + 2 * 20 * 10)
+    assert(table.sortSpillFraction == 0.5)
+    assert(!table.keepFiltersOverNativeScans)
+    assert(EngineCostTable.default.keepFiltersOverNativeScans)
+    assert(!table.keepPartialAggregatesOverNativeInputs)
+    assert(EngineCostTable.default.keepPartialAggregatesOverNativeInputs)
+    assert(
+      table.line(RowLocal, Form.Flat) == EngineCostTable.default
+        .line(RowLocal, Form.Flat))
+    assert(EngineCostTable.parse("") == EngineCostTable.default)
+
+    for (bad <- Seq(
+        "sort.flat.comet=1",
+        "sort.flat.comet=1,x",
+        "sort.flat.comet=1,2,3,4",
+        "sort.flat.spark=1,2,3",
+        "sorts.flat.comet=1,2",
+        "sort.deep.comet=1,2",
+        "sort.flat.velox=1,2",
+        "sort.velox=1,2",
+        "c2r.flat.spark=1,2",
+        "r2c.spark=1,2",
+        "expandNoCodegen.comet=1,2",
+        "filterPassThroughPerLeaf=0.5",
+        "filterPassThroughPerLeaf.comet=NaN",
+        "shuffleReadPerByte.comet=1,2",
+        "shuffleWritePartitionBase=0",
+        "quadraticLeafCap=0",
+        "keepFiltersOverNativeScans=1",
+        "oomRiskPenalty=1",
+        "unknownScalar=1",
+        "sort.flat.comet")) {
+      val e = intercept[IllegalArgumentException](EngineCostTable.parse(bad))
+      assert(e.getMessage.contains(costTable), e.getMessage)
+      assert(e.getMessage.contains(bad), e.getMessage)
+    }
+
+    withTables {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+        val plan = finalPlan(run("SELECT k, max(s) FROM t GROUP BY k"))
+        withSQLConf(flag -> "true", costTable -> "sort.flat.comet=1") {
+          val e = intercept[IllegalArgumentException](CostBasedEngineChoice(spark).apply(plan))
+          assert(e.getMessage.contains(costTable), e.getMessage)
+        }
+      }
+    }
+  }
+
+  test("prices follow the formulas of the table") {
+    val t = EngineCostTable.default
+    val flat10 = Width(10, 0)
+    same(t.comet(ShuffleWrite, flat10), 48.95 * 10 + 0.037 * 100)
+    same(t.spark(ShuffleWrite, flat10), 69 + 67.21 * 10)
+    same(t.comet(ShuffleRead, Width(4, 4)), 10.79 * 4 + 0.019 * 16)
+    same(t.spark(ShuffleRead, Width(4, 4)), 167 + 19.02 * 4)
+    same(t.spark(Sort, Width(200, 0)), 432 + 24.1 * 200)
+    same(t.comet(Sort, Width(200, 0)), 321 + 21.2 * 200)
+    same(t.comet(Sort, Width(200, 200)), 244 + 200 * (2.69 + 0.016 * 200))
+    same(t.spark(Sort, Width(200, 200)), 770 + 2.34 * 200)
+    assert(t.spark(Sort, Width(509, 487)) < t.comet(Sort, Width(509, 487)))
+    same(t.comet(ShuffleWrite, Width(1000, 0)), 1000 * (48.95 + 0.037 * 600))
+    same(t.comet(Smj, flat10), 40)
+    same(t.spark(Smj, flat10), 350)
+    same(t.comet(Bhj, flat10), 72 + 23 + 0.2)
+    same(t.spark(Bhj, Width(10, 10)), 205)
+    same(t.comet(Predicate, Width(2, 0)), 11 + 2.14 * 2)
+    same(t.spark(Predicate, Width(2, 2)), 8.2 * 2)
+    same(t.comet(C2R, flat10), 80 + 0.011 * 100)
+    same(t.comet(C2R, Width(10, 10)), 20 + 119 + 0.019 * 100)
+    same(t.comet(R2C, flat10), 3.4 + 76.7 + 3.6)
+    same(t.spark(AggCollectList, Width(5, 0)), 1700)
+    same(t.spark(WindowAggregate, Width(5, 0)), 20 + 0.8 * 5)
+    same(t.shuffleWritePartitionFactor(100, 100), 1)
+    same(t.shuffleWritePartitionFactor(100, 250), 1)
+    same(t.shuffleWritePartitionFactor(100, 2000), 1 + (0.04 + 0.036) * 7)
+    same(t.shuffleReadPartitionFactor(100, 2000), 1 + (0.06 + 0.025) * 7)
+    same(t.columnarShuffleWritePartitionFactor(100, 2000), 1 + 0.1 * 7)
+    same(t.cometShuffleBytes(1000), (0.5 + 0.6) * 1000)
+    same(t.sparkShuffleBytes(1000), (3.6 + 0.45) * 1000)
+  }
+
+  test("a price blends the flat and nested lines by the nested fraction, with no step") {
+    val t = EngineCostTable.default
+    for (costClass <- CostClass.all) {
+      val flat = t.comet(costClass, Width(100, 0))
+      val nested = t.comet(costClass, Width(100, 100))
+      for (n <- Seq(0, 25, 49, 50, 51, 75, 100)) {
+        same(t.comet(costClass, Width(100, n)), flat + (nested - flat) * n / 100)
+      }
+      same(
+        t.comet(costClass, Width(100, 51)) - t.comet(costClass, Width(100, 49)),
+        (nested - flat) * 0.02)
+      if (costClass.spark) {
+        val sparkFlat = t.spark(costClass, Width(100, 0))
+        val sparkNested = t.spark(costClass, Width(100, 100))
+        same(
+          t.spark(costClass, Width(100, 51)) - t.spark(costClass, Width(100, 49)),
+          (sparkNested - sparkFlat) * 0.02)
+      }
+    }
+
+    def attr(name: String, dataType: DataType): Attribute = AttributeReference(name, dataType)()
+    val ints = (1 to 3).map(i => attr(s"i$i", IntegerType))
+    val struct3 = attr("s", StructType(Seq("a", "b", "c").map(StructField(_, IntegerType))))
+    assert(EngineCostTable.widthOf(ints) == Width(3, 0))
+    assert(EngineCostTable.widthOf(ints :+ struct3) == Width(6, 3))
+    assert(EngineCostTable.widthOf(ints :+ attr("x", IntegerType) :+ struct3) == Width(7, 3))
+    assert(
+      EngineCostTable.widthOf(
+        Seq(attr("m", MapType(IntegerType, ArrayType(StringType))))) == Width(2, 2))
+    assert(EngineCostTable.widthOf(Nil) == Width(0, 0))
+    assert(Width(0, 0).nestedFraction == 0)
+  }
+
+  test("operators cost their price per row, whatever their rows") {
+    def sortCost(rows: Int): Double = {
+      var cost = Double.NaN
+      withTempPath { dir =>
+        spark.range(rows).selectExpr("id AS k", "id + 1 AS v").write.parquet(dir.getCanonicalPath)
+        withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+          val plan =
+            runUnordered(spark.read.parquet(dir.getCanonicalPath).sortWithinPartitions("k"))
+          val native = nodes(plan).collectFirst { case s: CometSortExec => s }.get
+          assert(model.terms(native, Engine.Comet) == Seq(Term(Sort, Width(2, 0))))
+          cost = model.operatorCost(native, Engine.Comet)
+        }
+      }
+      cost
+    }
+    val small = sortCost(10)
+    same(small, EngineCostTable.default.comet(Sort, Width(2, 0)))
+    same(sortCost(20000), small)
+  }
+
+  test("a sort adds its spill fraction and its bytes beyond the lines") {
+    withTables {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "false") {
+        val plan = runUnordered(spark.table("t").sortWithinPartitions("k"))
+        val sort = nodes(plan).collectFirst { case s: CometSortExec => s }.get
+        val t = EngineCostTable.default
+        val w = Width(3, 0)
+        assert(model.excessBytes(sort.output) == 20 - 12)
+        same(model.operatorCost(sort, Engine.Comet), t.comet(Sort, w) + 0.15 * 8)
+        same(model.operatorCost(sort, Engine.Spark), t.spark(Sort, w))
+        val spilling =
+          new EngineCostModel(EngineCostTable.parse("sortSpillFraction=0.25"), -1, 0, Map.empty)
+        assert(spilling.terms(sort, Engine.Spark) == Seq(Term(Sort, w), Term(SortSpill, w, 0.25)))
+        same(
+          spilling.operatorCost(sort, Engine.Spark),
+          t.spark(Sort, w) + 0.25 * t.spark(SortSpill, w))
+      }
+    }
+  }
+
+  test("a project prices its pass-through by engine and the expressions it computes") {
+    withWide("t8", 7) {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "false") {
+        def project(df: DataFrame): SparkPlan =
+          nodes(runUnordered(df)).collectFirst {
+            case p: CometProjectExec => p
+            case p: ProjectExec => p
+          }.get
+        def select(df: DataFrame): DataFrame =
+          df.select(col("k"), col("c1").as("a"), (col("c2") + col("c3")).as("s"), col("c4"))
+        val overScan = project(select(spark.table("t8")))
+        val w = Width(4, 0)
+        assert(model.overScan(overScan.children.head))
+        assert(
+          model.terms(overScan, Engine.Comet) ==
+            Seq(Term(ProjectPassThrough, w), Term(Expr, w, 1)))
+        assert(model.terms(overScan, Engine.Spark) == Seq(Term(ExprOverScan, w, 1)))
+        same(model.operatorPrice(overScan, Engine.Comet), 1.25 + 0.057 * 4 + 1)
+        same(model.operatorPrice(overScan, Engine.Spark), 2.5)
+
+        val afterShuffle = project(select(spark.table("t8").repartition(col("k"))))
+        assert(!model.overScan(afterShuffle.children.head))
+        same(model.operatorPrice(afterShuffle, Engine.Comet), 1.25 + 0.057 * 4 + 1)
+        same(model.operatorPrice(afterShuffle, Engine.Spark), 10.5 * 4 + 2.3 + 0.1 * 4)
+      }
+    }
+  }
+
+  test("a filter prices the leaves of its predicate and passes its rows by engine") {
+    withWide("t8", 7) {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "false") {
+        val plan = runUnordered(spark.table("t8").filter(col("c4") > 5 && col("c5") < 900))
+        val filter = nodes(plan).collectFirst { case f: CometFilterExec => f }.get
+        assert(model.terms(filter, Engine.Comet) == Seq(Term(Predicate, Width(2, 0))))
+        same(model.operatorCost(filter, Engine.Comet), 11 + 2.14 * 2 + 1.5 * 8)
+        same(model.operatorCost(filter, Engine.Spark), 5.4 * 2)
+      }
+    }
+  }
+
+  test("a selective filter over a wide native scan stays native whatever the prices") {
+    withWide("t60", 59) {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "true") {
+        def query: DataFrame =
+          spark
+            .table("t60")
+            .filter(col("c50") < 5 && col("c51") > 1)
+            .select((col("k") +: (1 to 49).map(i => col(s"c$i"))) :+ (col("c2") + 1).as("x"): _*)
+        val expensive = "predicate.comet=100000,0,0;filterPassThroughPerLeaf.comet=1000;" +
+          "projectPassThrough.comet=100000,0,0"
+        for (prices <- Seq("", expensive)) {
+          withSQLConf(costTable -> prices) {
+            val plan = runUnordered(query)
+            assert(count(plan) { case f: CometFilterExec => f } == 1, s"plan:\n$plan")
+            assert(count(plan) { case p: CometProjectExec => p } == 1, s"plan:\n$plan")
+          }
+        }
+        withSQLConf(costTable -> s"$expensive;keepFiltersOverNativeScans=false") {
+          val moved = runUnordered(query)
+          assert(count(moved) { case f: CometFilterExec => f } == 0, s"plan:\n$moved")
+          assert(count(moved) { case p: CometProjectExec => p } == 0, s"plan:\n$moved")
+        }
+      }
+    }
+  }
+
+  test(
+    "a partial aggregate over a wide native scan and filter stays native whatever the prices") {
+    withWide("t60", 59) {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "true") {
+        def query: DataFrame =
+          spark
+            .table("t60")
+            .filter(col("c50") < 500)
+            .groupBy("k")
+            .agg(sum("c1"), sum("c2"))
+        def partials(plan: SparkPlan): Int = count(plan) {
+          case a: CometHashAggregateExec if a.aggregateExpressions.forall(_.mode == Partial) => a
+        }
+        val expensive = "agg.comet=100000,0,0;aggDeclarative.comet=100000,0,0"
+        for (prices <- Seq("", expensive)) {
+          withSQLConf(costTable -> prices) {
+            val plan = runUnordered(query)
+            assert(partials(plan) == 1, s"plan:\n$plan")
+          }
+        }
+        withSQLConf(costTable -> s"$expensive;keepPartialAggregatesOverNativeInputs=false") {
+          val moved = runUnordered(query)
+          assert(partials(moved) == 0, s"plan:\n$moved")
+        }
+      }
+    }
+  }
+
+  test("aggregates are priced by their keys and the classes of their functions") {
+    withTables {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "false") {
+        val hash = run("SELECT k, sum(v), count(*) FROM t GROUP BY k")
+        val aggs = nodes(hash).collect { case a: CometHashAggregateExec => a }
+        assert(aggs.size == 2, s"plan:\n$hash")
+        aggs.foreach { agg =>
+          assert(model.costClasses(agg) == Seq(Agg))
+          assert(
+            model.terms(agg, Engine.Comet) ==
+              Seq(Term(Agg, Width(1, 0), 0.5), Term(AggDeclarative, Width(2, 0), 1.0)))
+          same(model.operatorCost(agg, Engine.Comet), 0.5 * (3.2 + 0.082) + 6)
+          same(model.operatorCost(agg, Engine.Spark), 0.5 * 62.1 + 15)
+          val narrow = new EngineCostModel(EngineCostTable.default, -1, 0, Map.empty, 1)
+          assert(
+            narrow.terms(agg, Engine.Spark) ==
+              Seq(Term(Agg, Width(1, 0), 0.5), Term(AggDeclarativeNoCodegen, Width(2, 0), 1.0)))
+        }
+
+        val objects = runUnordered(
+          sql("SELECT k, collect_list(v), collect_list(s), collect_set(v), percentile(v, 0.5), " +
+            "percentile_approx(v, 0.5) FROM t GROUP BY k"))
+        val objectAggs = nodes(objects).filter(_.nodeName.contains("Aggregate"))
+        assert(objectAggs.size == 2, s"plan:\n$objects")
+        objectAggs.foreach { agg =>
+          val terms = model.terms(agg, Engine.Spark)
+          assert(
+            terms.map(t => (t.costClass, t.times)) == Seq(
+              Agg -> 0.5,
+              AggCollectList -> 1.0,
+              AggCollectSet -> 0.5,
+              AggPercentile -> 0.5,
+              AggPercentileApprox -> 0.5,
+              AggObjectHash -> 0.5),
+            s"plan:\n$objects")
+          same(
+            model.operatorPrice(agg, Engine.Spark),
+            0.5 * (62.1 + 2 * 1700 + 1600 + 2400 + 3900 + 2500))
+          same(
+            model.operatorPrice(agg, Engine.Comet),
+            0.5 * (3.2 + 0.082 + 2 * 28 + 105 + 130 + 270 + 1000))
+        }
+
+        val sorted = withSQLConf(sparkAggregates) {
+          run("SELECT k, max(s) FROM t GROUP BY k")
+        }
+        val sortAgg = nodes(sorted).collectFirst { case a: SortAggregateExec => a }.get
+        assert(
+          model.terms(sortAgg, Engine.Spark) == Seq(
+            Term(Agg, Width(1, 0), 0.5),
+            Term(AggDeclarative, Width(1, 0), 0.5),
+            Term(Sort, Width(2, 0))))
+      }
+    }
+  }
+
+  test("aggregate keys holding arrays and keys computed by the codegen dispatcher add classes") {
+    withStar {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "false") {
+        val plan = runUnordered(sql(s"SELECT DISTINCT $starColumns FROM star"))
+        val aggs = nodes(plan).collect { case a: CometHashAggregateExec => a }
+        assert(aggs.size == 2, s"plan:\n$plan")
+        val (partial, finals) = aggs.partition(a =>
+          model.dispatchedThroughCodegen(
+            a.originalPlan
+              .asInstanceOf[HashAggregateExec]
+              .groupingExpressions
+              .find(_.name == "discounts")
+              .get))
+        assert(partial.size == 1 && finals.size == 1, s"plan:\n$plan")
+        val keys = Term(Agg, Width(18, 11), 0.5)
+        val arrays = Term(AggArrayKey, Width(7, 7), 0.5)
+        assert(
+          model.terms(partial.head, Engine.Comet) ==
+            Seq(keys, arrays, Term(CodegenDispatch, Width(3, 3))))
+        assert(model.terms(finals.head, Engine.Comet) == Seq(keys, arrays))
+        val table = EngineCostTable.default
+        same(
+          model.operatorPrice(partial.head, Engine.Comet),
+          0.5 * table.comet(Agg, Width(18, 11)) + 0.5 * 937 * 7 + 217 * 3)
+        same(
+          model.operatorPrice(partial.head, Engine.Spark),
+          0.5 * table.spark(Agg, Width(18, 11)) + 0.5 * 76 * 7 + 133 * 3)
+        same(
+          model.operatorPrice(finals.head, Engine.Comet),
+          0.5 * table.comet(Agg, Width(18, 11)) + 0.5 * 937 * 7)
+
+        val flat = runUnordered(sql("SELECT DISTINCT order_id, category_id FROM star"))
+        nodes(flat).collect { case a: CometHashAggregateExec => a }.foreach { agg =>
+          assert(model.terms(agg, Engine.Comet) == Seq(Term(Agg, Width(2, 0), 0.5)))
+        }
+      }
+    }
+  }
+
+  for (aqe <- Seq("false", "true")) {
+    test(
+      s"a distinct over array keys after a window runs in Spark, as in star_order_2020 (AQE=$aqe)") {
+      withStar {
+        withAqe(aqe) {
+          def aggregates(plan: SparkPlan): (Int, Int) =
+            (
+              count(plan) { case a: CometHashAggregateExec => a },
+              count(plan) { case a: HashAggregateExec => a })
+          val (off, on) = offAndOn(runUnordered(starQuery))
+          assert(aggregates(off) == (2, 0), s"plan:\n$off")
+          assert(aggregates(on) == (0, 2), s"plan:\n$on")
+          withSQLConf(
+            flag -> "true",
+            costTable -> ("aggArrayKey.comet=0,0,0;aggArrayKey.spark=0,0;" +
+              "codegenDispatch.comet=0,0,0;codegenDispatch.spark=0,0")) {
+            val before = runUnordered(starQuery)
+            assert(aggregates(before) == (2, 0), s"plan:\n$before")
+          }
+        }
+      }
+    }
+  }
+
+  test("a sort-merge join adds smjCrossCondition only with a CASE or IF over both inputs") {
+    withTables {
+      withSQLConf(
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+        SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+        flag -> "false") {
+        def join(query: String): SparkPlan = {
+          val plan = run(query)
+          val joins = nodes(plan).collect {
+            case j: CometSortMergeJoinExec => j
+            case j: SortMergeJoinExec => j
+          }
+          assert(joins.size == 1, s"plan:\n$plan")
+          joins.head
+        }
+        val out = Width(4, 0)
+        val equi = join("SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k")
+        val band = join(
+          "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
+            "AND a.v <= b.v AND b.v <= a.v + 13")
+        val oneSide = join(
+          "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
+            "AND a.v <= CASE WHEN b.v > 500 THEN b.v ELSE b.v + 13 END")
+        val crossCase = join(crossCaseOnT)
+        // Pricing is defined for original Spark operators as well as native wrappers. ANSI
+        // arithmetic in a skipped operand remains excluded by the accepted G05 guard.
+        assert(equi.isInstanceOf[CometSortMergeJoinExec])
+        assert(band.isInstanceOf[SortMergeJoinExec])
+        assert(oneSide.isInstanceOf[CometSortMergeJoinExec])
+        assert(crossCase.isInstanceOf[SortMergeJoinExec])
+        assert(band.asInstanceOf[SortMergeJoinExec].condition.isDefined)
+        for (engine <- Engine.all; j <- Seq(equi, band, oneSide)) {
+          assert(model.terms(j, engine) == Seq(Term(Smj, out)))
+        }
+        same(model.operatorPrice(equi, Engine.Comet), EngineCostTable.default.comet(Smj, out))
+        val table = EngineCostTable.default
+        for (engine <- Engine.all) {
+          same(model.operatorPrice(band, engine), model.operatorPrice(equi, engine))
+          assert(
+            model.terms(crossCase, engine) == Seq(Term(Smj, out), Term(SmjCrossCondition, out)))
+          val price: (CostClass, Width) => Double =
+            if (engine == Engine.Comet) table.comet else table.spark
+          same(
+            model.operatorPrice(crossCase, engine),
+            price(Smj, out) + price(SmjCrossCondition, out))
+        }
+      }
+    }
+  }
+
+  private val crossCaseOnT =
+    "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
+      "AND CASE WHEN a.v % 2 = b.v % 2 THEN a.v - b.v ELSE 10 - (b.v - a.v) END BETWEEN 1 AND 10"
+
+  // This cross-input CASE has no checked arithmetic or other fallible skipped operand. It
+  // exercises actual native eligibility and cost-based reversion without removing G05 guards.
+  private val safeCrossCaseOnT =
+    "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
+      "AND CASE WHEN a.v < b.v THEN a.v >= b.v ELSE a.v <= b.v END"
+
+  for (aqe <- Seq("false", "true")) {
+    test(s"safe cross-input CASE responds to cost while ANSI join guards remain (AQE=$aqe)") {
+      withTables {
+        withAqe(
+          aqe,
+          SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+          SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+          def joins(plan: SparkPlan): (Int, Int) =
+            (
+              count(plan) { case j: CometSortMergeJoinExec => j },
+              count(plan) { case j: SortMergeJoinExec => j })
+          val equi = "SELECT a.k, a.v, b.s FROM t a JOIN t b ON a.k = b.k"
+          val band = equi + " AND a.v <= b.v AND b.v <= a.v + 13"
+          val (off, on) = offAndOn(run(equi))
+          assert(joins(off) == (1, 0), s"plan:\n$off")
+          assert(joins(on) == (1, 0), s"plan:\n$on")
+          assert(cometOperatorNames(off) == cometOperatorNames(on), s"$off\n$on")
+          for (query <- Seq(band, crossCaseOnT)) {
+            val (guardedOff, guardedOn) = offAndOn(run(query))
+            assert(joins(guardedOff) == (0, 1), s"plan:\n$guardedOff")
+            assert(joins(guardedOn) == (0, 1), s"plan:\n$guardedOn")
+          }
+          val (crossOff, crossOn) = offAndOn(run(safeCrossCaseOnT))
+          assert(joins(crossOff) == (1, 0), s"plan:\n$crossOff")
+          assert(joins(crossOn) == (0, 1), s"plan:\n$crossOn")
+          withSQLConf(
+            flag -> "true",
+            costTable -> "smjCrossCondition.comet=0,0,0;smjCrossCondition.spark=0,0") {
+            val plan = run(safeCrossCaseOnT)
+            assert(joins(plan) == (1, 0), s"plan:\n$plan")
+            // A zero price must not override an execution-correctness restriction.
+            assert(joins(run(crossCaseOnT)) == (0, 1))
+          }
+        }
+      }
+    }
+  }
+
+  private def withIntervals(f: => Unit): Unit = {
+    withTempPath { dir =>
+      spark
+        .range(2000)
+        .selectExpr(
+          "cast(id % 97 AS int) AS k",
+          "timestamp_seconds(id * 3600) AS v",
+          "id * 3600 AS vs",
+          "concat('s', cast(id % 7 AS string)) AS s")
+        .write
+        .parquet(s"${dir.getCanonicalPath}/ev")
+      spark
+        .range(500)
+        .selectExpr(
+          "cast(id % 97 AS int) AS k",
+          "timestamp_seconds(id * 7200) AS l",
+          "id * 7200 AS ls",
+          "IF(id % 5 = 0, NULL, timestamp_seconds(id * 7200 + 259200)) AS u",
+          "timestamp_seconds(id * 7200) AS created_at",
+          "IF(id % 5 = 0, NULL, timestamp_seconds(id * 7200 + 259200)) AS completed_dt",
+          "concat('s', cast(id % 5 AS string)) AS s")
+        .write
+        .parquet(s"${dir.getCanonicalPath}/dim")
+      spark.read.parquet(s"${dir.getCanonicalPath}/ev").createOrReplaceTempView("ev")
+      spark.read.parquet(s"${dir.getCanonicalPath}/dim").createOrReplaceTempView("dim")
+      sql(
+        "CREATE OR REPLACE TEMP VIEW rates AS SELECT s AS currency, " +
+          "CAST(to_date(l) AS timestamp) AS effective_date, " +
+          "CAST(to_date(u) AS timestamp) AS next_effective_date FROM dim")
+      withTempView("ev", "dim", "rates")(f)
+    }
+  }
+
+  private val validityIntervals = Seq(
+    "e.v >= d.l AND e.v < d.u",
+    "e.v BETWEEN d.l AND d.u",
+    "e.v > d.l AND e.v <= COALESCE(d.u, timestamp '9999-12-31')",
+    "(d.u IS NULL OR e.v < d.u) AND e.v >= d.l",
+    "to_date(e.v) >= to_date(d.l) AND CAST(e.v AS date) < CAST(d.u AS date)",
+    "date_trunc('day', e.v) >= d.l AND e.v < date_trunc('day', d.u)")
+
+  private val intervalQueries = Seq(
+    "SELECT e.k, e.v, r.effective_date FROM ev e LEFT JOIN rates r ON e.s = r.currency " +
+      "AND e.v > r.effective_date AND e.v <= r.next_effective_date",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k AND e.v >= d.l " +
+      "AND e.v < CAST(COALESCE(CAST(d.u AS string), '9999-12-31') AS timestamp)",
+    "WITH p AS (SELECT k, l, LEAD(l) OVER (PARTITION BY k ORDER BY l) AS nl FROM dim) " +
+      "SELECT e.k, e.v, p.l FROM ev e LEFT JOIN p ON e.k = p.k AND e.v >= p.l " +
+      "AND e.v < COALESCE(p.nl, timestamp '9999-12-31')")
+
+  private val crossInputBounds =
+    "SELECT o.k, o.v, g.v AS gv FROM ev o JOIN dim p ON o.k = p.k " +
+      "LEFT JOIN ev g ON o.k = g.k AND p.completed_dt < g.v AND o.v > g.v"
+
+  private val otherConditions = Seq(
+    crossInputBounds,
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k " +
+      "AND e.vs BETWEEN d.ls - 2592000 AND d.ls",
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k " +
+      "AND e.v BETWEEN d.l - INTERVAL 30 DAYS AND d.l",
+    "WITH p AS (SELECT k, l, l + INTERVAL 30 DAYS AS l_end FROM dim) " +
+      "SELECT e.k, e.v, p.l FROM ev e JOIN p ON e.k = p.k AND e.v >= p.l AND e.v < p.l_end",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k AND e.v > d.created_at " +
+      "AND COALESCE(d.completed_dt, timestamp '5999-12-31') <= e.v",
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k " +
+      "JOIN dim x ON e.k = x.k AND e.v >= d.l AND e.v < x.u",
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k AND e.v >= d.l",
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k AND e.v >= d.l AND e.v < d.u " +
+      "AND e.s <> d.s")
+
+  private val crossConditionals = Seq(
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k AND CASE WHEN e.s = d.s " +
+      "THEN e.vs - d.ls ELSE 10 - (d.ls - e.vs) END BETWEEN 1 AND 10",
+    "SELECT e.k, e.v, d.l FROM ev e JOIN dim d ON e.k = d.k AND e.v >= d.l " +
+      "AND IF(d.u IS NULL, e.vs < d.ls + 2592000, e.v < d.u)")
+
+  private val unchargedConditions = Seq(
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND e.v >= CASE WHEN d.s = 's1' THEN d.l ELSE d.created_at END AND e.v < d.u",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND IF(e.s = 's1', e.vs, e.vs + 3600) BETWEEN d.ls AND d.ls + 86400",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND datediff(e.v, d.l) BETWEEN 0 AND 30",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND e.vs - d.ls BETWEEN 1 AND 3600",
+    "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+      "AND (e.s = d.s OR CAST(d.ls AS string) = e.s)")
+
+  private def conditionTerms(query: String): Seq[Seq[Term]] = {
+    val plan = runUnordered(sql(query))
+    val joins = nodes(plan).collect {
+      case j: CometSortMergeJoinExec
+          if j.originalPlan.asInstanceOf[SortMergeJoinExec].condition.isDefined =>
+        j
+      case j: SortMergeJoinExec if j.condition.isDefined => j
+    }
+    assert(joins.nonEmpty, s"plan:\n$plan")
+    joins.map(j => model.terms(j, Engine.Comet))
+  }
+
+  for (aqe <- Seq("false", "true")) {
+    test(s"only a CASE or IF over both inputs adds smjCrossCondition (AQE=$aqe)") {
+      withIntervals {
+        withAqe(
+          aqe,
+          flag -> "false",
+          SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+          SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+          val intervals =
+            for (condition <- validityIntervals; joinType <- Seq("JOIN", "LEFT JOIN"))
+              yield s"SELECT e.k, e.v, d.l FROM ev e $joinType dim d ON e.k = d.k AND $condition"
+          for (query <- intervals ++ intervalQueries ++ otherConditions ++ unchargedConditions) {
+            assert(conditionTerms(query).forall(_.map(_.costClass) == Seq(Smj)), query)
+          }
+          for (query <- crossConditionals) {
+            assert(
+              conditionTerms(query).exists(_.map(_.costClass) == Seq(Smj, SmjCrossCondition)),
+              query)
+          }
+        }
+      }
+    }
+
+    test(s"interval joins retain native eligibility or safe fallback under cost (AQE=$aqe)") {
+      withIntervals {
+        withAqe(
+          aqe,
+          SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+          SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+          def joins(plan: SparkPlan): (Int, Int) =
+            (
+              count(plan) { case j: CometSortMergeJoinExec => j },
+              count(plan) { case j: SortMergeJoinExec => j })
+          val interval = "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+            "AND e.v >= d.l AND e.v < COALESCE(d.u, timestamp '9999-12-31')"
+          // COALESCE, checked arithmetic, temporal functions and parsing in a skipped
+          // operand are deliberately not declared eagerly safe by the accepted G05 guard.
+          val expected = Seq(
+            interval -> (0, 1),
+            otherConditions(1) -> (1, 0),
+            crossInputBounds -> (2, 0),
+            unchargedConditions(0) -> (1, 0)) ++
+            unchargedConditions.drop(1).map(_ -> (0, 1)) ++
+            crossConditionals.map(_ -> (0, 1))
+          for ((query, shape) <- expected) {
+            val (off, on) = offAndOn(run(query))
+            assert(joins(off) == shape, s"query=$query\nplan:\n$off")
+            assert(joins(on) == shape, s"query=$query\nplan:\n$on")
+          }
+          val safeCase = "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+            "AND CASE WHEN e.s = d.s THEN e.v >= d.l ELSE e.v < d.l END"
+          val (off, on) = offAndOn(run(safeCase))
+          assert(joins(off) == (1, 0), s"plan:\n$off")
+          assert(joins(on) == (0, 1), s"plan:\n$on")
+          withSQLConf(
+            flag -> "true",
+            costTable -> "smjCrossCondition.comet=0,0,0;smjCrossCondition.spark=0,0") {
+            assert(joins(run(safeCase)) == (1, 0))
+          }
+        }
+      }
+    }
+  }
+
+  private def withFbj(f: => Unit): Unit = {
+    withTempPath { dir =>
+      spark
+        .range(4000)
+        .selectExpr(
+          "cast(id AS string) AS order_id",
+          "timestamp_seconds(1735689600 + id * 3600) AS order_datetime_utc",
+          "concat('m', cast(id % 13 AS string)) AS merchant_id",
+          "concat('p', cast(id % 41 AS string)) AS product_id",
+          "concat('v', cast(id % 61 AS string)) AS product_variant_id",
+          "IF(id % 10 = 0, 'Other', 'Chinese') AS origin_name",
+          "id % 3 + 1 AS product_quantity",
+          "id % 4 = 0 AS is_fbj",
+          "cast(date_trunc('month', timestamp_seconds(1735689600 + id * 3600)) AS date) " +
+            "AS order_month_msk")
+        .write
+        .parquet(s"${dir.getCanonicalPath}/orders")
+      spark
+        .range(600)
+        .selectExpr(
+          "concat('v', cast(id % 61 AS string)) AS variant_id",
+          "concat('g', cast(id DIV 2 AS string)) AS replenishment_group_id",
+          "concat('g', cast(id DIV 2 + id % 2 * 100000 AS string)) AS replenishment_id",
+          "IF(id % 7 = 0, 'Merchant', 'Joom') AS source",
+          "cast(timestamp_seconds(1735689600 + id * 20000) AS date) AS partition_date",
+          "timestamp_seconds(1735689600 + id * 20000) AS created_at",
+          "'completed' AS current_status",
+          "timestamp_seconds(1735689600 + id * 20000 + 3600) AS 2_pending_inbound_dt",
+          "timestamp_seconds(1735689600 + id * 20000 + 7200) AS 3_pending_shipping_dt",
+          "timestamp_seconds(1735689600 + id * 20000 + 10800) AS 4_shipped_dt",
+          "timestamp_seconds(1735689600 + id * 20000 + 14400) AS 5_action_required_dt",
+          "timestamp_seconds(1735689600 + id * 20000 + 18000) AS 6_on_review_dt",
+          "IF(id % 5 = 0, NULL, timestamp_seconds(1735689600 + id * 20000 + 604800)) " +
+            "AS completed_dt",
+          "id % 20 + 5 AS min_count",
+          "id % 20 + 50 AS max_count",
+          "id % 30 AS requested_count",
+          "id % 25 AS accepted_count")
+        .write
+        .parquet(s"${dir.getCanonicalPath}/repl")
+      spark
+        .range(200)
+        .selectExpr(
+          "cast(date_trunc('quarter', timestamp_seconds(1735689600 + (id % 4) * 7776000)) " +
+            "AS date) AS quarter",
+          "concat('m', cast(id % 13 AS string)) AS merchant_id",
+          "concat('name', cast(id AS string)) AS merchant_name",
+          "concat('main', cast(id AS string)) AS main_merchant_name",
+          "concat('kam', cast(id % 3 AS string)) AS kam_email")
+        .write
+        .parquet(s"${dir.getCanonicalPath}/kam")
+      spark.read.parquet(s"${dir.getCanonicalPath}/orders").createOrReplaceTempView("gold_orders")
+      spark.read.parquet(s"${dir.getCanonicalPath}/repl").createOrReplaceTempView("fbj_repl")
+      spark.read.parquet(s"${dir.getCanonicalPath}/kam").createOrReplaceTempView("fbj_kam")
+      withTempView("gold_orders", "fbj_repl", "fbj_kam")(f)
+    }
+  }
+
+  private val fbjOrderType =
+    """
+      |WITH orders AS (
+      |    SELECT
+      |        order_datetime_utc,
+      |        CAST(order_datetime_utc AS DATE) AS dt,
+      |        order_id,
+      |        product_variant_id,
+      |        product_quantity,
+      |        is_fbj,
+      |        product_id,
+      |        merchant_id
+      |    FROM gold_orders
+      |    WHERE
+      |        origin_name = 'Chinese'
+      |        AND order_datetime_utc >= '2025-01-01'
+      |        AND order_month_msk >= '2024-12-01'
+      |),
+      |
+      |variant_daily_demand AS (
+      |    SELECT
+      |        product_variant_id,
+      |        dt,
+      |        SUM(product_quantity) AS daily_qty
+      |    FROM orders
+      |    GROUP BY product_variant_id, dt
+      |),
+      |
+      |forward_demand AS (
+      |    SELECT
+      |        a.product_variant_id,
+      |        a.dt,
+      |        SUM(f.daily_qty) AS forward_14d_qty
+      |    FROM variant_daily_demand AS a
+      |    INNER JOIN variant_daily_demand AS f
+      |        ON
+      |            a.product_variant_id = f.product_variant_id
+      |            AND a.dt <= f.dt
+      |            AND f.dt <= DATE_ADD(a.dt, 13)
+      |    GROUP BY a.product_variant_id, a.dt
+      |),
+      |
+      |parent_repl AS (
+      |    SELECT
+      |        variant_id,
+      |        replenishment_group_id,
+      |        partition_date,
+      |        created_at,
+      |        current_status,
+      |        2_pending_inbound_dt,
+      |        3_pending_shipping_dt,
+      |        4_shipped_dt,
+      |        5_action_required_dt,
+      |        6_on_review_dt,
+      |        completed_dt,
+      |        min_count,
+      |        max_count,
+      |        requested_count
+      |    FROM fbj_repl
+      |    WHERE
+      |        source IN ('Joom', 'Warehouse')
+      |        AND replenishment_id = replenishment_group_id
+      |),
+      |
+      |parent_repl_amount AS (
+      |    SELECT
+      |        parent_repl.replenishment_group_id,
+      |        parent_repl.min_count,
+      |        SUM(r.accepted_count) AS acc_count
+      |    FROM parent_repl
+      |    INNER JOIN fbj_repl AS r
+      |        ON parent_repl.replenishment_group_id = r.replenishment_group_id
+      |    GROUP BY
+      |        parent_repl.replenishment_group_id,
+      |        parent_repl.min_count
+      |),
+      |
+      |current_active_repl AS (
+      |    SELECT
+      |        o.order_datetime_utc,
+      |        o.dt,
+      |        o.order_id,
+      |        o.product_variant_id,
+      |        pr.replenishment_group_id,
+      |        pr.created_at,
+      |        COALESCE(pr.completed_dt, '5999-12-31 23:59:59') AS completed_dt,
+      |        ROW_NUMBER() OVER (PARTITION BY o.order_id ORDER BY pr.created_at DESC) AS rn
+      |    FROM orders AS o
+      |    LEFT JOIN parent_repl AS pr
+      |        ON
+      |            o.product_variant_id = pr.variant_id
+      |            AND o.order_datetime_utc > pr.created_at
+      |            AND COALESCE(pr.completed_dt, '5999-12-31 23:59:59') > o.order_datetime_utc
+      |),
+      |
+      |previous_completed_repl AS (
+      |    SELECT
+      |        o.order_datetime_utc,
+      |        o.dt,
+      |        o.order_id,
+      |        o.product_variant_id,
+      |        pr.replenishment_group_id,
+      |        pr.created_at,
+      |        COALESCE(pr.completed_dt, '5999-12-31 23:59:59') AS completed_dt,
+      |        pra.min_count,
+      |        pra.acc_count,
+      |        ROW_NUMBER() OVER (
+      |            PARTITION BY o.order_id
+      |            ORDER BY COALESCE(pr.completed_dt, '5999-12-31 23:59:59') DESC
+      |        ) AS rn
+      |    FROM orders AS o
+      |    LEFT JOIN parent_repl AS pr
+      |        ON
+      |            o.product_variant_id = pr.variant_id
+      |            AND o.order_datetime_utc > pr.created_at
+      |            AND COALESCE(pr.completed_dt, '5999-12-31 23:59:59') <= o.order_datetime_utc
+      |    LEFT JOIN parent_repl_amount AS pra
+      |        ON pr.replenishment_group_id = pra.replenishment_group_id
+      |),
+      |
+      |var_kam AS (
+      |    SELECT
+      |        mkm.quarter,
+      |        mkm.merchant_id,
+      |        MAX(mkm.merchant_name) AS merchant_name,
+      |        MAX(mkm.main_merchant_name) AS main_merchant_name,
+      |        MAX(mkm.kam_email) AS kam_email
+      |    FROM fbj_kam AS mkm
+      |    GROUP BY
+      |        mkm.quarter,
+      |        mkm.merchant_id
+      |),
+      |
+      |final AS (
+      |    SELECT /*+ BROADCAST(m_k) */
+      |        o.order_datetime_utc,
+      |        o.dt,
+      |        o.order_id,
+      |        o.product_variant_id,
+      |        o.product_quantity,
+      |        o.is_fbj,
+      |        o.product_id,
+      |        o.merchant_id,
+      |        m_k.kam_email AS kam,
+      |        fd.forward_14d_qty,
+      |        car.replenishment_group_id AS c_replenishment_group_id,
+      |        car.created_at AS c_created_at,
+      |        car.completed_dt AS c_completed_dt,
+      |        pcr.replenishment_group_id AS p_replenishment_group_id,
+      |        pcr.created_at AS p_created_at,
+      |        pcr.completed_dt AS p_completed_dt,
+      |        pcr.min_count AS p_min_count,
+      |        COALESCE(pcr.acc_count, 0) AS p_acc_count,
+      |        COALESCE(SUM(go.product_quantity), 0) AS p_product_qnt
+      |    FROM orders AS o
+      |    LEFT JOIN forward_demand AS fd
+      |        ON
+      |            o.product_variant_id = fd.product_variant_id
+      |            AND o.dt = fd.dt
+      |    LEFT JOIN current_active_repl AS car
+      |        ON
+      |            o.order_id = car.order_id
+      |            AND car.rn = 1
+      |    LEFT JOIN previous_completed_repl AS pcr
+      |        ON
+      |            o.order_id = pcr.order_id
+      |            AND pcr.rn = 1
+      |    LEFT JOIN var_kam AS m_k
+      |        ON
+      |            o.merchant_id = m_k.merchant_id
+      |            AND m_k.quarter = DATE_TRUNC('quarter', o.dt)
+      |    LEFT JOIN gold_orders AS go
+      |        ON
+      |            o.product_variant_id = go.product_variant_id
+      |            AND pcr.completed_dt < go.order_datetime_utc
+      |            AND o.order_datetime_utc > go.order_datetime_utc
+      |    GROUP BY
+      |        o.order_datetime_utc,
+      |        o.dt,
+      |        o.order_id,
+      |        o.product_variant_id,
+      |        o.product_quantity,
+      |        o.is_fbj,
+      |        o.product_id,
+      |        o.merchant_id,
+      |        m_k.kam_email,
+      |        fd.forward_14d_qty,
+      |        car.replenishment_group_id,
+      |        car.created_at,
+      |        car.completed_dt,
+      |        pcr.replenishment_group_id,
+      |        pcr.created_at,
+      |        pcr.completed_dt,
+      |        pcr.min_count,
+      |        COALESCE(pcr.acc_count, 0)
+      |)
+      |
+      |SELECT
+      |    dt AS partition_date,
+      |    order_datetime_utc,
+      |    order_id,
+      |    product_variant_id,
+      |    product_quantity,
+      |    is_fbj,
+      |    product_id,
+      |    merchant_id,
+      |    kam,
+      |    forward_14d_qty,
+      |    forward_14d_qty > 4 AS is_eligible,
+      |    CASE
+      |        WHEN is_fbj AND forward_14d_qty > 4
+      |            THEN '1.1 FBJ | Eligible'
+      |        WHEN is_fbj AND forward_14d_qty <= 4
+      |            THEN '1.2 FBJ | Not Eligible'
+      |        WHEN NOT is_fbj AND forward_14d_qty <= 4
+      |            THEN '2.1 FBM | Not Eligible'
+      |        WHEN
+      |            NOT is_fbj AND forward_14d_qty > 4
+      |            AND p_replenishment_group_id IS NULL
+      |            THEN '2.2.1 FBM Eligible | No previous replenishment'
+      |        WHEN
+      |            NOT is_fbj AND forward_14d_qty > 4
+      |            AND p_replenishment_group_id IS NOT NULL
+      |            AND c_replenishment_group_id IS NULL
+      |            THEN '2.2.2 FBM Eligible | Prev repl completed, no active repl'
+      |        WHEN
+      |            NOT is_fbj AND forward_14d_qty > 4
+      |            AND p_replenishment_group_id IS NOT NULL
+      |            AND c_replenishment_group_id IS NOT NULL
+      |            AND p_acc_count >= p_min_count
+      |            THEN '2.2.3 FBM Eligible | Fully delivered, late new repl'
+      |        WHEN
+      |            NOT is_fbj AND forward_14d_qty > 4
+      |            AND p_replenishment_group_id IS NOT NULL
+      |            AND c_replenishment_group_id IS NOT NULL
+      |            AND p_acc_count < p_min_count
+      |            AND p_product_qnt >= p_min_count - p_acc_count
+      |            THEN '2.2.4 FBM Eligible | Partially delivered, demand covered'
+      |        WHEN
+      |            NOT is_fbj AND forward_14d_qty > 4
+      |            AND p_replenishment_group_id IS NOT NULL
+      |            AND c_replenishment_group_id IS NOT NULL
+      |            AND p_acc_count < p_min_count
+      |            AND p_product_qnt < p_min_count - p_acc_count
+      |            THEN '3.0 FBM Eligible | Partially delivered, demand not covered'
+      |    END AS bucket,
+      |    c_replenishment_group_id,
+      |    c_created_at,
+      |    c_completed_dt,
+      |    p_replenishment_group_id,
+      |    p_created_at,
+      |    p_completed_dt,
+      |    p_min_count,
+      |    p_acc_count,
+      |    p_product_qnt
+      |FROM final
+      |DISTRIBUTE BY partition_date
+      |""".stripMargin
+
+  for (aqe <- Seq("false", "true")) {
+    test(s"fbj_order_type's band join under a root repartition stays native (AQE=$aqe)") {
+      withFbj {
+        withAqe(
+          aqe,
+          SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+          SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+          def conditions(plan: SparkPlan): (Seq[String], Seq[String]) = {
+            val all = nodes(plan).collect {
+              case j: CometSortMergeJoinExec =>
+                (true, j.originalPlan.asInstanceOf[SortMergeJoinExec].condition)
+              case j: SortMergeJoinExec => (false, j.condition)
+            }
+            def named(native: Boolean) =
+              all.collect { case (`native`, Some(c)) => c.references.map(_.name).toSeq.sorted }
+            def kind(refs: Seq[String]): String =
+              if (refs.contains("completed_dt") && refs.count(_ == "order_datetime_utc") == 2) {
+                "band"
+              } else if (refs.contains("created_at")) {
+                "replenishment"
+              } else {
+                "forward"
+              }
+            (named(true).map(kind).sorted, named(false).map(kind).sorted)
+          }
+          val (off, on) = offAndOn(run(fbjOrderType))
+          assert(
+            conditions(off) == (Seq("band"), Seq("forward", "replenishment", "replenishment")),
+            s"plan:\n$off")
+          val (native, spark) = conditions(on)
+          assert(native.contains("band") && !spark.contains("band"), s"plan:\n$on")
+          assert(native == Seq("band"), s"plan:\n$on")
+          assert(spark == Seq("forward", "replenishment", "replenishment"), s"plan:\n$on")
+        }
+      }
+    }
+  }
+
+  test("a window costs its line and the classes of its functions") {
+    withTables {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "false") {
+        val plan = run(
+          "SELECT k, v, row_number() OVER w AS r, sum(v) OVER w AS s, lag(v) OVER w AS l, " +
+            "lead(v) OVER w AS n FROM t WINDOW w AS (PARTITION BY k ORDER BY v)")
+        val windows = nodes(plan).filter(_.nodeName.contains("Window"))
+        assert(windows.size == 1, s"plan:\n$plan")
+        val window = windows.head
+        val n = Width(4, 0)
+        assert(
+          model.terms(window, Engine.Comet) == Seq(
+            Term(Window, Width(2, 0)),
+            Term(WindowRank, n, 1),
+            Term(WindowAggregate, n, 1),
+            Term(WindowOffset, n, 2)))
+        same(model.operatorPrice(window, Engine.Comet), 53 + 5.08 * 2 + 0.002 * 4 + 380 + 120)
+        same(model.operatorPrice(window, Engine.Spark), 15.3 * 2 + 20 + 0.8 * 4 + 2 * 0.25 * 4)
+      }
+    }
+  }
+
+  test("an expand and a generate cost nothing in Spark with codegen, per projection without") {
+    withTables {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "false") {
+        val rollup = run("SELECT k, v, count(*) FROM t GROUP BY ROLLUP(k, v)")
+        val expand = nodes(rollup).collectFirst { case e: CometExpandExec => e }.get
+        val projections = expand.originalPlan.asInstanceOf[ExpandExec].projections.size
+        assert(projections == 3)
+        val w = EngineCostTable.widthOf(expand.output)
+        assert(model.terms(expand, Engine.Comet) == Seq(Term(Expand, w, 3)))
+        same(model.operatorCost(expand, Engine.Comet), 0)
+        same(model.operatorCost(expand, Engine.Spark), 0)
+        val narrow = new EngineCostModel(EngineCostTable.default, -1, 0, Map.empty, 1)
+        assert(narrow.terms(expand, Engine.Spark) == Seq(Term(ExpandNoCodegen, w, 3)))
+        same(narrow.operatorCost(expand, Engine.Spark), 3 * 21 * w.leaves)
+
+        val exploded = run("SELECT k, explode(array(v, v + 1)) AS e FROM t")
+        val generate = nodes(exploded)
+          .find(_.nodeName.contains("Explode"))
+          .orElse(nodes(exploded).find(_.nodeName.contains("Generate")))
+          .get
+        assert(model.terms(generate, Engine.Comet) == Seq(Term(Generate, Width(2, 0))))
+        same(model.operatorPrice(generate, Engine.Comet), 2.5 * 2)
+        same(model.operatorPrice(generate, Engine.Spark), 0)
+        same(narrow.operatorPrice(generate, Engine.Spark), 18 * 2)
+      }
+    }
+  }
+
+  test("a shuffle is priced over every leaf, its partitions and its bytes, by format") {
+    withWide("t8", 7) {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+        val plan = runUnordered(spark.table("t8").repartition(col("k")))
+        val shuffle = nodes(plan).collectFirst { case s: CometShuffleExchangeExec => s }.get
+        val p = shuffle.outputPartitioning.numPartitions
+        val t = EngineCostTable.default
+        val w = Width(8, 0)
+        assert(model.shuffleWidth(shuffle) == w)
+        assert(model.excessBytes(shuffle.child.output) == 0)
+        val write = 48.95 * 8 + 0.037 * 64
+        val read = (14.73 * 8 + 0.032 * 64) * t.shuffleReadPartitionFactor(8, p)
+        same(
+          model.shuffleCost(shuffle, BoundaryFormats.NativeShuffle),
+          write * t.shuffleWritePartitionFactor(8, p) + read)
+        same(
+          model.shuffleCost(shuffle, BoundaryFormats.ColumnarShuffle),
+          write * t.columnarShuffleWritePartitionFactor(8, p) + 400 + read)
+        same(
+          model.shuffleCost(shuffle, BoundaryFormats.SparkShuffle),
+          69 + 67.21 * 8 + 67 + 26.34 * 8)
+
+        val c2r = t.comet(C2R, w)
+        val r2c = t.comet(R2C, w)
+        val input =
+          BoundaryFormats.Input(shuffle, Some(Engine.Spark), Engine.Comet, shuffle.child)
+        same(
+          model.price(input, BoundaryFormats.ColumnarShuffle, 3),
+          r2c + 2 * c2r + model.shuffleCost(shuffle, BoundaryFormats.ColumnarShuffle))
+        same(
+          model.price(input, BoundaryFormats.NativeShuffle, 1),
+          c2r + model.shuffleCost(shuffle, BoundaryFormats.NativeShuffle))
+        same(
+          model.price(input, BoundaryFormats.SparkShuffle, 1),
+          c2r + model.shuffleCost(shuffle, BoundaryFormats.SparkShuffle))
+      }
+    }
+    withTables {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+        val plan = runUnordered(spark.table("t").repartition(col("k")))
+        val shuffle = nodes(plan).collectFirst { case s: CometShuffleExchangeExec => s }.get
+        val bytes = EstimationUtils.getSizePerRow(shuffle.child.output).toDouble
+        assert(bytes == 8 + 4 + 4 + 20)
+        assert(model.excessBytes(shuffle.child.output) == 8)
+        val noBytes = new EngineCostModel(
+          EngineCostTable.parse(
+            "shuffleReadPerByte.comet=0;shuffleWritePerByte.comet=0;" +
+              "shuffleReadPerByte.spark=0;shuffleWritePerByte.spark=0"),
+          -1,
+          0,
+          Map.empty)
+        same(
+          model.shuffleCost(shuffle, BoundaryFormats.NativeShuffle),
+          noBytes.shuffleCost(shuffle, BoundaryFormats.NativeShuffle) + 1.1 * 8)
+        same(
+          model.shuffleCost(shuffle, BoundaryFormats.SparkShuffle),
+          noBytes.shuffleCost(shuffle, BoundaryFormats.SparkShuffle) + 4.05 * 8)
+      }
+    }
+  }
+
+  test("reverted operators are tagged to stay in Spark") {
+    withTables {
+      withSQLConf(
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+        flag -> "true",
+        expensiveNativeSort) {
+        val plan = finalPlan(run("SELECT k, max(s) FROM t GROUP BY k"))
+        val sorts = nodes(plan).collect { case s: SortExec => s }
+        assert(
+          sorts.nonEmpty && sorts.forall(
+            _.getTagValue(CometExecRule.ENGINE_CHOICE_SPARK_TAG).isDefined),
+          s"plan:\n$plan")
+      }
+    }
+  }
+
+  test("cost reversion preserves only the current direct AQE logical stage link") {
+    withTables {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false", flag -> "false") {
+        val originalTags =
+          Seq(Some(SparkPlan.LOGICAL_PLAN_TAG), Some(SparkPlan.LOGICAL_PLAN_INHERITED_TAG), None)
+        for (originalTag <- originalTags; currentTag <- Seq("stage", "inherited", "ordinary")) {
+          val plan = run("SELECT * FROM t ORDER BY k, v, s")
+          val native = nodes(plan).collectFirst { case sort: CometSortExec => sort }.get
+          val original = native.originalPlan
+          val originalLogical = original.logicalLink.get
+          original.unsetTagValue(SparkPlan.LOGICAL_PLAN_TAG)
+          original.unsetTagValue(SparkPlan.LOGICAL_PLAN_INHERITED_TAG)
+          originalTag.foreach(original.setTagValue(_, originalLogical))
+          native.unsetTagValue(SparkPlan.LOGICAL_PLAN_TAG)
+          native.unsetTagValue(SparkPlan.LOGICAL_PLAN_INHERITED_TAG)
+          val stage = LogicalQueryStage(originalLogical, native)
+          currentTag match {
+            case "stage" => native.setTagValue(SparkPlan.LOGICAL_PLAN_TAG, stage)
+            case "inherited" => native.setTagValue(SparkPlan.LOGICAL_PLAN_INHERITED_TAG, stage)
+            case _ =>
+              native.setTagValue(SparkPlan.LOGICAL_PLAN_TAG, LocalRelation(native.output))
+          }
+          val labels = new java.util.IdentityHashMap[SparkPlan, Engine]()
+          labels.put(native, Engine.Spark)
+          val restored = EngineSolver.relabel(native, labels)
+          assert(restored.isInstanceOf[SortExec])
+          if (currentTag == "stage") {
+            assert(restored.getTagValue(SparkPlan.LOGICAL_PLAN_TAG).exists(_ eq stage))
+          } else {
+            assert(restored.logicalLink == originalTag.map(_ => originalLogical))
+          }
+          assert(restored.getTagValue(CometExecRule.ENGINE_CHOICE_SPARK_TAG).isDefined)
+        }
+      }
+    }
+  }
+
+  test("a whole plan converts again the operators an earlier choice reverted") {
+    withTables {
+      withSQLConf(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false") {
+        def tagged(tag: org.apache.spark.sql.catalyst.trees.TreeNodeTag[Unit]): SparkPlan = {
+          val plan = sql("SELECT * FROM t SORT BY k").queryExecution.sparkPlan
+          plan.collect { case s: SortExec => s }.foreach(_.setTagValue(tag, ()))
+          CometScanRule(spark).apply(plan)
+        }
+        def nativeSorts(plan: SparkPlan): Int = plan.collect { case s: CometSortExec => s }.size
+        val choice = tagged(CometExecRule.ENGINE_CHOICE_SPARK_TAG)
+        assert(nativeSorts(CometExecRule(spark).apply(choice)) == 0)
+        assert(nativeSorts(CometExecRule(spark, wholePlan = true).apply(choice)) == 1)
+        val kept = tagged(CometExecRule.KEEP_ON_SPARK_TAG)
+        assert(nativeSorts(CometExecRule(spark).apply(kept)) == 0)
+        assert(nativeSorts(CometExecRule(spark, wholePlan = true).apply(kept)) == 0)
+      }
+    }
+  }
+
+  test("the choice is made again when AQE turns a sort-merge join into a broadcast hash join") {
+    withTempPath { dir =>
+      spark
+        .range(400000)
+        .selectExpr("cast(id % 100000 AS int) AS k", "id AS v")
+        .write
+        .parquet(dir.getCanonicalPath)
+      spark.read.parquet(dir.getCanonicalPath).createOrReplaceTempView("big")
+      withTempView("big") {
+        withWide("w100", 99) {
+          val query =
+            "SELECT a.k, a.c, w.* FROM (SELECT k, max(v) AS c FROM big GROUP BY k) a " +
+              "JOIN (SELECT * FROM w100 WHERE c1 < 5) w ON a.k = w.k"
+          def plan(adaptiveBroadcast: String): SparkPlan = {
+            var result: SparkPlan = null
+            withSQLConf(
+              SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
+              flag -> "true",
+              costTable -> "agg.flat.comet=80,0,0;sort.flat.comet=100000,0,0",
+              SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+              SQLConf.NON_EMPTY_PARTITION_RATIO_FOR_BROADCAST_JOIN.key -> "0",
+              SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> adaptiveBroadcast) {
+              result = runUnordered(sql(query))
+            }
+            result
+          }
+          val merged = plan("-1")
+          assert(count(merged) { case j: SortMergeJoinExec => j } == 1, s"plan:\n$merged")
+          val sparkAggs = nodes(merged).collect { case a: HashAggregateExec => a }
+          assert(sparkAggs.size == 1, s"plan:\n$merged")
+          assert(
+            sparkAggs.head.getTagValue(CometExecRule.ENGINE_CHOICE_SPARK_TAG).isDefined,
+            s"plan:\n$merged")
+
+          val broadcast = plan("10MB")
+          assert(count(broadcast) { case j: SortMergeJoinExec => j } == 0, s"plan:\n$broadcast")
+          assert(
+            count(broadcast) {
+              case j: BroadcastHashJoinExec => j
+              case j: CometBroadcastHashJoinExec => j
+            } == 1,
+            s"plan:\n$broadcast")
+          assert(count(broadcast) { case a: HashAggregateExec => a } == 0, s"plan:\n$broadcast")
+          assert(
+            count(broadcast) { case a: CometHashAggregateExec => a } == 2,
+            s"plan:\n$broadcast")
+        }
+      }
+    }
+  }
+
+  test("a native sort aggregate keeps the upstream wrapper and is priced as a sort aggregate") {
+    withTables {
+      withSQLConf(
+        CometConf.COMET_EXEC_AGGREGATE_ENABLED.key -> "true",
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+        flag -> "true",
+        costTable -> ("sort.flat.comet=0,0,0;agg.flat.comet=0,0,0;" +
+          "aggDeclarative.comet=0,0,0")) {
+        val plan = run("SELECT k, max(s) FROM t GROUP BY k")
+        assert(count(plan) { case a: SortAggregateExec => a } == 0, s"plan:\n$plan")
+        val aggs = nodes(plan).collect { case a: CometSortAggregateExec => a }
+        assert(aggs.size == 2, s"plan:\n$plan")
+        aggs.foreach { agg =>
+          assert(agg.originalPlan.isInstanceOf[SortAggregateExec], s"plan:\n$plan")
+          assert(model.costClasses(agg) == Seq(Agg, Sort), s"plan:\n$plan")
+        }
+      }
+    }
+  }
+}

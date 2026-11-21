@@ -3314,12 +3314,13 @@ class CometJoinSuite extends CometTestBase {
     }
   }
 
-  for (maxFields <- Seq("3", "100")) {
+  for (maxFields <- Seq("3", "100"); costBased <- Seq(false, true)) {
     test(
       "a Spark broadcast hash join over a skewed join reads a Comet broadcast stage " +
-        s"(codegen.maxFields=$maxFields)") {
+        s"(codegen.maxFields=$maxFields, costBased=$costBased)") {
       withSQLConf(
         SQLConf.ANSI_ENABLED.key -> "true",
+        CometConf.COMET_EXEC_COST_BASED_ENGINES_ENABLED.key -> costBased.toString,
         CometConf.COMET_NATIVE_COLUMNAR_TO_ROW_ENABLED.key -> "false",
         SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
         SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
