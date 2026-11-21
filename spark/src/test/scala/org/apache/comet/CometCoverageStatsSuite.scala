@@ -20,9 +20,10 @@
 package org.apache.comet
 
 import org.apache.spark.sql.CometTestBase
-import org.apache.spark.sql.comet.CometSubqueryBroadcastExec
+import org.apache.spark.sql.catalyst.expressions.And
+import org.apache.spark.sql.comet.{CometFilterExec, CometSubqueryBroadcastExec}
 import org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec
-import org.apache.spark.sql.execution.{ReusedSubqueryExec, SparkPlan, SubqueryExec, UnionExec}
+import org.apache.spark.sql.execution.{FilterExec, ReusedSubqueryExec, SparkPlan, SubqueryExec, UnionExec}
 import org.apache.spark.sql.execution.exchange.ReusedExchangeExec
 import org.apache.spark.sql.internal.SQLConf
 
@@ -31,6 +32,67 @@ import org.apache.spark.sql.internal.SQLConf
  * un-accelerated Spark operators, and transitions.
  */
 class CometCoverageStatsSuite extends CometTestBase {
+
+  import testImplicits._
+
+  for ((name, predicate, nativeAnd, sparkFallback) <- Seq(
+      ("native conjunction", "_1 > 1 AND _1 < 5", true, false),
+      ("single predicate", "_1 IS NOT NULL", false, false),
+      (
+        "shared ANSI cast fallback",
+        "CAST(_2 AS INT) > 1 AND CAST(_2 AS INT) < 5",
+        false,
+        true))) {
+    test(s"flattened Filter expression coverage: $name") {
+      withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
+        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+        SQLConf.SUBEXPRESSION_ELIMINATION_ENABLED.key -> "true") {
+        withParquetTable(
+          Seq[(Option[Int], String)](
+            (Some(0), "0"),
+            (Some(3), "3"),
+            (Some(7), "7"),
+            (None, null)),
+          "coverage_filter") {
+          val df = sql(s"SELECT _1 FROM coverage_filter WHERE $predicate")
+          checkSparkAnswer(df)
+          val plan = df.queryExecution.executedPlan
+          val filters = collect(plan) { case filter: CometFilterExec => filter }
+          if (sparkFallback) {
+            assert(filters.isEmpty, plan)
+            val sparkFilters = collect(plan) { case filter: FilterExec => filter }
+            assert(sparkFilters.size == 1, plan)
+            assert(sparkFilters.head.condition.isInstanceOf[And], plan)
+            assert(
+              new ExtendedExplainInfo()
+                .getFallbackReasons(plan)
+                .exists(_.contains("shared-expression evaluation order requires Spark")),
+              plan)
+            assert(
+              !sparkFilters.head
+                .getTagValue(CometExplainInfo.NATIVE_EXPRS)
+                .exists(_.contains("and")),
+              plan)
+          } else {
+            checkCometOperators(stripAQEPlan(plan))
+            assert(filters.size == 1, plan)
+            val filter = filters.head
+            assert(filter.nativeOp.getFilter.getPredicate.hasAnd == nativeAnd, plan)
+            assert(
+              filter
+                .getTagValue(CometExplainInfo.NATIVE_EXPRS)
+                .exists(_.contains("and")) == nativeAnd,
+              plan)
+            assert(
+              new ExtendedExplainInfo().getNativeExpressions(plan).contains("and") ==
+                nativeAnd,
+              plan)
+          }
+        }
+      }
+    }
+  }
 
   private def somePlan: SparkPlan =
     spark.range(0, 10).selectExpr("id", "id + 1 as x").queryExecution.executedPlan

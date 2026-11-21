@@ -57,8 +57,8 @@ import org.apache.spark.util.io.ChunkedByteBuffer
 import com.google.common.base.Objects
 import com.google.protobuf.{CodedOutputStream, Message}
 
-import org.apache.comet.{CometConf, CometExecIterator, CometRuntimeException, ConfigEntry, ContribServices}
-import org.apache.comet.CometSparkSessionExtensions.{isCometShuffleEnabled, isSpark35Plus, withFallbackReason}
+import org.apache.comet.{CometConf, CometExecIterator, CometExplainInfo, CometRuntimeException, ConfigEntry, ContribServices}
+import org.apache.comet.CometSparkSessionExtensions.{isCometShuffleEnabled, isSpark35Plus, withFallbackReason, withNativeExpr}
 import org.apache.comet.parquet.{CometParquetUtils, HadoopFileOutput}
 import org.apache.comet.rules.CometExecRule
 import org.apache.comet.serde.{CometCollectBuffer, CometOperatorSerde, Compatible, ExprOuterClass, OperatorOuterClass, QueryContextInterner, SupportLevel, Unsupported}
@@ -66,7 +66,7 @@ import org.apache.comet.serde.OperatorOuterClass.{AggregateMode => CometAggregat
 import org.apache.comet.serde.QueryPlanSerde
 import org.apache.comet.serde.QueryPlanSerde.{aggExprToProto, exprToProto, hasNonDefaultStringCollation, isStringCollationType, supportedSortType}
 import org.apache.comet.serde.operator.CometSink
-import org.apache.comet.shims.MergeRowsMetricsShim
+import org.apache.comet.shims.{CometExprTraitShim, MergeRowsMetricsShim}
 import org.apache.comet.udf.codegen.CometUdfFunctionPool
 
 /**
@@ -1658,7 +1658,7 @@ case class CometProjectExec(
   override protected def outputExpressions: Seq[NamedExpression] = projectList
 }
 
-object CometFilterExec extends CometOperatorSerde[FilterExec] {
+object CometFilterExec extends CometOperatorSerde[FilterExec] with CometExprTraitShim {
 
   override def enabledConfig: Option[ConfigEntry[Boolean]] =
     Some(CometConf.COMET_EXEC_FILTER_ENABLED)
@@ -1691,7 +1691,7 @@ object CometFilterExec extends CometOperatorSerde[FilterExec] {
     val wholeStageFilter = CollapseCodegenStages().apply(op).isInstanceOf[WholeStageCodegenExec]
     val nullChecks = conjuncts.collect {
       case n: IsNotNull
-          if n.child.nullIntolerant ||
+          if isNullIntolerant(n.child) ||
             n.child.isInstanceOf[Attribute] =>
         n
     }
@@ -1753,7 +1753,14 @@ object CometFilterExec extends CometOperatorSerde[FilterExec] {
       .setPredicate(predicate)
       .setAllowRuntimeFilterPushdown(op.condition.deterministic &&
         CometConf.COMET_EXEC_JOIN_DYNAMIC_FILTER_ALLOW_DETERMINISTIC_FILTER_PUSHDOWN.get(op.conf))
-    Some(builder.setFilter(filterBuilder).build())
+    val nativeFilter = builder.setFilter(filterBuilder).build()
+    if (op.condition.isInstanceOf[And]) {
+      // Flattening bypasses exprToProto for the original AND backbone. Its native
+      // logical control stays native, including when represented by CASE masks.
+      // Tag only after conversion succeeds so a Spark fallback gains no coverage.
+      withNativeExpr(op.condition, CometExplainInfo.exprDisplayName(op.condition))
+    }
+    Some(nativeFilter)
   }
 
   private def balancedAnd(values: IndexedSeq[ExprOuterClass.Expr]): ExprOuterClass.Expr = {

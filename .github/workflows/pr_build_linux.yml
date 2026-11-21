@@ -710,10 +710,15 @@ jobs:
       fail-fast: false
     name: ${{ matrix.profile.name }} [${{ matrix.suite.name }}]
     runs-on: ubuntu-24.04
+    env:
+      # JAVA_TOOL_OPTIONS reaches Maven's forked test JVM, unlike MAVEN_OPTS.
+      # Keep the existing module exports for every row and enable the complete
+      # differential matrices on the production Spark profile.
+      JAVA_TOOL_OPTIONS: >-
+        --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED
+        ${{ matrix.suite.name == 'exec' && contains(matrix.profile.maven_opts, '-Pspark-4.2') && '-Dcomet.test.aggFuzz.full=true -Dcomet.test.smjFuzz.full=true' || '' }}
     container:
       image: amd64/rust
-      env:
-        JAVA_TOOL_OPTIONS: "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED"
 
     steps:
       - uses: actions/checkout@v7
@@ -750,6 +755,25 @@ jobs:
           maven_opts: ${{ matrix.profile.maven_opts }}
           upload-test-reports: true
           skip-native-build: true
+          test-output-file: ${{ matrix.suite.name == 'exec' && contains(matrix.profile.maven_opts, '-Pspark-4.2') && 'target/qualification-exec.log' || '' }}
+
+      - name: Verify executed Spark 4.2 native window matrix
+        if: ${{ matrix.suite.name == 'exec' && contains(matrix.profile.maven_opts, '-Pspark-4.2') }}
+        run: |
+          python3 dev/ci/verify-native-windows.py \
+            target/qualification-exec.log --output target/qualification-windows.json
+
+      - name: Upload Spark 4.2 runtime qualification evidence
+        if: ${{ !cancelled() && matrix.suite.name == 'exec' && contains(matrix.profile.maven_opts, '-Pspark-4.2') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-qualification-spark4.2-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            target/qualification-exec.log
+            target/qualification-windows.json
+            spark/target/surefire-reports/TEST-*.xml
+          if-no-files-found: error
+          retention-days: 7
 
   # TPC-H correctness test - verifies benchmark queries produce correct results.
   # Runs in cache-refresh-only mode for its two cache entries: the SF=1 dataset,

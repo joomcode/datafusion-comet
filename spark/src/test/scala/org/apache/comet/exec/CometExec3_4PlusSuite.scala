@@ -42,35 +42,37 @@ import org.apache.comet.CometSparkSessionExtensions.isSpark42Plus
 class CometExec3_4PlusSuite extends CometTestBase {
   import testImplicits._
 
-  val func_might_contain = new FunctionIdentifier("might_contain")
-  val func_bloom_filter_agg = new FunctionIdentifier("bloom_filter_agg")
+  // Spark 4.2 resolves builtin calls through their system.builtin namespace. A
+  // one-part registration there creates a different key and leaves SQL unresolved.
+  private def bloomFunctionIdentifier(name: String): FunctionIdentifier =
+    if (isSpark42Plus) new FunctionIdentifier(name, Some("builtin"), Some("system"))
+    else new FunctionIdentifier(name)
+
+  val func_might_contain = bloomFunctionIdentifier("might_contain")
+  val func_bloom_filter_agg = bloomFunctionIdentifier("bloom_filter_agg")
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    if (!isSpark42Plus) {
-      // Register 'might_contain' to builtin.
-      spark.sessionState.functionRegistry.registerFunction(
-        func_might_contain,
-        new ExpressionInfo(classOf[BloomFilterMightContain].getName, "might_contain"),
-        (children: Seq[Expression]) => BloomFilterMightContain(children.head, children(1)))
-      // Register 'bloom_filter_agg' to builtin.
-      spark.sessionState.functionRegistry.registerFunction(
-        func_bloom_filter_agg,
-        new ExpressionInfo(classOf[BloomFilterAggregate].getName, "bloom_filter_agg"),
-        (children: Seq[Expression]) =>
-          children.size match {
-            case 1 => new BloomFilterAggregate(children.head)
-            case 2 => new BloomFilterAggregate(children.head, children(1))
-            case 3 => new BloomFilterAggregate(children.head, children(1), children(2))
-          })
-    }
+    // Register 'might_contain' to builtin.
+    spark.sessionState.functionRegistry.registerFunction(
+      func_might_contain,
+      new ExpressionInfo(classOf[BloomFilterMightContain].getName, "might_contain"),
+      (children: Seq[Expression]) => BloomFilterMightContain(children.head, children(1)))
+    // Register 'bloom_filter_agg' to builtin.
+    spark.sessionState.functionRegistry.registerFunction(
+      func_bloom_filter_agg,
+      new ExpressionInfo(classOf[BloomFilterAggregate].getName, "bloom_filter_agg"),
+      (children: Seq[Expression]) =>
+        children.size match {
+          case 1 => new BloomFilterAggregate(children.head)
+          case 2 => new BloomFilterAggregate(children.head, children(1))
+          case 3 => new BloomFilterAggregate(children.head, children(1), children(2))
+        })
   }
 
   override def afterAll(): Unit = {
-    if (!isSpark42Plus) {
-      spark.sessionState.functionRegistry.dropFunction(func_might_contain)
-      spark.sessionState.functionRegistry.dropFunction(func_bloom_filter_agg)
-    }
+    spark.sessionState.functionRegistry.dropFunction(func_might_contain)
+    spark.sessionState.functionRegistry.dropFunction(func_bloom_filter_agg)
     super.afterAll()
   }
 
@@ -145,7 +147,6 @@ class CometExec3_4PlusSuite extends CometTestBase {
   }
 
   test("test BloomFilterMightContain can take a constant value input") {
-    assume(!isSpark42Plus, "https://github.com/apache/datafusion-comet/issues/4968")
     val table = "test"
 
     withTable(table) {
@@ -159,7 +160,6 @@ class CometExec3_4PlusSuite extends CometTestBase {
   }
 
   test("test NULL inputs for BloomFilterMightContain without a FROM clause") {
-    assume(!isSpark42Plus, "https://github.com/apache/datafusion-comet/issues/4968")
     checkSparkAnswer("""
          |SELECT might_contain(null, null) both_null,
          |       might_contain(null, 1L) null_bf,
@@ -169,7 +169,6 @@ class CometExec3_4PlusSuite extends CometTestBase {
   }
 
   test("test NULL inputs for BloomFilterMightContain") {
-    assume(!isSpark42Plus, "https://github.com/apache/datafusion-comet/issues/4968")
     val table = "test"
 
     withTable(table) {
@@ -186,7 +185,6 @@ class CometExec3_4PlusSuite extends CometTestBase {
   }
 
   test("test BloomFilterMightContain from random input") {
-    assume(!isSpark42Plus, "https://github.com/apache/datafusion-comet/issues/4968")
     val (longs, bfBytes) = bloomFilterFromRandomInput(10000, 10000)
     val table = "test"
 
@@ -209,7 +207,6 @@ class CometExec3_4PlusSuite extends CometTestBase {
   }
 
   test("bloom_filter_agg caps oversized numItems / numBits like Spark") {
-    assume(!isSpark42Plus, "https://github.com/apache/datafusion-comet/issues/4968")
     val table = "test"
     withTable(table) {
       sql(s"create table $table(col1 long) using parquet")

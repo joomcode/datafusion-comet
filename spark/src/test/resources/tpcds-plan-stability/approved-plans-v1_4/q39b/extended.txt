@@ -1,63 +1,65 @@
 CometColumnarToRow
 +- CometSort
-   +- CometExchange
-      +- CometBroadcastHashJoin
-         :- CometProject
-         :  +- CometFilter
-         :     +- CometHashAggregate
-         :        +- CometExchange
-         :           +- CometHashAggregate
-         :              +- CometProject
-         :                 +- CometBroadcastHashJoin
-         :                    :- CometProject
-         :                    :  +- CometBroadcastHashJoin
-         :                    :     :- CometProject
-         :                    :     :  +- CometBroadcastHashJoin
-         :                    :     :     :- CometFilter
-         :                    :     :     :  +- CometNativeScan parquet spark_catalog.default.inventory
-         :                    :     :     :        +- CometSubqueryBroadcast
-         :                    :     :     :           +- CometBroadcastExchange
-         :                    :     :     :              +- CometProject
-         :                    :     :     :                 +- CometFilter
-         :                    :     :     :                    +- CometNativeScan parquet spark_catalog.default.date_dim
-         :                    :     :     +- CometBroadcastExchange
-         :                    :     :        +- CometFilter
-         :                    :     :           +- CometNativeScan parquet spark_catalog.default.item
-         :                    :     +- CometBroadcastExchange
-         :                    :        +- CometFilter
-         :                    :           +- CometNativeScan parquet spark_catalog.default.warehouse
-         :                    +- CometBroadcastExchange
-         :                       +- CometProject
-         :                          +- CometFilter
-         :                             +- CometNativeScan parquet spark_catalog.default.date_dim
-         +- CometBroadcastExchange
-            +- CometProject
-               +- CometFilter
-                  +- CometHashAggregate
-                     +- CometExchange
-                        +- CometHashAggregate
-                           +- CometProject
-                              +- CometBroadcastHashJoin
-                                 :- CometProject
-                                 :  +- CometBroadcastHashJoin
-                                 :     :- CometProject
-                                 :     :  +- CometBroadcastHashJoin
-                                 :     :     :- CometFilter
-                                 :     :     :  +- CometNativeScan parquet spark_catalog.default.inventory
-                                 :     :     :        +- CometSubqueryBroadcast
-                                 :     :     :           +- CometBroadcastExchange
-                                 :     :     :              +- CometProject
-                                 :     :     :                 +- CometFilter
-                                 :     :     :                    +- CometNativeScan parquet spark_catalog.default.date_dim
-                                 :     :     +- CometBroadcastExchange
-                                 :     :        +- CometFilter
-                                 :     :           +- CometNativeScan parquet spark_catalog.default.item
-                                 :     +- CometBroadcastExchange
-                                 :        +- CometFilter
-                                 :           +- CometNativeScan parquet spark_catalog.default.warehouse
-                                 +- CometBroadcastExchange
-                                    +- CometProject
-                                       +- CometFilter
-                                          +- CometNativeScan parquet spark_catalog.default.date_dim
+   +- CometColumnarExchange
+      +- BroadcastHashJoin
+         :- Project
+         :  +-  Filter [COMET: Filter nullable or stateful conjunct ordering requires Spark]
+         :     +- CometColumnarToRow
+         :        +- CometHashAggregate
+         :           +- CometExchange
+         :              +- CometHashAggregate
+         :                 +- CometProject
+         :                    +- CometBroadcastHashJoin
+         :                       :- CometProject
+         :                       :  +- CometBroadcastHashJoin
+         :                       :     :- CometProject
+         :                       :     :  +- CometBroadcastHashJoin
+         :                       :     :     :- CometFilter
+         :                       :     :     :  +- CometNativeScan parquet spark_catalog.default.inventory
+         :                       :     :     :        +- CometSubqueryBroadcast
+         :                       :     :     :           +- CometBroadcastExchange
+         :                       :     :     :              +- CometProject
+         :                       :     :     :                 +- CometFilter
+         :                       :     :     :                    +- CometNativeScan parquet spark_catalog.default.date_dim
+         :                       :     :     +- CometBroadcastExchange
+         :                       :     :        +- CometFilter
+         :                       :     :           +- CometNativeScan parquet spark_catalog.default.item
+         :                       :     +- CometBroadcastExchange
+         :                       :        +- CometFilter
+         :                       :           +- CometNativeScan parquet spark_catalog.default.warehouse
+         :                       +- CometBroadcastExchange
+         :                          +- CometProject
+         :                             +- CometFilter
+         :                                +- CometNativeScan parquet spark_catalog.default.date_dim
+         +- BroadcastExchange
+            +- CometColumnarToRow
+               +- CometProject
+                  +- CometFilter
+                     +- CometHashAggregate
+                        +- CometExchange
+                           +- CometHashAggregate
+                              +- CometProject
+                                 +- CometBroadcastHashJoin
+                                    :- CometProject
+                                    :  +- CometBroadcastHashJoin
+                                    :     :- CometProject
+                                    :     :  +- CometBroadcastHashJoin
+                                    :     :     :- CometFilter
+                                    :     :     :  +- CometNativeScan parquet spark_catalog.default.inventory
+                                    :     :     :        +- CometSubqueryBroadcast
+                                    :     :     :           +- CometBroadcastExchange
+                                    :     :     :              +- CometProject
+                                    :     :     :                 +- CometFilter
+                                    :     :     :                    +- CometNativeScan parquet spark_catalog.default.date_dim
+                                    :     :     +- CometBroadcastExchange
+                                    :     :        +- CometFilter
+                                    :     :           +- CometNativeScan parquet spark_catalog.default.item
+                                    :     +- CometBroadcastExchange
+                                    :        +- CometFilter
+                                    :           +- CometNativeScan parquet spark_catalog.default.warehouse
+                                    +- CometBroadcastExchange
+                                       +- CometProject
+                                          +- CometFilter
+                                             +- CometNativeScan parquet spark_catalog.default.date_dim
 
-Comet accelerated 46 out of 46 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 10 native, 0 codegen dispatch.
+Comet accelerated 42 out of 46 eligible operators (91%). Final plan contains 3 transitions between Spark and Comet. Accelerated expressions: 10 native, 0 codegen dispatch.

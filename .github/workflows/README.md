@@ -301,6 +301,10 @@ umbrella doesn't watch, or operate independently of the rest of CI:
 | `label_new_issues.yml` | Issue trigger to apply `requires-triage`.                                                            |
 | `label_prs.yml`        | Runs on `pull_request_target` so it can label pull requests opened from forks.                       |
 
+CodeQL checks workflow security on pushes to `main`, `branch-*` and `joom/**`,
+and on pull requests targeting `main` or a release branch. It also supports a
+manual dispatch. Scheduled checks still run only on the default branch.
+
 ## Reusable workflows (called by `ci.yml`)
 
 | File                              | Called from `ci.yml` job(s)                                     |
@@ -309,11 +313,26 @@ umbrella doesn't watch, or operate independently of the rest of CI:
 | `pr_build_macos.yml`              | `pr_build_macos`                                                |
 | `pr_benchmark_check.yml`          | `pr_benchmark_check`                                            |
 | `delta_build_gate.yml`            | `delta_build_gate`                                              |
-| `delta_contrib_test.yml`          | `delta_3_5`, `delta_4_0`, `delta_4_1`                           |
+| `delta_contrib_test.yml`          | `delta_3_5`, `delta_4_0`, `delta_4_1`, `delta_4_2`              |
 | `pyarrow_udf_test.yml`            | `pyarrow_udf_test`                                              |
 | `docs.yaml`                       | `docs`                                                          |
 | `spark_sql_test_reusable.yml`     | `spark_3_4`, `spark_3_5`, `spark_4_0`, `spark_4_1`, `spark_4_2` |
 | `iceberg_spark_test_reusable.yml` | `iceberg_1_8`, `iceberg_1_9`, `iceberg_1_10`, `iceberg_1_11`    |
+
+## Runtime qualification
+
+The Linux Spark 4.2 `exec` row enables the complete aggregate and sort-merge-join
+differential fuzz matrices through `JAVA_TOOL_OPTIONS`, so the flags reach the
+forked test JVM. It captures merged Maven output without changing Maven's exit
+status. After the tests pass, `dev/ci/verify-native-windows.py` checks all 88
+expected window actions for actual native metrics, explicit fallback and owned
+spill. The runtime log, verifier result and XML test reports are uploaded together.
+Missing or truncated native evidence fails the job; native metrics do not replace
+the Scala tests' Spark result, schema and required-error comparisons.
+
+Rust CI lints every workspace member, including the vendored DataFusion crate,
+with strict warnings. Vendor unit tests run explicitly using Comet's workspace
+feature graph and shared lockfile rather than a standalone vendor dependency graph.
 
 ## Changing what runs when
 

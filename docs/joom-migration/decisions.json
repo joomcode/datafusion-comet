@@ -445,10 +445,10 @@
   },
   "stage_start_policy": {
     "explicit_user_approval_per_group": true,
-    "currently_authorized": [],
-    "groups_not_authorized": [
+    "currently_authorized": [
       "G10"
     ],
+    "groups_not_authorized": [],
     "reaffirmed_on": "2026-11-21",
     "completed_groups": [
       "G01",
@@ -461,8 +461,8 @@
       "G08",
       "G09"
     ],
-    "active_implementation_group": null,
-    "next_group_requires_separate_approval": "G10",
+    "active_implementation_group": "G10",
+    "next_group_requires_separate_approval": null,
     "before_g06_final_checkpoint": {
       "explicit_user_approval_per_group": true,
       "currently_authorized": [
@@ -1104,5 +1104,70 @@
       "production",
       "datasci access"
     ]
+  },
+  "g10_authorization": {
+    "date": "2026-11-21",
+    "status": "APPROVED_EXPLICITLY",
+    "request_translation": "Start G10 joom/1.2-release-qualification: additional integration tests and bounded final fixes. Remove temporary CI bypasses, run the full agreed GHA and RC Build & Smoke on AMD64/ARM64, download final JARs. Report after checks before merge and stable tag. CI/GHA must be full again with all tests and quality checks. Briefly explain final G10 changes.",
+    "base": "4467d0337089036d3f01d28375260ce3dbcaaca5",
+    "allowed": [
+      "G10 implementation and bounded final fixes",
+      "Restore full normal automatic CI and all agreed tests/quality checks",
+      "Publish the G10 feature branch to origin as necessary for qualification",
+      "Run and monitor full agreed GHA and RC Build & Smoke at the exact candidate SHA",
+      "Download and verify final JAR artifacts/provenance/checksums"
+    ],
+    "excluded": [
+      "merge into branch-1.2 before report/approval",
+      "main updates",
+      "stable or other release tag creation before report/approval",
+      "external Maven/JFrog/Docker publication",
+      "production operations",
+      "datasci access"
+    ]
+  },
+  "before_g10_stage_start_policy": {
+    "explicit_user_approval_per_group": true,
+    "currently_authorized": [],
+    "groups_not_authorized": [
+      "G10"
+    ],
+    "reaffirmed_on": "2026-11-21",
+    "completed_groups": [
+      "G01",
+      "G02",
+      "G03",
+      "G04",
+      "G05",
+      "G06",
+      "G07",
+      "G08",
+      "G09"
+    ],
+    "active_implementation_group": null,
+    "next_group_requires_separate_approval": "G10",
+    "before_g06_final_checkpoint": {
+      "explicit_user_approval_per_group": true,
+      "currently_authorized": [
+        "G03"
+      ],
+      "groups_not_authorized": [
+        "G04",
+        "G05",
+        "G06",
+        "G07",
+        "G08",
+        "G09",
+        "G10"
+      ],
+      "reaffirmed_on": "2026-11-19",
+      "completed_groups": [
+        "G01",
+        "G02",
+        "G03"
+      ],
+      "active_implementation_group": null,
+      "next_group_requires_separate_approval": "G04"
+    }
   }
 }

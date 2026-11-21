@@ -72,6 +72,19 @@ abstract class CometTestBase
   protected val shuffleManager: String =
     "org.apache.spark.sql.comet.execution.shuffle.CometShuffleManager"
 
+  /**
+   * Keep scoped results on Spark 3.4, whose withSQLConf returns Unit instead of the body value.
+   */
+  protected def withSQLConfResult[T](pairs: (String, String)*)(f: => T): T = {
+    var result: Option[T] = None
+    withSQLConf(pairs: _*) {
+      // Some, rather than Option, also preserves a successful null result. Exceptions propagate
+      // through withSQLConf unchanged and its existing finally block restores the configuration.
+      result = Some(f)
+    }
+    result.get
+  }
+
   /** The reused exchanges in `plan`. */
   protected def reusedExchanges(plan: SparkPlan): Seq[ReusedExchangeExec] =
     collect(plan) { case r: ReusedExchangeExec => r }

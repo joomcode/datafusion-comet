@@ -153,3 +153,15 @@ third substantive commit and fast-forward locally. Do not create a PR, start
 full per-group CI, update main/tags, publish release artifacts, access production
 or datasci, or begin G08. Existing approved read-only GitHub and official
 RAT/Maven scopes persist. Final verification is retained in the integration receipt.
+
+## G10 final qualification authorization (2026-11-21)
+
+The user explicitly authorized G10 implementation, publication of its feature
+branch as necessary to launch qualification, full agreed GitHub Actions control
+(status/logs, dispatch, cancellation/rerun when needed), RC Build & Smoke on native
+AMD64/ARM64, and final JAR/artifact download and checksum/provenance verification.
+Use github.com/api.github.com and the normal GitHub Actions artifact/CDN redirects.
+Keep authentication restricted to GitHub; do not forward credentials to artifact
+blob hosts. This does not authorize branch-1.2/main changes, merge or release tags
+before the report/approval, Maven/JFrog/Docker publication, production or datasci.
+The original approved dependency/download safety condition remains in force.

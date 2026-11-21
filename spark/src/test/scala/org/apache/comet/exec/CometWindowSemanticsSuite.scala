@@ -73,7 +73,7 @@ class CometWindowSemanticsSuite extends CometTestBase {
       query: String,
       requiredNative: String = "",
       forbiddenNative: String = ""): DataFrame = {
-    val (expected, expectedSchema) = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+    val (expected, expectedSchema) = withSQLConfResult(CometConf.COMET_ENABLED.key -> "false") {
       val df = sql(query)
       (df.collect().toSeq.map(exact), df.schema)
     }
@@ -105,7 +105,7 @@ class CometWindowSemanticsSuite extends CometTestBase {
 
   private def checkMandatoryError(query: String, conditionSuffix: String): Unit = {
     def error(enabled: Boolean): SparkThrowable with Throwable = {
-      val failure = withSQLConf(CometConf.COMET_ENABLED.key -> enabled.toString) {
+      val failure = withSQLConfResult(CometConf.COMET_ENABLED.key -> enabled.toString) {
         intercept[Exception] { sql(query).collect() }
       }
       causeChain(failure)

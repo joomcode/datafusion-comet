@@ -284,7 +284,7 @@ class CostBasedEngineCorrectnessSuite extends CometTestBase with AdaptiveSparkPl
           "_1 AND CAST(_2 AS INT) > 1 AS b FROM g09_shared_boolean"
         modes.foreach { case (name, configuration) =>
           withSQLConf(configuration: _*) {
-            val sparkFailure = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+            val sparkFailure = withSQLConfResult(CometConf.COMET_ENABLED.key -> "false") {
               Try(sql(query).collect())
             }
             val df = sql(query)
@@ -334,7 +334,7 @@ class CostBasedEngineCorrectnessSuite extends CometTestBase with AdaptiveSparkPl
           (0 until 101).map(i => { val key = (i * 37) % 101; (key, key * 10) }),
           "g09_topk") {
           val query = "SELECT _2 FROM g09_topk ORDER BY _1 LIMIT 5 OFFSET 3"
-          val expected = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+          val expected = withSQLConfResult(CometConf.COMET_ENABLED.key -> "false") {
             sql(query).collect().toSeq
           }
           assert(expected == Seq(30, 40, 50, 60, 70).map(Row(_)))
@@ -407,7 +407,7 @@ class CostBasedEngineCorrectnessSuite extends CometTestBase with AdaptiveSparkPl
               val query = "SELECT _1, sum(_2), avg(_2), " +
                 "g09_bloom(_2, 1000L, 8192L) FROM g09_retained_buffers GROUP BY _1"
               val (expected, expectedSchema) =
-                withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+                withSQLConfResult(CometConf.COMET_ENABLED.key -> "false") {
                   val reference = sql(query)
                   (reference.collect().toSeq, reference.schema)
                 }

@@ -142,7 +142,9 @@ class CometOffTaskThreadSuite extends CometTestBase with AdaptiveSparkPlanHelper
         df.filter(col("apps") % 3 === 0).select(col("apps"), col("app_id"), col("cost"))
 
       val expected =
-        withSQLConf(CometConf.COMET_ENABLED.key -> "false", SQLConf.ANSI_ENABLED.key -> "true") {
+        withSQLConfResult(
+          CometConf.COMET_ENABLED.key -> "false",
+          SQLConf.ANSI_ENABLED.key -> "true") {
           query.collect().sortBy(_.getLong(0)).toSeq
         }
       withSQLConf(

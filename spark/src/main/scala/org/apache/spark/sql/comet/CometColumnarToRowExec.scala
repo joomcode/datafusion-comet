@@ -463,7 +463,10 @@ private[sql] object CometBatchRowProjection {
 
   private def key(references: Seq[BoundReference]): PoolKey = {
     val conf = SQLConf.get
-    PoolKey(references, conf.methodSplitThreshold, conf.codegenFactoryMode.toString)
+    PoolKey(
+      references,
+      conf.methodSplitThreshold,
+      conf.getConf(SQLConf.CODEGEN_FACTORY_MODE).toString)
   }
 
   private[comet] final class Pooled(val references: Seq[BoundReference])

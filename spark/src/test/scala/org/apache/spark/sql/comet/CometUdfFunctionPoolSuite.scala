@@ -344,19 +344,19 @@ class CometUdfFunctionPoolSuite
           if (nondeterministic) registered.asNondeterministic() else registered)
         withParquetTable((0L until 32L).map(Tuple1(_)), "g08_capture_input") {
           val query = "SELECT _1 AS id, g08_mutable_capture(_1) AS v FROM g08_capture_input"
-          val vanilla = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+          val vanilla = withSQLConfResult(CometConf.COMET_ENABLED.key -> "false") {
             val df = sql(query)
             df.queryExecution.executedPlan
             df
           }
-          val accelerated = withSQLConf(CometConf.COMET_ENABLED.key -> "true") {
+          val accelerated = withSQLConfResult(CometConf.COMET_ENABLED.key -> "true") {
             val df = sql(query)
             df.queryExecution.executedPlan
             df
           }
           for (value <- Seq(10L, 70L, -30L)) {
             captured(0) = value
-            val expected = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+            val expected = withSQLConfResult(CometConf.COMET_ENABLED.key -> "false") {
               vanilla.collect().toSeq.sortBy(_.getLong(0))
             }
             assert(expected.map(_.getLong(1)) == (0L until 32L).map(_ + value))

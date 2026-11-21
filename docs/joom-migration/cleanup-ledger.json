@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-21",
-  "stage": "G09_COMPLETED_INTEGRATED",
+  "stage": "G10_PREPARING_FULL_QUALIFICATION",
   "baseline": "resource-baseline.json",
   "no_dependency_downloads_or_release_outputs_yet": false,
   "entries": [
@@ -994,5 +994,24 @@
     "source_preservation": "refs/joom-migration/g09-qualified preserves00f5c17bc and its immutable original local qualification evidence.",
     "build_policy": "Documentation-only acceptance; no runtime rebuild, release artifact, Docker image or full per-group GHA. Standard pinned RAT check may use its normal tool-managed output/download.",
     "preservation": "Keep through final migration acceptance; no automatic deletion of evidence, recovery refs or shared caches."
+  },
+  "g10_resources": {
+    "auxiliary_directory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10",
+    "contains": "Initial source/documentation archive, GitHub workflow/job/log receipts, CI restoration and coverage reviews, targeted test evidence and final downloaded artifact verification.",
+    "preservation": "Keep all evidence through final acceptance and user cleanup decision; do not delete shared caches or original checkouts.",
+    "expected_outputs": "Downloaded CI logs/artifact ZIPs and final qualified JARs; actual run IDs, paths and sizes recorded after execution.",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest.json",
+    "post_commit_completion": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json",
+    "final_artifact_directory": "target/joom-release/gha-<RC_RUN_ID>",
+    "whole_directory_sizes_kib_before_remote": {
+      "native_target": 77969400,
+      "spark_target": 2199972,
+      "common_target": 140,
+      "delta_target": 1752,
+      "maven_repository": 8185440,
+      "auxiliary": 9992
+    },
+    "tooling": "Reuse standard Maven/Cargo/Scala caches and existing Java17/Rust. No new host Docker images/global tools. Actual sizes and run IDs are post-commit facts in final receipt.",
+    "plan_generations": "Pre-counter-fix current-task snapshots were archived and restored before accepted oldest-to-newest all-profile generation. Intermediate failures retained, not counted as passes."
   }
 }

@@ -1,0 +1,146 @@
+TakeOrderedAndProject
++- Project
+   +- BroadcastHashJoin
+      :- Project
+      :  +- BroadcastHashJoin
+      :     :- Project
+      :     :  +- BroadcastHashJoin
+      :     :     :- Project
+      :     :     :  +- BroadcastHashJoin
+      :     :     :     :- BroadcastHashJoin
+      :     :     :     :  :- Filter
+      :     :     :     :  :  +-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum]
+      :     :     :     :  :     +- Exchange
+      :     :     :     :  :        +- HashAggregate
+      :     :     :     :  :           +- Project
+      :     :     :     :  :              +- BroadcastHashJoin
+      :     :     :     :  :                 :- Project
+      :     :     :     :  :                 :  +- BroadcastHashJoin
+      :     :     :     :  :                 :     :- Project
+      :     :     :     :  :                 :     :  +-  Filter [COMET: Filter inferred null-check evaluation order requires Spark]
+      :     :     :     :  :                 :     :     +- CometColumnarToRow
+      :     :     :     :  :                 :     :        +- CometNativeScan parquet spark_catalog.default.customer
+      :     :     :     :  :                 :     +- BroadcastExchange
+      :     :     :     :  :                 :        +- CometColumnarToRow
+      :     :     :     :  :                 :           +- CometFilter
+      :     :     :     :  :                 :              +- CometNativeScan parquet spark_catalog.default.store_sales
+      :     :     :     :  :                 :                    +- CometSubqueryBroadcast
+      :     :     :     :  :                 :                       +- CometBroadcastExchange
+      :     :     :     :  :                 :                          +- CometFilter
+      :     :     :     :  :                 :                             +- CometNativeScan parquet spark_catalog.default.date_dim
+      :     :     :     :  :                 +- BroadcastExchange
+      :     :     :     :  :                    +- CometColumnarToRow
+      :     :     :     :  :                       +- CometFilter
+      :     :     :     :  :                          +- CometNativeScan parquet spark_catalog.default.date_dim
+      :     :     :     :  +- BroadcastExchange
+      :     :     :     :     +-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum]
+      :     :     :     :        +- Exchange
+      :     :     :     :           +- HashAggregate
+      :     :     :     :              +- Project
+      :     :     :     :                 +- BroadcastHashJoin
+      :     :     :     :                    :- Project
+      :     :     :     :                    :  +- BroadcastHashJoin
+      :     :     :     :                    :     :- Project
+      :     :     :     :                    :     :  +-  Filter [COMET: Filter inferred null-check evaluation order requires Spark]
+      :     :     :     :                    :     :     +- CometColumnarToRow
+      :     :     :     :                    :     :        +- CometNativeScan parquet spark_catalog.default.customer
+      :     :     :     :                    :     +- BroadcastExchange
+      :     :     :     :                    :        +- CometColumnarToRow
+      :     :     :     :                    :           +- CometFilter
+      :     :     :     :                    :              +- CometNativeScan parquet spark_catalog.default.store_sales
+      :     :     :     :                    :                    +- CometSubqueryBroadcast
+      :     :     :     :                    :                       +- CometBroadcastExchange
+      :     :     :     :                    :                          +- CometFilter
+      :     :     :     :                    :                             +- CometNativeScan parquet spark_catalog.default.date_dim
+      :     :     :     :                    +- BroadcastExchange
+      :     :     :     :                       +- CometColumnarToRow
+      :     :     :     :                          +- CometFilter
+      :     :     :     :                             +- CometNativeScan parquet spark_catalog.default.date_dim
+      :     :     :     +- BroadcastExchange
+      :     :     :        +- Filter
+      :     :     :           +-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum]
+      :     :     :              +- Exchange
+      :     :     :                 +- HashAggregate
+      :     :     :                    +- Project
+      :     :     :                       +- BroadcastHashJoin
+      :     :     :                          :- Project
+      :     :     :                          :  +- BroadcastHashJoin
+      :     :     :                          :     :- Project
+      :     :     :                          :     :  +-  Filter [COMET: Filter inferred null-check evaluation order requires Spark]
+      :     :     :                          :     :     +- CometColumnarToRow
+      :     :     :                          :     :        +- CometNativeScan parquet spark_catalog.default.customer
+      :     :     :                          :     +- BroadcastExchange
+      :     :     :                          :        +- CometColumnarToRow
+      :     :     :                          :           +- CometFilter
+      :     :     :                          :              +- CometNativeScan parquet spark_catalog.default.catalog_sales
+      :     :     :                          :                    +- ReusedSubquery
+      :     :     :                          +- BroadcastExchange
+      :     :     :                             +- CometColumnarToRow
+      :     :     :                                +- CometFilter
+      :     :     :                                   +- CometNativeScan parquet spark_catalog.default.date_dim
+      :     :     +- BroadcastExchange
+      :     :        +-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum]
+      :     :           +- Exchange
+      :     :              +- HashAggregate
+      :     :                 +- Project
+      :     :                    +- BroadcastHashJoin
+      :     :                       :- Project
+      :     :                       :  +- BroadcastHashJoin
+      :     :                       :     :- Project
+      :     :                       :     :  +-  Filter [COMET: Filter inferred null-check evaluation order requires Spark]
+      :     :                       :     :     +- CometColumnarToRow
+      :     :                       :     :        +- CometNativeScan parquet spark_catalog.default.customer
+      :     :                       :     +- BroadcastExchange
+      :     :                       :        +- CometColumnarToRow
+      :     :                       :           +- CometFilter
+      :     :                       :              +- CometNativeScan parquet spark_catalog.default.catalog_sales
+      :     :                       :                    +- ReusedSubquery
+      :     :                       +- BroadcastExchange
+      :     :                          +- CometColumnarToRow
+      :     :                             +- CometFilter
+      :     :                                +- CometNativeScan parquet spark_catalog.default.date_dim
+      :     +- BroadcastExchange
+      :        +- Filter
+      :           +-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum]
+      :              +- Exchange
+      :                 +- HashAggregate
+      :                    +- Project
+      :                       +- BroadcastHashJoin
+      :                          :- Project
+      :                          :  +- BroadcastHashJoin
+      :                          :     :- Project
+      :                          :     :  +-  Filter [COMET: Filter inferred null-check evaluation order requires Spark]
+      :                          :     :     +- CometColumnarToRow
+      :                          :     :        +- CometNativeScan parquet spark_catalog.default.customer
+      :                          :     +- BroadcastExchange
+      :                          :        +- CometColumnarToRow
+      :                          :           +- CometFilter
+      :                          :              +- CometNativeScan parquet spark_catalog.default.web_sales
+      :                          :                    +- ReusedSubquery
+      :                          +- BroadcastExchange
+      :                             +- CometColumnarToRow
+      :                                +- CometFilter
+      :                                   +- CometNativeScan parquet spark_catalog.default.date_dim
+      +- BroadcastExchange
+         +-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum]
+            +- Exchange
+               +- HashAggregate
+                  +- Project
+                     +- BroadcastHashJoin
+                        :- Project
+                        :  +- BroadcastHashJoin
+                        :     :- Project
+                        :     :  +-  Filter [COMET: Filter inferred null-check evaluation order requires Spark]
+                        :     :     +- CometColumnarToRow
+                        :     :        +- CometNativeScan parquet spark_catalog.default.customer
+                        :     +- BroadcastExchange
+                        :        +- CometColumnarToRow
+                        :           +- CometFilter
+                        :              +- CometNativeScan parquet spark_catalog.default.web_sales
+                        :                    +- ReusedSubquery
+                        +- BroadcastExchange
+                           +- CometColumnarToRow
+                              +- CometFilter
+                                 +- CometNativeScan parquet spark_catalog.default.date_dim
+
+Comet accelerated 30 out of 110 eligible operators (27%). Final plan contains 14 transitions between Spark and Comet. Accelerated expressions: 4 native, 0 codegen dispatch.

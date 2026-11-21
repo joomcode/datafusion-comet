@@ -5,7 +5,7 @@
   "files": [
     {
       "path": "AGENTS.md",
-      "sha256": "e883ad74a7787e53a281acdf06ec7a254ba861c622c7262d1f51d372ef632e68"
+      "sha256": "c38662eb60dc38b7d6ac7c24461ab77f4676a4aaec6ae6ce1be25184520827c7"
     },
     {
       "path": "CHECKPOINT-VERIFICATION.json",
@@ -13,7 +13,7 @@
     },
     {
       "path": "CLEANUP.md",
-      "sha256": "21d824a601432765b70fd22db2311d9a478d37deee2b519816cdfde6634c81c2"
+      "sha256": "91a806a251da623c16d9c5b1a2051cce5ef34670c0ed547b0ac15a086cdc8a32"
     },
     {
       "path": "G01-CLOSEOUT.md",
@@ -136,12 +136,20 @@
       "sha256": "c53a12dc045929be939ab85d91b260312b3ba3f3f70c97c175746183ce740961"
     },
     {
+      "path": "G10-report.md",
+      "sha256": "7209f2fc04eb1d5bc7411b657bf716665e5275c8ca5cfe28b564ed73b8e9174f"
+    },
+    {
+      "path": "G10-results.json",
+      "sha256": "657761a02659964496071c8e888ba5930fdcf61a0c1fe8aee46ee621fe7768aa"
+    },
+    {
       "path": "HANDOFF.md",
-      "sha256": "ecdcb5822f96bf178774cea11d1cabd66b169acac6ad8f24e93ac48274b004f8"
+      "sha256": "5c62c2e3f8ad7ca4cb56c1111d1d6703da17e09f761010263553a513ad31dec2"
     },
     {
       "path": "NETWORK.md",
-      "sha256": "1796a93793b894013d205824cd6afb6ca5ea6b098d6cba660ee3827d230f08e2"
+      "sha256": "27ef2db27e51e92df11873dd6b0b69303fb253d174754c39b69eb25c190b26d9"
     },
     {
       "path": "PATHS.md",
@@ -149,7 +157,7 @@
     },
     {
       "path": "PAUSED.md",
-      "sha256": "9e963469507e74560b43d0db54d849e9ed8477100729b6d8e1dc261e37c67eb9"
+      "sha256": "fb450945e51c5654b0a45cf29f9c6789755f29c56473e139781a7a1f3fd2e958"
     },
     {
       "path": "PERFORMANCE.md",
@@ -161,11 +169,11 @@
     },
     {
       "path": "README.md",
-      "sha256": "e09746304c54815138c29d09fdef30d61689ba1204bbbd1ce48a28576e0a4632"
+      "sha256": "89a95b7d3c4e222ed303290d07da195a67d650747105bb47a81faefb8ac450fc"
     },
     {
       "path": "STATE.json",
-      "sha256": "39689fff9e89d88b53170023f1074808eb83130a8c0ce20bcc52848a482b0137"
+      "sha256": "5aa80021318795dc2ada1500876db677850b01f3acff1c2ff486299332ff03f4"
     },
     {
       "path": "approved-plan.json",
@@ -177,7 +185,7 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "29328de3eaa96138067b2e9fc61d48c325aa98bd5fc0040c9752dce2b34d05d7"
+      "sha256": "c56b2016f620a2c123095bcdcb59a6080ef2b23a8ef9842d3b415aa7fbf27911"
     },
     {
       "path": "correctness-test-plan.txt",
@@ -189,7 +197,7 @@
     },
     {
       "path": "decisions.json",
-      "sha256": "53c05765128192a53447f49252d5e7d2751c35bfcc0aea32fdd10660b933db62"
+      "sha256": "f77ac03859504227e5171772d2277518e48f510bbdb33feed15caaedede1d5bc"
     },
     {
       "path": "feature-register.json",

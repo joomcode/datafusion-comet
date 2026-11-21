@@ -22,21 +22,25 @@ inputs:
     description: "Unique name for uploaded artifacts for this run"
     required: true
   suites:
-    description: 'Which Scalatest test suites to run'
+    description: "Which Scalatest test suites to run"
     required: false
-    default: ''
+    default: ""
   maven_opts:
-    description: 'Maven options passed to the mvn command'
+    description: "Maven options passed to the mvn command"
     required: false
-    default: ''
+    default: ""
   upload-test-reports:
-    description: 'Whether to upload test results to GitHub'
+    description: "Whether to upload test results to GitHub"
     required: false
-    default: 'false'
+    default: "false"
   skip-native-build:
-    description: 'Skip native build (when using pre-built artifact)'
+    description: "Skip native build (when using pre-built artifact)"
     required: false
-    default: 'false'
+    default: "false"
+  test-output-file:
+    description: "Optional merged Maven stdout/stderr log for runtime qualification"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -91,18 +95,38 @@ runs:
       env:
         SPARK_LOCAL_HOSTNAME: "localhost"
         SPARK_LOCAL_IP: "127.0.0.1"
+        COMET_TEST_OUTPUT_FILE: ${{ inputs.test-output-file }}
       run: |
-        MAVEN_OPTS="-Xmx4G -Xms2G -XX:+UnlockDiagnosticVMOptions -XX:+ShowMessageBoxOnError -XX:+HeapDumpOnOutOfMemoryError -XX:ErrorFile=./hs_err_pid%p.log" SPARK_HOME=`pwd` ./mvnw -B -Prelease install ${{ inputs.maven_opts }}
+        set -euo pipefail
+        run_tests() {
+          MAVEN_OPTS="-Xmx4G -Xms2G -XX:+UnlockDiagnosticVMOptions -XX:+ShowMessageBoxOnError -XX:+HeapDumpOnOutOfMemoryError -XX:ErrorFile=./hs_err_pid%p.log" SPARK_HOME="$PWD" ./mvnw -B -Prelease install ${{ inputs.maven_opts }}
+        }
+        if [[ -n "$COMET_TEST_OUTPUT_FILE" ]]; then
+          mkdir -p -- "$(dirname -- "$COMET_TEST_OUTPUT_FILE")"
+          run_tests 2>&1 | tee "$COMET_TEST_OUTPUT_FILE"
+        else
+          run_tests
+        fi
     - name: Run specified tests
       shell: bash
       if: ${{ inputs.suites != '' }}
       env:
         SPARK_LOCAL_HOSTNAME: "localhost"
         SPARK_LOCAL_IP: "127.0.0.1"
+        COMET_TEST_OUTPUT_FILE: ${{ inputs.test-output-file }}
       run: |
+        set -euo pipefail
         MAVEN_SUITES="$(echo "${{ inputs.suites }}" | paste -sd, -)"
         echo "Running with MAVEN_SUITES=$MAVEN_SUITES"
-        MAVEN_OPTS="-Xmx4G -Xms2G -DwildcardSuites=$MAVEN_SUITES -XX:+UnlockDiagnosticVMOptions -XX:+ShowMessageBoxOnError -XX:+HeapDumpOnOutOfMemoryError -XX:ErrorFile=./hs_err_pid%p.log" SPARK_HOME=`pwd` ./mvnw -B -Prelease install ${{ inputs.maven_opts }}
+        run_tests() {
+          MAVEN_OPTS="-Xmx4G -Xms2G -DwildcardSuites=$MAVEN_SUITES -XX:+UnlockDiagnosticVMOptions -XX:+ShowMessageBoxOnError -XX:+HeapDumpOnOutOfMemoryError -XX:ErrorFile=./hs_err_pid%p.log" SPARK_HOME="$PWD" ./mvnw -B -Prelease install ${{ inputs.maven_opts }}
+        }
+        if [[ -n "$COMET_TEST_OUTPUT_FILE" ]]; then
+          mkdir -p -- "$(dirname -- "$COMET_TEST_OUTPUT_FILE")"
+          run_tests 2>&1 | tee "$COMET_TEST_OUTPUT_FILE"
+        else
+          run_tests
+        fi
     - name: Upload crash logs
       if: failure()
       # These three stay on the plain action rather than
@@ -139,11 +163,11 @@ runs:
       continue-on-error: true
       uses: actions/upload-artifact@v7
       with:
-         name: java-test-reports-${{ inputs.artifact_name }}
-         path: "**/target/surefire-reports/*.txt"
-         if-no-files-found: ignore
-         retention-days: 7 # 1 week for test reports
-         overwrite: true
+        name: java-test-reports-${{ inputs.artifact_name }}
+        path: "**/target/surefire-reports/*.txt"
+        if-no-files-found: ignore
+        retention-days: 7 # 1 week for test reports
+        overwrite: true
 
     # Saved only on main, and only on a green run: an entry written from a pull request or a
     # `gh-readonly-queue/*` branch cannot be restored by any later run, and it

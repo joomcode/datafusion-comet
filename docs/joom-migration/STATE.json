@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-21",
-  "phase": "G09_COMPLETED_INTEGRATED",
+  "phase": "G10_SOURCE_FROZEN_POST_COMMIT_QUALIFICATION_REQUIRED",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -262,8 +262,9 @@
   "reserve": {
     "id": "G10",
     "branch": "joom/1.2-release-qualification",
-    "status": "APPROVED_RESERVE_ONLY_IF_NEEDED",
-    "scope": "Cross-feature tests and necessary limited integration fixes in separate commits. If review of one of the nine groups objectively requires a split, the reserve may be reassigned after discussing the concrete boundary. Do not create an unnecessary empty PR."
+    "status": "G10_EXPLICITLY_STARTED",
+    "scope": "Cross-feature tests and necessary limited integration fixes in separate commits. If review of one of the nine groups objectively requires a split, the reserve may be reassigned after discussing the concrete boundary. Do not create an unnecessary empty PR.",
+    "authorization_ref": "decisions.json#g10_authorization"
   },
   "docker_checks": {
     "context": "desktop-linux",
@@ -388,7 +389,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Report verified G09 publication/integration. Await explicit authorization before G10 or final qualification.",
+  "next_step": "Commit and publish the reviewed G10 candidate only, then qualify its exact SHA using full Comet CI, CodeQL, Miri and RC Build & Smoke AMD64/ARM64. Save immutable external acceptance receipts and download/verify the resulting JARs. Report before merge or stable tag.",
   "qualification": "G09 accepted:230 native and495 unique JVM/SQL/Delta cases locally passed. Qualified source/test/CI bytes are preserved; final full agreed CI/Linux/release/exact-JAR qualification remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -412,7 +413,7 @@
     "implementation_hold_preserved": true,
     "approved_feature_groups_and_release_milestones_unchanged": true
   },
-  "active_branch": "branch-1.2",
+  "active_branch": "joom/1.2-release-qualification",
   "g01_work_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01",
   "upstream_base_rechecked_on": "2026-11-17",
   "upstream_base_current_sha": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -614,18 +615,15 @@
   },
   "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09",
   "integration_gate": {
-    "group": "G09",
-    "status": "USER_ACCEPTED_INTEGRATION_ACTUAL_RESULT_IN_EXTERNAL_RECEIPT",
-    "merge_authorized": true,
+    "group": "G10",
+    "status": "REPORT_BEFORE_MERGE_AND_STABLE_TAG",
     "push_authorized": true,
-    "method": "Fast-forward only; guarded atomic two-ref origin push.",
-    "actual_result": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09-integration/completion.json",
-    "next_group_authorized": false,
+    "merge_authorized": false,
+    "stable_tag_authorized": false,
     "not_authorized": [
-      "G10",
-      "full per-group GHA",
-      "main/tag changes",
-      "release publication",
+      "branch-1.2/main changes",
+      "release tag creation",
+      "external artifact publication",
       "production",
       "datasci access"
     ]
@@ -1607,7 +1605,8 @@
           "intended_validation_command_or_job": "Inspect issue#4968 guards and metrics ignores; run applicable scenarios without suppressing correctness failures, or obtain explicit applicability disposition.",
           "status": "DEFERRED_FINAL_QUALIFICATION",
           "evidence_path_and_source_sha": "G04-results.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json; final release SHA pending."
-        }
+        },
+        "g10_local_resolution": "Two metric ignores restored and passed after real Final peak fix; six applicable Bloom fixtures pass without Spark4.2cancellation. Full exact-SHA remote suite still required."
       },
       {
         "id": "G05-LINUX-RELEASE",
@@ -1752,11 +1751,22 @@
       "status",
       "removal_evidence"
     ],
-    "entries": [],
+    "entries": [
+      {
+        "id": "G01-VENDOR-CLIPPY-EXCLUSION",
+        "group": "G01",
+        "file_or_setting": ".github/actions/rust-test/action.yaml --exclude datafusion-physical-plan",
+        "purpose": "Historical temporary pristine-vendor toolchain warning bypass",
+        "owner": "G10 final qualification",
+        "restore_or_remove_action": "Remove workspace package exclusion; retain only the approved statement-local deprecated allowance and strict remaining warnings.",
+        "status": "REMOVED_LOCAL_STRICT_PASSED_FINAL_LINUX_CI_REQUIRED",
+        "removal_evidence": ".github/actions/rust-test/action.yaml; ${MIGRATION_AUX_ROOT}/20261121_comet12-g10/strict-workspace-clippy.json; actual final Linux verdict in post-commit completion receipt."
+      }
+    ],
     "final_gate": "Audit actual CI, remove all temporary mechanisms, restore normal automatic triggers and full agreed coverage, then run full final GHA and exact final-JAR AMD64/ARM64 packaged smoke. An empty list alone is not proof of restoration."
   },
   "production_use_allowed": false,
-  "active_implementation_group": null,
+  "active_implementation_group": "G10",
   "local_documentation_update_pending": false,
   "g02": {
     "base_commit": "c04d2d03c2f572f99e3767f3c8a65f5294ca5328",
@@ -2394,5 +2404,28 @@
       "production",
       "datasci access"
     ]
+  },
+  "g10": {
+    "status": "SOURCE_FROZEN_LOCAL_CHECKS_PASSED_POST_COMMIT_QUALIFICATION_REQUIRED",
+    "branch": "joom/1.2-release-qualification",
+    "base": "4467d0337089036d3f01d28375260ce3dbcaaca5",
+    "authorization_ref": "decisions.json#g10_authorization",
+    "evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10",
+    "checkpoint": "All five plan profiles generated and ordinarily verified;4 native metric/replay tests,11 SQL/Bloom/coverage cases,3 original plan oracles and final C2R/conditional regressions passed; strict whole-workspace Clippy passed. Final remote qualification remains required.",
+    "full_gha_allowed": true,
+    "rc_build_smoke_allowed": true,
+    "merge_allowed": false,
+    "stable_tag_allowed": false,
+    "active_runs": [],
+    "ci_restoration_audit": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_ci-audit/ci-restoration-audit.json",
+    "coverage_audit": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_coverage-audit/coverage-matrix.json",
+    "local_plan_controller_session": null,
+    "external_progress": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/golden-profiles-progress.json",
+    "runtime_library_sha256": "2efa17cc5434d910110db79ba82f03146ec53e4e471b46d0df67921bd2c4cb7f",
+    "report": "G10-report.md",
+    "results": "G10-results.json",
+    "post_commit_completion": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json",
+    "exact_sha_policy": "Never amend qualified source for status-only documentation; immutable external receipts bind actual CI, RC and downloaded JAR evidence to candidate SHA.",
+    "post_commit_qualification_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json"
   }
 }

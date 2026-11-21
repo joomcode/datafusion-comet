@@ -91,10 +91,11 @@ class CometShuffleWriterSemanticsSuite extends CometTestBase with AdaptiveSparkP
           CometConf.COMET_SHUFFLE_COMPRESSION_CODEC.key -> codec,
           CometConf.COMET_BATCH_SIZE.key -> batch,
           CometConf.COMET_SHUFFLE_JVM_SPILL_THRESHOLD.key -> "11") {
-          val (expected, expectedSchema) = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
-            val sparkOnly = sql(query)
-            (sparkOnly.collect().toSeq.sortBy(_.getInt(0)).map(exact), sparkOnly.schema)
-          }
+          val (expected, expectedSchema) =
+            withSQLConfResult(CometConf.COMET_ENABLED.key -> "false") {
+              val sparkOnly = sql(query)
+              (sparkOnly.collect().toSeq.sortBy(_.getInt(0)).map(exact), sparkOnly.schema)
+            }
           val actual = sql(query)
           val got = actual.collect().toSeq.sortBy(_.getInt(0)).map(exact)
           assert(got == expected, label)

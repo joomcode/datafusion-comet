@@ -37,10 +37,9 @@ runs:
       shell: bash
       run: |
         cd native
-        # Published DataFusion 55.2 uses fetch_update, deprecated by Rust 1.100.
-        # Preserve its sources and lint every Comet member strictly; vendor unit
-        # tests below remain explicit and mandatory.
-        cargo clippy --locked --color=never --all-targets --workspace --exclude datafusion-physical-plan --no-deps -- -D warnings
+        # The vendored member has only the approved statement-local exemption
+        # for DataFusion 55.2's deprecated atomic call. Lint the whole workspace.
+        cargo clippy --locked --color=never --all-targets --workspace --no-deps -- -D warnings
 
     - name: Check native Python UDF feature
       shell: bash

@@ -777,7 +777,7 @@ class CometTaskMetricsSuite extends CometTestBase with AdaptiveSparkPlanHelper {
         val shuffled = sql("SELECT * FROM tbl")
           .sortWithinPartitions($"_1".desc)
           .repartition(4, $"_1")
-        val sparkRows = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+        val sparkRows = withSQLConfResult(CometConf.COMET_ENABLED.key -> "false") {
           sql("SELECT * FROM tbl")
             .collect()
             .map(row => (row.getInt(0), row.getString(1)))

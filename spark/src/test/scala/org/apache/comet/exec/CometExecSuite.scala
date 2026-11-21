@@ -3513,8 +3513,12 @@ class CometExecSuite extends CometTestBase {
   }
 
   test("bloom_filter_agg") {
-    assume(!isSpark42Plus, "https://github.com/apache/datafusion-comet/issues/4968")
-    val funcId_bloom_filter_agg = new FunctionIdentifier("bloom_filter_agg")
+    // Spark 4.2 resolves SQL builtins using system.builtin keys in this registry.
+    val funcId_bloom_filter_agg = if (isSpark42Plus) {
+      new FunctionIdentifier("bloom_filter_agg", Some("builtin"), Some("system"))
+    } else {
+      new FunctionIdentifier("bloom_filter_agg")
+    }
     spark.sessionState.functionRegistry.registerFunction(
       funcId_bloom_filter_agg,
       new ExpressionInfo(classOf[BloomFilterAggregate].getName, "bloom_filter_agg"),
@@ -3525,19 +3529,21 @@ class CometExecSuite extends CometTestBase {
           case 3 => new BloomFilterAggregate(children.head, children(1), children(2))
         })
 
-    withParquetTable(
-      (0 until 100)
-        .map(_ => (Random.nextInt(), Random.nextInt() % 5)),
-      "tbl") {
+    try {
+      withParquetTable(
+        (0 until 100)
+          .map(_ => (Random.nextInt(), Random.nextInt() % 5)),
+        "tbl") {
 
-      (if (isSpark35Plus) Seq("tinyint", "short", "int", "long", "string") else Seq("long"))
-        .foreach { input_type =>
-          val df = sql(f"SELECT bloom_filter_agg(cast(_2 as $input_type)) FROM tbl")
-          checkSparkAnswerAndOperator(df)
-        }
+        (if (isSpark35Plus) Seq("tinyint", "short", "int", "long", "string") else Seq("long"))
+          .foreach { input_type =>
+            val df = sql(f"SELECT bloom_filter_agg(cast(_2 as $input_type)) FROM tbl")
+            checkSparkAnswerAndOperator(df)
+          }
+      }
+    } finally {
+      spark.sessionState.functionRegistry.dropFunction(funcId_bloom_filter_agg)
     }
-
-    spark.sessionState.functionRegistry.dropFunction(funcId_bloom_filter_agg)
   }
 
   for (dictionaryEnabled <- Seq(false, true)) {

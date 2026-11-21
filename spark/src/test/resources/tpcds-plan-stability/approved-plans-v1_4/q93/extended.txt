@@ -1,24 +1,25 @@
-CometColumnarToRow
-+- CometTakeOrderedAndProject
-   +- CometHashAggregate
-      +- CometExchange
-         +- CometHashAggregate
-            +- CometProject
-               +- CometBroadcastHashJoin
-                  :- CometProject
-                  :  +- CometSortMergeJoin
-                  :     :- CometSort
-                  :     :  +- CometExchange
-                  :     :     +- CometProject
-                  :     :        +- CometNativeScan parquet spark_catalog.default.store_sales
-                  :     +- CometSort
-                  :        +- CometExchange
-                  :           +- CometProject
-                  :              +- CometFilter
-                  :                 +- CometNativeScan parquet spark_catalog.default.store_returns
-                  +- CometBroadcastExchange
-                     +- CometProject
-                        +- CometFilter
+TakeOrderedAndProject
++-  HashAggregate [COMET: Comet aggregate that merges intermediate buffers requires a Comet child aggregate when the intermediate buffer formats are incompatible with Spark. Incompatible aggregate function(s): sum]
+   +- Exchange
+      +- HashAggregate
+         +- Project
+            +- BroadcastHashJoin
+               :- CometColumnarToRow
+               :  +- CometProject
+               :     +- CometSortMergeJoin
+               :        :- CometSort
+               :        :  +- CometExchange
+               :        :     +- CometProject
+               :        :        +- CometNativeScan parquet spark_catalog.default.store_sales
+               :        +- CometSort
+               :           +- CometExchange
+               :              +- CometProject
+               :                 +- CometFilter
+               :                    +- CometNativeScan parquet spark_catalog.default.store_returns
+               +- BroadcastExchange
+                  +- Project
+                     +-  Filter [COMET: Filter inferred null-check evaluation order requires Spark]
+                        +- CometColumnarToRow
                            +- CometNativeScan parquet spark_catalog.default.reason
 
-Comet accelerated 21 out of 21 eligible operators (100%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 11 native, 0 codegen dispatch.
+Comet accelerated 12 out of 21 eligible operators (57%). Final plan contains 2 transitions between Spark and Comet. Accelerated expressions: 5 native, 0 codegen dispatch.

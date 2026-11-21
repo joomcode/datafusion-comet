@@ -274,7 +274,7 @@ class CometShuffleReadCoalesceSuite extends CometTestBase with AdaptiveSparkPlan
               assert(spark.table("g07_bloom_inputs").rdd.getNumPartitions == 8)
             }
             val query = "SELECT g07_bloom(v, 100L, 1024L) AS bf FROM g07_bloom_inputs"
-            val expected = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+            val expected = withSQLConfResult(CometConf.COMET_ENABLED.key -> "false") {
               sql(query).collect()
             }
             assert(expected.length == 1 && !expected(0).isNullAt(0))

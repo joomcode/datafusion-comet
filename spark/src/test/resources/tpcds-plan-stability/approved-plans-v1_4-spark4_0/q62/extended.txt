@@ -1,0 +1,31 @@
+TakeOrderedAndProject
++-  HashAggregate [COMET: Unsupported aggregate expression(s), AND shared-expression evaluation order requires Spark]
+   +- Exchange
+      +-  HashAggregate [COMET: Unsupported aggregate expression(s), AND shared-expression evaluation order requires Spark]
+         +- CometColumnarToRow
+            +- CometProject
+               +- CometBroadcastHashJoin
+                  :- CometProject
+                  :  +- CometBroadcastHashJoin
+                  :     :- CometProject
+                  :     :  +- CometBroadcastHashJoin
+                  :     :     :- CometProject
+                  :     :     :  +- CometBroadcastHashJoin
+                  :     :     :     :- CometFilter
+                  :     :     :     :  +- CometNativeScan parquet spark_catalog.default.web_sales
+                  :     :     :     +- CometBroadcastExchange
+                  :     :     :        +- CometFilter
+                  :     :     :           +- CometNativeScan parquet spark_catalog.default.warehouse
+                  :     :     +- CometBroadcastExchange
+                  :     :        +- CometProject
+                  :     :           +- CometFilter
+                  :     :              +- CometNativeScan parquet spark_catalog.default.ship_mode
+                  :     +- CometBroadcastExchange
+                  :        +- CometFilter
+                  :           +- CometNativeScan parquet spark_catalog.default.web_site
+                  +- CometBroadcastExchange
+                     +- CometProject
+                        +- CometFilter
+                           +- CometNativeScan parquet spark_catalog.default.date_dim
+
+Comet accelerated 24 out of 28 eligible operators (85%). Final plan contains 1 transitions between Spark and Comet. Accelerated expressions: 6 native, 0 codegen dispatch.

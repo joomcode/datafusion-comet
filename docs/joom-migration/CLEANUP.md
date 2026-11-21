@@ -280,3 +280,21 @@ checks, preservation proof and exact publication/completion receipt.
 Keep these records through final acceptance; nothing is automatically deleted.
 No runtime rebuild, release JAR, Docker image or dependency download is created
 by this integration.
+
+## G10 full qualification
+
+Keep `${MIGRATION_AUX_ROOT}/20261121_comet12-g10` through final acceptance. It holds
+initial documentation/source archives, all positive/intermediate-failure controls,
+plan-generation and ordinary-verification logs/XML, independent audits, exact-SHA
+GitHub run/job/artifact receipts and the downloaded release archive. Build outputs
+reuse `native/target`, `common/target`, `spark/target` and existing Maven/Cargo/Scala
+caches; whole-directory sizes do not represent G10-only growth. No host Docker
+images or global tools are installed for G10; native release builds run in GHA.
+
+Final downloaded artifacts reside in `target/joom-release/gha-<RC_RUN_ID>`.
+The final external completion receipt supplies the actual run ID, byte sizes,
+checksums, source and loaded-library provenance. Preserve the accepted JARs and
+receipts separately before choosing manual cleanup. No automatic deletion of
+source checkouts, shared caches, migration evidence or user resources is authorized.
+After all builds stop and evidence is preserved, use this guide's existing guarded
+manual target-cleaning commands; deleting a shared target forces future rebuilds.

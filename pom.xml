@@ -1139,7 +1139,8 @@ under the License.
             </args>
             <jvmArgs>
               <jvmArg>-Xms1024m</jvmArg>
-              <jvmArg>-Xmx1024m</jvmArg>
+              <!-- The full cross-profile test sources exceed a 1 GiB compiler heap. -->
+              <jvmArg>-Xmx2048m</jvmArg>
             </jvmArgs>
             <javacArgs>
               <javacArg>-source</javacArg>

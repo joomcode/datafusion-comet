@@ -34,7 +34,7 @@ import org.apache.spark.sql.catalyst.analysis.UnresolvedRelation
 import org.apache.spark.sql.catalyst.expressions.{And, Ascending, AttributeReference, BoundReference, Descending, DynamicPruningExpression, IsNotNull, SortOrder}
 import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, BuildRight, BuildSide}
 import org.apache.spark.sql.catalyst.plans.{Inner, LeftOuter, LeftSemi}
-import org.apache.spark.sql.catalyst.plans.logical.Join
+import org.apache.spark.sql.catalyst.plans.logical.{Join, LocalRelation}
 import org.apache.spark.sql.comet.{CometBroadcastExchangeExec, CometBroadcastHashJoinExec, CometBroadcastNestedLoopJoinExec, CometColumnarToRowExec, CometFilterExec, CometHashJoinExec, CometNativeScanExec, CometProjectExec, CometRangeExec, CometSampleExec, CometSortExec, CometSortMergeJoinExec, CometSparkToColumnarExec, CometUnionExec, CometWindowExec}
 import org.apache.spark.sql.execution.{ColumnarToRowTransition, InputAdapter, LocalTableScanExec, SortExec, SparkPlan, WholeStageCodegenExec}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AQEShuffleReadExec, BroadcastQueryStageExec, QueryStageExec}
@@ -3393,7 +3393,12 @@ class CometJoinSuite extends CometTestBase {
 
   test("columnar-to-row keeps direct, reused and staged Comet broadcasts out of codegen") {
     val attributes = Seq(AttributeReference("key", IntegerType, nullable = false)())
-    val local = LocalTableScanExec(attributes, Seq.empty, None)
+    // Let Spark supply its version-specific LocalTableScanExec constructor arguments.
+    val leaf = spark.sessionState.planner.plan(LocalRelation(attributes)).next()
+    assert(leaf.isInstanceOf[LocalTableScanExec], s"Unexpected Spark leaf: $leaf")
+    val local = leaf.asInstanceOf[LocalTableScanExec]
+    assert(local.output.map(_.exprId) == attributes.map(_.exprId))
+    assert(local.rows.isEmpty)
     val columnar = CometSparkToColumnarExec(local)
     val broadcast = CometBroadcastExchangeExec(
       columnar,

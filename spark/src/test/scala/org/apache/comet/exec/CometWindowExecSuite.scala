@@ -2192,7 +2192,7 @@ class CometWindowExecSuite extends CometTestBase {
         CometConf.COMET_EXEC_WINDOW_SORTED_ENABLED.key -> sorted,
         CometConf.COMET_BATCH_SIZE.key -> batchSize) {
         val ordered = s"SELECT * FROM ($query) g06 ORDER BY id"
-        val expected = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+        val expected = withSQLConfResult(CometConf.COMET_ENABLED.key -> "false") {
           sql(ordered).collect().toSeq
         }
         val df = sql(ordered)

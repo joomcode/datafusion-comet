@@ -17,6 +17,8 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+> **Current G10 authorization, 2026-11-21:** The user explicitly started `joom/1.2-release-qualification` from accepted G09 `4467d0337`. Restore all temporary CI bypasses and full normal automatic quality/test coverage, close applicable remaining gaps, run full agreed GHA and exact-SHA RC Build & Smoke on native AMD64/ARM64, and download/verify the final JARs. Report before merge or stable tag. Feature publication and workflow control are authorized; branch-1.2/main/tag changes, external artifact publication, production and datasci remain excluded. Earlier G10 holds below are historical. See STATE.json and decisions.json#g10_authorization.
+
 > **Current G09 acceptance, 2026-11-21:** The user approved publishing G09 and integrating it into `branch-1.2`. The two-commit fast-forward and exact local/remote/source/document verification are recorded after commit in `${MIGRATION_AUX_ROOT}/20261121_comet12-g09-integration/completion.json`. All29 qualified non-migration files remain unchanged from `00f5c17bc`. Earlier G09 review holds below are historical. G10, full per-group GHA, main/tag/release changes, production and datasci remain unauthorized; final full agreed CI and exact final-JAR AMD64/ARM64 qualification remain mandatory.
 
 > **Current G09 review gate, 2026-11-21:** I07/J01/J02/J03/J04 are locally qualified on `joom/1.2-cost-based-engines` from `2dc13d5bd`. See G09-report.md/G09-results.json:230 native and495unique JVM/SQL/Delta cases passed, with all selected failures resolved. Await explicit push/integration approval; branch-1.2/main/RC1 are unchanged. G10, full per-group GHA, release/publication, production and datasci remain unauthorized. Final full agreed CI and exact final-JAR AMD64/ARM64 qualification remain mandatory. Earlier stage banners are historical.
@@ -66,3 +68,23 @@ Latest completed qualification: **RC Build & Smoke 44388252264 on b93d553856a033
 - Older Linux release JARs use source2b8f80b3f and **do not contain the fixes**. Do not treat them as a final RC or production-ready. Host/M2 JARs with the new Scala code were used only for local tests. Dualarch packaged smoke remains an RC gate; it passed for the newer b93 artifact set.
 - Explicitly select Java17; use direct stable-toolchain Cargo bin and JNI-library PATH when needed. Working official protoc33.5 is already in the ProtocBridge cache. Global SDK/PATH/host tools were not changed.
 - All execution documentation is here; preserve caches/user checkouts. New test-only/network outputs are in the cleanup ledger. Git feature push/PR28 updates are authorized; artifact publication/production operations are excluded.
+
+## G10 frozen-source checkpoint (2026-11-21)
+
+Read G10-report.md, G10-results.json and STATE.json#g10. All local preparatory
+checks are complete; full remote qualification is a mandatory post-commit gate.
+No merge, main/tag change, external publication, production or datasci action is
+authorized. Preserve the exact frozen candidate SHA and all prior evidence.
+
+Actual remote progress, run IDs and failures are retained under
+`${MIGRATION_AUX_ROOT}/20261121_comet12-g10`. Use monitor.py for a bounded GitHub
+snapshot every five minutes; inspect new failures promptly. If a source correction
+requires a new SHA, cancel superseded builds rather than waiting unnecessarily.
+Never treat a generation run, ignored/canceled test or skipped applicable job as
+a successful correctness check. Reconcile every backlog item with actual evidence.
+
+After full exact-source Comet CI, CodeQL, Miri and native AMD64/ARM64 RC Build &
+Smoke pass, download and independently verify the final archive, JAR checksums,
+source/lock/build provenance and both architecture smoke receipts. Save completion.json
+externally and report before merge and stable tag. Do not amend the tested source
+merely to record post-commit results; a real source change requires requalification.

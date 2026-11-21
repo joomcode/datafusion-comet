@@ -281,7 +281,8 @@ manifest = {'commit':sys.argv[2], 'cargo_lock_sha256':sys.argv[3],
             'native_profile':'release', 'cargo_jobs':int(sys.argv[4]),
             'cargo_profile_release_debug':False,
             'native_flags':{arch:tool['rustflags'] for arch,tool in tools.items()},
-            'max_glibc':'2.31', 'qualification':'See docs/joom-migration; G01 RC is an incomplete Joom migration'}
+            'max_glibc':'2.31',
+            'qualification':'Build provenance only; acceptance requires full agreed CI and release-qualification.json for this commit'}
 (out/'build-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 files = ['comet-spark-spark4.2_2.13-1.2.0.jar','comet-contrib-delta-spark4.2_2.13-1.2.0.jar',
          'linux/aarch64/libcomet.so','linux/amd64/libcomet.so','commit.txt','build-manifest.json','effective-pom.xml']

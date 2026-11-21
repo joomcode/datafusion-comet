@@ -154,7 +154,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
 
   /** The executed plan of `INSERT INTO target <query>`, checking the rows it wrote. */
   private def insertPlan(schema: String, query: String): SparkPlan = {
-    val expected = withSQLConf(CometConf.COMET_ENABLED.key -> "false") {
+    val expected = withSQLConfResult(CometConf.COMET_ENABLED.key -> "false") {
       sql(query).collect().toSeq
     }
     var plan: SparkPlan = null
@@ -884,7 +884,7 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
             0.5 * (3.2 + 0.082 + 2 * 28 + 105 + 130 + 270 + 1000))
         }
 
-        val sorted = withSQLConf(sparkAggregates) {
+        val sorted = withSQLConfResult(sparkAggregates) {
           run("SELECT k, max(s) FROM t GROUP BY k")
         }
         val sortAgg = nodes(sorted).collectFirst { case a: SortAggregateExec => a }.get

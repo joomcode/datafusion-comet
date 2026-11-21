@@ -359,7 +359,9 @@ genuinely quiet day from a base that has drifted.
 Release branches (`branch-N.M`) start with the workflow files `main` had when they were cut, but have
 no merge queue and no nightly run. The merge queue covers only `main`, `ci.yml` runs on push only for `main`, and GitHub
 fires scheduled workflows only on the default branch, so a release branch gets no scheduled `ci.yml`,
-Miri or CodeQL run, and nothing runs after a pull request merges.
+Miri or CodeQL run. The full Comet test pipeline does not repeat after a pull request merges.
+CodeQL's Actions analysis runs automatically on pushes to release branches and `joom/**` feature
+branches, as well as pull requests targeting release branches. It can also be dispatched manually.
 
 On `main`, the tiers hold the expensive suites back for the queue and the nightly run, which still
 test every change. A release branch has neither, so holding a suite back there would mean never
