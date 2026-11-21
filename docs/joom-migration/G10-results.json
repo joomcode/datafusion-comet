@@ -1,7 +1,7 @@
 {
   "date": "2026-11-21",
   "group": "G10",
-  "status": "FINAL_SOURCE_FROZEN_MIRI_FIRST_FULL_QUALIFICATION_REQUIRED",
+  "status": "FINAL_SOURCE_FROZEN_FULL_QUALIFICATION_REQUIRED",
   "branch": "joom/1.2-release-qualification",
   "base_commit": "4467d0337089036d3f01d28375260ce3dbcaaca5",
   "cards": "All agreed 58 active cards, plus preservation of historical H01; no scope is automatically excluded.",
@@ -15,8 +15,8 @@
     "jvm_arrow": "18.3.0",
     "java": "17.0.19-tem"
   },
-  "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v4.json",
-  "source_manifest_sha256": "58bcbc49d70282df029af6a5016138403ff67220828631349de03c9ae597528f",
+  "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v5.json",
+  "source_manifest_sha256": "27d9e07a8d776af4631b08d004ac8fd586448f420d835b021a1e0f5495ed4025",
   "changed_source_sha256": {
     ".github/actions/java-test/action.yaml": "3ff24f865e0b76d1e8fb7f991f7ac201294c4fcc7a9491feeb28a3b96823edc2",
     ".github/actions/rust-test/action.yaml": "ae1207a8c531775baf0db3698ea232171ec203675105cf886e87a17198e7016d",
@@ -29,9 +29,9 @@
     "contrib/delta-spark/src/test/scala/org/apache/comet/contrib/delta/DeltaScanContribSuite.scala": "6291496717e08f5322b560b0642ab81bb26822d57de517c77e66162da659f395",
     "dev/ci/verify-native-windows.py": "38d49357b2672501704f9efa3dcb74ee746e9e06b6ee27f3acb4013d3e9e28cd",
     "dev/release/joom/build-release.sh": "e2ed184d3cf3f7442346115ba1db647519d1f09972abcd4e01e130a7734ec365",
-    "dev/release/joom/test-packaged-runtime.py": "fca1b8e9501b5c39058bca452fb55586afc6c130fd42fee9d817283ec4ce7c0c",
+    "dev/release/joom/test-packaged-runtime.py": "347c4626b49eff7a700388f8efb746a6041d74e32bac0a34f2ffe1eb214494d5",
     "dev/release/joom/test-rc-result.py": "805d1030a6adeef3e0ab46eddd0ecaa57459fccafc755e3510bf14bef71c5461",
-    "dev/release/joom/verify-packaged-runtime.py": "6cdc4ad8f0d2109ef8ada3c442f7fddd2cf73561587124ea8f8aafc89385d281",
+    "dev/release/joom/verify-packaged-runtime.py": "e3134c375393bfc68b4fea877687c6cff03f322ccd8d5773af8d3d351c7db27b",
     "dev/release/joom/verify-rc-result.py": "1bea6c32adb244785cfb003d3b769691793d37948308ef119bdf4b9a34de5489",
     "docs/source/contributor-guide/ci.md": "036cdc86a743069db2edd50fef11166e1b2692bb473379e6983a7497a7ec8b5b",
     "docs/source/contributor-guide/memory_management.md": "0f2c26937260892a239593f7f90d1675a9f54b9412420337f4e0071a4773c36e",
@@ -484,6 +484,21 @@
       "preflight_network_retry": "OfficialRAT0.16.1transient404; sameSHAfailed-jobsrerunaccepted201 andpreflightpassed. No licenseexemption/sourceversionchange.",
       "miri_failure": "UnsupportedZSTD_createCCtxCFFI, notUBdiagnostic, in newG07dictionaryroundtriptest.",
       "qualification_credit": false
+    },
+    {
+      "source_commit": "f700491ad3fd88d62bc573a2ee8aa714d445e5f2",
+      "full_ci": 44934717625,
+      "rc": 44934719876,
+      "miri": 44931908679,
+      "codeql": 44931876201,
+      "status": "CODEQL_MIRI_PASSED_FULL_CI_STOPPED_FOR_PACKAGED_TEST_ABI_FIX_RC_FAILED",
+      "miri_actual_passed": 107,
+      "miri_failed": 0,
+      "miri_ignored": 0,
+      "rc_original_smokes_passed_per_arch": 12,
+      "failure": "Raw test fixture references unrelocated Protobuf Message while final Core uses shaded Protobuf. No result comparison failed; test aborted on ABI mismatch.",
+      "evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/cancel-f700-for-packaged-protobuf.json",
+      "qualification_credit": false
     }
   ],
   "previous_source_manifests": [
@@ -501,6 +516,11 @@
       "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v3.json",
       "sha256": "05d9a9a502cb84d89d141dfb71fd3010fc5dc8a287163f1733143f0bf8d1687f",
       "source": "f9af0dae0ac27919312a733031a2bb1ced17b4a9"
+    },
+    {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v4.json",
+      "sha256": "58bcbc49d70282df029af6a5016138403ff67220828631349de03c9ae597528f",
+      "source": "f700491ad3fd88d62bc573a2ee8aa714d445e5f2"
     }
   ],
   "corrective_local_quality": {
@@ -613,8 +633,26 @@
     "scope": "One existing test fixture only; same19test registrations and full production prefix preserved.",
     "normal_native": "None,Lz4Frame,Zstd(1), bothwriterentrypoints, sameallfixtures/checksums/byteanddecodedrowassertions. Native19/19pass.",
     "miri": "None+pureRustLz4Frame; onlyunsupportedZstdCFFI omittedwithinthatfixture, no ignoredtest or validationflagchange.",
-    "quality": "Fmt andstrictshuffleall-targetClippy passed; actualLinuxMiri is required before expensive fullCI/RC.",
+    "quality": "Actual F700 Linux Miri passed107/0failed/0ignored. Native sources and Miri workflow unchanged by support-only fix; exact new-SHA Miri remains mandatory.",
     "local_environment": "Officialdatednightlyinstalled520MiB,stabledefaultunchanged. LocalMiri setup couldnotcreateitsstandardcacheinside sandbox; requestedone-offescalationuserrejected. No localMiritests executed; no cache relocation or further escalation.",
-    "execution_order": "Push finalcandidate\u2192MiriGHAonly+automaticCodeQL\u2192afterMiri succeeds fullCometCI+23caseRC on SAMEfrozenSHA."
+    "execution_order": "FullCI/Miri/dualarchRC parallel on SAME frozen SHA, CodeQL automatic; no qualification credit until all actual final gates pass.",
+    "previous_execution_order": "Push finalcandidate\u2192MiriGHAonly+automaticCodeQL\u2192afterMiri succeeds fullCometCI+23caseRC on SAMEfrozenSHA."
+  },
+  "packaged_test_support_abi_fix": {
+    "scope": "Only release test-support preparation and its contract tests; no production source/POM/algorithm changes.",
+    "local_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_packaged-protobuf-fix/local-shading-qualification.json",
+    "receipt_sha256": "786cbd03e4db88bdf825160aa9c0aa54482dc3d4a453fe8d37bd9c6bebb800c1",
+    "helper_source_sha256": "e3134c375393bfc68b4fea877687c6cff03f322ccd8d5773af8d3d351c7db27b",
+    "local_passed": 23,
+    "groups": 11,
+    "failed_canceled_ignored_pending": 0,
+    "contracts_passed": [
+      14,
+      18
+    ],
+    "production_and_dependency_bytes_unchanged": true,
+    "raw_negative_reproduced": "IncompatibleClassChangeError com.google.protobuf.Message",
+    "support_policy": "Both Core/Delta test JARs, exact resolved effective-POM Jar/Shade/ASM pins and relocations, offline dependency-free helper; final production-class guards retained.",
+    "final_execution_order": "FullCI/Miri/dualarchRC parallel on SAME frozen SHA, CodeQL automatic; no qualification credit until all actual final gates pass."
   }
 }

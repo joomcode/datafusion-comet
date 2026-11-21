@@ -1032,6 +1032,11 @@
       "default_toolchain": "stable unchanged",
       "sysroot": "Setupblocked;noactuallocalMiritests;escalationuserrejected",
       "manual_cleanup": "Aftermigrationcompletionanduserdecision:rustuptoolchainuninstallnightly-2026-11-21; do notremove sharedstable/toolchains/caches."
+    },
+    "packaged_test_support_fix": {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_packaged-protobuf-fix",
+      "contents": "Preserved raw failure, exact helper-created test support, offline Maven work output and all23 local shaded-JAR logs/receipts; no shared caches or source artifacts deleted.",
+      "ci_build_output": "target/rc-smoke-support/<release-directory>/<core-or-delta>; offline build intermediates only, never production JARs."
     }
   }
 }

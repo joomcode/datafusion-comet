@@ -214,7 +214,40 @@ source bytes. Native tests (19/19), formatting and strict shuffle Clippy passed.
 An official dated nightly/Miri installation added about 520 MiB while leaving
 stable as default. Local sysroot setup was blocked by sandbox cache permissions;
 the user rejected a one-off escalated setup. No local Miri test executed and no
-cache was relocated. The final candidate therefore runs Miri GHA first, followed
+cache was relocated. The F700 candidate therefore ran Miri GHA first, followed
 by full Comet CI and the 23-case dualarch RC after Miri succeeds, all on the same
 frozen SHA. CodeQL runs automatically. Previous interrupted runs do not qualify
 the final source. All actual remote verdicts remain mandatory post-commit facts.
+
+## Packaged test-support ABI correction
+
+Candidate `f700491ad` passed CodeQL and both actual Linux Miri jobs
+(19 unsafe-row tests and 88 hash tests, zero failed or ignored). Its RC passed
+the original 12 cases on both architectures, then the new UDF fixture aborted:
+the production Core JAR relocates Protobuf, while automatic support preparation
+copied unrelocated test bytecode. The earlier local precheck had explicitly shaded
+that support copy and therefore missed the automatic preparation gap. The running
+full CI was canceled immediately; neither unfinished CI nor failed RC qualifies
+this source. Their receipts and the raw failing fixture remain preserved.
+
+Automatic preparation now uses the existing offline Maven Jar/Shade plugins to
+relocate only Core and Delta test support, using the exact resolved release POM
+policy, including the Arrow C exclusion and service transformer. Production JAR
+hashes are checked before and after preparation. Normal developer classpaths,
+production code, dependency pins, all 23 selectors and all result/error/native
+and 17 Core plus 2 Delta class-origin assertions remain unchanged.
+
+The actual new helper reproduced the raw-support failure, then prepared both
+support JARs and passed all 23 unchanged cases across 11 groups on the shaded
+Darwin JARs, with zero failures/cancellations/ignored/pending cases. Production and
+dependency bytes remained identical. The 14 support contracts and 18 export
+contracts passed, as did Python 3.8 grammar and source-scope checks. This is a local
+ABI precheck, not final Linux acceptance. Evidence is under
+`${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_packaged-protobuf-fix`.
+
+The replacement candidate repeats every final gate on its own frozen SHA.
+Because this fix changes only test-support packaging and its contracts, and
+Miri has now actually passed the identical native sources, Miri, full Comet CI
+and dualarch RC may run in parallel, with automatic CodeQL. All actual final
+verdicts, backlog closure and downloaded-artifact verification remain mandatory
+post-commit gates. Report before merge or stable tag; protected refs stay unchanged.

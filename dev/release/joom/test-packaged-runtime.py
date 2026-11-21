@@ -25,6 +25,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 spec = importlib.util.spec_from_file_location(
@@ -67,6 +68,81 @@ class PackagedRuntimeFaults(unittest.TestCase):
         with zipfile.ZipFile(path, "w") as archive:
             archive.writestr(member, "fixture")
         return path
+
+    def effective_shade_pom(self):
+        path = self.root / "effective-pom.xml"
+        path.write_text('''<projects xmlns="http://maven.apache.org/POM/4.0.0">
+<project><artifactId>parent</artifactId></project>
+<project><artifactId>comet-spark-spark4.2_2.13</artifactId><build><plugins>
+<plugin><artifactId>maven-jar-plugin</artifactId><version>3.2.0</version></plugin>
+<plugin><artifactId>maven-shade-plugin</artifactId><version>3.2.4</version>
+<dependencies><dependency><groupId>org.ow2.asm</groupId><artifactId>asm</artifactId>
+<version>9.1</version></dependency></dependencies><executions><execution>
+<goals><goal>shade</goal></goals><configuration><relocations>
+<relocation><pattern>org.apache.arrow</pattern><shadedPattern>fixture.shaded.arrow</shadedPattern>
+<excludes><exclude>org/apache/arrow/c/**</exclude></excludes></relocation>
+<relocation><pattern>com.google.protobuf</pattern><shadedPattern>fixture.shaded.protobuf</shadedPattern>
+</relocation></relocations><transformers><transformer
+implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+</transformers></configuration></execution></executions></plugin>
+</plugins></build></project></projects>''')
+        return path
+
+    def test_support_shading_reuses_resolved_policy_without_production_dependencies(self):
+        effective = self.effective_shade_pom()
+        classes, target, work = [self.root / name for name in ["test-classes", "tests.jar", "shade"]]
+        pom, jar, shade = runtime.test_support_pom(effective, classes, target, work)
+        ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+        root = pom.getroot()
+        self.assertEqual((jar, shade), ("3.2.0", "3.2.4"))
+        self.assertIsNone(root.find("m:parent", ns))
+        self.assertIsNone(root.find("m:dependencies", ns))
+        plugins = root.findall("m:build/m:plugins/m:plugin", ns)
+        self.assertEqual(plugins[0].findtext("m:configuration/m:classesDirectory", namespaces=ns),
+                         str(classes))
+        config = plugins[1].find("m:configuration", ns)
+        self.assertEqual(config.findtext("m:outputFile", namespaces=ns), str(target))
+        self.assertEqual(config.findtext("m:createDependencyReducedPom", namespaces=ns), "false")
+        self.assertEqual(config.findtext("m:relocations/m:relocation/m:shadedPattern", namespaces=ns),
+                         "fixture.shaded.arrow")
+        self.assertEqual(config.findtext("m:relocations/m:relocation/m:excludes/m:exclude", namespaces=ns),
+                         "org/apache/arrow/c/**")
+        self.assertEqual(plugins[1].findtext("m:dependencies/m:dependency/m:version", namespaces=ns), "9.1")
+        self.assertIsNone(config.find("m:shadeTestJar", ns))
+
+    def test_support_shading_rejects_missing_or_unresolved_release_policy(self):
+        effective = self.effective_shade_pom()
+        original = effective.read_text()
+        for malformed in [original.replace("comet-spark-spark4.2_2.13", "wrong-module"),
+                          original.replace("<plugin><artifactId>maven-jar-plugin</artifactId>",
+                                           "<plugin><artifactId>maven-shade-plugin</artifactId>"),
+                          original.replace("3.2.4", "${shade.version}"),
+                          original.replace("fixture.shaded.protobuf", "${shade.package}.protobuf"),
+                          original.replace(original[original.index("<relocations>"):
+                                                    original.index("</relocations>") + 14],
+                                           "<relocations/>"),
+                          original.replace("<goals><goal>shade</goal></goals>", ""),
+                          original.replace("ServicesResourceTransformer", "OtherTransformer")]:
+            effective.write_text(malformed)
+            with self.subTest(pom=malformed), self.assertRaises(ValueError):
+                runtime.test_support_pom(effective, self.root / "classes", self.root / "tests.jar",
+                                         self.root / "shade")
+
+    def test_support_shading_is_offline_and_requires_an_actual_output(self):
+        effective = self.effective_shade_pom()
+        classes = self.root / "test-classes"
+        classes.mkdir()
+        (classes / "Test.class").write_bytes(b"fixture")
+        target, work = self.root / "tests.jar", self.root / "shade"
+        with mock.patch.object(runtime.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "relocated test support missing"):
+                runtime.shade_test_support(self.root, effective, classes, target, work)
+        command = run.call_args[0][0]
+        self.assertIn("-o", command)
+        self.assertEqual(command[-2:], ["org.apache.maven.plugins:maven-jar-plugin:3.2.0:jar",
+                                        "org.apache.maven.plugins:maven-shade-plugin:3.2.4:shade"])
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            runtime.shade_test_support(self.root, effective, classes, target, work)
 
     def test_support_cannot_supply_main_classes_or_native_libraries(self):
         runtime.check_test_jar(self.jar("test.jar"))

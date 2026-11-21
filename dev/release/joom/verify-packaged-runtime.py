@@ -19,6 +19,7 @@
 """Bundle matching test support, then smoke the final release JAR bytes offline."""
 
 import argparse
+import copy
 import hashlib
 import importlib.util
 import json
@@ -264,12 +265,93 @@ def check_test_jar(path, final_classes=()):
                         for name in names), "test support contains a native library")
 
 
-def zip_directory(source, target):
-    files = sorted(path for path in source.rglob("*") if path.is_file())
-    require(files, "empty Delta test output")
-    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in files:
-            archive.write(path, path.relative_to(source).as_posix())
+def test_support_pom(effective_pom, classes, target, work):
+    # Tests must use the same relocated dependency ABI as the final shaded JARs.
+    # A dependency-free project transforms test bytecode only: enabling shadeTestJar
+    # in Comet's production reactor would also select dependency test artifacts.
+    namespace = "http://maven.apache.org/POM/4.0.0"
+    ns = {"m": namespace}
+    root = ET.parse(effective_pom).getroot()
+    projects = [root] if root.tag == "{" + namespace + "}project" else list(root)
+    spark = [project for project in projects
+             if project.findtext("m:artifactId", namespaces=ns) == CORE.rsplit("-", 1)[0]]
+    require(len(spark) == 1, "effective POM must contain exactly one matching Spark module")
+    plugins = spark[0].findall("m:build/m:plugins/m:plugin", ns)
+
+    def plugin(name):
+        found = [item for item in plugins if item.findtext("m:artifactId", namespaces=ns) == name]
+        require(len(found) == 1, "missing or ambiguous effective plugin: " + name)
+        version = found[0].findtext("m:version", namespaces=ns)
+        require(version and "${" not in version, "unresolved effective plugin version: " + name)
+        return found[0], version
+
+    shade, shade_version = plugin("maven-shade-plugin")
+    _, jar_version = plugin("maven-jar-plugin")
+    configurations = [execution.find("m:configuration", ns)
+                      for execution in shade.findall("m:executions/m:execution", ns)
+                      if execution.findtext("m:goals/m:goal", namespaces=ns) == "shade"]
+    require(len(configurations) == 1 and configurations[0] is not None,
+            "missing or ambiguous effective shade execution")
+    relocations = configurations[0].find("m:relocations", ns)
+    require(relocations is not None and len(relocations), "missing release relocation policy")
+    dependencies = shade.find("m:dependencies", ns)
+    require(dependencies is not None and len(dependencies), "missing release shade plugin dependencies")
+    for element in [relocations, dependencies]:
+        require("${" not in ET.tostring(element, encoding="unicode"),
+                "unresolved effective shade policy")
+    transformer_name = "org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"
+    require(any(item.get("implementation") == transformer_name
+                for item in configurations[0].findall("m:transformers/m:transformer", ns)),
+            "release service-resource transformer missing")
+
+    def add(parent, name, text=None):
+        element = ET.SubElement(parent, "{" + namespace + "}" + name)
+        element.text = str(text) if text is not None else None
+        return element
+
+    ET.register_namespace("", namespace)
+    project = ET.Element("{" + namespace + "}project")
+    for name, value in [("modelVersion", "4.0.0"), ("groupId", "org.apache.comet.rc"),
+                        ("artifactId", "isolated-test-support"), ("version", "1")]:
+        add(project, name, value)
+    build = add(project, "build")
+    add(build, "directory", work / "target")
+    generated_plugins = add(build, "plugins")
+    generated_jar = add(generated_plugins, "plugin")
+    for name, value in [("groupId", "org.apache.maven.plugins"),
+                        ("artifactId", "maven-jar-plugin"), ("version", jar_version)]:
+        add(generated_jar, name, value)
+    add(add(generated_jar, "configuration"), "classesDirectory", classes)
+    generated_shade = add(generated_plugins, "plugin")
+    for name, value in [("groupId", "org.apache.maven.plugins"),
+                        ("artifactId", "maven-shade-plugin"), ("version", shade_version)]:
+        add(generated_shade, name, value)
+    generated_shade.append(copy.deepcopy(dependencies))
+    configuration = add(generated_shade, "configuration")
+    add(configuration, "createDependencyReducedPom", "false")
+    add(configuration, "outputFile", target)
+    configuration.append(copy.deepcopy(relocations))
+    transformer = add(add(configuration, "transformers"), "transformer")
+    transformer.set("implementation", transformer_name)
+    return ET.ElementTree(project), jar_version, shade_version
+
+
+def shade_test_support(repo, effective_pom, classes, target, work):
+    require(classes.is_dir() and any(classes.rglob("*.class")), "empty test class output")
+    require(not target.exists() and not work.exists(), "test shading output already exists")
+    pom, jar_version, shade_version = test_support_pom(effective_pom, classes, target, work)
+    work.mkdir(parents=True)
+    pom_path = work / "pom.xml"
+    pom.write(pom_path, encoding="utf-8", xml_declaration=True)
+    command = [str(repo / "mvnw"), "-o", "-B", "-ntp", "-f", str(pom_path),
+               "org.apache.maven.plugins:maven-jar-plugin:" + jar_version + ":jar",
+               "org.apache.maven.plugins:maven-shade-plugin:" + shade_version + ":shade"]
+    with (work / "shade.log").open("w") as log:
+        subprocess.run(command, cwd=repo, stdout=log, stderr=subprocess.STDOUT, check=True)
+    require(target.is_file(), "relocated test support missing")
+    return {"effective_pom_sha256": digest(effective_pom), "support_pom_sha256": digest(pom_path),
+            "jar_plugin_version": jar_version, "shade_plugin_version": shade_version,
+            "output_sha256": digest(target)}
 
 
 def prepare(args):
@@ -282,10 +364,13 @@ def prepare(args):
     support.mkdir()
     (support / "lib").mkdir()
     (support / "probe").mkdir()
-    core_tests = repo / "spark/target" / CORE.replace(".jar", "-tests.jar")
-    require(core_tests.is_file(), "matching core tests JAR missing")
-    shutil.copyfile(core_tests, support / "core-tests.jar")
-    zip_directory(repo / "contrib/delta-spark/target/test-classes", support / "delta-tests.jar")
+    jar_hashes = {name: digest(out / name) for name in [CORE, DELTA]}
+    shading = {}
+    for label, module in [("core", "spark"), ("delta", "contrib/delta-spark")]:
+        shading[label] = shade_test_support(
+            repo, out / "effective-pom.xml", repo / module / "target/test-classes",
+            support / (label + "-tests.jar"),
+            repo / "target/rc-smoke-support" / out.name / label)
     classpath = ["core-tests.jar", "delta-tests.jar"]
     copied = set()
     for module in ["spark", "contrib/delta-spark"]:
@@ -312,11 +397,14 @@ def prepare(args):
     for name in classpath:
         if name.endswith(".jar"):
             check_test_jar(support / name, final_classes)
+    require(jar_hashes == {name: digest(out / name) for name in [CORE, DELTA]},
+            "production JAR bytes changed while preparing test support")
     files = {path.relative_to(support).as_posix(): digest(path)
              for path in sorted(support.rglob("*")) if path.is_file()}
     manifest = {"format": 1, "commit": args.commit, "cargo_lock_sha256": args.lock_sha256,
                 "release_jar_sha256": {name: digest(out / name) for name in [CORE, DELTA]},
                 "effective_pom_sha256": digest(out / "effective-pom.xml"),
+                "test_support_shading": shading,
                 "classpath": classpath, "files": files}
     (support / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print("Prepared portable packaged-smoke support for " + args.commit)

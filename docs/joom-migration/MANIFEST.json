@@ -137,11 +137,11 @@
     },
     {
       "path": "G10-report.md",
-      "sha256": "21959e9e0be261b93b417009289435f389a95221490871dfd51d913af1d448ae"
+      "sha256": "a5450ef7a1aa2cdb4acaebea87ed27154fb385b1cb6c8f1b14777bf73d4b995d"
     },
     {
       "path": "G10-results.json",
-      "sha256": "59656cd60971e1661f0b0dd341a5cd4dd1985109f903024f5ba982de7b454cad"
+      "sha256": "5bb19d7aa6e039493b3761c065052ad836fb03ccc1bbdbb8daf727cb3013b723"
     },
     {
       "path": "HANDOFF.md",
@@ -173,7 +173,7 @@
     },
     {
       "path": "STATE.json",
-      "sha256": "4a993e7f70c6f263b0b5e0181548c7e3ac99475177879101197329f95837bfab"
+      "sha256": "ab736d8c89be0712cf5c20495a95a40b224d4d43e2d052e387d8b1e2301e46b3"
     },
     {
       "path": "approved-plan.json",
@@ -185,7 +185,7 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "afe4732b8431d9c5bde55e84fada4cdcdad357f364ec6595292bf15ced5f98f8"
+      "sha256": "9ffd00075658f3af6c1e92214b7ed0652b212817131d104a3e2a377380b34c1a"
     },
     {
       "path": "correctness-test-plan.txt",
