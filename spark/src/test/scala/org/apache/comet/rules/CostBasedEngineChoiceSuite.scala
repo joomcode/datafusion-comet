@@ -19,7 +19,10 @@
 
 package org.apache.comet.rules
 
-import org.apache.spark.sql.{CometTestBase, DataFrame}
+import scala.util.{Failure, Success, Try}
+
+import org.apache.spark.SparkThrowable
+import org.apache.spark.sql.{CometTestBase, DataFrame, QueryTest, Row}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.catalyst.expressions.aggregate.Partial
 import org.apache.spark.sql.catalyst.plans.logical.LocalRelation
@@ -965,50 +968,151 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
   }
 
   test("a sort-merge join adds smjCrossCondition only with a CASE or IF over both inputs") {
-    withTables {
-      withSQLConf(
-        SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
-        SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
-        flag -> "false") {
-        def join(query: String): SparkPlan = {
-          val plan = run(query)
-          val joins = nodes(plan).collect {
-            case j: CometSortMergeJoinExec => j
-            case j: SortMergeJoinExec => j
+    for (ansi <- Seq(true, false)) {
+      withSQLConf(SQLConf.ANSI_ENABLED.key -> ansi.toString) {
+        withTables {
+          withSQLConf(
+            SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+            SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+            flag -> "false") {
+            def join(query: String): SparkPlan = {
+              val plan = run(query)
+              val joins = nodes(plan).collect {
+                case j: CometSortMergeJoinExec => j
+                case j: SortMergeJoinExec => j
+              }
+              assert(joins.size == 1, s"plan:\n$plan")
+              joins.head
+            }
+            val out = Width(4, 0)
+            val equi = join("SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k")
+            val band = join(
+              "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
+                "AND a.v <= b.v AND b.v <= a.v + 13")
+            val oneSide = join(
+              "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
+                "AND a.v <= CASE WHEN b.v > 500 THEN b.v ELSE b.v + 13 END")
+            val crossCase = join(crossCaseOnT)
+            // Pricing is defined for original Spark operators as well as native wrappers. ANSI
+            // arithmetic in a skipped operand remains excluded by the accepted G05 guard.
+            // LEGACY integral arithmetic wraps instead; it is deliberately eligible for native SMJ.
+            assert(equi.isInstanceOf[CometSortMergeJoinExec])
+            if (ansi) {
+              assert(band.isInstanceOf[SortMergeJoinExec])
+            } else {
+              assert(band.isInstanceOf[CometSortMergeJoinExec])
+            }
+            assert(oneSide.isInstanceOf[CometSortMergeJoinExec])
+            assert(crossCase.isInstanceOf[SortMergeJoinExec])
+            assert(band match {
+              case j: SortMergeJoinExec => j.condition.isDefined
+              case j: CometSortMergeJoinExec => j.condition.isDefined
+              case _ => false
+            })
+            for (engine <- Engine.all; j <- Seq(equi, band, oneSide)) {
+              assert(model.terms(j, engine) == Seq(Term(Smj, out)))
+            }
+            same(model.operatorPrice(equi, Engine.Comet), EngineCostTable.default.comet(Smj, out))
+            val table = EngineCostTable.default
+            for (engine <- Engine.all) {
+              same(model.operatorPrice(band, engine), model.operatorPrice(equi, engine))
+              assert(
+                model
+                  .terms(crossCase, engine) == Seq(Term(Smj, out), Term(SmjCrossCondition, out)))
+              val price: (CostClass, Width) => Double =
+                if (engine == Engine.Comet) table.comet else table.spark
+              same(
+                model.operatorPrice(crossCase, engine),
+                price(Smj, out) + price(SmjCrossCondition, out))
+            }
           }
-          assert(joins.size == 1, s"plan:\n$plan")
-          joins.head
         }
-        val out = Width(4, 0)
-        val equi = join("SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k")
-        val band = join(
-          "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
-            "AND a.v <= b.v AND b.v <= a.v + 13")
-        val oneSide = join(
-          "SELECT a.k, a.v, b.v, b.k FROM t a JOIN t b ON a.k = b.k " +
-            "AND a.v <= CASE WHEN b.v > 500 THEN b.v ELSE b.v + 13 END")
-        val crossCase = join(crossCaseOnT)
-        // Pricing is defined for original Spark operators as well as native wrappers. ANSI
-        // arithmetic in a skipped operand remains excluded by the accepted G05 guard.
-        assert(equi.isInstanceOf[CometSortMergeJoinExec])
-        assert(band.isInstanceOf[SortMergeJoinExec])
-        assert(oneSide.isInstanceOf[CometSortMergeJoinExec])
-        assert(crossCase.isInstanceOf[SortMergeJoinExec])
-        assert(band.asInstanceOf[SortMergeJoinExec].condition.isDefined)
-        for (engine <- Engine.all; j <- Seq(equi, band, oneSide)) {
-          assert(model.terms(j, engine) == Seq(Term(Smj, out)))
-        }
-        same(model.operatorPrice(equi, Engine.Comet), EngineCostTable.default.comet(Smj, out))
-        val table = EngineCostTable.default
-        for (engine <- Engine.all) {
-          same(model.operatorPrice(band, engine), model.operatorPrice(equi, engine))
-          assert(
-            model.terms(crossCase, engine) == Seq(Term(Smj, out), Term(SmjCrossCondition, out)))
-          val price: (CostClass, Width) => Double =
-            if (engine == Engine.Comet) table.comet else table.spark
-          same(
-            model.operatorPrice(crossCase, engine),
-            price(Smj, out) + price(SmjCrossCondition, out))
+      }
+    }
+  }
+
+  test(
+    "cost choices preserve checked and wrapping join arithmetic at INT and BIGINT boundaries") {
+    // Separate physical INT/BIGINT columns prevent Scala or Catalyst from widening the INT case.
+    // Key 0 requires the overflowing RHS, key 1 skips it, and key 2 is a known successful match.
+    val left = Seq((0, Int.MaxValue, Long.MaxValue), (1, Int.MaxValue, Long.MaxValue), (2, 0, 0L))
+    val right = Seq((0, Int.MaxValue, Long.MaxValue), (1, 0, 0L), (2, 1, 1L))
+    withParquetTable(left, "cost_guard_l") {
+      withParquetTable(right, "cost_guard_r") {
+        val modes = Seq(
+          "disabled" -> Seq(flag -> "false"),
+          "default" -> Seq(flag -> "true"),
+          "zero-cross-condition" -> Seq(
+            flag -> "true",
+            costTable -> "smjCrossCondition.comet=0,0,0;smjCrossCondition.spark=0,0"))
+        for (ansi <- Seq(true, false);
+          aqe <- Seq("false", "true");
+          (mode, costs) <- modes) {
+          withSQLConf(
+            (Seq(
+              SQLConf.ANSI_ENABLED.key -> ansi.toString,
+              SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> aqe,
+              SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+              SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+              SQLConf.PREFER_SORTMERGEJOIN.key -> "true",
+              SQLConf.SHUFFLE_PARTITIONS.key -> "1",
+              CometConf.COMET_FORCE_SHJ.key -> "false",
+              CometConf.COMET_EXEC_SORT_MERGE_JOIN_ENABLED.key -> "true",
+              CometConf.COMET_EXEC_SORT_MERGE_JOIN_WITH_JOIN_FILTER_ENABLED.key -> "true") ++
+              costs): _*) {
+            for ((field, matched) <- Seq("_2" -> Row(2, 0, 1), "_3" -> Row(2, 0L, 1L))) {
+              assert(
+                spark.table("cost_guard_l").schema(field).dataType ==
+                  (if (field == "_2") IntegerType else org.apache.spark.sql.types.LongType))
+              for (skipOverflow <- Seq(false, true)) {
+                val query = s"SELECT a._1, a.$field, b.$field FROM cost_guard_l a " +
+                  s"JOIN cost_guard_r b ON a._1 = b._1 AND a.$field <= b.$field " +
+                  s"AND b.$field <= a.$field + 13 WHERE a._1 ${if (skipOverflow) "=" else "<>"} 1"
+                val label = s"ANSI=$ansi AQE=$aqe cost=$mode field=$field skip=$skipOverflow"
+                val expected = withSQLConfResult(CometConf.COMET_ENABLED.key -> "false") {
+                  Try(sql(query).collect().toSeq)
+                }
+                val df = sql(query)
+                val actual = Try(df.collect().toSeq)
+                (expected, actual) match {
+                  case (Success(sparkRows), Success(cometRows)) if !ansi || skipOverflow =>
+                    val knownRows = if (skipOverflow) Seq.empty else Seq(matched)
+                    QueryTest
+                      .sameRows(knownRows, sparkRows)
+                      .foreach(e => fail(s"$label Spark: $e"))
+                    QueryTest
+                      .sameRows(sparkRows, cometRows)
+                      .foreach(e => fail(s"$label Comet: $e"))
+                  case (Failure(sparkError), Failure(cometError)) if ansi && !skipOverflow =>
+                    def structured(error: Throwable): SparkThrowable =
+                      causeChain(error)
+                        .collect { case e: SparkThrowable => e }
+                        .lastOption
+                        .getOrElse(fail(s"$label missing structured error: $error"))
+                    val se = structured(sparkError)
+                    val ce = structured(cometError)
+                    assert(
+                      se.getErrorClass == "ARITHMETIC_OVERFLOW",
+                      s"$label Spark: $sparkError")
+                    assert(ce.getErrorClass == se.getErrorClass, s"$label Comet: $cometError")
+                    assert(ce.getSqlState == se.getSqlState, label)
+                  case _ => fail(s"$label Spark=$expected Comet=$actual")
+                }
+                // Establish rows/required-error parity before testing eligibility: neither a
+                // permissive price nor an AQE rewrite may bypass the checked-arithmetic guard.
+                val plan = df.queryExecution.executedPlan
+                val native = nodes(plan).collect { case j: CometSortMergeJoinExec => j }
+                val fallback = nodes(plan).collect { case j: SortMergeJoinExec => j }
+                if (ansi) {
+                  assert(native.isEmpty && fallback.size == 1, s"$label\n$plan")
+                  assert(fallback.head.condition.isDefined, s"$label\n$plan")
+                } else {
+                  assert(native.size == 1 && fallback.isEmpty, s"$label\n$plan")
+                  assert(native.head.condition.isDefined, s"$label\n$plan")
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -1026,36 +1130,43 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
 
   for (aqe <- Seq("false", "true")) {
     test(s"safe cross-input CASE responds to cost while ANSI join guards remain (AQE=$aqe)") {
-      withTables {
-        withAqe(
-          aqe,
-          SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
-          SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
-          def joins(plan: SparkPlan): (Int, Int) =
-            (
-              count(plan) { case j: CometSortMergeJoinExec => j },
-              count(plan) { case j: SortMergeJoinExec => j })
-          val equi = "SELECT a.k, a.v, b.s FROM t a JOIN t b ON a.k = b.k"
-          val band = equi + " AND a.v <= b.v AND b.v <= a.v + 13"
-          val (off, on) = offAndOn(run(equi))
-          assert(joins(off) == ((1, 0)), s"plan:\n$off")
-          assert(joins(on) == ((1, 0)), s"plan:\n$on")
-          assert(cometOperatorNames(off) == cometOperatorNames(on), s"$off\n$on")
-          for (query <- Seq(band, crossCaseOnT)) {
-            val (guardedOff, guardedOn) = offAndOn(run(query))
-            assert(joins(guardedOff) == ((0, 1)), s"plan:\n$guardedOff")
-            assert(joins(guardedOn) == ((0, 1)), s"plan:\n$guardedOn")
-          }
-          val (crossOff, crossOn) = offAndOn(run(safeCrossCaseOnT))
-          assert(joins(crossOff) == ((1, 0)), s"plan:\n$crossOff")
-          assert(joins(crossOn) == ((0, 1)), s"plan:\n$crossOn")
-          withSQLConf(
-            flag -> "true",
-            costTable -> "smjCrossCondition.comet=0,0,0;smjCrossCondition.spark=0,0") {
-            val plan = run(safeCrossCaseOnT)
-            assert(joins(plan) == ((1, 0)), s"plan:\n$plan")
-            // A zero price must not override an execution-correctness restriction.
-            assert(joins(run(crossCaseOnT)) == ((0, 1)))
+      for (ansi <- Seq(true, false)) {
+        withSQLConf(SQLConf.ANSI_ENABLED.key -> ansi.toString) {
+          withTables {
+            withAqe(
+              aqe,
+              SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+              SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+              def joins(plan: SparkPlan): (Int, Int) =
+                (
+                  count(plan) { case j: CometSortMergeJoinExec => j },
+                  count(plan) { case j: SortMergeJoinExec => j })
+              val equi = "SELECT a.k, a.v, b.s FROM t a JOIN t b ON a.k = b.k"
+              val band = equi + " AND a.v <= b.v AND b.v <= a.v + 13"
+              val (off, on) = offAndOn(run(equi))
+              assert(joins(off) == ((1, 0)), s"plan:\n$off")
+              assert(joins(on) == ((1, 0)), s"plan:\n$on")
+              assert(cometOperatorNames(off) == cometOperatorNames(on), s"$off\n$on")
+              val bandShape = if (ansi) (0, 1) else (1, 0)
+              for ((query, shape) <- Seq(band -> bandShape, crossCaseOnT -> ((0, 1)))) {
+                val (guardedOff, guardedOn) = offAndOn(run(query))
+                assert(joins(guardedOff) == shape, s"ANSI=$ansi query=$query\nplan:\n$guardedOff")
+                assert(joins(guardedOn) == shape, s"ANSI=$ansi query=$query\nplan:\n$guardedOn")
+              }
+              val (crossOff, crossOn) = offAndOn(run(safeCrossCaseOnT))
+              assert(joins(crossOff) == ((1, 0)), s"plan:\n$crossOff")
+              assert(joins(crossOn) == ((0, 1)), s"plan:\n$crossOn")
+              withSQLConf(
+                flag -> "true",
+                costTable -> "smjCrossCondition.comet=0,0,0;smjCrossCondition.spark=0,0") {
+                val plan = run(safeCrossCaseOnT)
+                assert(joins(plan) == ((1, 0)), s"plan:\n$plan")
+                // A zero price must not override an execution-correctness restriction. Remainder
+                // remains outside the eager-safety proof in either arithmetic mode.
+                assert(joins(run(crossCaseOnT)) == ((0, 1)))
+                assert(joins(run(band)) == bandShape)
+              }
+            }
           }
         }
       }
@@ -1186,40 +1297,54 @@ class CostBasedEngineChoiceSuite extends CometTestBase {
     }
 
     test(s"interval joins retain native eligibility or safe fallback under cost (AQE=$aqe)") {
-      withIntervals {
-        withAqe(
-          aqe,
-          SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
-          SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
-          def joins(plan: SparkPlan): (Int, Int) =
-            (
-              count(plan) { case j: CometSortMergeJoinExec => j },
-              count(plan) { case j: SortMergeJoinExec => j })
-          val interval = "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
-            "AND e.v >= d.l AND e.v < COALESCE(d.u, timestamp '9999-12-31')"
-          // COALESCE, checked arithmetic, temporal functions and parsing in a skipped
-          // operand are deliberately not declared eagerly safe by the accepted G05 guard.
-          val expected = Seq(
-            interval -> ((0, 1)),
-            otherConditions(1) -> ((1, 0)),
-            crossInputBounds -> ((2, 0)),
-            unchargedConditions(0) -> ((1, 0))) ++
-            unchargedConditions.drop(1).map(_ -> ((0, 1))) ++
-            crossConditionals.map(_ -> ((0, 1)))
-          for ((query, shape) <- expected) {
-            val (off, on) = offAndOn(run(query))
-            assert(joins(off) == shape, s"query=$query\nplan:\n$off")
-            assert(joins(on) == shape, s"query=$query\nplan:\n$on")
-          }
-          val safeCase = "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
-            "AND CASE WHEN e.s = d.s THEN e.v >= d.l ELSE e.v < d.l END"
-          val (off, on) = offAndOn(run(safeCase))
-          assert(joins(off) == ((1, 0)), s"plan:\n$off")
-          assert(joins(on) == ((0, 1)), s"plan:\n$on")
-          withSQLConf(
-            flag -> "true",
-            costTable -> "smjCrossCondition.comet=0,0,0;smjCrossCondition.spark=0,0") {
-            assert(joins(run(safeCase)) == ((1, 0)))
+      for (ansi <- Seq(true, false)) {
+        withSQLConf(SQLConf.ANSI_ENABLED.key -> ansi.toString) {
+          withIntervals {
+            withAqe(
+              aqe,
+              SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+              SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+              def joins(plan: SparkPlan): (Int, Int) =
+                (
+                  count(plan) { case j: CometSortMergeJoinExec => j },
+                  count(plan) { case j: SortMergeJoinExec => j })
+              val interval = "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+                "AND e.v >= d.l AND e.v < COALESCE(d.u, timestamp '9999-12-31')"
+              // COALESCE, checked arithmetic, temporal functions and parsing in a skipped
+              // operand are deliberately not declared eagerly safe by the accepted G05 guard.
+              val arithmeticShape = if (ansi) (0, 1) else (1, 0)
+              val expected = Seq(
+                (interval, (0, 1), (0, 1)),
+                (otherConditions(1), (1, 0), (1, 0)),
+                (crossInputBounds, (2, 0), (2, 0)),
+                (unchargedConditions(0), (1, 0), (1, 0)),
+                (unchargedConditions(1), arithmeticShape, arithmeticShape),
+                (unchargedConditions(2), (0, 1), (0, 1)),
+                (unchargedConditions(3), arithmeticShape, arithmeticShape),
+                (unchargedConditions(4), (0, 1), (0, 1))) ++
+                crossConditionals.map(query => (query, arithmeticShape, (0, 1)))
+              for ((query, offShape, onShape) <- expected) {
+                val (off, on) = offAndOn(run(query))
+                assert(joins(off) == offShape, s"ANSI=$ansi query=$query\nplan:\n$off")
+                assert(joins(on) == onShape, s"ANSI=$ansi query=$query\nplan:\n$on")
+              }
+              val safeCase = "SELECT e.k, e.v, d.l FROM ev e LEFT JOIN dim d ON e.k = d.k " +
+                "AND CASE WHEN e.s = d.s THEN e.v >= d.l ELSE e.v < d.l END"
+              val (off, on) = offAndOn(run(safeCase))
+              assert(joins(off) == ((1, 0)), s"plan:\n$off")
+              assert(joins(on) == ((0, 1)), s"plan:\n$on")
+              withSQLConf(
+                flag -> "true",
+                costTable -> "smjCrossCondition.comet=0,0,0;smjCrossCondition.spark=0,0") {
+                assert(joins(run(safeCase)) == ((1, 0)))
+                // Legacy CASE/IF arithmetic may use native SMJ when its price is low, while checked
+                // arithmetic must retain the same guard regardless of the configured price.
+                crossConditionals.foreach { query =>
+                  val plan = run(query)
+                  assert(joins(plan) == arithmeticShape, s"ANSI=$ansi query=$query\nplan:\n$plan")
+                }
+              }
+            }
           }
         }
       }

@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-22",
-  "stage": "G10_V10_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
+  "stage": "G10_V11_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
   "baseline": "resource-baseline.json",
   "no_dependency_downloads_or_release_outputs_yet": false,
   "entries": [
@@ -1157,6 +1157,14 @@
       "actual_download_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/artifact-download-verification-45009573016.json",
       "new_final_artifacts": "Pending actual new-SHA qualification and download. Do not substitute v9 artifacts.",
       "preserve": "All evidence/user clones/caches/targets; no automatic deletion. Local shared clones depend on the user Spark object store. Maven profile build dependencies use standard shared caches."
+    },
+    "cost_join_ansi_fixture_followup": {
+      "task_directory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts",
+      "contains": "Original failed65-case run, formatting failure, reviewed AUX patch, exact60-body preservation, positive profile XML/logs and48-variant boundary contract. Final local-gates index binds actual receipts only.",
+      "historical_v10_RC_directory": "target/joom-release/gha-45020346881",
+      "final_RC_directory": "PENDING_ACTUAL_NEW_EXACT_SHA_DOWNLOAD",
+      "build_outputs": "Reuse existing project targets and standard shared caches. No production dependency or toolchain change in this correction.",
+      "preserve": "Keep every original and later failed/successful attempt through final acceptance and explicit cleanup decision; no deletion."
     }
   }
 }

@@ -19,7 +19,60 @@ under the License.
 
 # G10: final integration and release qualification
 
-## Current v10 fixture-integration checkpoint (2026-11-22)
+## Current v11 ANSI-sensitive join-fixture checkpoint (2026-11-22)
+
+V10 full CI was canceled promptly after five CostBasedEngineChoiceSuite plan
+assertions failed on Spark 3.5 / Scala 2.13. Its final raw job inventory has
+92 successes, 11 failures, 31 skipped jobs and 30 canceled jobs. Nine failures
+stopped before tests during dependency/bootstrap acquisition; they are not all
+attributed to HTTP 429. One executed job contained the five cost-test failures;
+the remaining failure is the aggregate required-check job. Preserve every
+attempt and its exact classification.
+
+The fixture assumed ANSI was enabled without setting it. Original Spark 3.5
+normally defaults to LEGACY arithmetic; the accepted G05 safety guard deliberately
+allows native wrapping Add/Subtract/Multiply there. Every observed failure came
+after the original Spark/Comet row comparison. No production result mismatch or
+production-code change is established by these five failures.
+
+Only CostBasedEngineChoiceSuite changes from v10. The five existing registrations
+now execute explicit ANSI=true and false with exact mode-dependent engine
+expectations; their original SQL, input data, native companions and cost/price
+checks remain. The other 60 original test bodies/helpers are byte-identical.
+One additional registration checks physical INT/BIGINT boundaries across ANSI,
+AQE and disabled/default/zero conditional cost: 48 differential variants require
+36 successful row outcomes and 12 mandatory ARITHMETIC_OVERFLOW outcomes.
+Independent known rows and original Spark error-class/SQLSTATE parity are checked
+before strict native-versus-Spark SMJ assertions. A false first conjunct must
+skip the overflowing RHS; a zero cost cannot bypass a correctness guard.
+
+| Final local cohort     | Actual passes | Nonpasses |
+| ---------------------- | ------------: | --------: |
+| Spark3.4.3 / Scala2.12 |            66 |         0 |
+| Spark3.5.9 / Scala2.12 |            66 |         0 |
+| Spark3.5.9 / Scala2.13 |            66 |         0 |
+| Spark4.0.4             |            66 |         0 |
+| Spark4.1.3             |            66 |         0 |
+| Spark4.2.1             |            66 |         0 |
+
+Final local outcomes and both semantic/package gates are recorded in
+`G10-results.json#cost_join_ansi_fixture_followup` from the verified gate index.
+Per-profile counts are separate overlapping cohorts and are not summed as
+unique tests. The original 60-pass/5-failure diagnostic and the formatting-only
+failed attempt remain failed historical evidence.
+
+V10 RC27 on both native architectures, Miri 107, Actions CodeQL and its downloaded
+JARs passed only for historical source
+`c3f4fdef7d1d90a36e105a858e7611b09e68d5a7`. Native 2819 / vendor 1786,
+shuffle 645 and target scans 424 with 372 explicitly classified N/A cases are also
+historical source-bound evidence, not replacement-SHA acceptance. Fresh full
+same-SHA CI/CodeQL/Miri, RC27 on AMD64/ARM64 and final artifact download checks
+remain mandatory. All 58 cards, core98, window88, disjoint corrective58,
+original five Spark 3.4 fixtures, 138 required CI jobs, 16 structural jobs and
+all 15 backlog obligations are unchanged. Merge, stable tag and production
+remain unauthorized.
+
+## Historical v10 fixture-integration checkpoint (2026-11-22)
 
 The user resumed qualification. V9 full CI was canceled promptly after genuine
 Spark SQL and Spark4.0 test-fixture failures; its successful RC27, Miri107 and

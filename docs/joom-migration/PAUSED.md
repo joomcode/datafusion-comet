@@ -17,7 +17,37 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-## Current active continuation: G10 v10, 2026-11-22
+## Current active continuation: G10 v11, 2026-11-22
+
+Read `STATE.json#g10` and
+`G10-results.json#cost_join_ansi_fixture_followup`. All older checkpoints below
+are historical. The v10 CI was canceled for five ambient-ANSI fixture-plan
+failures; its passing RC27/Miri 107/Actions CodeQL and downloaded JARs remain
+historical for source `c3f4fdef7d1d90a36e105a858e7611b09e68d5a7`.
+
+Only one Scala test file changes from v10; production/native, CI, release
+scripts, dependencies and locks are unchanged. Final local profile and semantic
+receipts must match the reviewed source and the v11 source manifest before
+this checkpoint is applied. Preserve the original failed 65-case run and the
+formatting-only failure alongside all positive 66-case local runs.
+
+1. Verify all source/document hashes and protected refs, commit and normally
+   push only the feature branch. The candidate SHA and run IDs are external
+   post-commit facts in `candidate-v11.json`, `v11-source-arm.json`,
+   `v11-runs-arm.json` and `LIVE-v11.json`; helpers remain unarmed until bound.
+2. Start full same-SHA Comet CI/Miri/RC Build & Smoke; Actions CodeQL starts
+   automatically. Poll every five minutes; inspect failures promptly, cancel
+   superseded source runs and retry only genuine pretest failures on the same SHA.
+3. Require all 138 required and 16 structural CI jobs, core98, native window88,
+   the separate corrective58 and the original five Spark 3.4 SQL registrations.
+   Do not count skipped, ignored, canceled or version-N/A cases as passes.
+4. Require RC27/13 groups/24 Core plus two Delta class origins on each native
+   AMD64/ARM64 architecture. Download and verify final JAR bytes and reconcile
+   all 15 backlog entries from actual final-source receipts.
+5. Report before merge or stable tag. No branch-1.2/main/tag changes, external
+   publication, production operations or datasci access are authorized.
+
+## Historical active continuation: G10 v10, 2026-11-22
 
 The user explicitly resumed G10; the old shutdown pause below is historical.
 Read `STATE.json#g10` and `G10-results.json#spark_sql_and_exec_fixture_followup`.

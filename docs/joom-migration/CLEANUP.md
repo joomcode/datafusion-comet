@@ -367,3 +367,20 @@ and tree proofs. Those isolated clones depend on the user's Spark object store;
 do not remove or modify the user's checkout. New final JAR paths/sizes/checksums
 are recorded externally only after actual download. Standard caches and project
 targets are reused and remain shared. No automatic cleanup is authorized.
+
+### V10 historical downloads and v11 ANSI-fixture evidence
+
+Preserve `target/joom-release/gha-45020346881` and its matching external archive
+and verification receipt as historical RC27 evidence for source `c3f4fdef`.
+These are not final v11 deliverables. Keep the dated Nov22
+`cost-join-contracts`, `native-v10-acceptance` and `job-logs-v10` directories
+under `${MIGRATION_AUX_ROOT}/20261121_comet12-g10`. They contain the actual failed
+CI/local diagnostics, reviewed AUX proposal, byte-preservation proof, successful
+profile logs/XML archives and boundary-oracle checks. The proposal and draft-doc
+subdirectories are nested under `20261122_cost-join-contracts`.
+
+This correction reuses existing Java/Maven tools, project build targets and
+standard shared caches. Record the eventual final RC directory, archive sizes
+and checksums only after the new exact-SHA download. Preserve all existing
+failed and passing evidence; no deletion, cache pruning or source cleanup is
+authorized.

@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-22",
-  "phase": "G10_V10_LOCAL_FIXTURE_MATRIX_VERIFIED_FINAL_SOURCE_QUALIFICATION_PENDING",
+  "phase": "G10_V11_LOCAL_ANSI_COST_MATRIX_VERIFIED_FINAL_SOURCE_QUALIFICATION_PENDING",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -389,7 +389,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Commit the reviewed v10 source/documents, verify all 201 source hashes and all document hashes, normally push only the feature branch, arm and run full same-SHA Comet CI/Actions CodeQL/Miri/RC27 on native AMD64/ARM64. Poll every300seconds, inspect failures promptly and cancel superseded runs for genuine source corrections. Bind actual core98/window88/disjoint58/original5 and all 15 backlog/artifact outcomes. Report before merge/stable tag. No branch-1.2/main/tag, publication, production or datasci action.",
+  "next_step": "Commit reviewed v11 source/docs, verify source/document hashes, normally push feature, arm exact-source helpers and run full same-SHA CI/Actions CodeQL/Miri/RC27. Poll every 300 seconds and preserve actual failed attempts. Bind core98/window88/disjoint58/original5, all138required+16structural jobs and all15backlog/artifact outcomes. Report before merge/stable tag; no branch-1.2/main/tag, publication, production or datasci operation.",
   "qualification": "G09 accepted:230 native and495 unique JVM/SQL/Delta cases locally passed. Qualified source/test/CI bytes are preserved; final full agreed CI/Linux/release/exact-JAR qualification remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -591,8 +591,9 @@
   "pause": {
     "status": "RESUMED_AT_EXPLICIT_USER_REQUEST",
     "historical_checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/pause-v9.json",
-    "current_checkpoint": "PAUSED.md current v10 section",
-    "no_current_pause_requested": true
+    "current_checkpoint": "PAUSED.md active continuation section",
+    "no_current_pause_requested": true,
+    "historical_checkpoint_pointer_before_v11": "PAUSED.md current v10 section"
   },
   "sandbox_access_verification": {
     "checked_at": "2026-11-17T13:34:17.545289+00:00",
@@ -2401,12 +2402,12 @@
     ]
   },
   "g10": {
-    "status": "LOCAL_V10_FIXTURE_MATRIX_VERIFIED_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
+    "status": "LOCAL_V11_ANSI_JOIN_MATRIX_VERIFIED_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
     "branch": "joom/1.2-release-qualification",
     "base": "4467d0337089036d3f01d28375260ce3dbcaaca5",
     "authorization_ref": "decisions.json#g10_authorization",
     "evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10",
-    "checkpoint": "The user resumed v9; its full CI exposed fixture integration failures and was canceled promptly. All six corrected local profile cohorts and both semantic Delta gates now pass. Only tests/harness changed from v9; full exact-new-SHA qualification and actual final JARs remain pending.",
+    "checkpoint": "V10 full CI was canceled promptly for five ambient-ANSI cost-plan expectations; original Spark/Comet rows matched before assertions. One test-only correction now passes all six whole CostSuite cohorts and both semantic Delta gates. Production/native/CI/release/dependency code is unchanged; fresh exact-new-SHA full qualification and final JARs remain pending.",
     "full_gha_allowed": true,
     "rc_build_smoke_allowed": true,
     "merge_allowed": false,
@@ -2415,7 +2416,7 @@
     "ci_restoration_audit": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_ci-audit/ci-restoration-audit.json",
     "coverage_audit": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_coverage-audit/coverage-matrix.json",
     "local_plan_controller_session": null,
-    "external_progress": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/golden-profiles-progress.json",
+    "external_progress": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/LIVE-v11.json",
     "runtime_library_sha256": "2efa17cc5434d910110db79ba82f03146ec53e4e471b46d0df67921bd2c4cb7f",
     "report": "G10-report.md",
     "results": "G10-results.json",
@@ -2423,15 +2424,15 @@
     "exact_sha_policy": "Never amend qualified source for status-only documentation; immutable external receipts bind actual CI, RC and downloaded JAR evidence to candidate SHA.",
     "post_commit_qualification_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json",
     "first_candidate": "68133883ea32f6ab8c758f2b9d87f4aa7a36e642",
-    "external_live_checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/LIVE-v10.json",
-    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v10.json",
-    "source_manifest_sha256": "ed2992a35c7b1e3759d8f7b243c0afbc212c8a654424836dd55a379ddba76cab",
-    "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v10.json",
-    "previous_candidate": "df6c3e2da319ddcf26f93bcdd1d62a3ba62c3c6a",
+    "external_live_checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/LIVE-v11.json",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v11.json",
+    "source_manifest_sha256": "a7a643bbb056838770867dd8103fdfbeba335805eab3355fa8ce1b156de91282",
+    "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v11.json",
+    "previous_candidate": "c3f4fdef7d1d90a36e105a858e7611b09e68d5a7",
     "active_workers": [],
     "local_added_toolchain": "nightly-2026-11-21-aarch64-apple-darwin (official, defaultstableunchanged)",
     "local_miri_runner": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/run-pinned-miri.py (setup blocked; no actual local Miri tests executed)",
-    "actual_execution_progress": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/execution-checkpoint.json",
+    "actual_execution_progress": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/LIVE-v11.json",
     "historical_checkpoint_before_contract_corrections": {
       "disposition": "HISTORICAL_ONLY; preserved without transferring qualification to the corrected source.",
       "status": "FINAL_SOURCE_FROZEN_FULL_QUALIFICATION_REQUIRED",
@@ -2442,10 +2443,10 @@
       "source_manifest_sha256": "27d9e07a8d776af4631b08d004ac8fd586448f420d835b021a1e0f5495ed4025",
       "post_commit_qualification_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json"
     },
-    "local_contract_qualification_ref": "G10-results.json#spark_sql_and_exec_fixture_followup",
+    "local_contract_qualification_ref": "G10-results.json#cost_join_ansi_fixture_followup",
     "approved_target_workload": "Parquet and Delta are in scope; Iceberg is not used, by explicit user confirmation. All 32 older-profile Iceberg jobs remain mandatory.",
     "candidate_receipt_status": "COMMIT_AND_NEW_SAME_SHA_QUALIFICATION_PENDING",
-    "backlog_map_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v10.json",
+    "backlog_map_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v11.json",
     "future_source_commit": "Bound externally after committing this source; intentionally absent from pre-commit hashes.",
     "actual_local_contract_gates": {
       "status": "ALL_PLANNED_LOCAL_V8_GATES_VERIFIED",
@@ -3179,7 +3180,214 @@
       "stable_tag_allowed": false,
       "production_allowed": false
     },
-    "actual_remote_v9_results_ref": "G10-results.json#historical_v9_actual_remote_results"
+    "actual_remote_v9_results_ref": "G10-results.json#historical_v9_actual_remote_results",
+    "historical_v10_checkpoint_before_cost_join_ansi_correction": {
+      "status": "LOCAL_V10_FIXTURE_MATRIX_VERIFIED_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
+      "checkpoint": "The user resumed v9; its full CI exposed fixture integration failures and was canceled promptly. All six corrected local profile cohorts and both semantic Delta gates now pass. Only tests/harness changed from v9; full exact-new-SHA qualification and actual final JARs remain pending.",
+      "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v10.json",
+      "source_manifest_sha256": "ed2992a35c7b1e3759d8f7b243c0afbc212c8a654424836dd55a379ddba76cab",
+      "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v10.json",
+      "previous_candidate": "df6c3e2da319ddcf26f93bcdd1d62a3ba62c3c6a",
+      "candidate_receipt_status": "COMMIT_AND_NEW_SAME_SHA_QUALIFICATION_PENDING",
+      "backlog_map_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v10.json",
+      "external_live_checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/LIVE-v10.json",
+      "actual_execution_progress": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/execution-checkpoint.json",
+      "external_progress": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/golden-profiles-progress.json"
+    },
+    "actual_local_v11_cost_gates": {
+      "status": "ALL_LOCAL_PROFILES_AND_SEMANTIC_GATES_VERIFIED_REMOTE_QUALIFICATION_PENDING",
+      "scope": "One Scala test file only from v10. Production/native algorithms, workflow, release scripts, dependencies and locks unchanged.",
+      "source": "spark/src/test/scala/org/apache/comet/rules/CostBasedEngineChoiceSuite.scala",
+      "source_sha256": "be56d2c6154f4723a151d036b3cdd5ac65d7683771c3b3ae4ec610f18341f903",
+      "root_cause": "Five physical-plan fixtures used ambient ANSI defaults. Spark3.5 default LEGACY allows G05 eager-safe wrapping arithmetic; original Spark/Comet rows compared equal before the five failed engine assertions.",
+      "original_failed_registrations": 5,
+      "all_old_registration_names_preserved": true,
+      "all_other_60_test_bodies_helpers_and_fixtures_byte_identical": true,
+      "new_registration": "cost choices preserve checked and wrapping join arithmetic at INT and BIGINT boundaries",
+      "per_profile_registration_count": 66,
+      "boundary_variants": {
+        "total": 48,
+        "successful_rows": 36,
+        "mandatory_ARITHMETIC_OVERFLOW": 12,
+        "physical_types": [
+          "INT",
+          "BIGINT"
+        ],
+        "ansi": [
+          true,
+          false
+        ],
+        "aqe": [
+          false,
+          true
+        ],
+        "cost": [
+          "disabled",
+          "default",
+          "zero-cross-condition"
+        ],
+        "known_rows_plus_vanilla_Spark": true,
+        "structured_error_class_and_SQLSTATE": true,
+        "strict_native_or_guarded_Spark_SMJ": true,
+        "skipped_overflow_must_not_raise": true
+      },
+      "source_preservation_review": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/20261122_ansi-mode-proposal/formatted-source-first-profile-review.json",
+      "initial_diagnostic": {
+        "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/spark35-scala213-original-cost-suite.json",
+        "exit_code": 1,
+        "actual_positive": 60,
+        "actual_failed": 5,
+        "status": "FAILED_PRESERVED_NOT_ACCEPTED"
+      },
+      "formatting_attempt": {
+        "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/spark35-scala213-fixed-cost-suite-v1.json",
+        "exit_code": 1,
+        "tests_executed": false,
+        "status": "FAILED_FORMAT_GATE_NOT_ACCEPTED"
+      },
+      "first_actual_fixed_profile": {
+        "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/spark35-scala213-fixed-cost-suite-v2.json",
+        "exit_code": 0,
+        "actual_positive": 66,
+        "nonpasses": 0,
+        "elapsed_seconds": 142.05,
+        "scope": "First actual Spark3.5/Scala2.13 local cohort; not a substitute for the other five profiles or final same-SHA remote qualification."
+      },
+      "final_local_gates": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/final-local-gates-index.json",
+        "sha256": "f7a29995370ea9e2b5ee31fe99ca264b4f767cf02e535a7a62faa0323b35567a",
+        "cohorts": [
+          {
+            "profile": "Spark3.4.3 / Scala2.12",
+            "actual_passed": 66,
+            "failed": 0,
+            "canceled": 0,
+            "ignored": 0,
+            "pending": 0,
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/spark34-fixed-cost-suite-v1.json",
+            "receipt_sha256": "29d91c1eb956ab6438200d88a2a950d2f4374f4b1b305d360f433bcdfa3485fb",
+            "log_sha256": "2164a8f16fe33895592bb2ad81c3726770c42cea3e2e37fdd69e2587dba2bd06",
+            "report_sha256": "b8fe4ce71431ca75ebef26972f6b3a0ead122eed1219efae6326ae4f48b7022a",
+            "elapsed_seconds": 175.0,
+            "actual_Spark_classpath_verified": "3.4.3",
+            "actual_Scala_binary": "2.12"
+          },
+          {
+            "profile": "Spark3.5.9 / Scala2.12",
+            "actual_passed": 66,
+            "failed": 0,
+            "canceled": 0,
+            "ignored": 0,
+            "pending": 0,
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/spark35-scala212-fixed-cost-suite-v1.json",
+            "receipt_sha256": "40f9b9b1eba3d5d0d1c1ded2bb8ca4f8b4c61caa4beb9202193a83c47fcc89fa",
+            "log_sha256": "094de5843021b58b078f88b8b9960e4f4517b8a03ad4c68e36dcb5ffcebc0dde",
+            "report_sha256": "eaccee4463d1cddb807ffee153f8bf89a047f92777d0b01b6067e0a50d33e4a1",
+            "elapsed_seconds": 176.71,
+            "actual_Spark_classpath_verified": "3.5.9",
+            "actual_Scala_binary": "2.12"
+          },
+          {
+            "profile": "Spark3.5.9 / Scala2.13",
+            "actual_passed": 66,
+            "failed": 0,
+            "canceled": 0,
+            "ignored": 0,
+            "pending": 0,
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/spark35-scala213-fixed-cost-suite-v2.json",
+            "receipt_sha256": "dd5444ce5dee02c0a4fecb49ae839837cc3d0ed989e265a93a487dccdddc67f3",
+            "log_sha256": "5e7391c074ac33e50a7f9523c6e9d659fd37d288103341388cd61b04364c1ac0",
+            "report_sha256": "b75a78c75a96a6fc3eec2a6108831d14f841047ea00edfe72a2e647febd2bc0f",
+            "elapsed_seconds": 142.05,
+            "actual_Spark_classpath_verified": "3.5.9",
+            "actual_Scala_binary": "2.13"
+          },
+          {
+            "profile": "Spark4.0.4",
+            "actual_passed": 66,
+            "failed": 0,
+            "canceled": 0,
+            "ignored": 0,
+            "pending": 0,
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/spark40-fixed-cost-suite-v1.json",
+            "receipt_sha256": "4a3e1797ea4e84e66ec03fd789148bf1e8355331d9b4fcec0832834f456582e7",
+            "log_sha256": "9a90664325fd6abf94422affd65c62b5890bcf7378f00afd2acb521bac4e07f3",
+            "report_sha256": "6c72eb042f06509d979ae9d4278e97f5872e638baf194a28bf9204db9bda07d3",
+            "elapsed_seconds": 173.1,
+            "actual_Spark_classpath_verified": "4.0.4",
+            "actual_Scala_binary": "2.13"
+          },
+          {
+            "profile": "Spark4.1.3",
+            "actual_passed": 66,
+            "failed": 0,
+            "canceled": 0,
+            "ignored": 0,
+            "pending": 0,
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/spark41-fixed-cost-suite-v1.json",
+            "receipt_sha256": "78cbe226af0703d2d8ea0914c683503b1d41c82d2cf4f5aa01d4abe4bfc5b042",
+            "log_sha256": "594c8deadc5d313d94c3e63d7ed6ba99308600006f87241b45bfd955adcdc039",
+            "report_sha256": "c3d1710d00177b075161f051bd41a376df280754b1f1077efd259cb170b87b0e",
+            "elapsed_seconds": 177.66,
+            "actual_Spark_classpath_verified": "4.1.3",
+            "actual_Scala_binary": "2.13"
+          },
+          {
+            "profile": "Spark4.2.1",
+            "actual_passed": 66,
+            "failed": 0,
+            "canceled": 0,
+            "ignored": 0,
+            "pending": 0,
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/spark42-fixed-cost-suite-v1.json",
+            "receipt_sha256": "89e4c17c382edbe242884ee3803970457f9b4344c7c5f813ab18e7eac2fba6a7",
+            "log_sha256": "91363f7fc823eb1f2061277b1f82499038a510c1826e709df757a33d54bdbc15",
+            "report_sha256": "b55ea90505044b3c6ae3d5f40dd0b678adfd31506f33706666ca038687de8ffa",
+            "elapsed_seconds": 174.53,
+            "actual_Spark_classpath_verified": "4.2.1",
+            "actual_Scala_binary": "2.13"
+          }
+        ],
+        "semantic_gates": [
+          {
+            "id": "final-cost-spark42-delta-semantic-v1",
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/final-cost-spark42-delta-semantic-v1.json",
+            "receipt_sha256": "db41e1e2f00d78311289d87b9a47910d1c738bfee972eaf37d65ae477a71a35a",
+            "log_sha256": "83b976e4aeeeb7668ab20a2167ab58e01e829aa91879fd5766b6dc9280d5eeb5",
+            "elapsed_seconds": 134.22,
+            "exit_code": 0
+          },
+          {
+            "id": "final-cost-spark35-delta-semantic-v1",
+            "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cost-join-contracts/final-cost-spark35-delta-semantic-v1.json",
+            "receipt_sha256": "20db3b14381539ba7d25645e24fe4cfc51b64189def076505220ddf0d953ac4a",
+            "log_sha256": "3f7ff919a14c178c70057a4c92e88854c68b0da73051611a3151d19b4ba3807d",
+            "elapsed_seconds": 192.13,
+            "exit_code": 0
+          }
+        ]
+      },
+      "MF11": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v11.json",
+        "sha256": "a7a643bbb056838770867dd8103fdfbeba335805eab3355fa8ce1b156de91282",
+        "source_paths": 201
+      },
+      "final_exact_SHA_qualification": "PENDING_POST_COMMIT",
+      "acceptance_contracts_unchanged": {
+        "cards": 58,
+        "core_cases": 98,
+        "native_window_actions": 88,
+        "disjoint_corrective_cases": 58,
+        "original_Spark34_SQL_cases": 5,
+        "RC_cases_per_architecture": 27,
+        "RC_groups": 13,
+        "RC_Core_origins": 24,
+        "RC_Delta_origins": 2,
+        "required_CI_jobs": 138,
+        "structural_CI_jobs": 16,
+        "backlog_items": 15
+      }
+    }
   },
   "historical_pause_before_G10_v9_shutdown": {
     "status": "HISTORICAL_PAUSES_RESUMED_G01_FINALIZATION_AUTHORIZED",
