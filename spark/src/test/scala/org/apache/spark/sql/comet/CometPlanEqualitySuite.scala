@@ -82,37 +82,54 @@ class CometPlanEqualitySuite extends AnyFunSuite {
    * constructor parameter. Keep result-based exchange-reuse regressions as well.
    */
   private def parametersReadByEquals(cls: Class[_]): Set[String] = {
-    val owner = cls.getMethod("equals", classOf[Object]).getDeclaringClass
-    val hierarchy = Iterator
+    val hierarchy: Map[String, Class[_]] = Iterator
       .iterate[Class[_]](cls)(_.getSuperclass)
       .takeWhile(_ != null)
-      .map(_.getName.replace('.', '/'))
-      .toSet
-    val stream = owner.getResourceAsStream(s"/${owner.getName.replace('.', '/')}.class")
-    require(stream != null, s"Cannot read bytecode for ${owner.getName}")
-    val node = new ClassNode()
-    try {
-      new ClassReader(stream).accept(node, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES)
-    } finally {
-      stream.close()
+      .map(owner => owner.getName.replace('.', '/') -> owner)
+      .toMap
+    val visited = scala.collection.mutable.Set.empty[Class[_]]
+
+    def reads(owner: Class[_]): Set[String] = {
+      if (!visited.add(owner)) {
+        Set.empty
+      } else {
+        val stream = owner.getResourceAsStream(s"/${owner.getName.replace('.', '/')}.class")
+        require(stream != null, s"Cannot read bytecode for ${owner.getName}")
+        val node = new ClassNode()
+        try {
+          new ClassReader(stream).accept(node, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES)
+        } finally {
+          stream.close()
+        }
+        val equality = node.methods.asScala
+          .find { method =>
+            method.name == "equals" && method.desc == "(Ljava/lang/Object;)Z"
+          }
+          .getOrElse(fail(s"Cannot find equals bytecode for ${owner.getName}"))
+        val instructions = equality.instructions.iterator().asScala.toVector
+        val direct = instructions.collect {
+          case call: MethodInsnNode
+              if hierarchy.contains(call.owner) && call.desc.startsWith("()") =>
+            call.name
+          case field: FieldInsnNode
+              if field.getOpcode == Opcodes.GETFIELD && hierarchy.contains(field.owner) =>
+            field.name
+        }.toSet
+        // A subclass can compare its own parameter and delegate the remaining identity to
+        // super.equals. Follow only that exact superclass call, not arbitrary helper methods
+        // or equals calls on other objects whose reads say nothing about this plan's identity.
+        val parents = instructions.collect {
+          case call: MethodInsnNode
+              if call.getOpcode == Opcodes.INVOKESPECIAL && call.name == "equals" &&
+                call.desc == "(Ljava/lang/Object;)Z" && hierarchy.contains(call.owner) &&
+                hierarchy(call.owner) != owner && hierarchy(call.owner).isAssignableFrom(owner) =>
+            hierarchy(call.owner).getMethod("equals", classOf[Object]).getDeclaringClass
+        }.distinct
+        parents.foldLeft(direct) { case (all, parent) => all ++ reads(parent) }
+      }
     }
-    val equality = node.methods.asScala
-      .find { method =>
-        method.name == "equals" && method.desc == "(Ljava/lang/Object;)Z"
-      }
-      .getOrElse(fail(s"Cannot find equals bytecode for ${owner.getName}"))
-    equality.instructions
-      .iterator()
-      .asScala
-      .collect {
-        case call: MethodInsnNode
-            if hierarchy.contains(call.owner) && call.desc.startsWith("()") =>
-          call.name
-        case field: FieldInsnNode
-            if field.getOpcode == Opcodes.GETFIELD && hierarchy.contains(field.owner) =>
-          field.name
-      }
-      .toSet
+
+    reads(cls.getMethod("equals", classOf[Object]).getDeclaringClass)
   }
 
   test("native plan constructor parameters participate in equals or have explicit exclusions") {
@@ -170,6 +187,27 @@ class CometPlanEqualitySuite extends AnyFunSuite {
     val cls = classOf[CometPlanEqualitySuite.IncompleteEquality]
     assert(constructorParameters(cls) -- parametersReadByEquals(cls) == Set("omitted"))
   }
+
+  test("the guard follows constructor comparisons delegated to super.equals") {
+    val cls = classOf[CometPlanEqualitySuite.CompleteDelegatedEquality]
+    assert(constructorParameters(cls) == Set("compared", "retained"))
+    assert((constructorParameters(cls) -- parametersReadByEquals(cls)).isEmpty)
+    val value = new CometPlanEqualitySuite.CompleteDelegatedEquality(1, retained = true)
+    assert(value == new CometPlanEqualitySuite.CompleteDelegatedEquality(1, retained = true))
+    assert(value != new CometPlanEqualitySuite.CompleteDelegatedEquality(2, retained = true))
+    assert(value != new CometPlanEqualitySuite.CompleteDelegatedEquality(1, retained = false))
+  }
+
+  test("the guard detects a constructor parameter omitted by delegated equals") {
+    val cls = classOf[CometPlanEqualitySuite.IncompleteDelegatedEquality]
+    assert(constructorParameters(cls) == Set("compared", "retained", "omitted"))
+    assert(constructorParameters(cls) -- parametersReadByEquals(cls) == Set("omitted"))
+    // The structural rejection must remain even though this deliberately broken equals
+    // implementation accepts values with distinct omitted parameters.
+    assert(
+      new CometPlanEqualitySuite.IncompleteDelegatedEquality(1, retained = true, omitted = 1L) ==
+        new CometPlanEqualitySuite.IncompleteDelegatedEquality(1, retained = true, omitted = 2L))
+  }
 }
 
 object CometPlanEqualitySuite {
@@ -179,5 +217,34 @@ object CometPlanEqualitySuite {
       case _ => false
     }
     override def hashCode(): Int = compared
+  }
+
+  private class DelegatedEqualityBase(val compared: Int) {
+    override def equals(other: Any): Boolean = other match {
+      case that: DelegatedEqualityBase => compared == that.compared
+      case _ => false
+    }
+    override def hashCode(): Int = compared
+  }
+
+  private class CompleteDelegatedEquality(compared: Int, val retained: Boolean)
+      extends DelegatedEqualityBase(compared) {
+    override def equals(other: Any): Boolean = other match {
+      case that: CompleteDelegatedEquality => retained == that.retained && super.equals(other)
+      case _ => false
+    }
+    override def hashCode(): Int = 31 * super.hashCode() + java.lang.Boolean.hashCode(retained)
+  }
+
+  private class IncompleteDelegatedEquality(
+      compared: Int,
+      val retained: Boolean,
+      val omitted: Long)
+      extends DelegatedEqualityBase(compared) {
+    override def equals(other: Any): Boolean = other match {
+      case that: IncompleteDelegatedEquality => retained == that.retained && super.equals(other)
+      case _ => false
+    }
+    override def hashCode(): Int = 31 * super.hashCode() + java.lang.Boolean.hashCode(retained)
   }
 }

@@ -54,7 +54,7 @@ import org.apache.spark.sql.internal.SQLConf.SESSION_LOCAL_TIMEZONE
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
 
-import org.apache.comet.{CometConf, CometExecIterator, CometNativeException, ExtendedExplainInfo}
+import org.apache.comet.{CometConf, CometExecIterator, CometExplainInfo, CometNativeException, ExtendedExplainInfo}
 import org.apache.comet.CometSparkSessionExtensions.{isSpark35Plus, isSpark40Plus, isSpark41Plus, isSpark42Plus}
 import org.apache.comet.rules.CometCoalesceShufflePartitions
 import org.apache.comet.serde.Config.ConfigMap
@@ -5043,9 +5043,29 @@ class CometExecSuite extends CometTestBase {
             assert(conversions.head.child.collect { case scan: RDDScanExec => scan }.nonEmpty)
           }
           checkSparkSchema(query)
-          checkSparkAnswerAndOperator(
+          // Spark may share the repeated map lookup across BETWEEN's two comparisons. Retain
+          // its guarded evaluation, while the separate projection above still proves native
+          // map conversion. Require the precise row boundary, not a generic fallback waiver.
+          val inputClass: Class[_] =
+            if (sourceType == "rdd") classOf[RDDScanExec] else classOf[FileSourceScanExec]
+          val (_, betweenPlan) = checkSparkAnswerAndOperator(
             source.filter("partitionValues['hour'] BETWEEN '2026-09-02T22' AND '2026-09-03T00'"),
-            includeClasses = Seq(classOf[CometSparkToColumnarExec], classOf[CometFilterExec]))
+            classOf[FilterExec],
+            inputClass)
+          val betweenFilters = collect(betweenPlan) { case filter: FilterExec => filter }
+          assert(betweenFilters.size == 1, betweenPlan)
+          assert(
+            betweenFilters.head
+              .getTagValue(CometExplainInfo.FALLBACK_REASONS)
+              .contains(Set("Filter shared-expression evaluation order requires Spark")),
+            betweenPlan)
+          assert(collect(betweenPlan) { case p: ProjectExec => p }.isEmpty, betweenPlan)
+          assert(
+            collect(betweenPlan) { case c: CometSparkToColumnarExec => c }.isEmpty,
+            betweenPlan)
+          assert(collect(betweenPlan) {
+            case input if inputClass.isInstance(input) => input
+          }.size == 1)
           val (_, shuffled) = checkSparkAnswerAndOperator(
             query.repartition(2, col("id")),
             includeClasses = Seq(classOf[CometShuffleExchangeExec]))

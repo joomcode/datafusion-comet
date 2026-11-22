@@ -35,13 +35,14 @@ import org.apache.arrow.vector.types.pojo.ArrowType
 import org.apache.spark.{SparkConf, SparkException}
 import org.apache.spark.CometDriverPlugin
 import org.apache.spark.sql.{CometTestBase, DataFrame, Observation, QueryTest, Row}
-import org.apache.spark.sql.catalyst.expressions.{And, Ascending, Attribute, AttributeReference, EqualTo, Expression, GreaterThan, GreaterThanOrEqual, LessThan, Literal}
+import org.apache.spark.sql.catalyst.expressions.{And, Ascending, Attribute, AttributeReference, EqualTo, Expression, GreaterThan, GreaterThanOrEqual, LessThan, Literal, SortOrder}
+import org.apache.spark.sql.catalyst.expressions.aggregate.{Final, Max, Partial}
 import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, BuildRight, BuildSide}
 import org.apache.spark.sql.catalyst.plans.LeftOuter
 import org.apache.spark.sql.columnar.{CachedBatch, SimpleMetricsCachedBatch}
 import org.apache.spark.sql.comet.{CometBroadcastHashJoinExec, CometHashAggregateExec, CometHashJoinExec, CometInMemoryTableScanExec, CometSortAggregateExec, CometSortExec, CometSortMergeJoinExec}
 import org.apache.spark.sql.comet.execution.arrow.{ArrowCachedBatchSerializer, CometCachedBatchHelper}
-import org.apache.spark.sql.comet.execution.shuffle.CometCelebornShuffleManager
+import org.apache.spark.sql.comet.execution.shuffle.{CometCelebornShuffleManager, CometColumnarShuffle, CometNativeShuffle, CometShuffleExchangeExec}
 import org.apache.spark.sql.comet.util.Utils
 import org.apache.spark.sql.execution.{ColumnarToRowExec, CometSparkPlanInfoHelper, FilterExec, FormattedMode, RowToColumnarExec, SortExec, SparkPlan, SparkPlanInfo}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AQEShuffleReadExec, QueryStageExec, ShuffleQueryStageExec}
@@ -152,33 +153,88 @@ class CometInMemoryCacheSuite extends CometTestBase {
   // https://github.com/apache/spark/blob/v4.1.2/sql/core/src/test/scala/org/apache/spark/sql/execution/adaptive/AdaptiveQueryExecSuite.scala#L3114-L3154
   test("AQE SPARK-42101: cold and warm Comet cache materialization") {
     assume(isSpark35Plus, "Table-cache query stages require Spark 3.5+")
-    withAQECache {
-      withSQLConf(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
-        val left = spark.range(0, 10, 1, 2).selectExpr("cast(id as string) c1")
-        val right = spark.range(0, 10, 1, 2).selectExpr("cast(id as string) c2")
-        val cached = left.join(right, $"c1" === $"c2").cache()
-        val builder = spark.sharedState.cacheManager
-          .lookupCachedData(cached)
-          .get
-          .cachedRepresentation
-          .cacheBuilder
+    Seq("jvm" -> 3, "native" -> 5).foreach { case (shuffleMode, partitions) =>
+      withClue(s"shuffle=$shuffleMode partitions=$partitions: ") {
+        withAQECache {
+          withSQLConf(
+            SQLConf.ANSI_ENABLED.key -> "true",
+            SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+            SQLConf.SHUFFLE_PARTITIONS.key -> partitions.toString,
+            CometConf.COMET_SHUFFLE_MODE.key -> shuffleMode) {
+            val left = spark.range(0, 10, 1, 2).selectExpr("cast(id as string) c1")
+            val right = spark.range(0, 10, 1, 2).selectExpr("cast(id as string) c2")
+            val cached = left.join(right, $"c1" === $"c2").cache()
+            val builder = spark.sharedState.cacheManager
+              .lookupCachedData(cached)
+              .get
+              .cachedRepresentation
+              .cacheBuilder
 
-        Seq(true, false).foreach { firstAccess =>
-          val df = cached.groupBy("c1").agg(max($"c2"))
-          val adaptive = df.queryExecution.executedPlan.asInstanceOf[AdaptiveSparkPlanExec]
-          assert(!adaptive.isFinalPlan)
-          assert(builder.isCachedColumnBuffersLoaded != firstAccess)
-          assert(
-            collect(adaptive) { case s: ShuffleExchangeLike => s }.size ==
-              (if (firstAccess) 1 else 0))
-          assert(collect(adaptive) { case s: CometInMemoryTableScanExec => s }.size == 1)
+            Seq(true, false).foreach { firstAccess =>
+              val df = cached.groupBy("c1").agg(max($"c2"))
+              val adaptive = df.queryExecution.executedPlan.asInstanceOf[AdaptiveSparkPlanExec]
+              assert(!adaptive.isFinalPlan)
+              assert(builder.isCachedColumnBuffersLoaded != firstAccess)
+              val shuffles = collect(adaptive) { case s: ShuffleExchangeLike => s }
+              val sorts = collect(adaptive) { case s @ (_: CometSortExec | _: SortExec) => s }
+              assert(shuffles.size == (if (firstAccess) 1 else 0), adaptive)
+              assert(collect(adaptive) { case s: CometInMemoryTableScanExec => s }.size == 1)
+              if (firstAccess) {
+                // MAX(string) need not sort its partial groups immediately before a shuffle
+                // that destroys their order. Verify this exact native optimization, not a
+                // generic relaxation of Spark's original two-sort plan assertion.
+                assert(sorts.size == 1, adaptive)
+                val partials = collect(adaptive) {
+                  case a: CometSortAggregateExec if a.modes == Seq(Partial) => a
+                }
+                val finals = collect(adaptive) {
+                  case a: CometSortAggregateExec if a.modes == Seq(Final) => a
+                }
+                assert(partials.size == 1 && finals.size == 1, adaptive)
+                val partial = partials.head
+                assert(
+                  !partial.preservesGroupingOrder && partial.outputOrdering.isEmpty,
+                  adaptive)
+                assert(partial.groupingExpressions.size == 1, adaptive)
+                assert(partial.aggregateExpressions.size == 1, adaptive)
+                assert(partial.aggregateExpressions.head.aggregateFunction.isInstanceOf[Max])
+                assert(partial.aggregateExpressions.head.dataType == StringType)
+                assert(!partial.child.isInstanceOf[CometSortExec])
+                assert(!partial.child.isInstanceOf[SortExec])
+                val exchange = shuffles.head match {
+                  case comet: CometShuffleExchangeExec => comet
+                  case other => fail(s"Expected a Comet shuffle above the partial: $other")
+                }
+                assert(exchange.child eq partial, adaptive)
+                assert(exchange.outputOrdering.isEmpty, adaptive)
+                assert(exchange.requiredChildOrdering.forall(_.isEmpty), adaptive)
+                assert(exchange.outputPartitioning.numPartitions == partitions, adaptive)
+                assert(
+                  exchange.shuffleType ==
+                    (if (shuffleMode == "native") CometNativeShuffle else CometColumnarShuffle),
+                  adaptive)
+                val finalAggregate = finals.head
+                assert(finalAggregate.preservesGroupingOrder, adaptive)
+                assert(finalAggregate.child eq sorts.head, adaptive)
+                val requiredOrdering = finalAggregate.originalPlan.requiredChildOrdering.head
+                assert(requiredOrdering.nonEmpty, adaptive)
+                assert(
+                  SortOrder.orderingSatisfies(
+                    finalAggregate.child.outputOrdering,
+                    requiredOrdering),
+                  adaptive)
+              } else {
+                assert(sorts.isEmpty, adaptive)
+              }
 
-          checkAnswer(df, (0L until 10L).map(i => Row(i.toString, i.toString)))
-          assert(adaptive.isFinalPlan)
-          assert(builder.isCachedColumnBuffersLoaded)
-          assert(collect(adaptive) { case s: ShuffleExchangeLike => s }.isEmpty)
-          assert(collect(adaptive) { case s @ (_: CometSortExec | _: SortExec) => s }.isEmpty)
-          assert(collect(adaptive) { case s: CometInMemoryTableScanExec => s }.size == 1)
+              checkAnswer(df, (0L until 10L).map(i => Row(i.toString, i.toString)))
+              assert(adaptive.isFinalPlan)
+              assert(builder.isCachedColumnBuffersLoaded)
+              assert(collect(adaptive) { case s: ShuffleExchangeLike => s }.isEmpty)
+              assert(collect(adaptive) { case s @ (_: CometSortExec | _: SortExec) => s }.isEmpty)
+              assert(collect(adaptive) { case s: CometInMemoryTableScanExec => s }.size == 1)
+            }
+          }
         }
       }
     }

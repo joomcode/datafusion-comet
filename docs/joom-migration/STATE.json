@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-22",
-  "phase": "G10_V9_PAUSED_AT_USER_REQUEST_BEFORE_FEATURE_PUSH_AND_FULL_QUALIFICATION",
+  "phase": "G10_V10_LOCAL_FIXTURE_MATRIX_VERIFIED_FINAL_SOURCE_QUALIFICATION_PENDING",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -389,7 +389,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Resume only after the user returns: read PAUSED.md current Nov22 checkpoint, verify candidate-v9.json and pause-v9.json against clean local HEAD, source manifest and all document hashes; verify sandbox access; then push ONLY the feature branch and source-arm/dispatch the four exact-SHA workflows. No v9 push or dispatch occurred before this pause. Full CI/Actions CodeQL/Miri/RC27, actual core98/window88/additional58/original5 and15-backlog/artifact qualification remain pending. Report before merge or stable tag; production and datasci remain unauthorized.",
+  "next_step": "Commit the reviewed v10 source/documents, verify all 201 source hashes and all document hashes, normally push only the feature branch, arm and run full same-SHA Comet CI/Actions CodeQL/Miri/RC27 on native AMD64/ARM64. Poll every300seconds, inspect failures promptly and cancel superseded runs for genuine source corrections. Bind actual core98/window88/disjoint58/original5 and all 15 backlog/artifact outcomes. Report before merge/stable tag. No branch-1.2/main/tag, publication, production or datasci action.",
   "qualification": "G09 accepted:230 native and495 unique JVM/SQL/Delta cases locally passed. Qualified source/test/CI bytes are preserved; final full agreed CI/Linux/release/exact-JAR qualification remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -589,18 +589,10 @@
     }
   ],
   "pause": {
-    "status": "PAUSED_AT_EXPLICIT_USER_REQUEST",
-    "requested_on": "2026-11-22T02:13:40.624994+00:00",
-    "reason": "User will shut down the laptop; stop before publishing the replacement candidate or starting any next full GHA. Continue tomorrow from this checkpoint.",
-    "all_task_builds_stopped": true,
-    "active_sessions": [],
-    "resume_requires_explicit_user_instruction": true,
-    "feature_push_performed": false,
-    "v9_workflows_dispatched": false,
-    "helpers_armed": false,
-    "checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/pause-v9.json",
-    "local_candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v9.json",
-    "receipt_status": "Created and verified externally after the local commit; no future commit SHA is fabricated in committed files."
+    "status": "RESUMED_AT_EXPLICIT_USER_REQUEST",
+    "historical_checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/pause-v9.json",
+    "current_checkpoint": "PAUSED.md current v10 section",
+    "no_current_pause_requested": true
   },
   "sandbox_access_verification": {
     "checked_at": "2026-11-17T13:34:17.545289+00:00",
@@ -2409,12 +2401,12 @@
     ]
   },
   "g10": {
-    "status": "PAUSED_AFTER_VERIFIED_LOCAL_V9_CHECKS_BEFORE_PUSH_AND_REMOTE_QUALIFICATION",
+    "status": "LOCAL_V10_FIXTURE_MATRIX_VERIFIED_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
     "branch": "joom/1.2-release-qualification",
     "base": "4467d0337089036d3f01d28375260ce3dbcaaca5",
     "authorization_ref": "decisions.json#g10_authorization",
     "evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10",
-    "checkpoint": "User-requested shutdown pause. All five local cohorts and both semantic Delta gates passed; full repository Markdown formatting passed. Replacement source is frozen in a local commit only. Origin feature remains4e0f731190ae350e13fe00186676493b33306e29. No v9 push/dispatch/arming; read pause-v9.json after restart.",
+    "checkpoint": "The user resumed v9; its full CI exposed fixture integration failures and was canceled promptly. All six corrected local profile cohorts and both semantic Delta gates now pass. Only tests/harness changed from v9; full exact-new-SHA qualification and actual final JARs remain pending.",
     "full_gha_allowed": true,
     "rc_build_smoke_allowed": true,
     "merge_allowed": false,
@@ -2431,11 +2423,11 @@
     "exact_sha_policy": "Never amend qualified source for status-only documentation; immutable external receipts bind actual CI, RC and downloaded JAR evidence to candidate SHA.",
     "post_commit_qualification_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json",
     "first_candidate": "68133883ea32f6ab8c758f2b9d87f4aa7a36e642",
-    "external_live_checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/execution-checkpoint.json",
-    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v9.json",
-    "source_manifest_sha256": "4900f4c51e5592d17a9fe84c20225f62375d3e26baa6615bcd1ba36b53b398a4",
-    "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v9.json",
-    "previous_candidate": "4e0f731190ae350e13fe00186676493b33306e29",
+    "external_live_checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/LIVE-v10.json",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v10.json",
+    "source_manifest_sha256": "ed2992a35c7b1e3759d8f7b243c0afbc212c8a654424836dd55a379ddba76cab",
+    "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v10.json",
+    "previous_candidate": "df6c3e2da319ddcf26f93bcdd1d62a3ba62c3c6a",
     "active_workers": [],
     "local_added_toolchain": "nightly-2026-11-21-aarch64-apple-darwin (official, defaultstableunchanged)",
     "local_miri_runner": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/run-pinned-miri.py (setup blocked; no actual local Miri tests executed)",
@@ -2450,10 +2442,10 @@
       "source_manifest_sha256": "27d9e07a8d776af4631b08d004ac8fd586448f420d835b021a1e0f5495ed4025",
       "post_commit_qualification_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json"
     },
-    "local_contract_qualification_ref": "G10-results.json#profile_expression_correctness_followup",
+    "local_contract_qualification_ref": "G10-results.json#spark_sql_and_exec_fixture_followup",
     "approved_target_workload": "Parquet and Delta are in scope; Iceberg is not used, by explicit user confirmation. All 32 older-profile Iceberg jobs remain mandatory.",
-    "candidate_receipt_status": "LOCAL_COMMIT_ONLY_NOT_PUSHED_NOT_REMOTE_QUALIFIED",
-    "backlog_map_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v9.json",
+    "candidate_receipt_status": "COMMIT_AND_NEW_SAME_SHA_QUALIFICATION_PENDING",
+    "backlog_map_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v10.json",
     "future_source_commit": "Bound externally after committing this source; intentionally absent from pre-commit hashes.",
     "actual_local_contract_gates": {
       "status": "ALL_PLANNED_LOCAL_V8_GATES_VERIFIED",
@@ -3021,7 +3013,7 @@
       }
     },
     "user_shutdown_pause": {
-      "status": "PAUSED_AT_EXPLICIT_USER_REQUEST",
+      "status": "HISTORICAL_SUPERSEDED_BY_EXPLICIT_RESUME",
       "requested_on": "2026-11-22T02:13:40.624994+00:00",
       "reason": "User will shut down the laptop; stop before publishing the replacement candidate or starting any next full GHA. Continue tomorrow from this checkpoint.",
       "all_task_builds_stopped": true,
@@ -3033,7 +3025,161 @@
       "checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/pause-v9.json",
       "local_candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v9.json",
       "receipt_status": "Created and verified externally after the local commit; no future commit SHA is fabricated in committed files."
-    }
+    },
+    "historical_v9_checkpoint_before_fixture_corrections": {
+      "status": "PAUSED_AFTER_VERIFIED_LOCAL_V9_CHECKS_BEFORE_PUSH_AND_REMOTE_QUALIFICATION",
+      "checkpoint": "User-requested shutdown pause. All five local cohorts and both semantic Delta gates passed; full repository Markdown formatting passed. Replacement source is frozen in a local commit only. Origin feature remains4e0f731190ae350e13fe00186676493b33306e29. No v9 push/dispatch/arming; read pause-v9.json after restart.",
+      "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v9.json",
+      "source_manifest_sha256": "4900f4c51e5592d17a9fe84c20225f62375d3e26baa6615bcd1ba36b53b398a4",
+      "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v9.json",
+      "previous_candidate": "4e0f731190ae350e13fe00186676493b33306e29",
+      "candidate_receipt_status": "LOCAL_COMMIT_ONLY_NOT_PUSHED_NOT_REMOTE_QUALIFIED",
+      "backlog_map_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v9.json",
+      "user_shutdown_pause": {
+        "status": "PAUSED_AT_EXPLICIT_USER_REQUEST",
+        "requested_on": "2026-11-22T02:13:40.624994+00:00",
+        "reason": "User will shut down the laptop; stop before publishing the replacement candidate or starting any next full GHA. Continue tomorrow from this checkpoint.",
+        "all_task_builds_stopped": true,
+        "active_sessions": [],
+        "resume_requires_explicit_user_instruction": true,
+        "feature_push_performed": false,
+        "v9_workflows_dispatched": false,
+        "helpers_armed": false,
+        "checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/pause-v9.json",
+        "local_candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v9.json",
+        "receipt_status": "Created and verified externally after the local commit; no future commit SHA is fabricated in committed files."
+      }
+    },
+    "actual_local_v10_contract_gates": {
+      "status": "LOCAL_CORRECTED_FIXTURE_MATRIX_PASSED_REMOTE_EXACT_SHA_QUALIFICATION_PENDING",
+      "previous_candidate": "df6c3e2da319ddcf26f93bcdd1d62a3ba62c3c6a",
+      "scope": "Seven Scala test files and five generated Spark harness diffs only; no production/native/CI/dependency/lock changes from v9.",
+      "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v10.json",
+      "source_manifest_sha256": "ed2992a35c7b1e3759d8f7b243c0afbc212c8a654424836dd55a379ddba76cab",
+      "cohorts": [
+        {
+          "profile": "Spark3.4.3 / Scala2.12",
+          "actual_passed": 67,
+          "failed": 0,
+          "canceled_version_NA": 2,
+          "ignored": 0,
+          "pending": 0,
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark-sql-contracts/spark34-all-corrected-fixtures-positive-v1.json",
+          "receipt_sha256": "a0424a9b33351ca21526ca1c63e85c94652c61e7c76bde1bc72b929c1e8cee71",
+          "log_sha256": "e8bc53cbef03a04131e1bd7fd22f81bda75534bfb89fb5a01758bba1557e4c92",
+          "elapsed_seconds": 96.16
+        },
+        {
+          "profile": "Spark3.5.9 / Scala2.12",
+          "actual_passed": 68,
+          "failed": 0,
+          "canceled_version_NA": 1,
+          "ignored": 0,
+          "pending": 0,
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark-sql-contracts/spark35-scala212-all-corrected-fixtures-positive-v1.json",
+          "receipt_sha256": "f7abf6bfafc1b0554bb5a5facde7b6f7575cc794145e97428ddd116326fb32c8",
+          "log_sha256": "bcca9087507efa95034e1916fb5716eac5beb12d5643f474ebe3b467ec0aad3d",
+          "elapsed_seconds": 96.27
+        },
+        {
+          "profile": "Spark3.5.9 / Scala2.13",
+          "actual_passed": 68,
+          "failed": 0,
+          "canceled_version_NA": 1,
+          "ignored": 0,
+          "pending": 0,
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark-sql-contracts/spark35-scala213-all-corrected-fixtures-positive-v2.json",
+          "receipt_sha256": "1cf99aede2072ceef807d408656a3ba751278a0d7bf41b108f343574a422cf5f",
+          "log_sha256": "c71697ea88b9ba7e702429a836fd8efa846996b53dc15af0f9b97a8fe8cb97c6",
+          "elapsed_seconds": 185.36
+        },
+        {
+          "profile": "Spark4.0.4",
+          "actual_passed": 68,
+          "failed": 0,
+          "canceled_version_NA": 1,
+          "ignored": 0,
+          "pending": 0,
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark-sql-contracts/spark40-all-corrected-fixtures-positive-v1.json",
+          "receipt_sha256": "3f344589a977b925789893189327b29f14177f772ffde333a93e621408e15c00",
+          "log_sha256": "1d93f2af7cdabd807513cfa066e64d11907e199d05f80b9f06c50c1a4a4d3365",
+          "elapsed_seconds": 76.31
+        },
+        {
+          "profile": "Spark4.1.3",
+          "actual_passed": 68,
+          "failed": 0,
+          "canceled_version_NA": 1,
+          "ignored": 0,
+          "pending": 0,
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark-sql-contracts/spark41-all-corrected-fixtures-positive-v1.json",
+          "receipt_sha256": "3bd0d85f61356b897695839565763f2b575efc6de65b3b4df133e84d13a60afd",
+          "log_sha256": "74ae5bbb517ebd59cc5acec6a40d76b150471182104b023cebc4640b4ac47a31",
+          "elapsed_seconds": 105.04
+        },
+        {
+          "profile": "Spark4.2.1",
+          "actual_passed": 69,
+          "failed": 0,
+          "canceled_version_NA": 0,
+          "ignored": 0,
+          "pending": 0,
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark-sql-contracts/spark42-all-corrected-fixtures-positive-v1.json",
+          "receipt_sha256": "5450eee8235efc2d8d0c6ff31a4a5c1897ac0161bd6b0cfb0a4d79a3a65d282f",
+          "log_sha256": "4560b3d2f931a3034b6c6bb62b3e750f91b425cb1561fb415cccccc9fa4c9351",
+          "elapsed_seconds": 102.07
+        }
+      ],
+      "semantic_quality_gates": [
+        {
+          "id": "final-spark42-delta-semantic-v1",
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark-sql-contracts/final-spark42-delta-semantic-v1.json",
+          "receipt_sha256": "0054c6b74d7844d2093cb03440e2b170d8ba79bfd7c7c0f3e657d1cdce297faf",
+          "log_sha256": "af0bbe580fc31476d2bfbc77d3c139ec4500a5e8f2690abbc937d9e95232c878",
+          "exit_code": 0,
+          "elapsed_seconds": 138.42
+        },
+        {
+          "id": "final-spark35-delta-semantic-v1",
+          "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark-sql-contracts/final-spark35-delta-semantic-v1.json",
+          "receipt_sha256": "b0f2cb10efe257260f422ccd3e92ff693a4aa7bff7f89705733d124271881e34",
+          "log_sha256": "e288d299dd7515165a5fae3cb2173ec31405d5b81618772086ee4526cf51c350",
+          "exit_code": 0,
+          "elapsed_seconds": 193.04
+        }
+      ],
+      "proofs": [
+        {
+          "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_v10-independent-final-review/final-review.json",
+          "sha256": "56cafcbbd71990d02aa84aef0f0324e55f387412edbf897b88e8d67c45f78a1f"
+        },
+        {
+          "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark-sql-fixtures/regenerated-diffs-verification.json",
+          "sha256": "cda3e15d32335cf5c922a273f2426c6d81893a655cb6dd32692067b99e3b995b"
+        },
+        {
+          "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark-sql-fixtures/20261122_patch-context-review/independent-generated-tree-and-whitespace-review.json",
+          "sha256": "a2188a0560fadb6811e94d0f341f52c6cbc0a41274ec5b04c163be4e65b44e5b"
+        },
+        {
+          "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_range-sampling-audit/forced-default20-negative-control.json",
+          "sha256": "4141e1fa0e580a7f7a28e1e43b72c2a096cad52f762a32b84a580aee16fe0bff"
+        },
+        {
+          "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark40-exec-audit/all15-classification.json",
+          "sha256": "18dd645e78aa93076b87a6914d2728b736cb5494556be9d9ee60a218aa6e2742"
+        }
+      ],
+      "range_negative_control": "Forcing the native sample hint to default20 actually fails the independent exact full-sample Spark row/partition oracle; production source was restored byte-for-byte before all final positive profiles.",
+      "Spark_fixture_provenance": "All five diffs regenerated from exact official tags; only9actual Spark fixture files differ from prior patched trees. Original vanilla sampling thresholds/data preserved, native covered separately by a seed-independent full-sample oracle.",
+      "version_nonpasses": "The transaction registration is Spark4.2-only; table-cache query stages require Spark3.5+. Canceled registrations are N/A, never executed passes.",
+      "whitespace": "All five actual Spark source diff checks pass. Exactly14 outer diff-check warnings are verified single-space blank context markers inside nested patches, not whitespace in Scala sources. Standard generated diffs are preserved.",
+      "final_contract": "All 138 required CI jobs, Actions CodeQL, Miri107, core98/window88, disjoint corrective58, original five Spark 3.4 UDF and RC27 cases in 13 groups/24 Core and two Delta on native AMD64/ARM64 plus exact final artifact/backlog verification remain mandatory.",
+      "merge_allowed": false,
+      "stable_tag_allowed": false,
+      "production_allowed": false
+    },
+    "actual_remote_v9_results_ref": "G10-results.json#historical_v9_actual_remote_results"
   },
   "historical_pause_before_G10_v9_shutdown": {
     "status": "HISTORICAL_PAUSES_RESUMED_G01_FINALIZATION_AUTHORIZED",
@@ -3045,5 +3191,19 @@
     "release_exit_code": 137,
     "release_exit_explanation": "Deliberate docker stop for user pause; not an observed OOM or compiler failure.",
     "resumed_on": "2026-11-17T13:34:17.545289+00:00"
+  },
+  "historical_pause_before_G10_v10_resume": {
+    "status": "PAUSED_AT_EXPLICIT_USER_REQUEST",
+    "requested_on": "2026-11-22T02:13:40.624994+00:00",
+    "reason": "User will shut down the laptop; stop before publishing the replacement candidate or starting any next full GHA. Continue tomorrow from this checkpoint.",
+    "all_task_builds_stopped": true,
+    "active_sessions": [],
+    "resume_requires_explicit_user_instruction": true,
+    "feature_push_performed": false,
+    "v9_workflows_dispatched": false,
+    "helpers_armed": false,
+    "checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/pause-v9.json",
+    "local_candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v9.json",
+    "receipt_status": "Created and verified externally after the local commit; no future commit SHA is fabricated in committed files."
   }
 }

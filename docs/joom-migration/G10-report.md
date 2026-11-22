@@ -19,7 +19,61 @@ under the License.
 
 # G10: final integration and release qualification
 
-## Current replacement checkpoint (2026-11-22)
+## Current v10 fixture-integration checkpoint (2026-11-22)
+
+The user resumed qualification. V9 full CI was canceled promptly after genuine
+Spark SQL and Spark4.0 test-fixture failures; its successful RC27, Miri107 and
+Actions CodeQL receipts are historical and do not qualify this replacement SHA.
+Six other failed jobs stopped before tests on dependency/bootstrap acquisition;
+only two explicitly logged HTTP 429, so no broader 429 cause is asserted.
+
+This correction changes seven Scala test files and five generated Spark diffs.
+Production/native algorithms, workflows, dependencies and lockfiles remain exactly
+as v9. The full sample-size fixture now has a seed-independent native oracle
+against vanilla Spark and independently calculated partition bounds. A real
+production mutant forcing the sample hint to default 20 failed that oracle; the exact original source
+was restored before all positive runs. Original vanilla Spark sampling data and
+chi-square thresholds remain unchanged in the external Spark fixtures.
+
+Cold/warm AQE cache checks retain materialization, exact rows and strict native
+operator proofs while accounting for the accepted unordered partial MAX optimization
+before an order-destroying shuffle. Generator/map/join/decimal fixtures check the
+accepted precise Spark fallbacks and native companion paths, including required
+ANSI errors. Exported generator batch sizes are observed at the actual FFI
+boundary. The equals checker follows the actual superclass comparison and retains
+negative omission controls. No broad fallback allowance is introduced.
+
+| Local corrected cohort | Actual passes | Version-N/A cancellations | Failures |
+| ---------------------- | ------------: | ------------------------: | -------: |
+| Spark3.4.3 / Scala2.12 |            67 |                         2 |        0 |
+| Spark3.5.9 / Scala2.12 |            68 |                         1 |        0 |
+| Spark3.5.9 / Scala2.13 |            68 |                         1 |        0 |
+| Spark4.0.4             |            68 |                         1 |        0 |
+| Spark4.1.3             |            68 |                         1 |        0 |
+| Spark4.2.1             |            69 |                         0 |        0 |
+
+These overlapping cohorts are not summed as unique tests. The transaction case
+requires Spark4.2 and table-cache stages require Spark3.5; N/A registrations earn
+no pass credit. Strict Spark3.5/Delta and Spark4.2/Delta semantic/package gates
+passed. Every failed diagnostic/offline acquisition attempt remains preserved.
+
+All five Spark diffs were regenerated from exact official source tags and
+independently reproduced the expected trees, changing only nine fixture files.
+Actual Spark source whitespace checks pass. Fourteen outer diff-check warnings
+are verified blank context markers within nested patches; retain standard patch
+generation rather than altering the represented source or suppressing checks.
+
+Read `G10-results.json#spark_sql_and_exec_fixture_followup`, `STATE.json#g10` and
+`${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_candidate-v10-finalization`.
+The source manifest with exactly 201 paths is `final-source-manifest-v10.json`. The full 138-job
+CI, Actions CodeQL, Miri107, core98/window88, separate corrective58 and original
+five Spark3.4 UDF cases remain required on the new SHA. All 27 RC cases in 13 groups and
+24 Core plus two Delta origins on native AMD64/ARM64, independently verified final JAR
+downloads and all 15 backlog dispositions are mandatory. Keep all 15 entries open
+until actual final evidence is reconciled. Report before merge/stable tag;
+branch-1.2/main/tags, external publication, production and datasci remain excluded.
+
+## Historical v9 replacement checkpoint (2026-11-22)
 
 This section supersedes the historical candidate notes below. The replacement
 SHA is intentionally not predicted; final run IDs and outcomes belong in external

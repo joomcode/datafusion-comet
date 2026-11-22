@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-22",
-  "stage": "G10_V9_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
+  "stage": "G10_V10_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
   "baseline": "resource-baseline.json",
   "no_dependency_downloads_or_release_outputs_yet": false,
   "entries": [
@@ -1145,6 +1145,18 @@
       "new_final_artifacts": "PENDING exact-SHA RC27 and independently verified download; actual directory/sizes/checksums are post-commit facts.",
       "builds_and_caches": "Existing project targets and standard Maven/Cargo/Scala caches reused. The authorized semantic3.5 retry downloaded standard build plugins/dependencies into shared Maven cache; do not delete shared caches or claim their full size as task-only growth.",
       "preservation": "No automatic deletion; keep user checkouts, all receipts and accepted final JARs until an explicit cleanup decision."
+    },
+    "spark_sql_and_exec_fixture_followup": {
+      "root": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_candidate-v10-finalization",
+      "isolated_Spark_fixtures": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark-sql-fixtures",
+      "local_logs": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_spark-sql-contracts",
+      "historical_v9_archive": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/qualified-artifact-45009573016.zip",
+      "historical_v9_artifacts": "target/joom-release/gha-45009573016",
+      "archive_logical_bytes": 198386497,
+      "extracted_logical_bytes": 533203031,
+      "actual_download_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/artifact-download-verification-45009573016.json",
+      "new_final_artifacts": "Pending actual new-SHA qualification and download. Do not substitute v9 artifacts.",
+      "preserve": "All evidence/user clones/caches/targets; no automatic deletion. Local shared clones depend on the user Spark object store. Maven profile build dependencies use standard shared caches."
     }
   }
 }

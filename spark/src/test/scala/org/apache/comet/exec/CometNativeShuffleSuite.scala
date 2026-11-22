@@ -41,10 +41,10 @@ import org.apache.spark.sql.{CometTestBase, DataFrame, Dataset, Row}
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
 import org.apache.spark.sql.catalyst.expressions.aggregate.Final
 import org.apache.spark.sql.catalyst.plans.logical.LocalRelation
-import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
+import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, RangePartitioning}
 import org.apache.spark.sql.comet.{CometCollectLimitExec, CometExec, CometHashAggregateExec, CometLocalTableScanExec, CometMetricNode, CometNativeExec, CometNativeScanExec, CometScanWrapper, CometSortExec, CometSparkToColumnarExec, CometTakeOrderedAndProjectExec}
 import org.apache.spark.sql.comet.execution.arrow.{CometArrowStream, CometNativeArrowSource}
-import org.apache.spark.sql.comet.execution.shuffle.{CometColumnarShuffle, CometNativeShuffle, CometShuffleExchangeExec}
+import org.apache.spark.sql.comet.execution.shuffle.{CometColumnarShuffle, CometNativeShuffle, CometShuffleDependency, CometShuffleExchangeExec}
 import org.apache.spark.sql.execution.{FileSourceScanExec, LocalTableScanExec, SparkPlan}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AdaptiveSparkPlanHelper, AQEShuffleReadExec, ShuffleQueryStageExec}
 import org.apache.spark.sql.execution.aggregate.ObjectHashAggregateExec
@@ -1433,6 +1433,91 @@ class CometNativeShuffleSuite extends CometTestBase with AdaptiveSparkPlanHelper
         df.col("_3"),
         df.col("_1"))
       checkShuffleAnswer(rangePartitioned4, 1)
+    }
+  }
+
+  test("native range shuffle honors the sample hint with an independent full-sample oracle") {
+    withSQLConf(
+      SQLConf.ANSI_ENABLED.key -> "true",
+      SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
+      SQLConf.SHUFFLE_PARTITIONS.key -> "4",
+      CometConf.COMET_SHUFFLE_NATIVE_RANGE_PARTITIONING_ENABLED.key -> "true",
+      CometConf.COMET_SHUFFLE_NATIVE_ROUND_ROBIN_PARTITIONING_ENABLED.key -> "true") {
+      val size = 10000L
+      val expectedIds = (0L until size).reverse
+
+      def run(enabled: Boolean, sampleHint: Int): (Seq[Row], Seq[Long]) =
+        withSQLConfResult(
+          CometConf.COMET_ENABLED.key -> enabled.toString,
+          SQLConf.RANGE_EXCHANGE_SAMPLE_SIZE_PER_PARTITION.key -> sampleHint.toString) {
+          // Keep the original SPARK-22160 input and exchanges. Sparse samples can have different
+          // valid bounds because Spark seeds its reservoir with both partition index and RDD id.
+          val df = spark
+            .range(0, size, 1, 1)
+            .repartition(10)
+            .sort($"id".desc)
+            .selectExpr("SPARK_PARTITION_ID() AS pid", "id")
+          val plan = df.queryExecution.executedPlan
+          val rows = df.collect().toSeq
+          assert(rows.map(_.getLong(1)) == expectedIds, plan)
+          assert(rows.map(_.getInt(0)).toSet == Set(0, 1, 2, 3), plan)
+
+          val bounds = if (enabled) {
+            val exchanges = collect(plan) {
+              case exchange: CometShuffleExchangeExec
+                  if exchange.outputPartitioning.isInstanceOf[RangePartitioning] =>
+                exchange
+            }
+            assert(exchanges.size == 1, plan)
+            val exchange = exchanges.head
+            assert(exchange.shuffleType == CometNativeShuffle, plan)
+            assert(exchange.outputPartitioning.numPartitions == 4, plan)
+            assert(exchange.numMappers == 10, plan)
+            val dependency = exchange.shuffleDependency match {
+              case native: CometShuffleDependency[_, _, _] => native
+              case other => fail(s"Expected native range dependency, found $other")
+            }
+            val actual = dependency.rangePartitionBounds
+              .getOrElse {
+                fail(s"Native range bounds were not retained:\n$plan")
+              }
+              .map(_.getLong(0))
+            assert(actual.length == 3, plan)
+            assert(actual.sliding(2).forall(pair => pair.head > pair.last), actual)
+            // Check the native writer against the actual descending bounds, not merely its
+            // global sort order: a wrong partition followed by a local sort can hide bad routing.
+            rows.foreach { row =>
+              assert(row.getInt(0) == actual.count(bound => row.getLong(1) < bound), row)
+            }
+            actual
+          } else {
+            assert(collect(plan) { case e: CometShuffleExchangeExec => e }.isEmpty, plan)
+            assert(
+              collect(plan) {
+                case exchange: ShuffleExchangeExec
+                    if exchange.outputPartitioning.isInstanceOf[RangePartitioning] =>
+                  exchange
+              }.size == 1,
+              plan)
+            Seq.empty[Long]
+          }
+          (rows, bounds)
+        }
+
+      // With four output partitions, hint 10000 gives a per-input-partition reservoir budget
+      // ceil(3 * 4 * 10000 / 10) = 12000: every one of the 10000 rows must be sampled. This removes
+      // RDD-id/row-order sensitivity without assuming sparse samples always exceed a chi-square
+      // threshold. Ignoring the configuration and using default 20 must fail this exact oracle.
+      val (sparkFull, _) = run(enabled = false, sampleHint = 10000)
+      val expectedRows = expectedIds.map(id => Row(((size - 1 - id) / 2500).toInt, id))
+      assert(sparkFull == expectedRows)
+      val (nativeLow, lowBounds) = run(enabled = true, sampleHint = 1)
+      val (nativeFull, fullBounds) = run(enabled = true, sampleHint = 10000)
+      assert(nativeLow.map(_.getLong(1)) == sparkFull.map(_.getLong(1)))
+      assert(nativeFull == sparkFull, "Full-sample native range rows must match vanilla Spark")
+      assert(fullBounds == Seq(7500L, 5000L, 2500L))
+      assert(nativeFull.groupBy(_.getInt(0)).values.forall(_.size == 2500))
+      logInfo(s"Native range sample bounds: hint1=$lowBounds, hint10000=$fullBounds")
     }
   }
 

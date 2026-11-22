@@ -36,11 +36,11 @@ import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, BuildRight, BuildSide
 import org.apache.spark.sql.catalyst.plans.{Inner, LeftOuter, LeftSemi}
 import org.apache.spark.sql.catalyst.plans.logical.{Join, LocalRelation}
 import org.apache.spark.sql.comet.{CometBroadcastExchangeExec, CometBroadcastHashJoinExec, CometBroadcastNestedLoopJoinExec, CometColumnarToRowExec, CometFilterExec, CometHashJoinExec, CometNativeScanExec, CometProjectExec, CometRangeExec, CometSampleExec, CometSortExec, CometSortMergeJoinExec, CometSparkToColumnarExec, CometUnionExec, CometWindowExec}
-import org.apache.spark.sql.execution.{ColumnarToRowTransition, InputAdapter, LocalTableScanExec, SortExec, SparkPlan, WholeStageCodegenExec}
+import org.apache.spark.sql.execution.{ColumnarToRowTransition, FilterExec, InputAdapter, LocalTableScanExec, ProjectExec, SortExec, SparkPlan, WholeStageCodegenExec}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanExec, AQEShuffleReadExec, BroadcastQueryStageExec, QueryStageExec}
 import org.apache.spark.sql.execution.aggregate.SortAggregateExec
 import org.apache.spark.sql.execution.datasources.SchemaColumnConvertNotSupportedException
-import org.apache.spark.sql.execution.exchange.{ReusedExchangeExec, ShuffleExchangeLike}
+import org.apache.spark.sql.execution.exchange.{BroadcastExchangeExec, ReusedExchangeExec, ShuffleExchangeLike}
 import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, ShuffledHashJoinExec, SortMergeJoinExec}
 import org.apache.spark.sql.functions.{array, count, lit, struct, sum}
 import org.apache.spark.sql.internal.SQLConf
@@ -632,9 +632,37 @@ class CometJoinSuite extends CometTestBase {
     }
   }
 
+  /** Check only the precise G08 boundary; any other fallback still fails the native proof. */
+  private def assertInferredNullJoinBoundary(plan: SparkPlan, wholeStage: Boolean): Boolean = {
+    val reason = "Filter inferred null-check evaluation order requires Spark"
+    val filters = collect(plan) { case filter: FilterExec => filter }
+    val guarded = filters.filter(
+      _.getTagValue(CometExplainInfo.FALLBACK_REASONS)
+        .contains(Set(reason)))
+    if (guarded.isEmpty) {
+      false
+    } else {
+      assert(wholeStage, "The non-codegen companion must retain the native join")
+      assert(filters.size == 1 && guarded.size == 1, plan)
+      assert(collect(plan) { case project: ProjectExec => project }.size == 1, plan)
+      assert(collect(plan) { case join: BroadcastHashJoinExec => join }.size == 1, plan)
+      assert(collect(plan) { case exchange: BroadcastExchangeExec => exchange }.size == 1, plan)
+      assert(collect(plan) { case scan: CometNativeScanExec => scan }.size == 2, plan)
+      assert(collect(plan) { case join: CometBroadcastHashJoinExec => join }.isEmpty, plan)
+      checkCometOperators(
+        plan,
+        classOf[ProjectExec],
+        classOf[BroadcastHashJoinExec],
+        classOf[BroadcastExchangeExec],
+        classOf[FilterExec])
+      true
+    }
+  }
+
   test("join dynamic filter crosses deterministic residuals only with explicit opt-in") {
     withTempPath { probePath =>
       withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
         CometConf.COMET_BATCH_SIZE.key -> "1",
         CometConf.COMET_EXEC_JOIN_DYNAMIC_FILTER_ENABLED.key -> "true",
         SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
@@ -649,7 +677,7 @@ class CometJoinSuite extends CometTestBase {
         withParquetTable(probePath.getCanonicalPath, "dynamic_residual_probe") {
           // Key 2506 cannot pass the residual, although it belongs to the join domain.
           withParquetTable(Seq(Tuple1(2500), Tuple1(2506)), "dynamic_residual_build") {
-            for (buildLeft <- Seq(false, true)) {
+            for (buildLeft <- Seq(false, true); wholeStage <- Seq(false, true)) {
               val from = if (buildLeft) {
                 "dynamic_residual_build b JOIN dynamic_residual_probe p"
               } else {
@@ -660,38 +688,62 @@ class CometJoinSuite extends CometTestBase {
               var unfilteredBytes = 0L
               for (allowed <- Seq(false, true)) {
                 withSQLConf(
+                  SQLConf.WHOLESTAGE_CODEGEN_ENABLED.key -> wholeStage.toString,
                   CometConf.COMET_EXEC_JOIN_DYNAMIC_FILTER_ALLOW_DETERMINISTIC_FILTER_PUSHDOWN.key -> allowed.toString) {
-                  val (_, plan) = checkSparkAnswerAndOperator(
-                    sql(query),
-                    Seq(classOf[CometBroadcastHashJoinExec], classOf[CometNativeScanExec]))
-                  checkAnswer(sql(query), Seq(Row(2500, 2500L)))
-                  val joins = collect(plan) { case join: CometBroadcastHashJoinExec => join }
-                  assert(joins.size == 1)
-                  val filters = collect(plan) {
-                    case filter: CometFilterExec if filter.output.exists(_.name == "probe_key") =>
-                      filter
-                  }
-                  assert(filters.size == 1, s"Expected one native residual filter:\n$plan")
-                  assert(filters.head.condition.deterministic)
-                  assert(filters.head.nativeOp.getFilter.getAllowRuntimeFilterPushdown == allowed)
-                  val scans = collect(plan) {
-                    case scan: CometNativeScanExec if scan.output.exists(_.name == "probe_key") =>
-                      scan
-                  }
-                  assert(scans.size == 1)
-                  val metrics = scans.head.metrics
-                  val bytes = metrics("bytes_scanned").value
-                  assert(joins.head.metrics("output_rows").value == 1L)
-                  assert(filters.head.metrics("output_rows").value > 0L)
-                  if (allowed) {
-                    assert(joins.head.metrics("dynamic_filter_join_filters_attached").value > 0L)
-                    assert(metrics("row_groups_pruned_statistics").value > 0L)
-                    assert(bytes < unfilteredBytes)
+                  val df = sql(query)
+                  val fallback =
+                    assertInferredNullJoinBoundary(df.queryExecution.executedPlan, wholeStage)
+                  val (_, plan) = if (fallback) {
+                    checkSparkAnswerAndOperator(
+                      df,
+                      Seq(classOf[CometNativeScanExec]),
+                      classOf[ProjectExec],
+                      classOf[BroadcastHashJoinExec],
+                      classOf[BroadcastExchangeExec],
+                      classOf[FilterExec])
                   } else {
-                    unfilteredBytes = bytes
-                    assert(joins.head.metrics("dynamic_filter_join_filters_attached").value == 0L)
-                    assert(joins.head.metrics("dynamic_filter_join_filters_skipped").value > 0L)
+                    checkSparkAnswerAndOperator(
+                      df,
+                      Seq(classOf[CometBroadcastHashJoinExec], classOf[CometNativeScanExec]))
                   }
+                  checkAnswer(sql(query), Seq(Row(2500, 2500L)))
+                  if (!fallback) {
+                    val joins = collect(plan) { case join: CometBroadcastHashJoinExec => join }
+                    assert(joins.size == 1)
+                    val filters = collect(plan) {
+                      case filter: CometFilterExec
+                          if filter.output.exists(_.name == "probe_key") =>
+                        filter
+                    }
+                    assert(filters.size == 1, s"Expected one native residual filter:\n$plan")
+                    assert(filters.head.condition.deterministic)
+                    assert(
+                      filters.head.nativeOp.getFilter.getAllowRuntimeFilterPushdown == allowed)
+                    val scans = collect(plan) {
+                      case scan: CometNativeScanExec
+                          if scan.output.exists(_.name == "probe_key") =>
+                        scan
+                    }
+                    assert(scans.size == 1)
+                    val metrics = scans.head.metrics
+                    val bytes = metrics("bytes_scanned").value
+                    assert(joins.head.metrics("output_rows").value == 1L)
+                    assert(filters.head.metrics("output_rows").value > 0L)
+                    if (allowed) {
+                      assert(
+                        joins.head.metrics("dynamic_filter_join_filters_attached").value > 0L)
+                      assert(metrics("row_groups_pruned_statistics").value > 0L)
+                      assert(bytes < unfilteredBytes)
+                    } else {
+                      unfilteredBytes = bytes
+                      assert(
+                        joins.head.metrics("dynamic_filter_join_filters_attached").value == 0L)
+                      assert(joins.head.metrics("dynamic_filter_join_filters_skipped").value > 0L)
+                    }
+                  }
+                  logInfo(
+                    s"Dynamic residual fixture: wholeStage=$wholeStage, fallback=$fallback, " +
+                      s"buildLeft=$buildLeft, allowed=$allowed")
                 }
               }
             }
@@ -704,6 +756,7 @@ class CometJoinSuite extends CometTestBase {
   test("join dynamic filter preserves Parquet schema conversion errors") {
     withTempPath { probePath =>
       withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
         SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
         SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
         SQLConf.LEAF_NODE_DEFAULT_PARALLELISM.key -> "1",
@@ -723,12 +776,14 @@ class CometJoinSuite extends CometTestBase {
             .createOrReplaceTempView("dynamic_schema_probe")
           withParquetTable(Seq(Tuple1(0)), "dynamic_schema_build") {
             for {
+              wholeStage <- Seq(false, true)
               (comet, dynamicFilter) <- Seq((false, false), (true, false), (true, true))
               allowed <- Seq(false, true)
               // Without a residual, reader filters can attach regardless of the permission flag.
               residual <- Seq("", " WHERE pmod(p.payload, 2) >= 0")
             } {
               withSQLConf(
+                SQLConf.WHOLESTAGE_CODEGEN_ENABLED.key -> wholeStage.toString,
                 CometConf.COMET_ENABLED.key -> comet.toString,
                 CometConf.COMET_EXEC_JOIN_DYNAMIC_FILTER_ALLOW_DETERMINISTIC_FILTER_PUSHDOWN.key -> allowed.toString,
                 CometConf.COMET_EXEC_JOIN_DYNAMIC_FILTER_ENABLED.key -> dynamicFilter.toString) {
@@ -738,10 +793,18 @@ class CometJoinSuite extends CometTestBase {
                     "ON p.probe_key = b._1" + residual)
                 val plan = df.queryExecution.executedPlan
                 if (comet) {
-                  val joins = collect(plan) { case join: CometBroadcastHashJoinExec => join }
-                  assert(joins.size == 1, s"Expected one native broadcast hash join:\n$plan")
-                  assert(joins.head.buildSide == BuildRight)
-                  assert(joins.head.nativeOp.getHashJoin.getDynamicFilterEnabled == dynamicFilter)
+                  val fallback = assertInferredNullJoinBoundary(plan, wholeStage)
+                  if (fallback) {
+                    val joins = collect(plan) { case join: BroadcastHashJoinExec => join }
+                    assert(joins.size == 1 && joins.head.buildSide == BuildRight, plan)
+                  } else {
+                    checkCometOperators(plan)
+                    val joins = collect(plan) { case join: CometBroadcastHashJoinExec => join }
+                    assert(joins.size == 1, s"Expected one native broadcast hash join:\n$plan")
+                    assert(joins.head.buildSide == BuildRight)
+                    assert(
+                      joins.head.nativeOp.getHashJoin.getDynamicFilterEnabled == dynamicFilter)
+                  }
                   val probes = collect(plan) {
                     case scan: CometNativeScanExec if scan.output.exists(_.name == "payload") =>
                       scan
@@ -749,7 +812,7 @@ class CometJoinSuite extends CometTestBase {
                   assert(probes.size == 1, s"Expected one native probe scan:\n$plan")
                 }
                 withClue(s"comet=$comet, dynamicFilter=$dynamicFilter, allowed=$allowed, " +
-                  s"residual=$residual: ") {
+                  s"residual=$residual, wholeStage=$wholeStage: ") {
                   val error = intercept[SparkException](df.collect())
                   val chain = causeChain(error)
                   assert(
@@ -767,6 +830,7 @@ class CometJoinSuite extends CometTestBase {
   test("join dynamic filter preserves seeded rand probe order") {
     withTempPath { probePath =>
       withSQLConf(
+        SQLConf.ANSI_ENABLED.key -> "true",
         CometConf.COMET_BATCH_SIZE.key -> "16",
         CometConf.COMET_EXEC_JOIN_DYNAMIC_FILTER_ALLOW_DETERMINISTIC_FILTER_PUSHDOWN.key -> "true",
         SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "false",
@@ -808,20 +872,36 @@ class CometJoinSuite extends CometTestBase {
                 "WHERE key IS NOT NULL AND rand(42L) < 0.5) p " +
                 "JOIN dynamic_reader_rand_build b ON p.key = b._1"
 
-            for (enabled <- Seq(false, true)) {
+            for (wholeStage <- Seq(false, true); enabled <- Seq(false, true)) {
               withSQLConf(
+                SQLConf.WHOLESTAGE_CODEGEN_ENABLED.key -> wholeStage.toString,
                 CometConf.COMET_EXEC_JOIN_DYNAMIC_FILTER_ENABLED.key -> enabled.toString) {
-                val (_, plan) = checkSparkAnswerAndOperator(
-                  sql(query),
-                  Seq(
-                    classOf[CometBroadcastHashJoinExec],
-                    classOf[CometFilterExec],
-                    classOf[CometNativeScanExec]))
+                val df = sql(query)
+                val fallback =
+                  assertInferredNullJoinBoundary(df.queryExecution.executedPlan, wholeStage)
+                val (_, plan) = if (fallback) {
+                  checkSparkAnswerAndOperator(
+                    df,
+                    Seq(classOf[CometNativeScanExec]),
+                    classOf[ProjectExec],
+                    classOf[BroadcastHashJoinExec],
+                    classOf[BroadcastExchangeExec],
+                    classOf[FilterExec])
+                } else {
+                  checkSparkAnswerAndOperator(
+                    df,
+                    Seq(
+                      classOf[CometBroadcastHashJoinExec],
+                      classOf[CometFilterExec],
+                      classOf[CometNativeScanExec]))
+                }
                 checkAnswer(sql(query), Seq(Row(3)))
 
-                val joins = collect(plan) { case join: CometBroadcastHashJoinExec => join }
-                assert(joins.size == 1, s"Expected one native broadcast hash join:\n$plan")
-                assert(joins.head.metrics("output_rows").value == 1L)
+                if (!fallback) {
+                  val joins = collect(plan) { case join: CometBroadcastHashJoinExec => join }
+                  assert(joins.size == 1, s"Expected one native broadcast hash join:\n$plan")
+                  assert(joins.head.metrics("output_rows").value == 1L)
+                }
                 val probeScans = collect(plan) {
                   case scan: CometNativeScanExec if scan.output.exists(_.name == "key") => scan
                 }
@@ -829,12 +909,15 @@ class CometJoinSuite extends CometTestBase {
                 assert(probeScans.head.metrics("output_rows").value == 4L)
                 assert(probeScans.head.metrics("row_groups_pruned_statistics").value == 0L)
 
-                if (enabled) {
+                if (enabled && !fallback) {
+                  val joins = collect(plan) { case join: CometBroadcastHashJoinExec => join }
                   assert(joins.head.metrics("dynamic_filter_join_filters_attached").value == 0L)
                   assert(joins.head.metrics("dynamic_filter_join_filters_skipped").value == 1L)
                   assert(joins.head.metrics("dynamic_filter_join_rows_evaluated").value == 1L)
                   assert(joins.head.metrics("dynamic_filter_join_rows_pruned").value == 0L)
                 }
+                logInfo(s"Seeded rand fixture: wholeStage=$wholeStage, fallback=$fallback, " +
+                  s"dynamicFilter=$enabled")
               }
             }
           }

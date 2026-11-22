@@ -351,3 +351,19 @@ historical source-bound evidence. Preserve them with their receipts; they are
 not corrected final deliverables. The new exact-SHA RC27 directory, actual sizes
 and verified checksums remain pending post-commit facts. No automatic deletion
 of evidence, source checkouts, shared caches, build outputs or JARs is authorized.
+
+### V9 actual downloads and v10 fixture-integration evidence
+
+Preserve `target/joom-release/gha-45009573016` and the matching external
+`qualified-artifact-45009573016.zip`: verified v9 historical RC27 evidence,
+not final replacement deliverables. The archive is 198386497 bytes and extracted
+content 533203031 bytes (logical sizes; shared disk allocation can differ).
+Keep the dated Nov22 Spark SQL contracts/fixtures, range-sampling, Spark42101,
+Spark40exec, generator/map, exported-generator-batches, dynamic-filter,
+plan-equality-super, decimal-promotion and candidate-v10-finalization directories
+under `${MIGRATION_AUX_ROOT}/20261121_comet12-g10`. They retain actual logs,
+failed controls, restored source copies, exact official local shared Spark clones
+and tree proofs. Those isolated clones depend on the user's Spark object store;
+do not remove or modify the user's checkout. New final JAR paths/sizes/checksums
+are recorded externally only after actual download. Standard caches and project
+targets are reused and remain shared. No automatic cleanup is authorized.

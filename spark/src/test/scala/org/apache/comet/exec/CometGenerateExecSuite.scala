@@ -20,17 +20,90 @@
 package org.apache.comet.exec
 
 import org.apache.spark.sql.{CometTestBase, DataFrame, Row}
-import org.apache.spark.sql.comet.CometExplodeExec
+import org.apache.spark.sql.comet.{CometExplodeExec, CometGlobalLimitExec, CometNativeScanExec}
+import org.apache.spark.sql.execution.{FilterExec, GenerateExec, ProjectExec}
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
 import org.apache.spark.sql.execution.exchange.ReusedExchangeExec
 import org.apache.spark.sql.functions.col
 import org.apache.spark.sql.internal.SQLConf
 
-import org.apache.comet.CometConf
+import org.apache.comet.{CometConf, CometExplainInfo}
 
 class CometGenerateExecSuite extends CometTestBase {
 
   import testImplicits._
+
+  private def checkDefaultFallbackAndNativeGenerate(
+      df: => DataFrame,
+      nativeInput: Class[_] = classOf[CometNativeScanExec],
+      sparkProject: Boolean = false,
+      minimumNativeBatches: Int = 1,
+      expectedExportedBatchRows: Seq[Int] = Seq.empty): Unit = {
+    val rule = "org.apache.spark.sql.catalyst.optimizer.InferFiltersFromGenerate"
+    val existing = spark.conf
+      .getOption(SQLConf.OPTIMIZER_EXCLUDED_RULES.key)
+      .toSeq
+      .flatMap(_.split(","))
+      .filter(_.nonEmpty)
+    assert(
+      !existing.contains(rule),
+      "The default-query check must retain InferFiltersFromGenerate")
+    val (_, defaultPlan) = checkSparkAnswerAndOperator(
+      df,
+      classOf[GenerateExec],
+      classOf[FilterExec],
+      classOf[ProjectExec])
+    val filters = collect(defaultPlan) { case filter: FilterExec => filter }
+    val generators = collect(defaultPlan) { case generate: GenerateExec => generate }
+    val projects = collect(defaultPlan) { case project: ProjectExec => project }
+    assert(filters.size == 1 && generators.size == 1, defaultPlan)
+    assert(projects.size == (if (sparkProject) 1 else 0), defaultPlan)
+    assert(
+      filters.head
+        .getTagValue(CometExplainInfo.FALLBACK_REASONS)
+        .contains(Set("Filter inferred null-check evaluation order requires Spark")),
+      defaultPlan)
+    assert(collect(generators.head.child) { case f: FilterExec => f } == filters, defaultPlan)
+    assert(projects.forall(p => collect(p.child) { case g: GenerateExec => g } == generators))
+    assert(collect(defaultPlan) {
+      case input if nativeInput.isInstance(input) => input
+    }.size == 1)
+
+    // Preserve the real default guard above. Excluding only the optimizer rule that inserts
+    // its redundant array predicate lets this same SQL/data exercise native slicing as well.
+    // Both the vanilla Spark oracle and Comet run with this identical, isolated test config.
+    withSQLConf(SQLConf.OPTIMIZER_EXCLUDED_RULES.key -> (existing :+ rule).mkString(",")) {
+      val (_, nativePlan) = checkSparkAnswerAndOperator(df)
+      val nativeGenerators = collect(nativePlan) { case generate: CometExplodeExec => generate }
+      assert(nativeGenerators.size == 1, nativePlan)
+      assert(collect(nativePlan) {
+        case input if nativeInput.isInstance(input) => input
+      }.size == 1)
+      assert(nativeGenerators.head.metrics("output_rows").value > 0L, nativePlan)
+      if (expectedExportedBatchRows.nonEmpty) {
+        // ExplodeStream counts its raw builds before BatchSplitStream slices an oversized
+        // expansion. Observe the actual FFI-imported JVM batches instead of treating that raw
+        // metric as an exported-batch counter. This query's generator is the native root.
+        // Retain only row counts: CometExecIterator owns and closes each batch on advance/EOF.
+        val exportedRows = nativeGenerators.head
+          .executeColumnar()
+          .mapPartitions(batches => batches.map(_.numRows()))
+          .collect()
+          .toSeq
+        assert(exportedRows == expectedExportedBatchRows, exportedRows)
+        assert(exportedRows.size >= minimumNativeBatches, exportedRows)
+        logInfo(s"Generator exported batch sizes verified: $exportedRows")
+      } else {
+        assert(
+          nativeGenerators.head.metrics("output_batches").value >= minimumNativeBatches.toLong,
+          nativePlan)
+      }
+      logInfo(
+        "Generator fixture verified default guarded fallback and native companion: " +
+          s"input=${nativeInput.getSimpleName}, project=$sparkProject, " +
+          s"native raw output batches=${nativeGenerators.head.metrics("output_batches").value}")
+    }
+  }
 
   for (generator <- Seq("explode", "posexplode");
     input <- Seq("s.arr", "slice(s.arr, 1, 10)");
@@ -530,8 +603,8 @@ class CometGenerateExecSuite extends CometTestBase {
         Seq((1, Array(1, 2, 3)), (2, Array(4, 5)), (3, Array(6)), (4, Array(7, 8)), (5, Array(9)))
           .toDF("id", "arr")
           .createOrReplaceTempView("t")
-        val df = sql("SELECT id, posexplode(arr) FROM (SELECT id, arr FROM t LIMIT 4 OFFSET 1)")
-        checkSparkAnswerAndOperator(df)
+        def df = sql("SELECT id, posexplode(arr) FROM (SELECT id, arr FROM t LIMIT 4 OFFSET 1)")
+        checkDefaultFallbackAndNativeGenerate(df, nativeInput = classOf[CometGlobalLimitExec])
       }
     }
   }
@@ -571,8 +644,8 @@ class CometGenerateExecSuite extends CometTestBase {
         Seq((1, Array(1, 2, 3)), (2, Array(4, 5)), (3, Array(6)), (4, Array(7, 8)), (5, Array(9)))
           .toDF("id", "arr")
           .createOrReplaceTempView("t")
-        val df = sql("SELECT id, explode(arr) FROM (SELECT id, arr FROM t LIMIT 4 OFFSET 1)")
-        checkSparkAnswerAndOperator(df)
+        def df = sql("SELECT id, explode(arr) FROM (SELECT id, arr FROM t LIMIT 4 OFFSET 1)")
+        checkDefaultFallbackAndNativeGenerate(df, nativeInput = classOf[CometGlobalLimitExec])
       }
     }
   }
@@ -692,7 +765,13 @@ class CometGenerateExecSuite extends CometTestBase {
       // With the default batch size, 13 elements a row give output batches of 8190 rows, so the
       // later batches start both on and off a byte boundary.
       withBooleanArrays(numRows = 3000, arrayLength = 13) {
-        checkSparkAnswerAndOperator(sql(s"SELECT id, $generator(structs) FROM t"))
+        if (generator.endsWith("_outer")) {
+          checkSparkAnswerAndOperator(sql(s"SELECT id, $generator(structs) FROM t"))
+        } else {
+          checkDefaultFallbackAndNativeGenerate(
+            sql(s"SELECT id, $generator(structs) FROM t"),
+            minimumNativeBatches = 2)
+        }
       }
     }
   }
@@ -702,23 +781,30 @@ class CometGenerateExecSuite extends CometTestBase {
     // batch-size pieces on the way out, here at elements 100 and 200.
     withSQLConf(CometConf.COMET_BATCH_SIZE.key -> "100") {
       withBooleanArrays(numRows = 1, arrayLength = 250) {
-        checkSparkAnswerAndOperator(sql("SELECT id, explode(structs) FROM t"))
+        checkDefaultFallbackAndNativeGenerate(
+          sql("SELECT id, explode(structs) FROM t"),
+          minimumNativeBatches = 2,
+          expectedExportedBatchRows = Seq(100, 100, 50))
       }
     }
   }
 
   test("named_struct over an exploded boolean keeps its values") {
     withBooleanArrays(numRows = 3000, arrayLength = 13) {
-      checkSparkAnswerAndOperator(
-        sql("SELECT id, named_struct('v', v) FROM (SELECT id, explode(bools) AS v FROM t)"))
+      checkDefaultFallbackAndNativeGenerate(
+        sql("SELECT id, named_struct('v', v) FROM (SELECT id, explode(bools) AS v FROM t)"),
+        sparkProject = true,
+        minimumNativeBatches = 2)
     }
   }
 
   test("boolean ScalaUDF over an exploded boolean keeps its values") {
     spark.udf.register("flip", (x: Boolean) => !x)
     withBooleanArrays(numRows = 3000, arrayLength = 13) {
-      checkSparkAnswerAndOperator(
-        sql("SELECT id, flip(v) FROM (SELECT id, explode(bools) AS v FROM t)"))
+      checkDefaultFallbackAndNativeGenerate(
+        sql("SELECT id, flip(v) FROM (SELECT id, explode(bools) AS v FROM t)"),
+        sparkProject = true,
+        minimumNativeBatches = 2)
     }
   }
 

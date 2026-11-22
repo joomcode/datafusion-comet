@@ -17,7 +17,41 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-## Current shutdown checkpoint: G10 v9, 2026-11-22
+## Current active continuation: G10 v10, 2026-11-22
+
+The user explicitly resumed G10; the old shutdown pause below is historical.
+Read `STATE.json#g10` and `G10-results.json#spark_sql_and_exec_fixture_followup`.
+V9 was pushed and qualified partially: CI 45009568488 was canceled for actual
+test-fixture corrections; RC 45009573016, Miri 45009570609 and CodeQL 45009532084
+passed only for historical source `df6c3e2da319ddcf26f93bcdd1d62a3ba62c3c6a`.
+No old JAR or receipt qualifies the replacement source.
+
+All six corrected local profile cohorts and both semantic Delta gates passed.
+Seven Scala fixtures plus five generated Spark diffs changed; production/native,
+CI, dependencies and locks are unchanged from v9. The exact 201 source hashes are in
+`${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v10.json`;
+local gates and independent tree/whitespace proofs are indexed under
+`20261122_candidate-v10-finalization`. The final commit SHA, real new run IDs
+and outcomes will be recorded externally in `candidate-v10.json`, `v10-source-arm.json`,
+`v10-runs-arm.json` and `LIVE-v10.json`; never predict or fabricate these facts.
+
+1. Verify current source/document manifests and protected refs. Preserve all
+   failed/positive evidence, old source manifests and downloaded historical JARs.
+2. Commit the reviewed fixture correction with finalized English documentation,
+   verify the clean exact source, push only the feature normally and arm the
+   v10 helpers. Start full Comet CI/Miri/RC Build & Smoke once; CodeQL is automatic.
+3. Poll every five minutes. Inspect genuine failures promptly and cancel obsolete
+   runs if a source fix is needed; retry only pretest infrastructure failures on
+   the same SHA. Bind all 138 required CI jobs, Actions CodeQL, Miri107, core98,
+   window88, separate58 and original five Spark 3.4 UDF evidence.
+4. Require all 27 RC cases in 13 groups and 24 Core plus two Delta class origins
+   on each native AMD64/ARM64 architecture. Download and verify
+   the exact final JARs, then reconcile all 15 backlog entries using actual final
+   source/run/job/artifact receipts. Do not amend tested source for status alone.
+5. Report before merge or stable tag. No branch-1.2/main/tag change, external
+   artifact publication, production or datasci access is authorized.
+
+## Historical shutdown checkpoint: G10 v9, 2026-11-22
 
 **Paused at the user's explicit request, before feature push and the next full
 qualification.** This section overrides older continuation instructions below.
