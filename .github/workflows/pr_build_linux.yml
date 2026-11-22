@@ -748,6 +748,29 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-registry-
 
+      # A terminated fork has no ScalaTest summary. Keep bounded JVM and cgroup
+      # evidence for the full production-profile matrix without changing its heap,
+      # cases, assertions or failure status.
+      - name: Prepare Spark 4.2 runtime diagnostics
+        if: ${{ matrix.suite.name == 'exec' && contains(matrix.profile.maven_opts, '-Pspark-4.2') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          diagnostic_dir="$GITHUB_WORKSPACE/target/runtime-diagnostics"
+          mkdir -p "$diagnostic_dir"
+          echo "JAVA_TOOL_OPTIONS=$JAVA_TOOL_OPTIONS -XX:+ExitOnOutOfMemoryError -XX:ErrorFile=$diagnostic_dir/hs_err_pid%p.log -Xlog:gc*:file=$diagnostic_dir/gc-%p.log:time,uptime,level,tags:filecount=2,filesize=16m" >> "$GITHUB_ENV"
+          for resource in /proc/meminfo /proc/self/cgroup \
+              /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.peak /sys/fs/cgroup/memory.max \
+              /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory.stat \
+              /sys/fs/cgroup/memory/memory.oom_control \
+              /sys/fs/cgroup/memory/memory.limit_in_bytes \
+              /sys/fs/cgroup/memory/memory.max_usage_in_bytes; do
+            if [[ -r "$resource" ]]; then
+              echo "--- $resource"
+              cat "$resource"
+            fi
+          done > "$diagnostic_dir/resources-before.txt"
+
       - name: Java test steps
         uses: ./.github/actions/java-test
         with:
@@ -757,6 +780,24 @@ jobs:
           upload-test-reports: true
           skip-native-build: true
           test-output-file: ${{ matrix.suite.name == 'exec' && contains(matrix.profile.maven_opts, '-Pspark-4.2') && 'target/qualification-exec.log' || '' }}
+
+      - name: Record Spark 4.2 runtime resources
+        if: ${{ !cancelled() && matrix.suite.name == 'exec' && contains(matrix.profile.maven_opts, '-Pspark-4.2') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/runtime-diagnostics
+          for resource in /proc/meminfo /proc/self/cgroup \
+              /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.peak /sys/fs/cgroup/memory.max \
+              /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory.stat \
+              /sys/fs/cgroup/memory/memory.oom_control \
+              /sys/fs/cgroup/memory/memory.limit_in_bytes \
+              /sys/fs/cgroup/memory/memory.max_usage_in_bytes; do
+            if [[ -r "$resource" ]]; then
+              echo "--- $resource"
+              cat "$resource"
+            fi
+          done > target/runtime-diagnostics/resources-after.txt
 
       - name: Verify executed Spark 4.2 native window matrix
         if: ${{ matrix.suite.name == 'exec' && contains(matrix.profile.maven_opts, '-Pspark-4.2') }}
@@ -772,6 +813,7 @@ jobs:
           path: |
             target/qualification-exec.log
             target/qualification-windows.json
+            target/runtime-diagnostics/
             spark/target/surefire-reports/TEST-*.xml
           if-no-files-found: error
           retention-days: 7

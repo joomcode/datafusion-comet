@@ -1165,6 +1165,23 @@
       "final_RC_directory": "PENDING_ACTUAL_NEW_EXACT_SHA_DOWNLOAD",
       "build_outputs": "Reuse existing project targets and standard shared caches. No production dependency or toolchain change in this correction.",
       "preserve": "Keep every original and later failed/successful attempt through final acceptance and explicit cleanup decision; no deletion."
+    },
+    "smj_guarded_route_fixture_followup": {
+      "root": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/",
+      "new_evidence_directories": [
+        "20261122_smj-routing-local-v12",
+        "20261122_smj-big-query-diagnostic-v11",
+        "20261122_failed-target-exec-v11",
+        "20261122_completed-gap-logs-v11",
+        "20261122_qualification-v12-preparation",
+        "20261122_v12-document-finalization"
+      ],
+      "historical_v11_RC_directory": "target/joom-release/gha-45029701852",
+      "historical_v11_RC_archive": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/qualified-artifact-45029701852.zip",
+      "failed_archive_and_log_download_partials": "Preserved as failed transport attempts; no evidence/pass credit.",
+      "user_Iceberg_checkout": "User-owned read-only source; preserve it and all original checkouts/caches.",
+      "new_tools_or_dependencies": "None in this correction; existing standard caches and build targets reused.",
+      "cleanup": "No deletion performed or authorized. Refresh actual final resource inventory after new artifact delivery."
     }
   }
 }

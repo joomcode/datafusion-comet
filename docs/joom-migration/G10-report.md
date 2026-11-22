@@ -19,7 +19,41 @@ under the License.
 
 # G10: final integration and release qualification
 
-## Current v11 ANSI-sensitive join-fixture checkpoint (2026-11-22)
+## Current v12 guarded-SMJ fixture checkpoint (2026-11-22)
+
+The fast targeted local gate passed; this is not final qualification. V11 CI
+completed with 130 successful, eight failed and 16 structural jobs. Eight SMJ
+registrations contained 22 plan-only route assertions after exact Spark/Comet
+row-multiset comparisons. A separate abrupt fork termination has no established
+cause and left later exec coverage incomplete. Pretest bootstrap failures and
+dependent failures are recorded separately; none receives pass credit.
+
+Preserve the approved production short-circuit guard. Only left/not_or,
+anti/not_or and right_rl/not_or require its precise Spark join path. Require the
+exact node-local reason, one Spark SMJ, no native SMJ and both native scans before
+and after execution; native companions remain strict. All 33 registrations,
+original SQL/data/seeds, exact multiset normalization and spill checks remain.
+An existing default registration gains 12 differential pairs: three guarded and
+nine native. Production code is unchanged from v11.
+
+The full Spark4.2 exec job now records bounded JVM GC/fatal logs and before/after
+proc/cgroup resource evidence. Real JVM exhaustion fails promptly. No heap limit,
+query, oracle, case, assertion or failure gate is reduced or bypassed. The isolated
+old big case reached all 84 comparisons in 286.42 seconds, with 81 positive
+outcomes and three known plan assertions; no OOM or timeout was observed. Its
+roughly 3.3 GiB heap peak does not establish the Linux failure cause.
+
+Read G10-results.json#smj_guarded_route_fixture_followup and STATE.json#g10. The
+202-path source manifest is final-source-manifest-v12.json in the external G10
+directory. The extended local five-registration controller is diagnostic only; its actual
+completion/cleanup is recorded externally. Follow the approved local/CI split
+without duplicating the full matrices locally. A real new commit, full same-SHA CI,
+Actions CodeQL, Miri107, core98/window88, separate58/original5, RC27 on each native
+architecture, verified final downloads and all15 backlog dispositions remain
+required. V11 passing RC/Miri/CodeQL/JAR receipts remain historical; all old
+failures and raw evidence are preserved. No merge, tag or production operation.
+
+## Historical v11 ANSI-sensitive join-fixture checkpoint (2026-11-22)
 
 V10 full CI was canceled promptly after five CostBasedEngineChoiceSuite plan
 assertions failed on Spark 3.5 / Scala 2.13. Its final raw job inventory has

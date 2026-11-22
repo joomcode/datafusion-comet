@@ -384,3 +384,13 @@ standard shared caches. Record the eventual final RC directory, archive sizes
 and checksums only after the new exact-SHA download. Preserve all existing
 failed and passing evidence; no deletion, cache pruning or source cleanup is
 authorized.
+
+## G10 guarded-SMJ fixture follow-up
+
+Keep the v11 RC archive and target/joom-release/gha-45029701852 as historical
+source-bound evidence. New local diagnostics, completed job-log proofs, failed
+transport partials, unarmed v12 helpers and the pre-edit document archive stay
+under the dated external G10 root. No new toolchain or cache setup is required.
+Preserve the user-provided Iceberg checkout and all original/shared sources and
+caches. Refresh the final inventory after replacement artifacts arrive; nothing
+has been automatically removed.

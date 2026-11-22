@@ -30,14 +30,14 @@ import scala.util.Random
 
 import org.apache.commons.io.FileUtils
 import org.apache.spark.sql.{CometTestBase, Row}
-import org.apache.spark.sql.comet.CometSortMergeJoinExec
+import org.apache.spark.sql.comet.{CometNativeScanExec, CometSortMergeJoinExec}
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.joins.SortMergeJoinExec
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 
-import org.apache.comet.CometConf
+import org.apache.comet.{CometConf, CometExplainInfo}
 
 /**
  * Differential tests of Comet's sort-merge join with a join filter against Spark, over generated
@@ -590,7 +590,8 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
       expectNative: Boolean = true,
       expectCondition: Boolean = true,
       expectAnsiNative: Boolean = true,
-      expectSparkFallback: Boolean = false)
+      expectSparkFallback: Boolean = false,
+      expectedFallbackReason: Option[String] = None)
 
   private def joinQuery(
       ds: DataSet,
@@ -616,13 +617,21 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
     val label = s"${kind.name}${if (flipped) "_rl" else ""}${if (twoKeys) "_2keys" else ""}" +
       s"/${filter.name}"
     val nullChecksPushed = filter == isNotNullCmp && Set("inner", "semi").contains(kind.name)
+    // PushPredicateThroughJoin moves the preserved-side NOT(flag) before the common timestamp
+    // comparison. Only these routes keep temporal parsing on the RHS of a lazy AND in the join.
+    val notOrNeedsSpark = filter == notOr &&
+      ((!flipped && Set("left", "anti").contains(kind.name)) ||
+        (flipped && kind.name == "right"))
     Q(
       label,
       s"SELECT $select FROM $from ON $on",
-      expectNative = filter.expectNative || nullChecksPushed,
-      expectAnsiNative = filter.expectAnsiNative || nullChecksPushed,
+      expectNative = (filter.expectNative || nullChecksPushed) && !notOrNeedsSpark,
+      expectAnsiNative = (filter.expectAnsiNative || nullChecksPushed) && !notOrNeedsSpark,
       expectCondition = !pushable,
-      expectSparkFallback = true)
+      expectSparkFallback = true,
+      expectedFallbackReason =
+        if (notOrNeedsSpark) Some("Join condition requires Spark's short-circuit evaluation")
+        else None)
   }
 
   private def existenceQueries(ds: DataSet): Seq[Q] = Seq(
@@ -681,6 +690,19 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
   private def cometJoins(plan: SparkPlan): Seq[CometSortMergeJoinExec] =
     collect(plan) { case j: CometSortMergeJoinExec => j }
 
+  private def assertExpectedFallback(plan: SparkPlan, q: Q, ctx: String): Unit = {
+    q.expectedFallbackReason.foreach { reason =>
+      val joins = collect(plan) { case join: SortMergeJoinExec => join }
+      assert(joins.size == 1 && cometJoins(plan).isEmpty, s"$ctx expected one Spark SMJ:\n$plan")
+      assert(
+        joins.head.getTagValue(CometExplainInfo.FALLBACK_REASONS).contains(Set(reason)),
+        s"$ctx expected the exact short-circuit fallback reason:\n$plan")
+      assert(
+        collect(plan) { case scan: CometNativeScanExec => scan }.size == 2,
+        s"$ctx the guarded join must keep both native Parquet scans:\n$plan")
+    }
+  }
+
   private def runCase(ds: DataSet, shape: Shape, q: Q): Outcome = {
     val ctx = s"[seed=$seed data=${ds.name} shape=${shape.name} case=${q.label}]"
     withConfs(baseConfs ++ shape.confs: _*) {
@@ -699,6 +721,7 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
         assert(
           collect(initial) { case j: SortMergeJoinExec => j }.nonEmpty,
           s"$ctx expected Spark SMJ before execution:\n$initial")
+        assertExpectedFallback(initial, q, ctx)
       }
       val actual =
         try Right(df.collect().toSeq)
@@ -733,6 +756,8 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
               extra.take(5).map { case (k, d) => s"  ${showRow(k)} x$d" }.mkString("\n")
           }
       }
+      // Check semantics first, then the exact accepted guard and retained native inputs.
+      if (errors.isEmpty) assertExpectedFallback(plan, q, ctx)
       if (native != expectedNative) {
         errors += s"expected native=$expectedNative, got $native"
       }
@@ -815,6 +840,13 @@ class CometSmjJoinFilterFuzzSuite extends CometTestBase with AdaptiveSparkPlanHe
   test("boolean and conditional operators around lifted subexpressions, batch 64") {
     val ds = dataSet("main")
     runAll(ds, b64, matrix(ds, joinKinds, defaultBoolFilters))
+    // Twelve Spark/Comet comparisons: three precise guarded routes and nine native companions.
+    // Keep this coverage in the default run without changing the full-matrix registrations.
+    runAll(
+      ds,
+      b64,
+      matrix(ds, joinKinds, Seq(notOr)) ++
+        matrix(ds, joinKinds, Seq(notOr), flipped = true))
   }
 
   test("boolean and conditional operators, batch 7 and spilling") {

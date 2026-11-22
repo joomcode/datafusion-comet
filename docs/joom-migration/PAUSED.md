@@ -17,7 +17,34 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-## Current active continuation: G10 v11, 2026-11-22
+## Current active continuation: G10 v12 precommit, 2026-11-22
+
+The user resumed G10. The old process group 83567 was manually terminated and its
+absence was verified inside the sandbox. Read STATE.json#g10,
+G10-results.json#smj_guarded_route_fixture_followup and the external LIVE-v12.json.
+The feature HEAD is still historical v11 bc40fe6a; reviewed test/CI changes and
+these documents are uncommitted. No replacement workflow has started.
+
+1. Check the actual active local controller/result in LIVE-v12.json. Finish or
+   reconcile its bounded diagnostic before starting another Maven build.
+   The corrected default gate passed; full/profile matrices belong to GHA.
+2. Verify final-source-manifest-v12.json and all unchanged v11 source pins. Only
+   the SMJ fuzz fixture and Linux workflow may change outside migration docs.
+   Preserve actual local receipts, format documents and refresh MANIFEST.json.
+3. Commit/push only the feature after local review. Actual SHA/run identities
+   belong in candidate-v12.json/source-arm/runs-arm and LIVE-v12.json after they
+   exist. Follow the unarmed helper handoff under
+   20261122_qualification-v12-preparation; never predict identities or reuse old
+   passing receipts as replacement-source qualification.
+4. Start all agreed same-SHA workflows and poll every five minutes. Preserve all
+   138 required/16 structural jobs, core98/window88/separate58/original5 and RC27
+   on native AMD64/ARM64. Download/verify final JARs and reconcile all15 backlogs.
+   Diagnose real failures promptly; retry only genuine pretest infrastructure
+   failures on the same source. Unknown old Linux fork termination stays unknown.
+5. Report before merge or stable tag. branch-1.2/main/tags, external artifact
+   publication, production and datasci remain excluded.
+
+## Historical active continuation: G10 v11, 2026-11-22
 
 Read `STATE.json#g10` and
 `G10-results.json#cost_join_ansi_fixture_followup`. All older checkpoints below

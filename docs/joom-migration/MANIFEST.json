@@ -13,7 +13,7 @@
     },
     {
       "path": "CLEANUP.md",
-      "sha256": "2a8164b38312a5e8158ea282eb9a5d98668b7cc384f2d712c4f2c219d1cea79b"
+      "sha256": "6509b40add5b3ea1e346a77d3e2478670d8cb9d7cb94e093e4438f6b8191974d"
     },
     {
       "path": "G01-CLOSEOUT.md",
@@ -137,11 +137,11 @@
     },
     {
       "path": "G10-report.md",
-      "sha256": "d48053503d531ba66eedbc53061fd0b8a276ed7569d93f4b9e0defd874c928e9"
+      "sha256": "e6d5f54f37a4de9bed58ed1295b4918136b7b2a31efbc435f12d021f88d4f35b"
     },
     {
       "path": "G10-results.json",
-      "sha256": "6bc476a86672513f16c18d8f950e074d8382d7b89cdfde6a41326ce0233714fe"
+      "sha256": "00ba909dc8b03a7649b0e8998d3b06fd9f8ab7ac53a4a5fdbd648227a231c93f"
     },
     {
       "path": "HANDOFF.md",
@@ -157,7 +157,7 @@
     },
     {
       "path": "PAUSED.md",
-      "sha256": "60919f55d6b68c4fb03c8ef293975c6e7937a8e3e819619bab19c83222f693e1"
+      "sha256": "c32bbe8bafec946ba36f8dbd0500ed7f6def33a9135e52f8a87e489c25a78e26"
     },
     {
       "path": "PERFORMANCE.md",
@@ -173,7 +173,7 @@
     },
     {
       "path": "STATE.json",
-      "sha256": "1cb01e2dc025222a54c113f42e0a7fd176f57e6f1a9be88620a315f00dac0dd7"
+      "sha256": "5cbf04ddef338f345458dd48567838282e3bc09a9b4cd711d7d6c8aed2c7b019"
     },
     {
       "path": "approved-plan.json",
@@ -185,7 +185,7 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "7bdcf0be097f50d6fbde11d0a7c032ac8ecf478da39f186791ccb0447855fd24"
+      "sha256": "0c9670b66d821a737a6d0ea5320ef5614e9f2a3b3d8bcc9cece55fe3a4a735a4"
     },
     {
       "path": "correctness-test-plan.txt",

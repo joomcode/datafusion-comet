@@ -389,7 +389,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Commit reviewed v11 source/docs, verify source/document hashes, normally push feature, arm exact-source helpers and run full same-SHA CI/Actions CodeQL/Miri/RC27. Poll every 300 seconds and preserve actual failed attempts. Bind core98/window88/disjoint58/original5, all138required+16structural jobs and all15backlog/artifact outcomes. Report before merge/stable tag; no branch-1.2/main/tag, publication, production or datasci operation.",
+  "next_step": "Finalize documents/manifest, commit/push feature only and obtain all agreed exact-SHA remote qualification. Preserve extended diagnostic outcomes externally; do not duplicate full matrices locally. Report before merge/stable tag.",
   "qualification": "G09 accepted:230 native and495 unique JVM/SQL/Delta cases locally passed. Qualified source/test/CI bytes are preserved; final full agreed CI/Linux/release/exact-JAR qualification remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -2402,12 +2402,12 @@
     ]
   },
   "g10": {
-    "status": "LOCAL_V11_ANSI_JOIN_MATRIX_VERIFIED_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
+    "status": "LOCAL_V12_TARGETED_GATE_VERIFIED_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
     "branch": "joom/1.2-release-qualification",
     "base": "4467d0337089036d3f01d28375260ce3dbcaaca5",
     "authorization_ref": "decisions.json#g10_authorization",
     "evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10",
-    "checkpoint": "V10 full CI was canceled promptly for five ambient-ANSI cost-plan expectations; original Spark/Comet rows matched before assertions. One test-only correction now passes all six whole CostSuite cohorts and both semantic Delta gates. Production/native/CI/release/dependency code is unchanged; fresh exact-new-SHA full qualification and final JARs remain pending.",
+    "checkpoint": "Fast exact Spark4.2 local gate and static/review checks passed. Extended local controller is diagnostic only; complete required cross-profile/full-fuzz matrices will run in GHA. Final source commit and remote qualification pending.",
     "full_gha_allowed": true,
     "rc_build_smoke_allowed": true,
     "merge_allowed": false,
@@ -2416,7 +2416,7 @@
     "ci_restoration_audit": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_ci-audit/ci-restoration-audit.json",
     "coverage_audit": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_coverage-audit/coverage-matrix.json",
     "local_plan_controller_session": null,
-    "external_progress": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/LIVE-v11.json",
+    "external_progress": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/LIVE-v12.json",
     "runtime_library_sha256": "2efa17cc5434d910110db79ba82f03146ec53e4e471b46d0df67921bd2c4cb7f",
     "report": "G10-report.md",
     "results": "G10-results.json",
@@ -2424,11 +2424,11 @@
     "exact_sha_policy": "Never amend qualified source for status-only documentation; immutable external receipts bind actual CI, RC and downloaded JAR evidence to candidate SHA.",
     "post_commit_qualification_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json",
     "first_candidate": "68133883ea32f6ab8c758f2b9d87f4aa7a36e642",
-    "external_live_checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/LIVE-v11.json",
-    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v11.json",
-    "source_manifest_sha256": "a7a643bbb056838770867dd8103fdfbeba335805eab3355fa8ce1b156de91282",
-    "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v11.json",
-    "previous_candidate": "c3f4fdef7d1d90a36e105a858e7611b09e68d5a7",
+    "external_live_checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/LIVE-v12.json",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v12.json",
+    "source_manifest_sha256": "6c357d0e1df345cff2e1921b62e4447bb78164dd98d7c7a4fce0ea5c63ca37a4",
+    "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v12.json",
+    "previous_candidate": "bc40fe6a1d88e9c9baa863c433b7fa7f5eb3aaec",
     "active_workers": [],
     "local_added_toolchain": "nightly-2026-11-21-aarch64-apple-darwin (official, defaultstableunchanged)",
     "local_miri_runner": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/run-pinned-miri.py (setup blocked; no actual local Miri tests executed)",
@@ -2443,10 +2443,10 @@
       "source_manifest_sha256": "27d9e07a8d776af4631b08d004ac8fd586448f420d835b021a1e0f5495ed4025",
       "post_commit_qualification_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json"
     },
-    "local_contract_qualification_ref": "G10-results.json#cost_join_ansi_fixture_followup",
+    "local_contract_qualification_ref": "G10-results.json#smj_guarded_route_fixture_followup",
     "approved_target_workload": "Parquet and Delta are in scope; Iceberg is not used, by explicit user confirmation. All 32 older-profile Iceberg jobs remain mandatory.",
-    "candidate_receipt_status": "COMMIT_AND_NEW_SAME_SHA_QUALIFICATION_PENDING",
-    "backlog_map_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v11.json",
+    "candidate_receipt_status": "PENDING_ACTUAL_POST_COMMIT_RECEIPT",
+    "backlog_map_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v12.json",
     "future_source_commit": "Bound externally after committing this source; intentionally absent from pre-commit hashes.",
     "actual_local_contract_gates": {
       "status": "ALL_PLANNED_LOCAL_V8_GATES_VERIFIED",
@@ -3387,6 +3387,143 @@
         "structural_CI_jobs": 16,
         "backlog_items": 15
       }
+    },
+    "historical_v11_actual_remote_results": {
+      "status": "HISTORICAL_SOURCE_BOUND_NOT_V12_QUALIFICATION",
+      "source_commit": "bc40fe6a1d88e9c9baa863c433b7fa7f5eb3aaec",
+      "Comet_CI": {
+        "run_id": 45029697441,
+        "conclusion": "failure",
+        "success_jobs": 130,
+        "failed_jobs": 8,
+        "structural_skips": 16,
+        "failure_audit": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_full-ci-failure-audit-v11/terminal-eight-failure-audit-v11.json"
+      },
+      "RC": {
+        "run_id": 45029701852,
+        "conclusion": "success",
+        "cases_per_arch": 27,
+        "artifact_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/artifact-download-verification-45029701852.json",
+        "local_artifacts": "target/joom-release/gha-45029701852"
+      },
+      "Miri": {
+        "run_id": 45029699605,
+        "conclusion": "success",
+        "actual_tests": 107
+      },
+      "Actions_CodeQL": {
+        "run_id": 45029684935,
+        "conclusion": "success"
+      },
+      "historical_log_catalog": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_completed-gap-logs-v11/historical-v11-full-log-final-handoff.json",
+      "four_unrendered_Hive_cancel_dispositions": "UNKNOWN, no pass credit; ancillary historical profiles, no expanded acceptance gate."
+    },
+    "smj_guarded_route_fixture_followup": {
+      "status": "LOCAL_V12_TARGETED_GATE_VERIFIED_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
+      "previous_candidate": "bc40fe6a1d88e9c9baa863c433b7fa7f5eb3aaec",
+      "scope": [
+        "spark/src/test/scala/org/apache/comet/exec/CometSmjJoinFilterFuzzSuite.scala",
+        ".github/workflows/pr_build_linux.yml"
+      ],
+      "production_changes_from_v11": false,
+      "diagnosis": {
+        "failed_registration_count": 8,
+        "failed_internal_route_assertions": 22,
+        "observed_result_mismatch": false,
+        "cause": "Approved short-circuit guard deliberately selects Spark after preserved-side NOT(flag) is reordered before temporal parsing; old native-plan fixtures did not account for that exact route.",
+        "abrupt_Linux_fork_end": "UNKNOWN; no complete final ScalaTest summary. Later suites and full98/window88 cannot be accepted from that failed invocation."
+      },
+      "fix": {
+        "precise_fallback_routes": [
+          "left/not_or",
+          "anti/not_or",
+          "right_rl/not_or"
+        ],
+        "all_other_routes_remain_strict_native_where_previously_expected": true,
+        "node_local_exact_fallback_reason": "Join condition requires Spark's short-circuit evaluation",
+        "native_scan_count_required_on_guarded_routes": 2,
+        "row_multiset_oracle_unchanged": true,
+        "registration_count_preserved": 33,
+        "full_registrations_preserved": 23,
+        "default_registrations_preserved": 10,
+        "new_default_internal_comparisons": 12,
+        "new_fallback_pairs": 3,
+        "new_native_pairs": 9
+      },
+      "runtime_diagnostics": {
+        "scope": "Full Spark4.2 exec job only",
+        "features": [
+          "Bounded per-JVM GC logs and fatal-error paths",
+          "ExitOnOutOfMemoryError makes real JVM exhaustion a hard failure",
+          "Before/after read-only proc/cgroup memory and OOM-event snapshots in existing evidence artifact"
+        ],
+        "heap_limits_cases_and_failure_checks_unchanged": true,
+        "no_oracle_rewrite_or_retry_or_skip_or_budget_increase": true
+      },
+      "original_big_local_diagnostic": {
+        "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_smj-big-query-diagnostic-v11/result.json",
+        "exit_code": 1,
+        "elapsed_seconds": 286.42,
+        "comparisons_reached": 84,
+        "positive_outcomes": 81,
+        "known_route_assertion_failures": 3,
+        "timed_out": false,
+        "OOM_observed": false,
+        "qualification_credit": false
+      },
+      "local_default_gate": {
+        "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_smj-routing-local-v12/spark42-smj-route-default-v2.json",
+        "exit_code": 0,
+        "elapsed_seconds": 58.51,
+        "registrations_passed": 1,
+        "internal_comparisons": 48,
+        "full_Linux_qualification_credit": false
+      },
+      "first_local_selector_attempt": {
+        "receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_smj-routing-local-v12/spark42-smj-route-default-v1.json",
+        "exit_code": 1,
+        "status": "FAILED_HARNESS_SELECTOR_BEFORE_TESTS_NO_CREDIT",
+        "reason": "A comma in the Maven suites selector was parsed as another class; the unique prefix selector was used in the successful next attempt."
+      },
+      "remaining_local_gates": "The successful default gate is complete. The five-registration extended controller is diagnostic only and may be bounded by its configured time limit; actual completion/cleanup is recorded externally. Full cross-profile and full-fuzz acceptance belongs to the unchanged required GHA coverage, following the approved local/CI split.",
+      "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v12.json",
+      "source_manifest_sha256": "6c357d0e1df345cff2e1921b62e4447bb78164dd98d7c7a4fce0ea5c63ca37a4",
+      "source_paths": 202,
+      "reviews": [
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_smj-fuzz-plan-audit/independent-not-or-patch-and-big-diagnostic-review-v11.json",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_smj-fuzz-plan-audit/independent-permanent-runtime-diagnostics-review-v12-precommit.json",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_final-production-review/independent-production-review-v12-precommit.json",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_v12-armer-independent-review/review-v12-unarmed-master.json"
+      ],
+      "authorship_limit": "The latest production review explicitly identifies a self-review of three transport files; earlier independent transport reviews remain separate.",
+      "all15_backlog_entries": "OPEN until actual final-source evidence reconciliation",
+      "final_contract": {
+        "required_CI_jobs": 138,
+        "structural_CI_jobs": 16,
+        "core_cases": 98,
+        "native_window_actions": 88,
+        "separate_corrective_cases": 58,
+        "original_Spark34_SQL_cases": 5,
+        "RC_cases_per_native_architecture": 27,
+        "RC_groups": 13,
+        "RC_Core_origins": 24,
+        "RC_Delta_origins": 2
+      },
+      "merge_stable_tag_production_authorized": false,
+      "extended_local_diagnostic": {
+        "controller": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_smj-routing-local-v12/20261122_full-regressions/run-five.py",
+        "expected_cases": 5,
+        "timeout_seconds": 1200,
+        "status": "IN_PROGRESS_NOT_ACCEPTED",
+        "first_observed_case": "full: batch7, boolean and conditional operators, both side orders",
+        "first_observed_case_seconds": 533,
+        "scope": "Observed passing registration within an unfinished diagnostic invocation; no complete invocation or final-Linux credit."
+      }
+    },
+    "historical_v11_current_reference_fields": {
+      "external_progress": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/LIVE-v11.json",
+      "backlog_map_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v11.json",
+      "local_contract_qualification_ref": "G10-results.json#cost_join_ansi_fixture_followup"
     }
   },
   "historical_pause_before_G10_v9_shutdown": {
