@@ -23,160 +23,44 @@ on:
     paths:
       - .github/workflows/runtime_memory_diagnostics.yml
       - dev/ci/runtime-memory-diagnostic.py
+      - dev/ci/SparkParquetMemoryProbe.java
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   diagnose:
-    name: ${{ matrix.mode }} / Spark 4.2.1
+    name: Official Spark 4.2.1 Parquet ownership
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ matrix.mode == 'isolated' && 35 || 180 }}
-    container:
-      image: amd64/rust
-    defaults:
-      run:
-        working-directory: /__w/datafusion-comet/datafusion-comet
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [isolated, warmed]
+    timeout-minutes: 15
     env:
-      SPARK_LOCAL_HOSTNAME: localhost
-      SPARK_LOCAL_IP: 127.0.0.1
       JAVA_TOOL_OPTIONS: >-
         --add-exports=java.base/sun.nio.ch=ALL-UNNAMED
-        --add-exports=java.base/sun.util.calendar=ALL-UNNAMED
         --add-opens=java.base/java.nio=ALL-UNNAMED
         --add-opens=java.base/java.lang=ALL-UNNAMED
-        -Dcomet.test.aggFuzz.full=true -Dcomet.test.smjFuzz.full=true
-
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Prepare diagnostics without changing allocation policy
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Diagnose unchanged official Spark Parquet ownership
         shell: bash
         run: |
           set -euo pipefail
-          out="$PWD/target/memory-diagnostic"
-          mkdir -p "$out"
-          printf 'working_directory=%s\ngithub_workspace=%s\n' "$PWD" "$GITHUB_WORKSPACE" > "$out/checkout.txt"
-          ls -ld . .git >> "$out/checkout.txt"
-          # Checkout's Node process and subsequent container shells can use
-          # different Git configuration homes. Trust this exact checkout only.
-          git config --global --add safe.directory "$PWD"
-          git rev-parse --show-toplevel >> "$out/checkout.txt"
-          git diff --exit-code HEAD
-          git diff --exit-code d00c8fdd3c05ee919c1ade656647d4571983d03f HEAD -- . \
-            ':(exclude).github/workflows/runtime_memory_diagnostics.yml' \
-            ':(exclude)dev/ci/runtime-memory-diagnostic.py'
-          echo "SPARK_HOME=$PWD" >> "$GITHUB_ENV"
-          echo "DIAGNOSTIC_ROOT=$PWD" >> "$GITHUB_ENV"
-          echo "JAVA_TOOL_OPTIONS=$JAVA_TOOL_OPTIONS -XX:NativeMemoryTracking=summary -XX:+ExitOnOutOfMemoryError -XX:ErrorFile=$out/hs_err_pid%p.log -Xlog:gc*:file=$out/gc-%p.log:time,uptime,level,tags:filecount=2,filesize=16m -Xlog:class+load=info:file=$out/classes-%p.log:time,uptime,level,tags:filecount=2,filesize=16m" >> "$GITHUB_ENV"
-
-      - name: Setup Rust and Java toolchain
-        uses: ./.github/actions/setup-builder
-        with:
-          rust-version: "1.100.0"
-          jdk-version: "17"
-
-      - name: Verify existing native artifact source
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 - <<'PY'
-          import json, os, pathlib, urllib.request
-          url = "https://api.github.com/repos/" + os.environ["GITHUB_REPOSITORY"] + "/actions/artifacts/14764008696"
-          request = urllib.request.Request(url, headers={
-              "Authorization": "Bearer " + os.environ["GH_TOKEN"],
-              "Accept": "application/vnd.github+json",
-              "X-GitHub-Api-Version": "2022-11-28"})
-          with urllib.request.urlopen(request, timeout=30) as response:
-              artifact = json.load(response)
-          assert artifact["name"] == "native-lib-linux" and not artifact["expired"]
-          assert artifact["workflow_run"]["id"] == 45046547108
-          assert artifact["workflow_run"]["head_sha"] == "d00c8fdd3c05ee919c1ade656647d4571983d03f"
-          assert artifact["digest"] == "sha256:4f381cce4cfeb8df26748ae949038176eeba53a9deabda6befc3f4a1b50d212b"
-          pathlib.Path("target/memory-diagnostic/native-artifact-origin.json").write_text(json.dumps(artifact, indent=2) + "\n")
-          print("Verified exact d00 native artifact; diagnostic reuse only.")
-          PY
-
-      - name: Download unchanged native library
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: 14764008696
-          run-id: 45046547108
-          github-token: ${{ github.token }}
-          path: native/target/release/
-          merge-multiple: true
-
-      - name: Bootstrap isolated classpath through the standard action
-        if: matrix.mode == 'isolated'
-        uses: ./.github/actions/java-test
-        with:
-          artifact_name: diagnostic-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}
-          suites: org.apache.comet.CometConfSuite
-          maven_opts: -Pspark-4.2
-          skip-native-build: true
-          test-output-file: target/memory-diagnostic/bootstrap.log
-
-      - name: Compute original Maven cache key
-        if: matrix.mode == 'warmed'
-        id: maven-cache-key
-        shell: bash
-        run: echo "hash=${{ hashFiles('**/pom.xml') }}" >> "$GITHUB_OUTPUT"
-
-      - name: Restore original Maven dependencies
-        if: matrix.mode == 'warmed'
-        uses: actions/cache/restore@v5
-        with:
-          path: |
-            ~/.m2/repository
-            /root/.m2/repository
-          key: ${{ runner.os }}-java-maven-${{ steps.maven-cache-key.outputs.hash }}
-          restore-keys: |
-            ${{ runner.os }}-java-maven-
-
-      - name: Resolve warmed Maven model before its first install
-        if: matrix.mode == 'warmed'
-        shell: bash
-        run: dev/ci/prepare-maven-model.sh -Pspark-4.2
-
-      - name: Diagnose the isolated unchanged big registration
-        if: matrix.mode == 'isolated'
-        shell: bash
-        run: |
           python3 dev/ci/runtime-memory-diagnostic.py \
-            --output "$DIAGNOSTIC_ROOT/target/memory-diagnostic/isolated" \
-            --timeout 900 isolated
+            --output "$PWD/target/parquet-memory-probe"
 
-      - name: Diagnose the original three-suite prefix in its first Maven install
-        if: matrix.mode == 'warmed'
-        shell: bash
-        env:
-          MAVEN_OPTS: >-
-            -Xmx4G -Xms2G
-            -DwildcardSuites=org.apache.comet.exec.CometAggregateSuite,org.apache.comet.exec.CometFirstLastBoolAggFuzzSuite,org.apache.comet.exec.CometSmjJoinFilterFuzzSuite
-            -XX:+UnlockDiagnosticVMOptions -XX:+ShowMessageBoxOnError
-            -XX:+HeapDumpOnOutOfMemoryError -XX:ErrorFile=./hs_err_pid%p.log
-        run: |
-          python3 dev/ci/runtime-memory-diagnostic.py \
-            --output "$DIAGNOSTIC_ROOT/target/memory-diagnostic/warmed" \
-            --timeout 9900 wrap -- ./mvnw -B -Prelease install -Pspark-4.2
-
-      - name: Preserve diagnostic evidence even when the JVM fails
+      - name: Preserve diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: runtime-memory-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            target/memory-diagnostic/
-            **/target/unit-tests.log
-            **/target/surefire-reports/
-            **/hs_err_pid*.log
+          name: spark-parquet-memory-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/parquet-memory-probe/
           if-no-files-found: error
           retention-days: 7
