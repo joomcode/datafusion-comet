@@ -19,6 +19,31 @@ under the License.
 
 # G10: final integration and release qualification
 
+## Current v13 runtime-contract checkpoint (2026-11-22)
+
+The user approved official Spark4.2.1 with heap Spark column vectors and ANSI=true;
+see RUNTIME-REQUIREMENTS.md. The official Spark artifact remains unchanged.
+Previous v12 full CI failed with a kernel OOM; its green RC/Miri/native and partial
+CI receipts do not qualify changed source. The separate stock-Spark-only witness
+establishes the omitted auxiliary vector cleanup, not the exact fraction of the
+whole warmed OOM or any successful wrong SQL result.
+
+V13 applies the approved defaults to target Comet/Spark SQL test JVMs and requires
+actual session-default observations in every packaged smoke group. Fault tests
+reject missing/inconsistent evidence. Original test data, results/errors, native
+assertions, explicit off-heap/ANSI variants and the full fuzz matrix are retained.
+The independent Comet prefetched-output cleanup fix and three lifecycle regressions
+are included; they solve a separate imported Arrow lease leak, not the Spark defect.
+
+Local checks passed:59 JVM regressions (including three prefetched-output cases),
+five actual false/true session-default observations,46 RC fault tests, Python3.8
+parsing and static CI/suite guards. Independent scope review found no blocker.
+These are local gates. Full same-SHA GHA/CodeQL/Miri, all required
+coverage/backlogs and RC27 on native AMD64/ARM64 are still mandatory, followed by
+final JAR downloads. Read G10-results.json#runtime_contract_v13_followup and the
+external LIVE-v13.json for actual identities/results. No merge, stable tag,
+production operation or datasci change is authorized.
+
 ## Current v12 guarded-SMJ fixture checkpoint (2026-11-22)
 
 The fast targeted local gate passed; this is not final qualification. V11 CI

@@ -154,6 +154,12 @@ abstract class CometTestBase
     conf.set(SHUFFLE_MANAGER, shuffleManager)
     conf.set(MEMORY_OFFHEAP_ENABLED.key, "true")
     conf.set(MEMORY_OFFHEAP_SIZE.key, "2g")
+    if (CometSparkSessionExtensions.isSpark42Plus) {
+      // Match the production contract while stock Spark leaks auxiliary off-heap Parquet
+      // vectors (SPARK-60098). Native Comet still uses the off-heap pool configured above.
+      // Individual off-heap regression cases can continue to override this session default.
+      conf.set(SQLConf.COLUMN_VECTOR_OFFHEAP_ENABLED.key, "false")
+    }
     conf.set(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key, "1g")
     conf.set(SQLConf.ADAPTIVE_AUTO_BROADCASTJOIN_THRESHOLD.key, "1g")
     conf.set(CometConf.COMET_ENABLED.key, "true")
@@ -817,6 +823,13 @@ abstract class CometTestBase
   protected override def beforeAll(): Unit = {
     initializeSession()
     super.beforeAll()
+    if (CometSparkSessionExtensions.isSpark42Plus) {
+      // The packaged runner captures stderr, whereas the normal logger writes unit-tests.log.
+      // Report actual session defaults before tests deliberately override individual SQL modes.
+      System.err.println(
+        s"Comet test session defaults: columnVectorOffHeap=${spark.sessionState.conf.offHeapColumnVectorEnabled}, " +
+          s"ansi=${spark.sessionState.conf.ansiEnabled}")
+    }
   }
 
   protected override def afterAll(): Unit = {

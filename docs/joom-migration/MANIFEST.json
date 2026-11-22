@@ -137,11 +137,11 @@
     },
     {
       "path": "G10-report.md",
-      "sha256": "e6d5f54f37a4de9bed58ed1295b4918136b7b2a31efbc435f12d021f88d4f35b"
+      "sha256": "8934ff34ad80998150de6fd418fdaa553a20c443e0ace59c2da383a45faa4925"
     },
     {
       "path": "G10-results.json",
-      "sha256": "00ba909dc8b03a7649b0e8998d3b06fd9f8ab7ac53a4a5fdbd648227a231c93f"
+      "sha256": "770e13cf27e450b422162602ab17a258a6fc447aabb51c17ded03e0ac5160539"
     },
     {
       "path": "HANDOFF.md",
@@ -157,7 +157,7 @@
     },
     {
       "path": "PAUSED.md",
-      "sha256": "c32bbe8bafec946ba36f8dbd0500ed7f6def33a9135e52f8a87e489c25a78e26"
+      "sha256": "cb61f99689d2af707a5cf6fcbbd5e2eba307095fa88b3e28ca102fe5fc4928e0"
     },
     {
       "path": "PERFORMANCE.md",
@@ -169,11 +169,15 @@
     },
     {
       "path": "README.md",
-      "sha256": "89a95b7d3c4e222ed303290d07da195a67d650747105bb47a81faefb8ac450fc"
+      "sha256": "683af0bff3d4ee3a782c5d4f6e037cb52a58d52f35be647dc43e402f1e8ad498"
+    },
+    {
+      "path": "RUNTIME-REQUIREMENTS.md",
+      "sha256": "194ddf49f43c70b297b8052cb7065ae8a288834393fb623f61daebfc51ce8ffb"
     },
     {
       "path": "STATE.json",
-      "sha256": "5cbf04ddef338f345458dd48567838282e3bc09a9b4cd711d7d6c8aed2c7b019"
+      "sha256": "8a64e3bf9d61675c036a3123edfe592f17839267458b3fb190b3c9445061b9a2"
     },
     {
       "path": "approved-plan.json",
@@ -185,7 +189,7 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "0c9670b66d821a737a6d0ea5320ef5614e9f2a3b3d8bcc9cece55fe3a4a735a4"
+      "sha256": "9ca717af552c01260ed1ddcf4cdc98f80b314d696ef8a9ab0fa68b00f4d980bf"
     },
     {
       "path": "correctness-test-plan.txt",
@@ -197,7 +201,7 @@
     },
     {
       "path": "decisions.json",
-      "sha256": "f0e56bcf97e7c62a4f395f4294615d6e7faa37e7f6e2bec5bdc3896bb8ff9583"
+      "sha256": "546dce800002f4ef6da9855281c549cd00f33b843f0b62b123e1a94e6b6511dd"
     },
     {
       "path": "feature-register.json",

@@ -17,6 +17,84 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+## Current continuation: approved Spark runtime contract, 2026-11-22
+
+The user explicitly approved official Spark4.2.1 with
+`spark.sql.columnVector.offheap.enabled=false`, preserving ANSI=true, and asked
+to continue full G10 GHA and RC Build & Smoke on native AMD64/ARM64. The earlier
+accidental selection/withdrawal is superseded by this later direct instruction.
+Read RUNTIME-REQUIREMENTS.md and decisions.json#g10_spark421_column_vector_contract.
+The older pending-decision checkpoints below are historical.
+
+The v13 working source includes the independently qualified prefetched-output
+cleanup fix and three regressions, target Spark4.2 test defaults and RC proof of
+actual session defaults. Finish/verify local gates, source/document manifests,
+then commit/push only the feature and bind actual identities externally. All old
+v12 and diagnostic receipts remain historical. Preserve explicit off-heap=true
+and ANSI=false regression cases, full original test/oracle/fuzz coverage and all
+quality gates. Do not merge the separate diagnostic branch or change Spark.
+
+Follow STATE.json#g10.runtime_contract_v13_followup and external LIVE-v13.json.
+Require full exact-SHA GHA/CodeQL/Miri and RC27 on each native architecture,
+verified final JAR downloads and all15 backlog reconciliations. Poll every five
+minutes and diagnose failures promptly. No branch-1.2/main/tag changes, merge,
+stable release, production, external publication or datasci access is allowed.
+
+## Current decision gate: confirmed stock Spark defect, 2026-11-22
+
+The small native AMD64 witness run45074448225 on diagnostic commitcb5154ae7
+completed. Official Spark4.2.1-only reader cleanup leaves200auxiliary offheap
+vectors alive after100nested readers close: NMT Other rises by exactly4,096,000B
+and explicit auxiliary rescue releases exactly that amount. Flat control has zero
+growth. The Spark SQL JAR hash matches the warmed OOM run. No Comet classes,
+SparkContext, SQL or rows are involved; this is not full qualification or a
+measurement of the defect's exact share of the whole OOM.
+
+An explicit user question is pending: keep official Spark4.2.1 with
+`spark.sql.columnVector.offheap.enabled=false` in the target runtime and checks
+(recommended for the current Comet scope), or separately build an identified
+Joom Spark4.2.1 with the upstream SPARK-60098 backport. Neither option is applied.
+Changing the Spark artifact or runtime contract requires the user's decision.
+Do not start another full CI merely to repeat this known resource problem.
+
+All local builds and diagnostic workflows are terminal; no poller remains active.
+The primary feature still has the locally qualified prefetched-output fix/tests
+and migration documentation uncommitted. All15 backlogs remain open; final exact
+source still needs full agreed GHA/RC on both architectures. No merge/tag is
+allowed. Read the external LIVE-v12.json and
+`20261122_stock-spark-ownership-witness/verified-witness.json` under the current
+G10 auxiliary root for actual receipts. The diagnostic branch must not be merged.
+
+## Current active continuation: G10 memory diagnosis, 2026-11-22
+
+This section supersedes the older precommit checkpoints below. Read
+STATE.json#g10.runtime_memory_diagnostic_followup and the external
+`${MIGRATION_AUX_ROOT}/20261121_comet12-g10/LIVE-v12.json` for actual run/commit
+identities and newer events. The feature HEAD is historical d00c8fdd3; the
+prefetched-output lifecycle fix and its three regressions are uncommitted.
+Those local59-case results do not qualify a future final source or solve OOM.
+
+- Diagnostic run45064103471 is terminal: the isolated original big registration
+  passed84 internal comparisons; the original warmed three-suite prefix suffered
+  kernel OOM without timeout. NMT Other grew to about9.47GiB in the test JVM.
+- Independent exact-source review found applicable stock Spark4.2.1 defect
+  SPARK-60098. Main808d79616144 and branch-4.x backportc5808b781be5 fix unowned
+  Parquet auxiliary offheap vectors; neither is in target617618396087.
+  Runtime proof and exact causal contribution remain pending. Do not silently
+  change the Spark artifact/configuration or embed shadow Spark classes in Comet.
+- Complete the small official-Spark-only native AMD64 GHA ownership witness
+  run45074448225 on diagnostic sourcecb5154ae7.
+  The separate diagnostic branch is never an integration candidate. It has no
+  release/acceptance credit and changes no primary runtime/test source.
+- Then discuss the necessary Spark dependency/configuration decision. Preserve
+  every original SQL oracle, input, ANSI guard and native-execution assertion.
+  Do not use extra runner memory or fewer tests to conceal unresolved growth.
+- All15 backlogs remain open. The historical d00 RC/Miri/native/partial CI results
+  are retained; final changed source still needs full agreed exact-SHA GHA and
+  RC27 on native AMD64/ARM64, final JARs and complete backlog reconciliation.
+- No branch-1.2/main/tag change, merge, stable release, external artifact
+  publication, production or datasci access is authorized.
+
 ## Current active continuation: G10 v12 precommit, 2026-11-22
 
 The user resumed G10. The old process group 83567 was manually terminated and its

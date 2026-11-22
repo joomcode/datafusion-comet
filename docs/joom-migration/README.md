@@ -17,6 +17,29 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+## Current continuation: approved Spark runtime contract, 2026-11-22
+
+The user explicitly approved official Spark4.2.1 with
+`spark.sql.columnVector.offheap.enabled=false`, preserving ANSI=true, and asked
+to continue full G10 GHA and RC Build & Smoke on native AMD64/ARM64. The earlier
+accidental selection/withdrawal is superseded by this later direct instruction.
+Read RUNTIME-REQUIREMENTS.md and decisions.json#g10_spark421_column_vector_contract.
+The older pending-decision checkpoints below are historical.
+
+The v13 working source includes the independently qualified prefetched-output
+cleanup fix and three regressions, target Spark4.2 test defaults and RC proof of
+actual session defaults. Finish/verify local gates, source/document manifests,
+then commit/push only the feature and bind actual identities externally. All old
+v12 and diagnostic receipts remain historical. Preserve explicit off-heap=true
+and ANSI=false regression cases, full original test/oracle/fuzz coverage and all
+quality gates. Do not merge the separate diagnostic branch or change Spark.
+
+Follow STATE.json#g10.runtime_contract_v13_followup and external LIVE-v13.json.
+Require full exact-SHA GHA/CodeQL/Miri and RC27 on each native architecture,
+verified final JAR downloads and all15 backlog reconciliations. Poll every five
+minutes and diagnose failures promptly. No branch-1.2/main/tag changes, merge,
+stable release, production, external publication or datasci access is allowed.
+
 > **Current G10 authorization, 2026-11-21:** The user explicitly started `joom/1.2-release-qualification` from accepted G09 `4467d0337`. Restore all temporary CI bypasses and full normal automatic quality/test coverage, close applicable remaining gaps, run full agreed GHA and exact-SHA RC Build & Smoke on native AMD64/ARM64, and download/verify the final JARs. Report before merge or stable tag. Feature publication and workflow control are authorized; branch-1.2/main/tag changes, external artifact publication, production and datasci remain excluded. Earlier G10 holds below are historical. See STATE.json and decisions.json#g10_authorization.
 
 > **Current G09 acceptance, 2026-11-21:** The user approved publishing G09 and integrating it into `branch-1.2`. The two-commit fast-forward and exact local/remote/source/document verification are recorded after commit in `${MIGRATION_AUX_ROOT}/20261121_comet12-g09-integration/completion.json`. All29 qualified non-migration files remain unchanged from `00f5c17bc`. Earlier G09 review holds below are historical. G10, full per-group GHA, main/tag/release changes, production and datasci remain unauthorized; final full agreed CI and exact final-JAR AMD64/ARM64 qualification remain mandatory.
@@ -96,6 +119,7 @@ meaning rather than claiming byte-identical raw output.
 - Apache `branch-1.2` pinned to `93cc6f9d71136bd0d87f77dd901989144d8c09fb`. Do not replace the base with newer upstream without separate discussion.
 - Spark4.2.1 / Scala2.13.18; DataFusion55.2.0, Arrow/Parquet59.3.2; target Delta integration4.4.1. Exact compatibility is checked during implementation.
 - Maximize use of agreed upstream implementations while retaining all missing Joom capabilities. Similar upstream code does not prove equivalence.
+- Official Spark4.2.1 requires `spark.sql.columnVector.offheap.enabled=false` in the target deployment and qualification; see [RUNTIME-REQUIREMENTS.md](RUNTIME-REQUIREMENTS.md). Explicit regression variants remain.
 - ANSI=true. Compare Spark4.2.1 Comet-off/on: results AND mandatory errors; retain mixed SUM/AVG overflow guards. Fix or restrict a known unsafe path before execution. A successful build alone does not prove correctness.
 - Do not touch/include PR5889. Do not automatically add changes after source tag13.
 - Delivery: local Comet/Delta JARs for Linux amd64+arm64 and Spark4.2 image, SHA256, Git SHA, build parameters and test results. Scoped Git permissions for G01/G02/G03 and the completed G01 integration/RC1 tagging are recorded in `decisions.json`; they do not authorize a later stage or a new PR/CI launch. JFrog publication, datasci image changes and production rollout remain excluded.

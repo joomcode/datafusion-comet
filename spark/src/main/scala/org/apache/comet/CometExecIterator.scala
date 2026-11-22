@@ -412,6 +412,13 @@ class CometExecIterator(
           currentBatch = null
         }
       }
+      attempt {
+        // hasNext imports output before next publishes it as currentBatch. A consumer can stop
+        // in between, so release that independent lease as well, even at task completion.
+        val prefetched = nextBatch
+        nextBatch = None
+        prefetched.foreach(_.close())
+      }
       attempt(nativeUtil.close())
       shuffleBlockIterators.values.foreach(it => attempt(it.close()))
       attempt { val _ = killWatch.cancel(false) }

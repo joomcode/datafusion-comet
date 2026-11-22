@@ -717,6 +717,7 @@ jobs:
       # differential matrices on the production Spark profile.
       JAVA_TOOL_OPTIONS: >-
         --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED
+        ${{ contains(matrix.profile.maven_opts, '-Pspark-4.2') && '-Dspark.sql.columnVector.offheap.enabled=false' || '' }}
         ${{ matrix.suite.name == 'exec' && contains(matrix.profile.maven_opts, '-Pspark-4.2') && '-Dcomet.test.aggFuzz.full=true -Dcomet.test.smjFuzz.full=true' || '' }}
     container:
       image: amd64/rust

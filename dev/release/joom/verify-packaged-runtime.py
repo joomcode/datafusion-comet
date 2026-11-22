@@ -41,6 +41,8 @@ sys.dont_write_bytecode = True
 
 CORE = "comet-spark-spark4.2_2.13-1.2.0.jar"
 DELTA = "comet-contrib-delta-spark4.2_2.13-1.2.0.jar"
+REQUIRED_SQL_CONF = {"spark.sql.columnVector.offheap.enabled": "false",
+                     "spark.sql.ansi.enabled": "true"}
 CORE_ORIGIN_CLASSES = (
     "org.apache.comet.NativeBase",
     "org.apache.comet.udf.codegen.CometUdfFunctionPool$",
@@ -168,6 +170,9 @@ public final class RcPackagedSmoke {
     Object sparkModule = sparkPackage.getField("MODULE$").get(null);
     String sparkVersion = (String) sparkPackage.getMethod("SPARK_VERSION").invoke(sparkModule);
     require(sparkVersion.equals("4.2.1"), "Packaged smoke loaded the wrong Spark version");
+    require("false".equals(System.getProperty("spark.sql.columnVector.offheap.enabled"))
+        && "true".equals(System.getProperty("spark.sql.ansi.enabled")),
+        "Packaged smoke requires the approved Spark SQL defaults");
     String arch = System.getProperty("rc.arch");
     String jvmArch = System.getProperty("os.arch");
     require(arch.equals("amd64") ? Set.of("amd64", "x86_64").contains(jvmArch)
@@ -209,6 +214,8 @@ public final class RcPackagedSmoke {
         + ",\"loaded_native_path\":" + quote(extracted.toString())
         + ",\"spark_version\":" + quote(sparkVersion)
         + ",\"java_version\":" + quote(System.getProperty("java.version"))
+        + ",\"required_sql_conf\":{\"spark.sql.columnVector.offheap.enabled\":\"false\","
+        + "\"spark.sql.ansi.enabled\":\"true\"}"
         + ",\"class_origins\":{" + String.join(",", classOrigins) + "}}\n");
   }
 }
@@ -468,6 +475,16 @@ def assert_test_summary(text, expected):
             "packaged smoke suite aborted or did not report")
 
 
+def assert_session_defaults(text):
+    defaults = re.findall(
+        r"Comet test session defaults: columnVectorOffHeap=(true|false), ansi=(true|false)",
+        text)
+    require(defaults and all(value == ("false", "true") for value in defaults),
+            "packaged smoke did not observe the approved Spark session defaults")
+    return [{"spark.sql.columnVector.offheap.enabled": vector,
+             "spark.sql.ansi.enabled": ansi} for vector, ansi in defaults]
+
+
 def validate_class_origins(loaded, jar_hashes, group):
     expected = {name: {"jar_name": CORE, "jar_sha256": jar_hashes[CORE], "resource_count": 1}
                 for name in CORE_ORIGIN_CLASSES}
@@ -520,6 +537,7 @@ def run(args):
             "-Dlog4j.configurationFile=file:" + str(repo / "spark/src/test/resources/log4j2.properties"),
             "-Dspark.test.home=" + str(repo), "-Dspark.testing=true",
             "-Dspark.sql.warehouse.dir=" + str(case_dir / "warehouse"),
+            *["-D" + key + "=" + value for key, value in REQUIRED_SQL_CONF.items()],
             "-Dspark.hadoop.fs.s3a.committer.magic.enabled=false",
             "-Drc.arch=" + args.architecture, "-Drc.core=" + str(out / CORE),
             "-Drc.delta=" + str(out / DELTA), "-Drc.native.sha256=" + native_sha,
@@ -538,14 +556,18 @@ def run(args):
         text = log.read_text(errors="replace")
         require(proc.returncode == 0, label + " packaged smoke JVM failed; inspect " + str(log))
         assert_test_summary(text, expected)
+        session_defaults = assert_session_defaults(text)
         loaded = json.loads(proof.read_text())
         require(loaded["architecture"] == args.architecture
                 and loaded["core_jar_sha256"] == manifest["release_jar_sha256"][CORE]
-                and loaded["loaded_native_sha256"] == native_sha, "loaded library proof mismatch")
+                and loaded["loaded_native_sha256"] == native_sha
+                and loaded.get("required_sql_conf") == REQUIRED_SQL_CONF,
+                "loaded library or required SQL configuration proof mismatch")
         validate_class_origins(loaded, manifest["release_jar_sha256"], label)
         results.append({"group": label, "passed": expected, "failed": 0, "canceled": 0,
                         "ignored": 0, "pending": 0,
                         "bundled_native_and_class_origins": "VERIFIED",
+                        "observed_session_defaults": session_defaults,
                         "loaded_native_proof": loaded})
         print(args.architecture, label, expected, "packaged tests passed", flush=True)
     # Checking again makes the result identify the exact bytes before AND after execution.
@@ -556,6 +578,7 @@ def run(args):
               "release_jar_sha256": manifest["release_jar_sha256"], "native_sha256": native_sha,
               "checksum_manifest_sha256": digest(out / "sha256.txt"),
               "test_support_manifest_sha256": digest(out / "test-support/manifest.json"),
+              "required_sql_conf": REQUIRED_SQL_CONF,
               "cases": results, "total_passed": sum(case["passed"] for case in results)}
     (root / "results.json").write_text(json.dumps(result, indent=2) + "\n")
 

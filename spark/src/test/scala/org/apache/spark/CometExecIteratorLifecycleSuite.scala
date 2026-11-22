@@ -44,7 +44,7 @@ import org.apache.spark.sql.types.{LongType, StructField, StructType}
 import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 import org.apache.spark.util.JsonProtocol
 
-import org.apache.comet.{CometArrowAllocator, CometConf, CometExecIterator, CometExecutorMemoryUsage, CometNativeException, CometShuffleBlockIterator, Native}
+import org.apache.comet.{CometArrowAllocator, CometArrowImportAllocator, CometConf, CometExecIterator, CometExecutorMemoryUsage, CometNativeException, CometShuffleBlockIterator, Native}
 import org.apache.comet.serde.Config.ConfigMap
 import org.apache.comet.serde.OperatorOuterClass
 import org.apache.comet.vector.CometPlainVector
@@ -149,6 +149,150 @@ class CometExecIteratorLifecycleSuite extends CometTestBase {
       survivors == 0,
       s"$survivors of ${managerRefs.size} CometTaskMemoryManagers stayed reachable: " +
         "createPlan failure leaked their task-shared memory pool references")
+  }
+
+  /**
+   * A successful hasNext imports an output batch even when the caller never invokes next.
+   * Imported Arrow buffers are explicit resources: releasing the native plan alone must not leave
+   * the JVM's outstanding output lease alive. Keep the input buffers in a private allocator as a
+   * second, independent ownership check, and cover an already-consumed batch as well.
+   */
+  private def assertPrefetchedOutputReleased(
+      taskAttemptId: Long,
+      consumeFirst: Boolean,
+      completeTask: Boolean,
+      failInputClose: Boolean): Unit = {
+    val nativeLib = new Native()
+    val plansBefore = nativeLib.getMemoryUsage()(3)
+    val importsBefore = CometArrowImportAllocator.getAllocatedMemory
+    val allocator = CometArrowAllocator.newChildAllocator("prefetched-output", 0, Long.MaxValue)
+    try {
+      withTaskContext(taskAttemptId) {
+        val rowsPerBatch = 32
+        val inputs = (0 until 2).map { batchId =>
+          val vector = new BigIntVector("test", allocator)
+          vector.allocateNew(rowsPerBatch)
+          (0 until rowsPerBatch).foreach { row =>
+            vector.set(row, batchId.toLong * 1000L + row.toLong)
+          }
+          vector.setValueCount(rowsPerBatch)
+          new ColumnarBatch(Array[ColumnVector](new CometPlainVector(vector)), rowsPerBatch)
+        }
+        val stream = CometArrowStream.fromColumnarBatchIter(
+          inputs.iterator,
+          StructType(Seq(StructField("test", LongType, nullable = false))),
+          CometArrowStream.NATIVE_TIMEZONE,
+          "prefetched-output")
+        val boom = new java.io.IOException("injected later input cleanup failure")
+        val throwingCloses = new AtomicInteger()
+        val laterCloses = new AtomicInteger()
+        val blocks = if (failInputClose) {
+          Map(
+            0 -> new CometShuffleBlockIterator(new ByteArrayInputStream(Array.emptyByteArray)) {
+              override def close(): Unit = {
+                val _ = throwingCloses.incrementAndGet()
+                throw boom
+              }
+            },
+            1 -> new CometShuffleBlockIterator(new ByteArrayInputStream(Array.emptyByteArray)) {
+              override def close(): Unit = {
+                val _ = laterCloses.incrementAndGet()
+                super.close()
+              }
+            })
+        } else {
+          Map.empty[Int, CometShuffleBlockIterator]
+        }
+        var iter: CometExecIterator = null
+        try {
+          iter = new CometExecIterator(
+            id = CometExec.newIterId,
+            inputObjects = Array[Object](stream),
+            numOutputCols = 1,
+            protobufQueryPlan = limitPlanBytes,
+            nativeMetrics = CometMetricNode(Map.empty),
+            numParts = 1,
+            partitionIndex = 0,
+            shuffleBlockIterators = blocks)
+          assert(iter.hasNext, "expected a real imported Arrow batch")
+          if (consumeFirst) {
+            val first = iter.next()
+            assert(first.numRows() == rowsPerBatch)
+            assert(first.column(0).getLong(0) == 0L)
+            assert(first.column(0).getLong(rowsPerBatch - 1) == rowsPerBatch.toLong - 1L)
+            assert(iter.hasNext, "expected a second imported batch after consuming the first")
+          }
+          assert(
+            CometArrowImportAllocator.getAllocatedMemory > importsBefore,
+            "hasNext did not create an outstanding Arrow import, so cleanup was not exercised")
+
+          if (completeTask) {
+            TaskContext.get().asInstanceOf[TaskContextImpl].markTaskCompleted(None)
+          } else if (failInputClose) {
+            assert(intercept[java.io.IOException](iter.close()) eq boom)
+            assert(throwingCloses.get() == 1)
+            assert(laterCloses.get() == 1, "later cleanup was skipped after the injected failure")
+          } else {
+            iter.close()
+          }
+          assert(!iter.hasNext, "a closed iterator must not expose its prefetched batch")
+          assert(
+            CometArrowImportAllocator.getAllocatedMemory == importsBefore,
+            "closing a plan left a prefetched Arrow output lease alive")
+          // The two input batches belong to this test; the reader may not have reached the
+          // second one. Closing our original references must now release their whole allocator.
+          inputs.foreach(_.close())
+          assert(allocator.getAllocatedMemory == 0L, "output retained its input's Arrow buffers")
+          assert(nativeLib.getMemoryUsage()(3) == plansBefore)
+          iter.close()
+          TaskContext.get().asInstanceOf[TaskContextImpl].markTaskCompleted(None)
+          assert(CometArrowImportAllocator.getAllocatedMemory == importsBefore)
+          if (failInputClose) {
+            assert(throwingCloses.get() == 1)
+            assert(laterCloses.get() == 1)
+          }
+        } finally {
+          if (iter != null) {
+            try iter.close()
+            catch {
+              case failure: java.io.IOException if failInputClose && (failure eq boom) =>
+            }
+            // The old implementation can return the leaked prefetched batch even after close.
+            // Rescue that explicit resource only in negative-control cleanup, after assertions,
+            // so a deliberately failing old-code run does not poison later allocator checks.
+            try iter.next().close()
+            catch { case _: NoSuchElementException => }
+          }
+          inputs.foreach(_.close())
+        }
+      }
+    } finally {
+      allocator.close()
+    }
+  }
+
+  test("prefetched Arrow output is released by close before next") {
+    Seq(false, true).zipWithIndex.foreach { case (consumeFirst, index) =>
+      withClue(s"consumeFirst=$consumeFirst: ") {
+        assertPrefetchedOutputReleased(4950000L + index.toLong, consumeFirst, false, false)
+      }
+    }
+  }
+
+  test("prefetched Arrow output is released by task completion before next") {
+    Seq(false, true).zipWithIndex.foreach { case (consumeFirst, index) =>
+      withClue(s"consumeFirst=$consumeFirst: ") {
+        assertPrefetchedOutputReleased(4950010L + index.toLong, consumeFirst, true, false)
+      }
+    }
+  }
+
+  test("prefetched Arrow output is released when later cleanup throws") {
+    Seq(false, true).zipWithIndex.foreach { case (consumeFirst, index) =>
+      withClue(s"consumeFirst=$consumeFirst: ") {
+        assertPrefetchedOutputReleased(4950020L + index.toLong, consumeFirst, false, true)
+      }
+    }
   }
 
   test("close() is idempotent and still releases the plan when teardown throws") {

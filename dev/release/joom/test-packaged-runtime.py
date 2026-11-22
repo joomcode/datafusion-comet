@@ -35,6 +35,19 @@ spec.loader.exec_module(runtime)
 
 
 class PackagedRuntimeFaults(unittest.TestCase):
+    def test_actual_session_defaults_are_required(self):
+        text = "Comet test session defaults: columnVectorOffHeap=false, ansi=true\n"
+        self.assertEqual(runtime.assert_session_defaults(text * 2),
+                         [runtime.REQUIRED_SQL_CONF, runtime.REQUIRED_SQL_CONF])
+
+    def test_missing_or_incompatible_session_defaults_fail(self):
+        good = "Comet test session defaults: columnVectorOffHeap=false, ansi=true\n"
+        for text in ["", good.replace("OffHeap=false", "OffHeap=true"),
+                     good.replace("ansi=true", "ansi=false"),
+                     good + good.replace("OffHeap=false", "OffHeap=true")]:
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, "session defaults"):
+                runtime.assert_session_defaults(text)
+
     def test_expression_guard_group_selects_both_exact_existing_registrations(self):
         group = [case for case in runtime.CASES if case[0] == "g10-expression-guards"]
         self.assertEqual(group, [(
@@ -402,6 +415,7 @@ public final class package$ {
         native.write_bytes(b"synthetic already-loaded native fixture")
         proof = self.root / "proof.json"
         command = [str(java / "java"), "-Dos.arch=amd64", "-Drc.arch=amd64",
+                   *["-D" + key + "=" + value for key, value in runtime.REQUIRED_SQL_CONF.items()],
                    "-Drc.core=" + str(core), "-Drc.delta=" + str(delta),
                    "-Dfake.native.file=" + str(native), "-Dfake.origin.init.fail=true",
                    "-Drc.native.sha256=" + runtime.digest(native), "-Drc.proof=" + str(proof)]
@@ -419,6 +433,8 @@ public final class package$ {
                                        "g08-delta-serialization")
         for extra in [["-Drc.native.sha256=" + "0" * 64],
                       ["-Drc.core=" + str(runner)], ["-Dfake.tests.fail=true"],
+                      ["-Dspark.sql.columnVector.offheap.enabled=true"],
+                      ["-Dspark.sql.ansi.enabled=false"],
                       ["-Dfake.spark.version=4.2.0"]]:
             proof.unlink()
             result = subprocess.run(command + extra + cp, capture_output=True,

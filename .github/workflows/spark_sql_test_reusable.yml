@@ -25,19 +25,19 @@ on:
   workflow_call:
     inputs:
       spark-short:
-        description: 'Spark minor version, e.g. 3.5'
+        description: "Spark minor version, e.g. 3.5"
         required: true
         type: string
       spark-full:
-        description: 'Spark full version, e.g. 3.5.9'
+        description: "Spark full version, e.g. 3.5.9"
         required: true
         type: string
       java:
-        description: 'JDK major version, e.g. 17'
+        description: "JDK major version, e.g. 17"
         required: true
         type: number
       collect-fallback-logs:
-        description: 'Whether to collect Comet fallback reasons from spark sql unit test logs'
+        description: "Whether to collect Comet fallback reasons from spark sql unit test logs"
         required: false
         default: false
         type: boolean
@@ -48,9 +48,9 @@ on:
         # tier without a second call (and a second 40-minute build) for the
         # queue: one call, and the rows the tier does not want are left out
         # of the matrix by dev/ci/spark-sql-modules.py.
-        description: 'Which test modules to run: all, core (catalyst + sql_core) or hive (sql_hive)'
+        description: "Which test modules to run: all, core (catalyst + sql_core) or hive (sql_hive)"
         required: false
-        default: 'all'
+        default: "all"
         type: string
 
 env:
@@ -60,9 +60,11 @@ env:
   # x86_64-unknown-linux-gnu, and rust-lld cannot resolve -ljvm against the
   # Zulu JDK layout installed by setup-java. Keep bfd for all cargo invocations.
   RUSTFLAGS: "-Clink-arg=-fuse-ld=bfd"
+  # Match the approved Spark 4.2.1 deployment contract in forked test JVMs too.
+  # Test-local explicit off-heap vector cases remain unchanged.
+  JAVA_TOOL_OPTIONS: ${{ inputs.spark-short == '4.2' && '-Dspark.sql.columnVector.offheap.enabled=false' || '' }}
 
 jobs:
-
   # Build the native library AND pre-compile Spark sources + Test classes in a
   # single runner, then publish two artifacts the matrix consumes:
   #   - native-lib-spark-<full>-jdk<N>:      libcomet.so (~50 MB)

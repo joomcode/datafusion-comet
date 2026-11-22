@@ -24,9 +24,7 @@
       "path": "${MIGRATION_AUX_ROOT}/20261117_comet12-session-setup",
       "ownership": "TASK_CREATED",
       "shared": false,
-      "created_files": [
-        "resource-baseline-command-results.json"
-      ]
+      "created_files": ["resource-baseline-command-results.json"]
     },
     {
       "type": "g01_auxiliary_outputs",
@@ -148,10 +146,7 @@
       "shared": false,
       "contains": "Pre-G02 documentation archive, source/command manifests, native/JVM build and regression logs, failed and passing report snapshots, independent reviews and final completion receipt.",
       "preserve_until": "G02 review and final migration qualification; no automatic shared-cache deletion.",
-      "build_outputs_reused": [
-        "native/target",
-        "spark/target"
-      ],
+      "build_outputs_reused": ["native/target", "spark/target"],
       "new_docker_images": false,
       "new_release_artifacts": false
     },
@@ -233,10 +228,7 @@
     "${UPSTREAM_SPARK_ROOT}",
     "${JOOM_SPARK_ROOT}"
   ],
-  "user_installed_tools_preserve": [
-    "Rust/Rustup via Homebrew",
-    "SDKMAN JDKs"
-  ],
+  "user_installed_tools_preserve": ["Rust/Rustup via Homebrew", "SDKMAN JDKs"],
   "historical_auxiliary_directories_review_before_cleanup": [
     "${MIGRATION_AUX_ROOT}/20261115_comet-upstream-audit",
     "${MIGRATION_AUX_ROOT}/20261115_comet-upstream-branches-pr-audit",
@@ -845,10 +837,7 @@
       "target/criterion": 372,
       "auxiliary_directory": 427884
     },
-    "criterion_outputs": [
-      "native/target/criterion",
-      "target/criterion"
-    ],
+    "criterion_outputs": ["native/target/criterion", "target/criterion"],
     "attribution": "Entire reused directory sizes, not G03-only growth. Baseline dylib copy is task-created; shared cache/toolchain/release artifacts remain preserved."
   },
   "g03_integration_resources": {
@@ -867,10 +856,7 @@
       "common/target",
       "target/criterion"
     ],
-    "criterion_outputs": [
-      "native/target/criterion",
-      "target/criterion"
-    ],
+    "criterion_outputs": ["native/target/criterion", "target/criterion"],
     "measured_sizes_kib": {
       "auxiliary_directory": 3412,
       "native/target": 69195412,
@@ -1024,10 +1010,7 @@
       "toolchain": "nightly-2026-11-21-aarch64-apple-darwin",
       "path": "${HOME}/.rustup/toolchains/nightly-2026-11-21-aarch64-apple-darwin",
       "size_kib": 532552,
-      "components": [
-        "miri",
-        "rust-src"
-      ],
+      "components": ["miri", "rust-src"],
       "install_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/install-pinned-miri.json",
       "default_toolchain": "stable unchanged",
       "sysroot": "Setupblocked;noactuallocalMiritests;escalationuserrejected",
@@ -1183,5 +1166,42 @@
       "new_tools_or_dependencies": "None in this correction; existing standard caches and build targets reused.",
       "cleanup": "No deletion performed or authorized. Refresh actual final resource inventory after new artifact delivery."
     }
+  },
+  "g10_runtime_memory_diagnostic_resources": {
+    "auxiliary_root": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10",
+    "worktree": "target/joom-runtime-memory-diagnostic",
+    "branch": "joom/1.2-runtime-memory-diagnostic",
+    "status": "Preserve diagnostics and source provenance until final acceptance. Remove the linked worktree correctly before any enclosing target cleanup. No deletion is currently authorized.",
+    "downloaded_archives": [
+      {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_memory-diagnostic-v2-warmed/diagnostic-artifact-14774030476.zip",
+        "bytes": 32007240,
+        "sha256": "88bb7ca9547334729adc7d43c73e2405fe2fb345adb3b544def1754a0e105906"
+      },
+      {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_native-ci-binary-v12/native-ci-artifact-14764008696.zip",
+        "bytes": 73968488,
+        "sha256": "4f381cce4cfeb8df26748ae949038176eeba53a9deabda6befc3f4a1b50d212b"
+      },
+      {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_native-profiler-planning/async-profiler-4.6-linux-x64.tar.gz",
+        "bytes": 446987,
+        "sha256": "1e79ed54d8952889a2e74f993d22ee925e3322460d4f37a2ed95bfb88585da36",
+        "status": "Official publisher digest verified; planning alternative only, not extracted/executed."
+      }
+    ],
+    "cleanup_draft": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_cleanup-migration-addendum/CLEANUP-ADDENDUM-DRAFT.md",
+    "shared_caches_and_user_sources_preserve": true
+  },
+  "g10_runtime_contract_v13_resources": {
+    "auxiliary_root": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10",
+    "paths": [
+      "20261122_runtime-contract-v13",
+      "20261122_qualification-v13-preparation"
+    ],
+    "contents": "Pre-edit source/document backups, explicit authorization, local logs/report archives, unarmed qualification helpers and later exact-source run/receipt records. Preserve until final acceptance.",
+    "release_output": "Final native AMD64/ARM64 artifacts go to target/joom-release/gha-<actual-run-id>; actual path/size/digest recorded after download.",
+    "deletion_performed": false,
+    "new_shared_cache_locations": []
   }
 }

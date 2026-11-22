@@ -55,7 +55,7 @@ class ReceiptBoundary(unittest.TestCase):
             jars = {name: rc.digest(self.out / name) for name in [rc.CORE, rc.DELTA]}
             proof = {"architecture": arch, "core_jar_sha256": jars[rc.CORE],
                      "loaded_native_sha256": rc.digest(native), "java_version": "17.0.19",
-                     "spark_version": "4.2.1"}
+                     "spark_version": "4.2.1", "required_sql_conf": dict(rc.REQUIRED_SQL_CONF)}
             cases = []
             for group, count in rc.COUNTS.items():
                 origins = {name: {"jar_name": rc.CORE, "jar_sha256": jars[rc.CORE],
@@ -68,8 +68,10 @@ class ReceiptBoundary(unittest.TestCase):
                 cases.append({"group": group, "passed": count, "failed": 0,
                               "canceled": 0, "ignored": 0, "pending": 0,
                               "bundled_native_and_class_origins": "VERIFIED",
+                              "observed_session_defaults": [dict(rc.REQUIRED_SQL_CONF)],
                               "loaded_native_proof": loaded})
             result = {"architecture": arch, "commit": COMMIT, "cargo_lock_sha256": LOCK,
+                      "required_sql_conf": dict(rc.REQUIRED_SQL_CONF),
                       "release_jar_sha256": jars, "native_sha256": rc.digest(native),
                       "checksum_manifest_sha256": rc.digest(self.out / "sha256.txt"),
                       "test_support_manifest_sha256": rc.digest(self.out / "test-support/manifest.json"),
@@ -132,6 +134,31 @@ class ReceiptBoundary(unittest.TestCase):
                 self.validate()
             result["cases"][0]["loaded_native_proof"][field] = old
 
+    def test_missing_or_incompatible_session_defaults_cannot_qualify_release(self):
+        case = self.case("g09-cost")
+        original = copy.deepcopy(case["observed_session_defaults"])
+        for defaults in [None, [],
+                         [dict(rc.REQUIRED_SQL_CONF, **{"spark.sql.columnVector.offheap.enabled": "true"})],
+                         [dict(rc.REQUIRED_SQL_CONF, **{"spark.sql.ansi.enabled": "false"})]]:
+            case["observed_session_defaults"] = defaults
+            self.rewrite("amd64")
+            with self.subTest(defaults=defaults), self.assertRaisesRegex(ValueError, "session defaults"):
+                self.validate()
+        case["observed_session_defaults"] = original
+
+    def test_declared_contract_cannot_replace_observed_session_defaults(self):
+        case = self.case("g09-cost")
+        case["loaded_native_proof"].pop("required_sql_conf")
+        self.rewrite("amd64")
+        with self.assertRaisesRegex(ValueError, "session defaults"):
+            self.validate()
+
+    def test_receipt_requires_the_production_sql_contract(self):
+        self.results["amd64"][1].pop("required_sql_conf")
+        self.rewrite("amd64")
+        with self.assertRaisesRegex(ValueError, "required Spark SQL configuration"):
+            self.validate()
+
     def test_exporter_contract_matches_runtime_runner(self):
         runtime = rc.module("verify-packaged-runtime")
         self.assertEqual(rc.COUNTS, {label: count for label, _, _, count in runtime.CASES})
@@ -140,6 +167,7 @@ class ReceiptBoundary(unittest.TestCase):
         self.assertEqual(set(rc.CORE_ORIGIN_CLASSES), set(runtime.CORE_ORIGIN_CLASSES))
         self.assertEqual(set(rc.DELTA_ORIGIN_CLASSES), set(runtime.DELTA_ORIGIN_CLASSES))
         self.assertEqual(rc.DELTA_GROUPS, set(runtime.DELTA_GROUPS))
+        self.assertEqual(rc.REQUIRED_SQL_CONF, runtime.REQUIRED_SQL_CONF)
         self.assertEqual(len(runtime.CORE_ORIGIN_CLASSES), 24)
         self.assertEqual(len(runtime.DELTA_ORIGIN_CLASSES), 2)
 

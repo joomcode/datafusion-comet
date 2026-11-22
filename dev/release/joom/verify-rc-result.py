@@ -30,6 +30,8 @@ import sys
 sys.dont_write_bytecode = True
 CORE = "comet-spark-spark4.2_2.13-1.2.0.jar"
 DELTA = "comet-contrib-delta-spark4.2_2.13-1.2.0.jar"
+REQUIRED_SQL_CONF = {"spark.sql.columnVector.offheap.enabled": "false",
+                     "spark.sql.ansi.enabled": "true"}
 COUNTS = {"delta": 4, "dpp": 1, "reload": 1, "ansi": 6,
           "g08-udf": 1, "g08-delta-serialization": 2, "g09-cost": 4,
           "g09-wide-sort": 1, "g09-wide-shuffle": 1, "g09-range": 1,
@@ -124,6 +126,11 @@ def validate_case_proof(case, arch, jar_hashes, native_hash):
             "smoke group failed or skipped cases: " + arch + "/" + group)
     proof = case.get("loaded_native_proof")
     require(isinstance(proof, dict), "missing loaded-native proof: " + arch)
+    defaults = case.get("observed_session_defaults")
+    require(isinstance(defaults, list) and defaults
+            and all(value == REQUIRED_SQL_CONF for value in defaults)
+            and proof.get("required_sql_conf") == REQUIRED_SQL_CONF,
+            "missing or inconsistent Spark session defaults: " + arch + "/" + group)
     require(proof["architecture"] == arch
             and proof["core_jar_sha256"] == jar_hashes[CORE]
             and proof["loaded_native_sha256"] == native_hash
@@ -147,6 +154,8 @@ def validate_receipts(out, reports, commit, lock):
                 "duplicate or unexpected smoke architecture")
         require(result["commit"] == commit and result["cargo_lock_sha256"] == lock,
                 "smoke source/lockfile mismatch: " + arch)
+        require(result.get("required_sql_conf") == REQUIRED_SQL_CONF,
+                "smoke required Spark SQL configuration mismatch: " + arch)
         require(result["release_jar_sha256"] == jar_hashes,
                 "smoke tested different final JARs: " + arch)
         require(result["checksum_manifest_sha256"] == checksum_hash
@@ -192,6 +201,7 @@ def export(out, reports, commit, lock, destination):
                       "G07 default Kryo, G08 UDF/serialization and G09 engine/boundary paths; "
                       "full Comet CI and production GCP qualification are separate",
              "packaged_smoke_groups": COUNTS,
+             "required_sql_conf": REQUIRED_SQL_CONF,
              "release_jar_sha256": {name: digest(destination / name) for name in [CORE, DELTA]},
              "checksum_manifest_sha256": digest(destination / "sha256.txt"),
              "test_support_manifest_sha256": digest(out / "test-support/manifest.json"),
