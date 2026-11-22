@@ -1,6 +1,6 @@
 {
-  "updated_on": "2026-11-21",
-  "stage": "G10_PREPARING_FULL_QUALIFICATION",
+  "updated_on": "2026-11-22",
+  "stage": "G10_V9_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
   "baseline": "resource-baseline.json",
   "no_dependency_downloads_or_release_outputs_yet": false,
   "entries": [
@@ -1128,6 +1128,23 @@
         "interpretation": "Actual task-tree occupancy, not download-only growth. Existing cumulative Spark log copies are preserved; future captures use only the new log range. Shared cache/build totals are separate and are not claimed as migration-only growth.",
         "deletion_authorized": false
       }
+    },
+    "profile_expression_correctness_followup": {
+      "auxiliary_directories": [
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_expression-contracts",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_expression-ignore-audit",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_timestamp-cast-dispatch",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_native-aqe-structure",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_final-independent-review",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_rc27-expression-guards",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_backlog-v9",
+        "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_final-docs-v9"
+      ],
+      "contains": "Every failed and successful profile/lint receipt, original resource/source copies, exact244-record preservation, NULL/overflow/dispatch proofs, RC27 controls and immutable source review. Preserve all historical artifacts and receipts.",
+      "historical_v8_artifacts": "target/joom-release/gha-44963792674 and its external archive/receipts: historical source4e0 only, not corrected final deliverables.",
+      "new_final_artifacts": "PENDING exact-SHA RC27 and independently verified download; actual directory/sizes/checksums are post-commit facts.",
+      "builds_and_caches": "Existing project targets and standard Maven/Cargo/Scala caches reused. The authorized semantic3.5 retry downloaded standard build plugins/dependencies into shared Maven cache; do not delete shared caches or claim their full size as task-only growth.",
+      "preservation": "No automatic deletion; keep user checkouts, all receipts and accepted final JARs until an explicit cleanup decision."
     }
   }
 }

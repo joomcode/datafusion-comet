@@ -55,12 +55,28 @@ case object SparkAnswerOnly extends QueryAssertionMode
 case class WithTolerance(tol: Double) extends QueryAssertionMode
 case class ExpectFallback(reason: String) extends QueryAssertionMode
 
-/** Checks the exact Spark operator boundary while retaining native file scans. */
+/**
+ * Checks the exact Spark operator boundary while retaining native file scans. A gate such as
+ * `spark=3.4,3.5` admits fallback only on those profiles; others stay native. Additions such as
+ * `spark=3.4:Sort|3.5:AQEShuffleRead` are required only on their named profile, while the base
+ * boundary applies everywhere. The optional fourth `else_native=...` field is valid only for a
+ * profile gate and retains native-expression checks elsewhere.
+ */
 case class ExpectFallbackPlan(
     reason: String,
     operators: Seq[String],
-    ansiDisabledOnly: Boolean = false)
-    extends QueryAssertionMode
+    ansiDisabledOnly: Boolean = false,
+    sparkProfiles: Seq[String] = Seq.empty,
+    additionalOperatorsBySpark: Map[String, Seq[String]] = Map.empty,
+    elseNative: Seq[String] = Seq.empty)
+    extends QueryAssertionMode {
+  def appliesToSparkProfile(profile: String): Boolean =
+    sparkProfiles.isEmpty || sparkProfiles.contains(
+      profile) || additionalOperatorsBySpark.nonEmpty
+
+  def operatorsForSparkProfile(profile: String): Seq[String] =
+    operators ++ additionalOperatorsBySpark.getOrElse(profile, Seq.empty)
+}
 case class Ignore(reason: String) extends QueryAssertionMode
 
 /**
@@ -250,8 +266,11 @@ object SqlFileTestParser {
     Set(
       "Project",
       "Filter",
+      "Sort",
       "Window",
       "HashAggregate",
+      "BroadcastHashJoin",
+      "BroadcastExchange",
       "Exchange",
       "AQEShuffleRead",
       "Expand",
@@ -271,17 +290,73 @@ object SqlFileTestParser {
       case FallbackPlanPattern(arguments) =>
         val parts = arguments.split(";", -1).map(_.trim).toSeq
         require(
-          parts.size >= 2 && parts.size <= 3 && parts.head.nonEmpty,
+          parts.size >= 2 && parts.size <= 4 && parts.head.nonEmpty,
           s"line $line: expect_fallback_plan requires a reason and explicit operators")
         val operators = parts(1).split(",", -1).map(_.trim).toSeq
         require(
           operators.nonEmpty && operators.forall(fallbackPlanOperators) &&
             operators.distinct.size == operators.size,
           s"line $line: invalid or duplicate expect_fallback_plan operators: ${parts(1)}")
-        require(
-          parts.size == 2 || parts(2) == "ansi=false",
-          s"line $line: only the condition ansi=false is supported by expect_fallback_plan")
-        ExpectFallbackPlan(parts.head, operators, ansiDisabledOnly = parts.size == 3)
+        val elseNative = parts
+          .lift(3)
+          .map { option =>
+            require(
+              parts(2).startsWith("spark=") && !parts(2).contains(":") &&
+                !parts(2).contains("|") && option.startsWith("else_native="),
+              s"line $line: else_native requires a profile-only Spark gate")
+            val names = option.stripPrefix("else_native=").split(",", -1).map(_.trim).toSeq
+            require(
+              names.nonEmpty && names.forall(_.matches("[a-z][a-z0-9_]*")) &&
+                names.distinct.size == names.size,
+              s"line $line: invalid or duplicate else_native expression names: $option")
+            names
+          }
+          .getOrElse(Seq.empty)
+        parts.lift(2) match {
+          case None => ExpectFallbackPlan(parts.head, operators)
+          case Some("ansi=false") =>
+            ExpectFallbackPlan(parts.head, operators, ansiDisabledOnly = true)
+          case Some(option) if option.startsWith("spark=") =>
+            val specification = option.stripPrefix("spark=")
+            val knownProfiles = Set("3.4", "3.5")
+            if (specification.contains(":")) {
+              val entries = specification.split("\\|", -1).map(_.trim).toSeq
+              val additions = entries.map { entry =>
+                val pair = entry.split(":", -1).map(_.trim).toSeq
+                require(
+                  pair.size == 2 && knownProfiles(pair.head),
+                  s"line $line: unsupported profile-specific fallback operators: $entry")
+                val extra = pair(1).split(",", -1).map(_.trim).toSeq
+                require(
+                  extra.nonEmpty && extra.forall(fallbackPlanOperators) &&
+                    extra.distinct.size == extra.size &&
+                    extra.forall(op => !operators.contains(op)),
+                  s"line $line: invalid or duplicate profile-specific fallback operators: $entry")
+                pair.head -> extra
+              }
+              require(
+                additions.map(_._1).distinct.size == additions.size,
+                s"line $line: duplicate expect_fallback_plan Spark profiles: $option")
+              ExpectFallbackPlan(
+                parts.head,
+                operators,
+                additionalOperatorsBySpark = additions.toMap)
+            } else {
+              val profiles = specification.split(",", -1).map(_.trim).toSeq
+              require(
+                profiles.nonEmpty && profiles.forall(knownProfiles) &&
+                  profiles.distinct.size == profiles.size,
+                s"line $line: unsupported or duplicate expect_fallback_plan Spark profiles: $option")
+              ExpectFallbackPlan(
+                parts.head,
+                operators,
+                sparkProfiles = profiles,
+                elseNative = elseNative)
+            }
+          case Some(option) =>
+            throw new IllegalArgumentException(
+              s"line $line: unsupported expect_fallback_plan condition: $option")
+        }
       case InvalidFallbackPlanPattern() =>
         throw new IllegalArgumentException(
           s"line $line: malformed expect_fallback_plan directive")

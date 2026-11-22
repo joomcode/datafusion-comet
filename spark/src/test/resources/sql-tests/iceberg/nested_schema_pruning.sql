@@ -70,7 +70,7 @@ SELECT id, items.x FROM test_cat.db.nested_pruning ORDER BY id
 query
 SELECT id, m['k'].v FROM test_cat.db.nested_pruning ORDER BY id
 
-query
+query expect_fallback_plan(Filter shared-expression evaluation order requires Spark; Project, Filter; spark=3.4:Sort)
 SELECT id FROM test_cat.db.nested_pruning WHERE s.inner.b > 100 ORDER BY id
 
 -- The whole struct, so nothing is pruned.

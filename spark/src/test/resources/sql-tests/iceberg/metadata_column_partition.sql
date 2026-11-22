@@ -495,7 +495,7 @@ SELECT id, _partition.dept FROM test_cat.db.part_nulls ORDER BY id
 query
 SELECT id, _partition FROM test_cat.db.part_nulls WHERE _partition.dept IS NULL ORDER BY id
 
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Filter; spark=3.4:Sort)
 SELECT id, _partition FROM test_cat.db.part_nulls WHERE _partition.dept IS NOT NULL ORDER BY id
 
 statement
@@ -514,7 +514,7 @@ CREATE TABLE test_cat.db.part_where (id INT, dept STRING, value DOUBLE) USING ic
 statement
 INSERT INTO test_cat.db.part_where VALUES (1, 'eng', 10.0), (2, 'sales', 20.0), (3, 'eng', 30.0), (4, 'hr', 40.0)
 
-query
+query expect_fallback_plan(Filter shared-expression evaluation order requires Spark; Project, Filter; spark=3.4:Sort)
 SELECT id, value FROM test_cat.db.part_where WHERE _partition.dept = 'eng' ORDER BY id
 
 query
@@ -568,7 +568,7 @@ INSERT INTO test_cat.db.part_join_left VALUES (1, 'eng', 10), (2, 'sales', 20), 
 statement
 INSERT INTO test_cat.db.part_join_right VALUES (100, 'eng', 500), (200, 'sales', 300)
 
-query
+query expect_fallback_plan(Filter inferred null-check evaluation order requires Spark; Project, BroadcastHashJoin, BroadcastExchange, Filter; spark=3.4:Sort)
 SELECT l.id, l.value, r.budget FROM test_cat.db.part_join_left l JOIN test_cat.db.part_join_right r ON l._partition.dept = r._partition.dept ORDER BY l.id
 
 statement
@@ -697,7 +697,7 @@ SELECT id, _partition FROM test_cat.db.part_date_identity ORDER BY id
 query
 SELECT id, _partition.event_date FROM test_cat.db.part_date_identity ORDER BY id
 
-query
+query expect_fallback_plan(Filter shared-expression evaluation order requires Spark; Project, Filter; spark=3.4:Sort)
 SELECT id, data FROM test_cat.db.part_date_identity WHERE _partition.event_date = DATE '2023-01-15' ORDER BY id
 
 statement
@@ -722,10 +722,10 @@ SELECT id, _partition FROM test_cat.db.part_special_chars ORDER BY id
 query
 SELECT id, _partition.tag FROM test_cat.db.part_special_chars ORDER BY id
 
-query
+query expect_fallback_plan(Filter shared-expression evaluation order requires Spark; Project, Filter; spark=3.4:Sort)
 SELECT id FROM test_cat.db.part_special_chars WHERE _partition.tag = 'hello world' ORDER BY id
 
-query
+query expect_fallback_plan(Filter shared-expression evaluation order requires Spark; Project, Filter; spark=3.4:Sort)
 SELECT id FROM test_cat.db.part_special_chars WHERE _partition.tag = '' ORDER BY id
 
 statement
@@ -819,7 +819,7 @@ SELECT id, _partition.event_date_year, _partition.region FROM test_cat.db.part_m
 query
 SELECT _partition.event_date_year, COUNT(*) as cnt FROM test_cat.db.part_mixed GROUP BY _partition.event_date_year ORDER BY event_date_year
 
-query
+query expect_fallback_plan(Filter shared-expression evaluation order requires Spark; Project, Filter; spark=3.4:Sort)
 SELECT id, data FROM test_cat.db.part_mixed WHERE _partition.region = 'US' ORDER BY id
 
 statement

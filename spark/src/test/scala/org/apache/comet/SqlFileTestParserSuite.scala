@@ -285,15 +285,87 @@ class SqlFileTestParserSuite extends AnyFunSuite {
       ExpectFallbackPlan(
         "Conditional ordering",
         Seq("HashAggregate", "Exchange", "AQEShuffleRead")))
+    val profileOnly =
+      ExpectFallbackPlan("Profile ordering", Seq("Project"), sparkProfiles = Seq("3.4"))
+    assert(
+      modeOf("query expect_fallback_plan(Profile ordering; Project; spark=3.4)") ===
+        profileOnly)
+    assert(modeOf(
+      "query expect_fallback_plan(Profile ordering; Project; spark=3.4; else_native=date_trunc)") ===
+      profileOnly.copy(elseNative = Seq("date_trunc")))
+    assert(profileOnly.appliesToSparkProfile("3.4"))
+    assert(!profileOnly.appliesToSparkProfile("4.1"))
+    val profileSort = ExpectFallbackPlan(
+      "Profile ordering",
+      Seq("Project", "Filter"),
+      additionalOperatorsBySpark = Map("3.4" -> Seq("Sort")))
+    assert(
+      modeOf("query expect_fallback_plan(Profile ordering; Project, Filter; spark=3.4:Sort)") ===
+        profileSort)
+    assert(profileSort.appliesToSparkProfile("3.4"))
+    assert(profileSort.appliesToSparkProfile("4.1"))
+    assert(profileSort.operatorsForSparkProfile("3.4") == Seq("Project", "Filter", "Sort"))
+    assert(profileSort.operatorsForSparkProfile("4.1") == Seq("Project", "Filter"))
+    assert(
+      modeOf(
+        "query expect_fallback_plan(Filter ordering; BroadcastHashJoin, BroadcastExchange; spark=3.4)") ===
+        ExpectFallbackPlan(
+          "Filter ordering",
+          Seq("BroadcastHashJoin", "BroadcastExchange"),
+          sparkProfiles = Seq("3.4")))
+    val oldProfiles = profileOnly.copy(sparkProfiles = Seq("3.4", "3.5"))
+    assert(
+      modeOf(
+        "query expect_fallback_plan(Profile ordering; Project; spark=3.4,3.5; else_native=date_trunc)") ===
+        oldProfiles.copy(elseNative = Seq("date_trunc")))
+    assert(oldProfiles.appliesToSparkProfile("3.4"))
+    assert(oldProfiles.appliesToSparkProfile("3.5"))
+    assert(!oldProfiles.appliesToSparkProfile("4.0"))
+    val oldOperators = profileSort.copy(additionalOperatorsBySpark =
+      Map("3.4" -> Seq("Sort"), "3.5" -> Seq("AQEShuffleRead")))
+    assert(modeOf(
+      "query expect_fallback_plan(Profile ordering; Project, Filter; spark=3.4:Sort|3.5:AQEShuffleRead)") === oldOperators)
+    assert(oldOperators.operatorsForSparkProfile("3.4") == Seq("Project", "Filter", "Sort"))
+    assert(
+      oldOperators.operatorsForSparkProfile("3.5") == Seq("Project", "Filter", "AQEShuffleRead"))
+    assert(oldOperators.operatorsForSparkProfile("4.0") == Seq("Project", "Filter"))
     Seq(
       "query expect_fallback_plan()",
       "query expect_fallback_plan(; Project)",
       "query expect_fallback_plan(reason;)",
       "query expect_fallback_plan(reason; Project,)",
       "query expect_fallback_plan(reason; FileSourceScan)",
+      "query expect_fallback_plan(reason; Broadcast)",
+      "query expect_fallback_plan(reason; BroadcastHashJoinExec)",
       "query expect_fallback_plan(reason; Project, Project)",
       "query expect_fallback_plan(reason; Project; ansi=true)",
       "query expect_fallback_plan(reason; Project; native_scan=false)",
+      "query expect_fallback_plan(reason; Project; spark=9.9)",
+      "query expect_fallback_plan(reason; Project; spark=3.4,3.4)",
+      "query expect_fallback_plan(reason; Project; spark=3.4,)",
+      "query expect_fallback_plan(reason; Project; spark=3.4,9.9)",
+      "query expect_fallback_plan(reason; Project; spark=3.4|3.5)",
+      "query expect_fallback_plan(reason; Project; spark=3.4:Sort|3.4:AQEShuffleRead)",
+      "query expect_fallback_plan(reason; Project; spark=3.4:Sort|3.5)",
+      "query expect_fallback_plan(reason; Project; spark=3.4:Sort|)",
+      "query expect_fallback_plan(reason; Project; spark=3.4,3.5:Sort)",
+      "query expect_fallback_plan(reason; Project; spark=3.4:Sort|3.5:Project)",
+      "query expect_fallback_plan(reason; Project; spark=)",
+      "query expect_fallback_plan(reason; Project; spark=3.4:)",
+      "query expect_fallback_plan(reason; Project; spark=3.4:Sort,)",
+      "query expect_fallback_plan(reason; Project; spark=3.4:Sort,Sort)",
+      "query expect_fallback_plan(reason; Project; spark=3.4:Project)",
+      "query expect_fallback_plan(reason; Project; spark=3.4:FileSourceScan)",
+      "query expect_fallback_plan(reason; Project; spark=3.4:Sort:Filter)",
+      "query expect_fallback_plan(reason; Project; spark=3.4; ansi=false)",
+      "query expect_fallback_plan(reason; Project; spark=3.4; else_native=)",
+      "query expect_fallback_plan(reason; Project; spark=3.4; else_native=abs,)",
+      "query expect_fallback_plan(reason; Project; spark=3.4; else_native=abs,abs)",
+      "query expect_fallback_plan(reason; Project; spark=3.4; else_native=abs(...))",
+      "query expect_fallback_plan(reason; Project; spark=3.4; else_native=ABS)",
+      "query expect_fallback_plan(reason; Project; spark=3.4:Sort; else_native=abs)",
+      "query expect_fallback_plan(reason; Project; ansi=false; else_native=abs)",
+      "query expect_fallback_plan(reason; Project; spark=3.4; else_native=abs; ignored)",
       "query expect_fallback_plan(reason; Project; ansi=false; ignored)",
       "query expect_fallback_plan broken").foreach { directive =>
       assert(intercept[IllegalArgumentException](modeOf(directive)).getMessage.contains("line 1"))

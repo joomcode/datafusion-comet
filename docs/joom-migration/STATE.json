@@ -1,12 +1,12 @@
 {
-  "updated_on": "2026-11-21",
-  "phase": "G10_SHUFFLE_UDF_KEY_CORRECTNESS_FOLLOWUP_FINAL_QUALIFICATION_PENDING",
+  "updated_on": "2026-11-22",
+  "phase": "G10_V9_PAUSED_AT_USER_REQUEST_BEFORE_FEATURE_PUSH_AND_FULL_QUALIFICATION",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
   "observed_code_head_before_documentation_commit": "2b8f80b3f253559bc999f73769b05c88ebcd5fc2",
   "implementation_started": true,
-  "active_writer": "Main coordinator; helpers prepare isolated patches and read-only reviews",
+  "active_writer": "None: paused at explicit user request for laptop shutdown.",
   "worker_threads_created": [
     {
       "group": "G01",
@@ -389,7 +389,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Freeze the complete UDF shuffle-key correction after actual final local gates. Run all four same-SHA workflows, RC25 on native AMD64/ARM64, download and verify final JARs, and resolve all 15 backlog dispositions. Report before merge or stable tag; production remains unauthorized.",
+  "next_step": "Resume only after the user returns: read PAUSED.md current Nov22 checkpoint, verify candidate-v9.json and pause-v9.json against clean local HEAD, source manifest and all document hashes; verify sandbox access; then push ONLY the feature branch and source-arm/dispatch the four exact-SHA workflows. No v9 push or dispatch occurred before this pause. Full CI/Actions CodeQL/Miri/RC27, actual core98/window88/additional58/original5 and15-backlog/artifact qualification remain pending. Report before merge or stable tag; production and datasci remain unauthorized.",
   "qualification": "G09 accepted:230 native and495 unique JVM/SQL/Delta cases locally passed. Qualified source/test/CI bytes are preserved; final full agreed CI/Linux/release/exact-JAR qualification remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -589,15 +589,18 @@
     }
   ],
   "pause": {
-    "status": "HISTORICAL_PAUSES_RESUMED_G01_FINALIZATION_AUTHORIZED",
-    "requested_on": "2026-11-17T05:06:02.577827+00:00",
-    "reason": "User requested restart checkpoint and interruption",
+    "status": "PAUSED_AT_EXPLICIT_USER_REQUEST",
+    "requested_on": "2026-11-22T02:13:40.624994+00:00",
+    "reason": "User will shut down the laptop; stop before publishing the replacement candidate or starting any next full GHA. Continue tomorrow from this checkpoint.",
     "all_task_builds_stopped": true,
-    "resume_requires_explicit_user_instruction": false,
-    "stopped_release_container": "de92fed928af",
-    "release_exit_code": 137,
-    "release_exit_explanation": "Deliberate docker stop for user pause; not an observed OOM or compiler failure.",
-    "resumed_on": "2026-11-17T13:34:17.545289+00:00"
+    "active_sessions": [],
+    "resume_requires_explicit_user_instruction": true,
+    "feature_push_performed": false,
+    "v9_workflows_dispatched": false,
+    "helpers_armed": false,
+    "checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/pause-v9.json",
+    "local_candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v9.json",
+    "receipt_status": "Created and verified externally after the local commit; no future commit SHA is fabricated in committed files."
   },
   "sandbox_access_verification": {
     "checked_at": "2026-11-17T13:34:17.545289+00:00",
@@ -2406,12 +2409,12 @@
     ]
   },
   "g10": {
-    "status": "LOCAL_SHUFFLE_KEY_CORRECTION_VERIFIED_FINAL_SAME_SHA_QUALIFICATION_REQUIRED",
+    "status": "PAUSED_AFTER_VERIFIED_LOCAL_V9_CHECKS_BEFORE_PUSH_AND_REMOTE_QUALIFICATION",
     "branch": "joom/1.2-release-qualification",
     "base": "4467d0337089036d3f01d28375260ce3dbcaaca5",
     "authorization_ref": "decisions.json#g10_authorization",
     "evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10",
-    "checkpoint": "Final local key-function transport, interner and compatibility regressions and strict/semantic gates are verified. The old cf86a3b4 full CI failed real missing-pool cases; its CodeQL/Miri107/RC23/download passes remain historical. New exact-SHA full CI, CodeQL, Miri, RC25 and corrected artifact delivery remain pending. Controlled ID collision is not an observed production wrong result.",
+    "checkpoint": "User-requested shutdown pause. All five local cohorts and both semantic Delta gates passed; full repository Markdown formatting passed. Replacement source is frozen in a local commit only. Origin feature remains4e0f731190ae350e13fe00186676493b33306e29. No v9 push/dispatch/arming; read pause-v9.json after restart.",
     "full_gha_allowed": true,
     "rc_build_smoke_allowed": true,
     "merge_allowed": false,
@@ -2429,10 +2432,10 @@
     "post_commit_qualification_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json",
     "first_candidate": "68133883ea32f6ab8c758f2b9d87f4aa7a36e642",
     "external_live_checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/execution-checkpoint.json",
-    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v8.json",
-    "source_manifest_sha256": "4b5e8e7846f10da67e81804a5b3101e209d90daab5b37ec0f424690c5d1a25e6",
-    "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v8.json",
-    "previous_candidate": "cf86a3b4f3e8850e028aaaae281a2b49fe3baf32",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v9.json",
+    "source_manifest_sha256": "4900f4c51e5592d17a9fe84c20225f62375d3e26baa6615bcd1ba36b53b398a4",
+    "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v9.json",
+    "previous_candidate": "4e0f731190ae350e13fe00186676493b33306e29",
     "active_workers": [],
     "local_added_toolchain": "nightly-2026-11-21-aarch64-apple-darwin (official, defaultstableunchanged)",
     "local_miri_runner": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/run-pinned-miri.py (setup blocked; no actual local Miri tests executed)",
@@ -2447,10 +2450,10 @@
       "source_manifest_sha256": "27d9e07a8d776af4631b08d004ac8fd586448f420d835b021a1e0f5495ed4025",
       "post_commit_qualification_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/completion.json"
     },
-    "local_contract_qualification_ref": "G10-results.json#shuffle_UDF_key_transport_followup",
+    "local_contract_qualification_ref": "G10-results.json#profile_expression_correctness_followup",
     "approved_target_workload": "Parquet and Delta are in scope; Iceberg is not used, by explicit user confirmation. All 32 older-profile Iceberg jobs remain mandatory.",
-    "candidate_receipt_status": "EXPECTED_POST_COMMIT_NOT_FINAL_QUALIFICATION",
-    "backlog_map_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v8.json",
+    "candidate_receipt_status": "LOCAL_COMMIT_ONLY_NOT_PUSHED_NOT_REMOTE_QUALIFIED",
+    "backlog_map_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v9.json",
     "future_source_commit": "Bound externally after committing this source; intentionally absent from pre-commit hashes.",
     "actual_local_contract_gates": {
       "status": "ALL_PLANNED_LOCAL_V8_GATES_VERIFIED",
@@ -2608,7 +2611,8 @@
           ]
         }
       ],
-      "limits": "Source-bound local evidence only; preserve all earlier failed/negative attempts. Actual same-SHA fullCI/CodeQL/Miri/RC25 and finalartifact delivery remain pending."
+      "limits": "Source-bound local evidence only; preserve all earlier failed/negative attempts. Actual same-SHA fullCI/CodeQL/Miri/RC25 and finalartifact delivery remain pending.",
+      "qualification_scope": "HISTORICAL_V8_LOCAL_SOURCE; current v9 gates are in actual_local_v9_contract_gates and all final same-SHA remote gates remain pending."
     },
     "historical_v7_checkpoint_before_shuffle_key_correction": {
       "disposition": "HISTORICAL_ONLY; current local/key/remote verdicts live in the new follow-up.",
@@ -2900,6 +2904,146 @@
         "limits": "Overlapping local cohorts are not one complete final-source run. Raw runner success can include an explicitly identified version-N/A registration. Final same-SHA Linux CI/RC and final JAR delivery remain pending."
       },
       "local_contract_qualification_ref": "G10-results.json#local_scan_SQL_contract_qualification"
+    },
+    "historical_v8_checkpoint_before_profile_expression_correction": {
+      "status": "LOCAL_SHUFFLE_KEY_CORRECTION_VERIFIED_FINAL_SAME_SHA_QUALIFICATION_REQUIRED",
+      "checkpoint": "Final local key-function transport, interner and compatibility regressions and strict/semantic gates are verified. The old cf86a3b4 full CI failed real missing-pool cases; its CodeQL/Miri107/RC23/download passes remain historical. New exact-SHA full CI, CodeQL, Miri, RC25 and corrected artifact delivery remain pending. Controlled ID collision is not an observed production wrong result.",
+      "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v8.json",
+      "source_manifest_sha256": "4b5e8e7846f10da67e81804a5b3101e209d90daab5b37ec0f424690c5d1a25e6",
+      "candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v8.json",
+      "remote": {
+        "source_commit": "4e0f731190ae350e13fe00186676493b33306e29",
+        "disposition": "HISTORICAL_ONLY; does not qualify the replacement candidate.",
+        "full_CI": {
+          "run_id": 44963788842,
+          "status": "CANCELED_AFTER_REAL_OLDER_PROFILE_TEST_CONTRACT_FAILURES"
+        },
+        "RC": {
+          "run_id": 44963792674,
+          "status": "SUCCESS",
+          "cases_per_architecture": 25
+        },
+        "Miri": {
+          "run_id": 44963790704,
+          "status": "SUCCESS",
+          "actual_passed_tests": 107
+        },
+        "CodeQL": {
+          "run_id": 44963769288,
+          "status": "SUCCESS",
+          "language": "GitHub Actions"
+        },
+        "downloaded_artifacts": "Historical v8 archive/JAR verification passed; retain original receipts, never deliver it as corrected final artifacts."
+      },
+      "local_gates_reference": "The unchanged actual_local_contract_gates object retains historical v8 local receipts; current v9 gates are recorded separately in actual_local_v9_contract_gates."
+    },
+    "actual_local_v9_contract_gates": {
+      "static_review": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_final-independent-review/final-static-independent-review.json",
+        "sha256": "26e0aa977f20a5e307e6c0217ebfa6815a10e1d055dfa343e326ac9d92a3ec78"
+      },
+      "five_profile_local_matrix": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_final-independent-review/final-local-matrix.json",
+        "sha256": "4d2ad530db51528f649a441fe778780788ae2c9f30491eab72c305c1565ab33c"
+      },
+      "quality": {
+        "spark42_delta_semantic": {
+          "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_expression-contracts/final-spark42-delta-semantic.json",
+          "sha256": "c5c383bf713326558abf2f581516d2988f09dfd9c3e5fd248796bd3386167d5e",
+          "exit_code": 0,
+          "elapsed_seconds": 138.94,
+          "log_sha256": "2bcb2192d557d5e31551e26a7d63e199640e22c76e272d4a21ddc1fd6864df40"
+        },
+        "spark35_delta_strict_semantic": {
+          "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_expression-contracts/final-spark35-delta-semantic-v2.json",
+          "sha256": "4c04d095d63fcf0f30a5539efdfaa06e2acd796d08f8ff08d80bbe437a326778",
+          "exit_code": 0,
+          "elapsed_seconds": 226.88,
+          "log_sha256": "46889e742b2ae94413496f28f022b09de47abbc6daed31682a25695682f27e97"
+        },
+        "initial_offline_spark35": "FAILED before lint execution because its plugin was not cached; preserved separately, not counted as a pass."
+      },
+      "local_counts": [
+        {
+          "profile": "3.4",
+          "runner_successes": 60,
+          "executed_positive": 60,
+          "version_NA": 0,
+          "elapsed_seconds": 111.32
+        },
+        {
+          "profile": "3.5",
+          "runner_successes": 60,
+          "executed_positive": 60,
+          "version_NA": 0,
+          "elapsed_seconds": 80.54
+        },
+        {
+          "profile": "4.0",
+          "runner_successes": 60,
+          "executed_positive": 60,
+          "version_NA": 0,
+          "elapsed_seconds": 111.58
+        },
+        {
+          "profile": "4.1",
+          "runner_successes": 60,
+          "executed_positive": 60,
+          "version_NA": 0,
+          "elapsed_seconds": 120.72
+        },
+        {
+          "profile": "4.2",
+          "runner_successes": 60,
+          "executed_positive": 58,
+          "version_NA": 2,
+          "elapsed_seconds": 99.06
+        }
+      ],
+      "counts_policy": "Per-profile60/60 raw successes are separate cohorts, not summed as unique tests. Target4.2 has58actual positives plus2logged N/A, never60executed SQL/body positives.",
+      "RC27": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_rc27-expression-guards/rc27-source-proof.json",
+        "sha256": "5bba3aa24c49a20b8f2aecf62b9c81367a894d1ebe5cae22f22290cc92d37843",
+        "cases_per_architecture": 27,
+        "groups": 13,
+        "Core_origin_classes": 24,
+        "Delta_origin_classes": 2,
+        "Python_contract_controls": 41,
+        "source_guard_controls": 5,
+        "final_Linux_execution": "PENDING_POST_COMMIT_EXACT_SHA"
+      },
+      "final_required_runtime": {
+        "core_cases": 98,
+        "native_window_actions": 88,
+        "additional_corrective_cases": 58,
+        "original_Spark34_SQL_cases": 5,
+        "policy": "Separate source/run/job-bound actual evidence; never infer execution from a green aggregate, a version guard or planned selectors."
+      }
+    },
+    "user_shutdown_pause": {
+      "status": "PAUSED_AT_EXPLICIT_USER_REQUEST",
+      "requested_on": "2026-11-22T02:13:40.624994+00:00",
+      "reason": "User will shut down the laptop; stop before publishing the replacement candidate or starting any next full GHA. Continue tomorrow from this checkpoint.",
+      "all_task_builds_stopped": true,
+      "active_sessions": [],
+      "resume_requires_explicit_user_instruction": true,
+      "feature_push_performed": false,
+      "v9_workflows_dispatched": false,
+      "helpers_armed": false,
+      "checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/pause-v9.json",
+      "local_candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v9.json",
+      "receipt_status": "Created and verified externally after the local commit; no future commit SHA is fabricated in committed files."
     }
+  },
+  "historical_pause_before_G10_v9_shutdown": {
+    "status": "HISTORICAL_PAUSES_RESUMED_G01_FINALIZATION_AUTHORIZED",
+    "requested_on": "2026-11-17T05:06:02.577827+00:00",
+    "reason": "User requested restart checkpoint and interruption",
+    "all_task_builds_stopped": true,
+    "resume_requires_explicit_user_instruction": false,
+    "stopped_release_container": "de92fed928af",
+    "release_exit_code": 137,
+    "release_exit_explanation": "Deliberate docker stop for user pause; not an observed OOM or compiler failure.",
+    "resumed_on": "2026-11-17T13:34:17.545289+00:00"
   }
 }

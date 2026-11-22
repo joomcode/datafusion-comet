@@ -19,10 +19,18 @@
 
 package org.apache.comet
 
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
-import org.apache.spark.sql.CometTestBase
-import org.apache.spark.sql.catalyst.expressions.{FromUTCTimestamp, TruncTimestamp}
+import org.apache.spark.SparkThrowable
+import org.apache.spark.sql.{CometTestBase, DataFrame}
+import org.apache.spark.sql.catalyst.expressions.{Cast, FromUTCTimestamp, TruncTimestamp}
+import org.apache.spark.sql.comet.CometNativeScanExec
+import org.apache.spark.sql.execution.{FilterExec, ProjectExec}
+import org.apache.spark.sql.types.{BooleanType, ByteType, DataType, DecimalType, DoubleType, FloatType, IntegerType, ShortType, TimestampType}
+
+import org.apache.comet.CometSparkSessionExtensions.isSpark40Plus
+import org.apache.comet.expressions.CometCast
+import org.apache.comet.serde.Unsupported
 
 /** Producer-to-producer timestamp comparisons, including the original Joom regressions. */
 class CometTimestampComparisonSuite extends CometTestBase {
@@ -63,11 +71,14 @@ class CometTimestampComparisonSuite extends CometTestBase {
   test("timestamp_seconds compares natively with timestamp literals and scan columns") {
     withEvents {
       inZones() {
-        checkSparkAnswerAndImpl(
-          sql(
-            "SELECT s FROM events WHERE " +
-              "timestamp_seconds(s) BETWEEN TIMESTAMP '2020-01-01' AND TIMESTAMP '2030-01-01'"),
-          native = Seq("timestamp_seconds"))
+        val betweenQuery = "SELECT s FROM events WHERE " +
+          "timestamp_seconds(s) BETWEEN TIMESTAMP '2020-01-01' AND TIMESTAMP '2030-01-01'"
+        // Spark filters share this producer across BETWEEN's two comparisons.
+        // Keep the original row oracle and require only the accepted evaluation-order boundary.
+        val (_, plan) = checkSparkAnswerAndNativeScanFilter(
+          sql(betweenQuery),
+          "Filter shared-expression evaluation order requires Spark")
+        checkCometOperators(plan, classOf[FilterExec])
         checkSparkAnswerAndImpl(
           sql(
             "SELECT s, timestamp_seconds(s) >= ts, timestamp_seconds(s) = ts, " +
@@ -100,13 +111,26 @@ class CometTimestampComparisonSuite extends CometTestBase {
       // The successful native comparisons above also run with the target ANSI=true mode.
       for (zone <- zones) {
         withSQLConf("spark.sql.session.timeZone" -> zone, "spark.sql.ansi.enabled" -> "false") {
-          checkSparkAnswerAndOperator("""SELECT s, COALESCE(
+          val query = """SELECT s, COALESCE(
               |  CASE WHEN timestamp_seconds(s) BETWEEN TIMESTAMP '2020-01-01'
               |    AND TIMESTAMP '2030-01-01' THEN timestamp_seconds(s) END,
               |  CASE WHEN timestamp_millis(ms) BETWEEN TIMESTAMP '2020-01-01'
               |    AND TIMESTAMP '2030-01-01' THEN timestamp_millis(ms) END,
               |  to_timestamp(str, 'yyyy-MM-dd HH:mm:ss.SSSSSS')) AS p_time
-              |FROM events""".stripMargin)
+              |FROM events""".stripMargin
+          if (isSpark40Plus) {
+            checkSparkAnswerAndOperator(query)
+          } else {
+            val reason = "Conditional shared-expression evaluation order requires Spark"
+            val (_, plan) = checkSparkAnswerAndFallbackReason(query, reason)
+            checkCometOperators(plan, classOf[ProjectExec])
+            val projects = collect(plan) { case project: ProjectExec => project }
+            assert(projects.size == 1, plan)
+            assert(
+              projects.head.getTagValue(CometExplainInfo.FALLBACK_REASONS).contains(Set(reason)),
+              plan)
+            assert(collect(plan) { case scan: CometNativeScanExec => scan }.size == 1, plan)
+          }
         }
       }
     }
@@ -179,6 +203,113 @@ class CometTimestampComparisonSuite extends CometTestBase {
             dispatched = Seq("from_utc_timestamp"))
         }
       }
+    }
+  }
+
+  test(
+    "unsupported timestamp casts retain Spark rows and mandatory errors through dispatch or fallback") {
+    withEvents {
+      assert(
+        CometConf.COMET_SCALA_UDF_CODEGEN_ENABLED.get(),
+        "The dispatcher must be on by default")
+      val targets: Seq[(String, DataType)] = Seq(
+        "BOOLEAN" -> BooleanType,
+        "TINYINT" -> ByteType,
+        "SMALLINT" -> ShortType,
+        "INT" -> IntegerType,
+        "FLOAT" -> FloatType,
+        "DOUBLE" -> DoubleType,
+        "DECIMAL(10,2)" -> DecimalType(10, 2))
+      def sameError(expected: Throwable, actual: Throwable): Unit = {
+        causeChain(expected).collect { case error: SparkThrowable => error }.lastOption match {
+          case Some(error) =>
+            val actualError = causeChain(actual)
+              .collect { case failure: SparkThrowable =>
+                failure
+              }
+              .lastOption
+              .getOrElse(fail(s"Comet lost Spark's structured error: $actual"))
+            assert(actualError.getClass == error.getClass)
+            assert(actualError.getErrorClass == error.getErrorClass)
+            assert(actualError.getSqlState == error.getSqlState)
+          case None =>
+            val expectedRoot = causeChain(expected).last
+            val actualRoot = causeChain(actual).last
+            assert(actualRoot.getClass == expectedRoot.getClass)
+            assert(actualRoot.getMessage == expectedRoot.getMessage)
+        }
+      }
+      var checked = 0
+      for ((target, dataType) <- targets; ansi <- Seq("true", "false");
+        dispatch <- Seq(true, false)) {
+        val configs =
+          Seq("spark.sql.ansi.enabled" -> ansi, "spark.sql.session.timeZone" -> "UTC") ++
+            (if (dispatch) Seq.empty
+             else Seq(CometConf.COMET_SCALA_UDF_CODEGEN_ENABLED.key -> "false"))
+        withSQLConf(configs: _*) {
+          withClue(s"cast timestamp to $target, ANSI=$ansi, dispatch=$dispatch: ") {
+            val query = s"SELECT s, CAST(ts AS $target) FROM events"
+            def analyzed(enabled: Boolean): Try[DataFrame] =
+              withSQLConfResult(CometConf.COMET_ENABLED.key -> enabled.toString) {
+                Try {
+                  val df = sql(query)
+                  val _ = df.queryExecution.analyzed
+                  df
+                }
+              }
+            (analyzed(enabled = false), analyzed(enabled = true)) match {
+              case (Failure(expected), Failure(actual)) =>
+                // A Spark analysis rejection precedes physical planning and earns no native credit.
+                sameError(expected, actual)
+              case (Failure(expected), Success(_)) =>
+                fail(s"Comet accepted a query that Spark rejected during analysis: $expected")
+              case (Success(_), Failure(actual)) => throw actual
+              case (Success(sparkDf), Success(df)) =>
+                assert(df.schema == sparkDf.schema)
+                val casts = df.queryExecution.analyzed.expressions.flatMap(_.collect {
+                  case cast: Cast
+                      if cast.child.dataType == TimestampType && cast.dataType == dataType =>
+                    cast
+                })
+                assert(casts.size == 1)
+                val reason = CometCast.getSupportLevel(casts.head) match {
+                  case Unsupported(Some(reason)) => reason
+                  case other => fail(s"Expected the existing native cast guard, found $other")
+                }
+                val plan = stripAQEPlan(df.queryExecution.executedPlan)
+                if (dispatch) {
+                  checkCometOperators(plan)
+                  assertExpressionImpl(plan, native = Seq.empty, dispatched = Seq("cast"))
+                } else {
+                  checkCometOperators(plan, classOf[ProjectExec])
+                  val projects = collect(plan) { case project: ProjectExec => project }
+                  assert(projects.size == 1, plan)
+                  val disabledReason = s"${CometExplainInfo.exprDisplayName(casts.head)}: " +
+                    s"${CometConf.COMET_SCALA_UDF_CODEGEN_ENABLED.key}=false; " +
+                    "expression has no native path so the plan falls back to Spark"
+                  assert(
+                    projects.head
+                      .getTagValue(CometExplainInfo.FALLBACK_REASONS)
+                      .contains(Set(reason, disabledReason)),
+                    plan)
+                }
+                assert(collect(plan) { case scan: CometNativeScanExec => scan }.size == 1, plan)
+                checkSparkAnswerMaybeThrows(df) match {
+                  case (None, None) =>
+                    if (dispatch) {
+                      checkSparkAnswerAndImpl(sql(query), dispatched = Seq("cast"))
+                    }
+                  case (None, Some(actual)) => throw actual
+                  case (Some(expected), None) =>
+                    fail(s"Comet succeeded but Spark failed: $expected")
+                  case (Some(expected), Some(actual)) => sameError(expected, actual)
+                }
+            }
+            checked += 1
+          }
+        }
+      }
+      assert(checked == 28)
     }
   }
 

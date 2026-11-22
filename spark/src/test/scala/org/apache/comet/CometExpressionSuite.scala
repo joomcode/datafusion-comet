@@ -902,21 +902,70 @@ class CometExpressionSuite extends CometTestBase with AdaptiveSparkPlanHelper {
     }
   }
 
-  // TODO: https://github.com/apache/datafusion-comet/issues/2539
-  ignore("date_add with scalar overflow") {
+  test("date_add with scalar overflow") {
     Seq(true, false).foreach { dictionaryEnabled =>
       withTempDir { dir =>
         val path = new Path(dir.toURI.toString, "test.parquet")
         makeParquetFileAllPrimitiveTypes(path, dictionaryEnabled = dictionaryEnabled, 10000)
         withParquetTable(path.toString, "tbl") {
-          val (sparkErr, cometErr) =
-            checkSparkAnswerMaybeThrows(sql(s"SELECT _20 + ${Int.MaxValue} FROM tbl"))
-          if (isSpark40Plus) {
-            assert(sparkErr.get.getMessage.contains("EXPRESSION_DECODING_FAILED"))
-          } else {
-            assert(sparkErr.get.getMessage.contains("integer overflow"))
+          Seq("true", "false").foreach { ansi =>
+            withSQLConf(SQLConf.ANSI_ENABLED.key -> ansi) {
+              // Spark DateAdd wraps its internal Int day value even in ANSI mode. Check those
+              // values before external DATE decoding, whose rebase/encoding may itself throw.
+              val internalQuery = "SELECT unix_date(_20), " +
+                s"unix_date(date_add(_20, ${Int.MaxValue})) FROM tbl"
+              checkSparkAnswerAndImpl(
+                internalQuery,
+                native = Seq("date_add", "unix_date"),
+                dispatched = Seq.empty)
+              val days = sql(internalQuery).collect()
+              assert(days.length == 10000)
+              assert(days.exists(_.isNullAt(0)), "The fixture must exercise NULL propagation")
+              assert(days.exists(row => !row.isNullAt(0) && row.getInt(0) > 0))
+              days.foreach { row =>
+                if (row.isNullAt(0)) {
+                  assert(row.isNullAt(1))
+                } else {
+                  // Independent wide-integer oracle, not either engine's date arithmetic helper.
+                  val total = row.getInt(0).toLong + Int.MaxValue.toLong
+                  val expected = if (total > Int.MaxValue.toLong) total - (1L << 32) else total
+                  assert(row.getInt(1).toLong == expected)
+                }
+              }
+
+              // Keep the original DATE-output query and its complete input. Its external decoding
+              // must agree with this exact Spark profile, whether that profile returns rows or fails.
+              val dateQuery = sql(s"SELECT _20 + ${Int.MaxValue} FROM tbl")
+              checkCometOperators(stripAQEPlan(dateQuery.queryExecution.executedPlan))
+              checkSparkAnswerMaybeThrows(dateQuery) match {
+                case (None, None) => // The helper already compared the complete Spark/Comet rows.
+                case (None, Some(actual)) => throw actual
+                case (Some(expected), None) =>
+                  fail(s"Comet succeeded but Spark failed: $expected")
+                case (Some(expected), Some(actual)) =>
+                  val expectedStructured = causeChain(expected).collect {
+                    case error: SparkThrowable => error
+                  }.lastOption
+                  expectedStructured match {
+                    case Some(error) =>
+                      val actualStructured = causeChain(actual)
+                        .collect { case failure: SparkThrowable =>
+                          failure
+                        }
+                        .lastOption
+                        .getOrElse(fail(s"Comet lost Spark's structured error: $actual"))
+                      assert(actualStructured.getClass == error.getClass)
+                      assert(actualStructured.getErrorClass == error.getErrorClass)
+                      assert(actualStructured.getSqlState == error.getSqlState)
+                    case None =>
+                      val expectedRoot = causeChain(expected).last
+                      val actualRoot = causeChain(actual).last
+                      assert(actualRoot.getClass == expectedRoot.getClass)
+                      assert(actualRoot.getMessage == expectedRoot.getMessage)
+                  }
+              }
+            }
           }
-          assert(cometErr.get.getMessage.contains("attempt to add with overflow"))
         }
       }
     }

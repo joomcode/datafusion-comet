@@ -33,7 +33,7 @@ DELTA = "comet-contrib-delta-spark4.2_2.13-1.2.0.jar"
 COUNTS = {"delta": 4, "dpp": 1, "reload": 1, "ansi": 6,
           "g08-udf": 1, "g08-delta-serialization": 2, "g09-cost": 4,
           "g09-wide-sort": 1, "g09-wide-shuffle": 1, "g09-range": 1,
-          "g07-kryo": 1, "g10-udf-shuffle": 2}
+          "g07-kryo": 1, "g10-udf-shuffle": 2, "g10-expression-guards": 2}
 CORE_ORIGIN_CLASSES = (
     "org.apache.comet.NativeBase",
     "org.apache.comet.udf.codegen.CometUdfFunctionPool$",
@@ -57,6 +57,8 @@ CORE_ORIGIN_CLASSES = (
     "org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec",
     "org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec$",
     "org.apache.spark.sql.comet.execution.shuffle.CometNativeShuffleWriter",
+    "org.apache.comet.expressions.CometCast",
+    "org.apache.comet.expressions.CometCast$",
 )
 DELTA_ORIGIN_CLASSES = (
     "org.apache.spark.sql.comet.CometDeltaNativeScanExec",

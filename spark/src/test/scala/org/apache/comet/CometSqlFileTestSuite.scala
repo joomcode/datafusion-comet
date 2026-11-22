@@ -28,12 +28,14 @@ import org.scalatest.exceptions.TestFailedException
 
 import org.apache.spark.sql.CometTestBase
 import org.apache.spark.sql.catalyst.expressions.{Abs, CreateArray, Literal}
-import org.apache.spark.sql.comet.CometNativeScanExec
-import org.apache.spark.sql.execution.{ExpandExec, FileSourceScanExec, FilterExec, GenerateExec, ProjectExec, SparkPlan, TakeOrderedAndProjectExec}
+import org.apache.spark.sql.comet.{CometIcebergNativeScanExec, CometNativeScanExec}
+import org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec
+import org.apache.spark.sql.execution.{ExpandExec, FileSourceScanExec, FilterExec, GenerateExec, ProjectExec, SortExec, SparkPlan, TakeOrderedAndProjectExec}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanHelper, AQEShuffleReadExec, QueryStageExec}
 import org.apache.spark.sql.execution.aggregate.HashAggregateExec
 import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
-import org.apache.spark.sql.execution.exchange.{ReusedExchangeExec, ShuffleExchangeExec}
+import org.apache.spark.sql.execution.exchange.{BroadcastExchangeExec, ReusedExchangeExec, ShuffleExchangeExec}
+import org.apache.spark.sql.execution.joins.BroadcastHashJoinExec
 import org.apache.spark.sql.execution.window.WindowExec
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.ArrayType
@@ -214,9 +216,17 @@ class CometSqlFileTestSuite extends CometTestBase with AdaptiveSparkPlanHelper {
                   case ExpectFallback(reason) =>
                     checkSparkAnswerAndFallbackReason(sql, reason)
                   case expectation: ExpectFallbackPlan =>
-                    if (expectation.ansiDisabledOnly && SQLConf.get.ansiEnabled) {
-                      // The alternate configuration still has the original fully native contract.
-                      checkSparkAnswerAndOperator(sql)
+                    if ((expectation.ansiDisabledOnly && SQLConf.get.ansiEnabled) ||
+                      !expectation.appliesToSparkProfile(currentSparkProfile)) {
+                      // Preserve an explicit native-expression contract as well as operators.
+                      if (expectation.elseNative.nonEmpty) {
+                        checkSparkAnswerAndImpl(
+                          sql,
+                          native = expectation.elseNative,
+                          dispatched = Seq.empty)
+                      } else {
+                        checkSparkAnswerAndOperator(sql)
+                      }
                     } else {
                       checkFallbackPlan(sql, expectation)
                     }
@@ -256,11 +266,17 @@ class CometSqlFileTestSuite extends CometTestBase with AdaptiveSparkPlanHelper {
     }
   }
 
+  private def currentSparkProfile: String =
+    org.apache.spark.SPARK_VERSION.split("[.-]").take(2).mkString(".")
+
   private val fallbackOperatorClasses: Map[String, Class[_]] = Map(
     "Project" -> classOf[ProjectExec],
     "Filter" -> classOf[FilterExec],
+    "Sort" -> classOf[SortExec],
     "Window" -> classOf[WindowExec],
     "HashAggregate" -> classOf[HashAggregateExec],
+    "BroadcastHashJoin" -> classOf[BroadcastHashJoinExec],
+    "BroadcastExchange" -> classOf[BroadcastExchangeExec],
     "Exchange" -> classOf[ShuffleExchangeExec],
     "AQEShuffleRead" -> classOf[AQEShuffleReadExec],
     "Expand" -> classOf[ExpandExec],
@@ -287,24 +303,25 @@ class CometSqlFileTestSuite extends CometTestBase with AdaptiveSparkPlanHelper {
     }
     addActualPlan(stripAQEPlan(cometPlan))
     val actualNodes = actualPlans.flatMap(plan => collect(plan) { case op => op })
-    val expected: Seq[Class[_]] = expectation.operators.flatMap {
-      case "OneRowRelation" =>
-        // Spark 4.2 has OneRowRelationExec; older profiles use an empty-output RDDScanExec.
-        // Match that precise leaf contract without importing an unavailable versioned API.
-        val leaves = actualNodes.collect {
-          case op
-              if op.nodeName == "Scan OneRowRelation" && op.output.isEmpty &&
-                op.children.isEmpty =>
-            op
-        }
-        assert(leaves.nonEmpty, s"Expected OneRowRelation fallback leaf is absent:\n$cometPlan")
-        val classes: Seq[Class[_]] = leaves.map(op => op.getClass: Class[_]).distinct.toSeq
-        classes.foreach { cls =>
-          assert(actualNodes.filter(cls.isInstance).forall(leaves.contains))
-        }
-        classes
-      case name => Seq(fallbackOperatorClasses(name))
-    }
+    val expected: Seq[Class[_]] =
+      expectation.operatorsForSparkProfile(currentSparkProfile).flatMap {
+        case "OneRowRelation" =>
+          // Spark 4.2 has OneRowRelationExec; older profiles use an empty-output RDDScanExec.
+          // Match that precise leaf contract without importing an unavailable versioned API.
+          val leaves = actualNodes.collect {
+            case op
+                if op.nodeName == "Scan OneRowRelation" && op.output.isEmpty &&
+                  op.children.isEmpty =>
+              op
+          }
+          assert(leaves.nonEmpty, s"Expected OneRowRelation fallback leaf is absent:\n$cometPlan")
+          val classes: Seq[Class[_]] = leaves.map(op => op.getClass: Class[_]).distinct.toSeq
+          classes.foreach { cls =>
+            assert(actualNodes.filter(cls.isInstance).forall(leaves.contains))
+          }
+          classes
+        case name => Seq(fallbackOperatorClasses(name))
+      }
     expected.foreach { cls =>
       assert(
         actualNodes.exists(cls.isInstance),
@@ -315,13 +332,35 @@ class CometSqlFileTestSuite extends CometTestBase with AdaptiveSparkPlanHelper {
       case scan: BatchScanExec => scan: SparkPlan
     }
     if (fileInputs.nonEmpty) {
-      val nativeScans = collect(cometPlan) { case scan: CometNativeScanExec => scan }
+      val nativeScans = collect(cometPlan) {
+        case scan: CometNativeScanExec => scan: SparkPlan
+        case scan: CometIcebergNativeScanExec => scan: SparkPlan
+      }
       assert(
         nativeScans.size == fileInputs.size,
         s"Expected ${fileInputs.size} retained native file scans, found ${nativeScans.size}:\n" +
           cometPlan.toString)
     }
-    val allowed = expected ++ Seq(classOf[QueryStageExec], classOf[ReusedExchangeExec])
+    // A columnar reader over Comet's own exchange is a structural bridge, not a Spark
+    // compute fallback. Inspect every actual inner plan above before admitting its wrapper.
+    def nativeColumnarExchange(plan: SparkPlan): Boolean = plan match {
+      case stage: QueryStageExec => nativeColumnarExchange(stage.plan)
+      case reused: ReusedExchangeExec => nativeColumnarExchange(reused.child)
+      case exchange: CometShuffleExchangeExec => exchange.supportsColumnar
+      case _ => false
+    }
+    val unlistedReads = actualNodes.collect {
+      case read: AQEShuffleReadExec if !expected.exists(_.isInstance(read)) => read
+    }
+    unlistedReads.foreach { read =>
+      assert(
+        read.supportsColumnar && nativeColumnarExchange(read.child),
+        s"Unlisted AQE shuffle read must be columnar over a Comet exchange:\n$cometPlan")
+    }
+    val structuralReads: Seq[Class[_]] =
+      if (unlistedReads.nonEmpty) Seq(classOf[AQEShuffleReadExec]) else Seq.empty
+    val allowed = expected ++ Seq(classOf[QueryStageExec], classOf[ReusedExchangeExec]) ++
+      structuralReads
     actualPlans.foreach(checkCometOperators(_, allowed: _*))
   }
 
@@ -352,6 +391,59 @@ class CometSqlFileTestSuite extends CometTestBase with AdaptiveSparkPlanHelper {
             assert(intercept[TestFailedException] {
               checkFallbackPlan(query, expectation.copy(reason = "Comet Scan is not enabled"))
             }.getMessage.contains("retained native file scans"))
+          }
+          val profileOnly = SqlFileTestParser.parse(
+            Seq(
+              s"-- Config: ${CometConf.COMET_EXEC_PROJECT_ENABLED.key}=false",
+              s"query expect_fallback_plan($reason; Project; spark=3.4,3.5)",
+              query))
+          if (Set("3.4", "3.5")(currentSparkProfile)) {
+            runTestFile("profile-plan.sql", profileOnly)
+          } else {
+            val error = intercept[RuntimeException](runTestFile("profile-plan.sql", profileOnly))
+            assert(error.getCause.getMessage.contains("Expected only Comet native operators"))
+          }
+          if (!Set("3.4", "3.5")(currentSparkProfile)) {
+            withSQLConf(CometConf.COMET_EXEC_PROJECT_ENABLED.key -> "true") {
+              def nativeAlternate(name: String): SqlTestFile = SqlFileTestParser.parse(Seq(
+                s"-- Config: ${CometConf.COMET_EXEC_PROJECT_ENABLED.key}=true",
+                s"query expect_fallback_plan($reason; Project; spark=3.4,3.5; else_native=$name)",
+                "SELECT abs(id) FROM fallback_plan_input"))
+              runTestFile("native-alternate.sql", nativeAlternate("abs"))
+              val error = intercept[RuntimeException] {
+                runTestFile("wrong-native-alternate.sql", nativeAlternate("date_trunc"))
+              }
+              assert(error.getCause.getMessage.contains("Expected `date_trunc`"))
+            }
+          }
+          val conditionalSort =
+            expectation.copy(additionalOperatorsBySpark = Map("3.4" -> Seq("Sort")))
+          if (currentSparkProfile == "3.4") {
+            assert(intercept[TestFailedException] {
+              checkFallbackPlan(query, conditionalSort)
+            }.getMessage.contains("SortExec is absent"))
+          } else {
+            checkFallbackPlan(query, conditionalSort)
+          }
+          val conditionalRead =
+            expectation.copy(additionalOperatorsBySpark = Map("3.5" -> Seq("AQEShuffleRead")))
+          if (currentSparkProfile == "3.5") {
+            assert(intercept[TestFailedException] {
+              checkFallbackPlan(query, conditionalRead)
+            }.getMessage.contains("AQEShuffleReadExec is absent"))
+          } else {
+            checkFallbackPlan(query, conditionalRead)
+          }
+          withSQLConf(CometConf.COMET_EXEC_SORT_ENABLED.key -> "false") {
+            val sortedQuery = query + " SORT BY id"
+            checkFallbackPlan(sortedQuery, expectation.copy(operators = Seq("Project", "Sort")))
+            if (currentSparkProfile == "3.4") {
+              checkFallbackPlan(sortedQuery, conditionalSort)
+            } else {
+              assert(intercept[TestFailedException] {
+                checkFallbackPlan(sortedQuery, conditionalSort)
+              }.getMessage.contains("found Sort"))
+            }
           }
           withSQLConf(SQLConf.ANSI_ENABLED.key -> "true") {
             val fixture = SqlFileTestParser.parse(Seq(
@@ -394,6 +486,27 @@ class CometSqlFileTestSuite extends CometTestBase with AdaptiveSparkPlanHelper {
           assert(intercept[TestFailedException] {
             checkFallbackPlan(query, ExpectFallbackPlan(reason, Seq("Project", "Exchange")))
           }.getMessage.contains("found Filter"))
+        }
+        withSQLConf(
+          SQLConf.ADAPTIVE_EXECUTION_ENABLED.key -> "true",
+          SQLConf.COALESCE_PARTITIONS_ENABLED.key -> "true",
+          SQLConf.SHUFFLE_PARTITIONS.key -> "4",
+          CometConf.COMET_SHUFFLE_ENABLED.key -> "false",
+          CometConf.COMET_EXEC_AGGREGATE_ENABLED.key -> "false") {
+          val query = "SELECT id, COUNT(*) FROM fallback_stage_input GROUP BY id"
+          val reason = "Native support for operator HashAggregateExec is disabled"
+          val (_, plan) = checkSparkAnswerAndFallbackReason(query, reason)
+          val reads = collect(plan) { case read: AQEShuffleReadExec => read }
+          assert(reads.nonEmpty, s"Expected an actual coalesced Spark row shuffle:\n$plan")
+          assert(reads.forall(read => !read.supportsColumnar), plan)
+          val expectation = ExpectFallbackPlan(reason, Seq("HashAggregate", "Exchange"))
+          assert(intercept[TestFailedException] {
+            checkFallbackPlan(query, expectation)
+          }.getMessage.contains("Unlisted AQE shuffle read must be columnar"))
+          // Explicitly naming the Spark row reader retains its required operator contract.
+          checkFallbackPlan(
+            query,
+            expectation.copy(operators = Seq("HashAggregate", "Exchange", "AQEShuffleRead")))
         }
       }
     }

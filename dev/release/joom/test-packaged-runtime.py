@@ -35,6 +35,22 @@ spec.loader.exec_module(runtime)
 
 
 class PackagedRuntimeFaults(unittest.TestCase):
+    def test_expression_guard_group_selects_both_exact_existing_registrations(self):
+        group = [case for case in runtime.CASES if case[0] == "g10-expression-guards"]
+        self.assertEqual(group, [(
+            "g10-expression-guards", "org.apache.comet.CometExpressionSuite", [
+                "-t", "date_add with scalar overflow",
+                "-s", "org.apache.comet.CometTimestampComparisonSuite",
+                "-t", "unsupported timestamp casts retain Spark rows and mandatory errors through dispatch or fallback",
+            ], 2)])
+        good = ("Suites: completed 2, aborted 0\n"
+                "Tests: succeeded 2, failed 0, canceled 0, ignored 0, pending 0\n")
+        runtime.assert_test_summary(good, group[0][3])
+        for malformed in [good.replace("succeeded 2", "succeeded 1"),
+                          good.replace("canceled 0", "canceled 1")]:
+            with self.subTest(summary=malformed), self.assertRaises(ValueError):
+                runtime.assert_test_summary(malformed, group[0][3])
+
     def test_summary_requires_exact_executed_test_count(self):
         good = ("Suites: completed 1, aborted 0\n"
                 "Tests: succeeded 25, failed 0, canceled 0, ignored 0, pending 0\n")
@@ -273,6 +289,25 @@ implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransfor
         wrong[fixed[0]]["jar_name"] = "core-tests.jar"
         with self.assertRaises(ValueError):
             runtime.validate_class_origins({"class_origins": wrong}, hashes, "g10-udf-shuffle")
+
+    def test_expression_guard_group_requires_both_final_cast_class_origins(self):
+        hashes = {runtime.CORE: "a" * 64, runtime.DELTA: "b" * 64}
+        origins = {name: {"jar_name": runtime.CORE, "jar_sha256": hashes[runtime.CORE],
+                          "resource_count": 1} for name in runtime.CORE_ORIGIN_CLASSES}
+        fixed = ("org.apache.comet.expressions.CometCast", "org.apache.comet.expressions.CometCast$")
+        self.assertTrue(set(fixed).issubset(origins))
+        runtime.validate_class_origins({"class_origins": origins}, hashes, "g10-expression-guards")
+        for name in fixed:
+            missing = json.loads(json.dumps(origins))
+            del missing[name]
+            with self.subTest(missing=name), self.assertRaises(ValueError):
+                runtime.validate_class_origins({"class_origins": missing}, hashes,
+                                               "g10-expression-guards")
+            wrong = json.loads(json.dumps(origins))
+            wrong[name]["jar_name"] = runtime.DELTA
+            with self.subTest(wrong=name), self.assertRaises(ValueError):
+                runtime.validate_class_origins({"class_origins": wrong}, hashes,
+                                               "g10-expression-guards")
 
     def test_manifest_binds_support_to_release_and_source(self):
         out, manifest = self.fixture()

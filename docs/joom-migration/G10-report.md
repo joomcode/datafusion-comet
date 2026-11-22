@@ -19,6 +19,72 @@ under the License.
 
 # G10: final integration and release qualification
 
+## Current replacement checkpoint (2026-11-22)
+
+This section supersedes the historical candidate notes below. The replacement
+SHA is intentionally not predicted; final run IDs and outcomes belong in external
+receipts after commit. Merge, stable tag and production remain unauthorized.
+
+The bounded follow-up changes 13 test/resource/release-validation files. It does
+not change production eligibility, native algorithms, CI workflows, dependencies
+or lockfiles. All 244 original SQL records, data/configuration/error statements
+and statement order across the three resources are preserved. Precise fallback
+expectations now account for actual Spark 3.4/3.5 plans while retaining native
+expression proof on the other profiles. Every listed Spark operator and reason
+is required; all other computation remains subject to the strict native checks.
+Typed native scans retain source multiplicity. An unlisted AQE read is structural
+only if columnar and backed by the typed Comet exchange; all inner plans are
+still checked. A real row-shuffle negative control proves rejection.
+
+One formerly ignored DateAdd case is active again. Its original 10,000-row input,
+two dictionary modes and DATE output remain; explicit ANSI true/false, real NULL
+and overflow witnesses, an independent wide-integer wrap oracle and actual
+native date_add/unix_date assertions check Spark rows or mandatory errors. One
+timestamp-cast regression checks seven native-unsupported targets across both
+ANSI modes and dispatcher on/off: 28 internal variants, exact Spark rows/errors
+and actual dispatched/native-scan or precise Project/native-scan paths. Analysis
+rejections earn no native execution credit. Eleven inherited native-expression
+ignores retain explicit source-guard/scope dispositions; they are not passes.
+
+| Final local profile cohort | Runner successes | Executed positive | Version N/A |
+| -------------------------- | ---------------: | ----------------: | ----------: |
+| Spark 3.4                  |               60 |                60 |           0 |
+| Spark 3.5                  |               60 |                60 |           0 |
+| Spark 4.0                  |               60 |                60 |           0 |
+| Spark 4.1                  |               60 |                60 |           0 |
+| Spark 4.2.1                |               60 |                58 |           2 |
+
+These are separate per-profile cohorts, not 300 unique tests. The two Spark4.2
+Iceberg registrations return through their logged version guards and receive no
+executed-pass credit; all older-profile Iceberg jobs remain required. Final
+Spark4.2 + Delta semantic/package checks passed in 138.94 seconds; final strict
+Spark3.5 + Delta semantic/package checks passed in 226.88 seconds. The initial
+offline3.5 plugin-availability failure remains preserved as failed evidence.
+
+RC acceptance grows additively from 25 to 27 cases in 13 groups per architecture,
+with 24 Core and two Delta origin classes. All prior selectors and origin guards
+remain. The 41 Python contract controls and five source-guard controls passed;
+they do not replace native Linux packaged execution. Core98 runtime cases,
+88 native-window actions, the separate58 corrective cases and the original five
+Spark3.4 UDF SQL fixtures require actual final source/run/job-bound evidence.
+All15 backlog entries remain open until reconciled with that evidence.
+
+Historical v8 source `4e0f731190ae350e13fe00186676493b33306e29` passed RC25
+(`44963792674`), Miri107 (`44963790704`) and Actions CodeQL (`44963769288`),
+and its archive/JARs were downloaded and verified. Its full CI (`44963788842`)
+was canceled after real older-profile test-contract failures. These source-bound
+receipts are retained without qualification credit for the replacement source.
+
+Read `G10-results.json#profile_expression_correctness_followup`, `STATE.json#g10`,
+and the final local matrix/static review under
+`${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_final-independent-review`.
+The unarmed v9 backlog map defines requirements, not closure. After freezing the
+replacement SHA, full agreed CI, Actions CodeQL, Miri, native AMD64/ARM64 RC27,
+verified downloaded final JARs and all15 backlog dispositions remain mandatory.
+Record outcomes externally without amending the tested source for status alone.
+
+## Historical preparation and source-bound attempts
+
 **Frozen-source qualification candidate.** G10 is prepared on
 `joom/1.2-release-qualification`, based on accepted G09
 `4467d0337089036d3f01d28375260ce3dbcaaca5`. Local checks below passed. Full GHA,

@@ -42,7 +42,9 @@ SELECT id, date_trunc('HOUR', ts) = other, date_trunc('DAY', ts) >= other FROM t
 query expect_native(date_trunc)
 SELECT id FROM test_trunc_ts_label WHERE date_trunc('DAY', ts) >= TIMESTAMP'2024-06-01 00:00:00Z'
 
-query expect_native(date_trunc)
+-- Spark 3.4/3.5 share date_trunc across BETWEEN's comparisons, requiring the accepted Spark
+-- Project boundary. Other profiles retain the strict native operator contract.
+query expect_fallback_plan(AND shared-expression evaluation order requires Spark; Project; spark=3.4,3.5; else_native=date_trunc)
 SELECT id, date_trunc('HOUR', ts) BETWEEN other AND ts, date_trunc('HOUR', ts) <=> other FROM test_trunc_ts_label
 
 query expect_native(date_trunc)

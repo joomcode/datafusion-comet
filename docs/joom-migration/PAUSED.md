@@ -17,6 +17,73 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+## Current shutdown checkpoint: G10 v9, 2026-11-22
+
+**Paused at the user's explicit request, before feature push and the next full
+qualification.** This section overrides older continuation instructions below.
+There are no active local build/test/poll sessions. The replacement candidate is
+saved as a local commit only; `origin/joom/1.2-release-qualification` still points
+to historical v8 `4e0f731190ae350e13fe00186676493b33306e29`. No v9 workflow was
+dispatched, and all v9 qualification helpers remain unarmed. Do not push tonight:
+the feature push itself automatically starts Actions CodeQL.
+
+The local SHA and final integrity proof are recorded after commit in
+`${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v9.json` and
+`${MIGRATION_AUX_ROOT}/20261121_comet12-g10/pause-v9.json`. The complete non-migration
+source manifest is `final-source-manifest-v9.json` in the same directory, SHA256
+`4900f4c51e5592d17a9fe84c20225f62375d3e26baa6615bcd1ba36b53b398a4`:
+191 paths, comprising the previous 185 and six newly changed paths, all within
+the 13 independently reviewed corrective files. Production/native algorithms,
+CI workflows, dependencies and lockfiles are unchanged from v8. All 244 original
+SQL records/data/configuration/error statements remain unchanged. Accepted G01-G09
+code, decisions, feature cards and all 15 backlog entries remain preserved.
+
+Completed local evidence is in G10-results.json#profile_expression_correctness_followup:
+60 executed cases each on Spark3.4/3.5/4.0/4.1; target Spark4.2.1 has58 executed
+cases and2 logged Iceberg-version N/A registrations; no failed/canceled/ignored
+cases in these selected cohorts. Spark4.2/Delta semantic and strict Spark3.5/Delta
+semantic checks passed. RC contract controls41 and source controls5 passed;
+full repository Prettier and git diff whitespace checks passed. These are local
+gates, not remote final qualification. Old v8 RC25 JARs/runs remain historical.
+
+After the user resumes:
+
+1. Read this checkpoint, STATE.json#g10, G10-results.json, decisions.json and the
+   external pause/candidate receipts. Check sandbox access, a clean current
+   feature HEAD, all191 source hashes and all54 document hashes. Verify protected
+   branch-1.2/main/RC1 refs against pause-v9.json. Do not access datasci.
+2. Inspect the concise helper handoff in
+   `${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_qualification-v9-preparation`.
+   Preserve all old receipts; do not overwrite or infer success from them.
+   Push only `joom/1.2-release-qualification` normally and verify the remote SHA.
+   Source-arm `arm-qualification-v9.py` with the actual local candidate SHA and
+   the exact manifest/hash above. Do not create another candidate merely to
+   record status. The source armer validates clean Git, exact scope, bounded
+   DateAdd/RC27 changes and document/source hashes before pinning AUX helpers.
+3. Run existing `dispatch-v9.py` once for full Comet CI, Miri and RC Build & Smoke;
+   Actions CodeQL comes from the push. Poll with `monitor-compact-v9.py` every
+   five minutes. Bind all four real run IDs with the master armer `runs` phase.
+   Cancel an obsolete CI promptly if a genuine source correction is required;
+   pure infrastructure failures may be retried as failed jobs on the same SHA.
+4. Refresh/bind the external15-entry backlog map to the exact candidate, source
+   manifest, final STATE hash and real run IDs. Arm the separate corrective58
+   requirements with actual nine source hashes and the real successful target
+   expressions job. Keep original core98/window88 and five Spark3.4 UDF fixtures
+   mandatory; do not replace or double-count them with corrective58. All138
+   required CI jobs, Miri107 and Actions CodeQL require actual source-bound proof.
+5. Require RC27 cases in13 groups per native AMD64/ARM64 architecture,24 Core and
+   two Delta origin classes. Download/verify the actual final JAR bytes,
+   provenance, native libraries, complete rows/errors and all15 backlog outcomes.
+   Update external results/cleanup inventory. Report before any merge/stable
+   tag. branch-1.2/main/RC1, production and external publication remain excluded.
+
+Preserve the existing standard caches, project build outputs, previous failures
+and successful receipts. No cleanup is required for shutdown. The fresh v9 final
+JARs, remote pass counts and completion receipt do not exist yet; never substitute
+historical downloaded v8 JARs or declare qualification complete.
+
+> **Current G10 continuation, 2026-11-22:** All five final local profile cohorts and strict Spark3.5/semantic Spark4.2 Delta checks passed. Spark4.2 has58 executed positives plus2 logged Iceberg version-N/A registrations. Read G10-results.json#profile_expression_correctness_followup and STATE.json#g10. Freeze the new source, then qualify that exact SHA with full CI/Actions CodeQL/Miri/RC27 on native AMD64/ARM64, core98/window88/separate58/original5 evidence, verified downloads and all15 backlog dispositions. V8 source4e0 runs/JARs are historical, not final credit. Preserve all old receipts. Report before merge/stable tag; production and datasci remain unauthorized. Earlier checkpoint instructions below are historical and do not override this continuation.
+
 > **Current G10 authorization, 2026-11-21:** The user explicitly started `joom/1.2-release-qualification` from accepted G09 `4467d0337`. Restore all temporary CI bypasses and full normal automatic quality/test coverage, close applicable remaining gaps, run full agreed GHA and exact-SHA RC Build & Smoke on native AMD64/ARM64, and download/verify the final JARs. Report before merge or stable tag. Feature publication and workflow control are authorized; branch-1.2/main/tag changes, external artifact publication, production and datasci remain excluded. Earlier G10 holds below are historical. See STATE.json and decisions.json#g10_authorization.
 
 > **Current G09 acceptance, 2026-11-21:** The user approved publishing G09 and integrating it into `branch-1.2`. The two-commit fast-forward and exact local/remote/source/document verification are recorded after commit in `${MIGRATION_AUX_ROOT}/20261121_comet12-g09-integration/completion.json`. All29 qualified non-migration files remain unchanged from `00f5c17bc`. Earlier G09 review holds below are historical. G10, full per-group GHA, main/tag/release changes, production and datasci remain unauthorized; final full agreed CI and exact final-JAR AMD64/ARM64 qualification remain mandatory.

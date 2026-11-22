@@ -1,6 +1,6 @@
 {
   "created_on": "2026-11-17",
-  "updated_on": "2026-11-21",
+  "updated_on": "2026-11-22",
   "purpose": "Durable approved migration package; update checksums when documents intentionally change.",
   "files": [
     {
@@ -13,7 +13,7 @@
     },
     {
       "path": "CLEANUP.md",
-      "sha256": "538f6bbbb5c1123a51ddf7d6e3927917b5e6c7e9917de93f8de507ef7f58bb45"
+      "sha256": "b060c21f52e6655a5cc5bceefdf49ffd9c2ced1719d92228bf5f8256f97782be"
     },
     {
       "path": "G01-CLOSEOUT.md",
@@ -137,11 +137,11 @@
     },
     {
       "path": "G10-report.md",
-      "sha256": "4a073e64be2df488d0fe9b7a30f34dc01d65b59ab9df251702fbf45c649f54ef"
+      "sha256": "b74116b931d8ffbca916b19a473c01087eabd9425dc14c36425f7e85a83fcec7"
     },
     {
       "path": "G10-results.json",
-      "sha256": "1d7be61158f8082ac269e399089e264a326efd2bd2ce299241e5ad6e0155c2ec"
+      "sha256": "a4dd5b15af43f1db030178bc241b110e3bb224e43be53e351ca1ff5bae392c4f"
     },
     {
       "path": "HANDOFF.md",
@@ -157,7 +157,7 @@
     },
     {
       "path": "PAUSED.md",
-      "sha256": "158501176a0a3857ac9ec54514f1d882b413ec4e9da51300fd07a1512aaf0ac2"
+      "sha256": "5c7e12f96934073bbcba2a26358fac2b8d478e0333053b8448606e134e3177b8"
     },
     {
       "path": "PERFORMANCE.md",
@@ -173,7 +173,7 @@
     },
     {
       "path": "STATE.json",
-      "sha256": "c1baf57695c01b87745df243b6c14026bfd93874291fd324051b85f38a26b9dd"
+      "sha256": "c543c444f59f67e3140d3a63720654e89682b557e26c0c56e1f656762292f9b9"
     },
     {
       "path": "approved-plan.json",
@@ -185,7 +185,7 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "d729c67ece2b21e888b0a59344bf828d5877b4f6cfc58fa4fbe3cfa0cde46c01"
+      "sha256": "290366002c37296da343b757df9537f0909cb9d2046e9f17e2703842797d4960"
     },
     {
       "path": "correctness-test-plan.txt",
@@ -197,7 +197,7 @@
     },
     {
       "path": "decisions.json",
-      "sha256": "23b821e95d69dd901a34b97e7141c90a45e6f5277827f8f91aa06728a1676a40"
+      "sha256": "f0e56bcf97e7c62a4f395f4294615d6e7faa37e7f6e2bec5bdc3896bb8ff9583"
     },
     {
       "path": "feature-register.json",

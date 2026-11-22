@@ -31,6 +31,7 @@ import org.apache.spark.sql.functions.udf
 import org.apache.spark.sql.internal.SQLConf
 
 import org.apache.comet.{CometCodegenAssertions, CometConf}
+import org.apache.comet.CometSparkSessionExtensions.isSpark35Plus
 
 /** A task-local counter makes duplicate or branch-reordered evaluation visible in result rows. */
 private class ConditionalCountingFunction extends (Int => java.lang.Integer) with Serializable {
@@ -143,9 +144,12 @@ class CometConditionalEvaluationOrderSuite
           withSQLConf(
             SQLConf.OPTIMIZER_EXCLUDED_RULES.key ->
               "org.apache.spark.sql.catalyst.optimizer.ReplaceNullWithFalseInPredicate") {
-            // Only an actually eligible whole-stage Filter treats top-level NULL like FALSE.
-            // Interpreted/codegen-predicate AND must evaluate its RHS when LHS is NULL.
-            val required = if (mode == "whole-stage") None else Some("CAST_INVALID_INPUT")
+            // SPARK-44236 made NO_CODEGEN disable whole-stage codegen only from Spark 3.5.
+            // Spark 3.4 still runs this fixture as an eligible whole-stage Filter in that mode.
+            // Interpreted/codegen-predicate AND otherwise evaluates its RHS when LHS is NULL.
+            val nullRejectedBeforeRhs =
+              mode == "whole-stage" || (mode == "no-codegen" && !isSpark35Plus)
+            val required = if (nullRejectedBeforeRhs) None else Some("CAST_INVALID_INPUT")
             val plan = compare(query, required)
             assert(
               collect(plan) {

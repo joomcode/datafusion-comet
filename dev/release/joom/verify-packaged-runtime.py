@@ -64,6 +64,8 @@ CORE_ORIGIN_CLASSES = (
     "org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec",
     "org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec$",
     "org.apache.spark.sql.comet.execution.shuffle.CometNativeShuffleWriter",
+    "org.apache.comet.expressions.CometCast",
+    "org.apache.comet.expressions.CometCast$",
 )
 DELTA_ORIGIN_CLASSES = (
     "org.apache.spark.sql.comet.CometDeltaNativeScanExec",
@@ -116,6 +118,11 @@ CASES = [
     ("g10-udf-shuffle", "org.apache.spark.sql.comet.CometUdfFunctionPoolSuite", [
         "-t", "native hash shuffle transports UDF keys separately from child functions",
         "-t", "native range shuffle transports UDF keys separately from child functions",
+    ], 2),
+    ("g10-expression-guards", "org.apache.comet.CometExpressionSuite", [
+        "-t", "date_add with scalar overflow",
+        "-s", "org.apache.comet.CometTimestampComparisonSuite",
+        "-t", "unsupported timestamp casts retain Spark rows and mandatory errors through dispatch or fallback",
     ], 2),
 ]
 

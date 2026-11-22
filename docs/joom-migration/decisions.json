@@ -1197,5 +1197,14 @@
     "final_gate": "All four workflows, 25 actual packaged cases on both native architectures and artifact verification must bind the corrected final SHA.",
     "scope_preservation": "All 58 active cards, H01, prior decisions, G01-G09 history and 15 backlog requirements are unchanged.",
     "merge_stable_tag_production_authorized": false
+  },
+  "g10_v9_shutdown_pause": {
+    "date": "2026-11-22",
+    "source": "Explicit user request: save all progress reliably, stop before the next full GHA, and resume tomorrow after laptop shutdown.",
+    "state": "Local candidate commit only; no feature push, workflow dispatch, helper arming, merge or stable tag tonight.",
+    "resume": "Read PAUSED.md current shutdown checkpoint and external pause-v9.json/candidate-v9.json; verify exact source/doc/ref integrity, then continue pending full qualification on that SHA.",
+    "historical_evidence": "All old receipts/artifacts remain preserved without final replacement-source pass credit.",
+    "final_contract": "Full agreed CI/Actions CodeQL/Miri, core98+window88+separate corrective58+original5, RC27/13/24Core+2Delta per AMD64/ARM64, verified final downloads and all15 backlog dispositions; no weaker correctness gates.",
+    "merge_stable_tag_production_authorized": false
   }
 }

@@ -1,7 +1,7 @@
 {
-  "date": "2026-11-21",
+  "date": "2026-11-22",
   "group": "G10",
-  "status": "LOCAL_SHUFFLE_KEY_CORRECTION_VERIFIED_FINAL_SAME_SHA_QUALIFICATION_REQUIRED",
+  "status": "LOCAL_V9_CORRECTIVE_MATRIX_VERIFIED_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
   "branch": "joom/1.2-release-qualification",
   "base_commit": "4467d0337089036d3f01d28375260ce3dbcaaca5",
   "cards": "All agreed 58 active cards, plus preservation of historical H01; no scope is automatically excluded.",
@@ -15,8 +15,8 @@
     "jvm_arrow": "18.3.0",
     "java": "17.0.19-tem"
   },
-  "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v8.json",
-  "source_manifest_sha256": "4b5e8e7846f10da67e81804a5b3101e209d90daab5b37ec0f424690c5d1a25e6",
+  "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v9.json",
+  "source_manifest_sha256": "4900f4c51e5592d17a9fe84c20225f62375d3e26baa6615bcd1ba36b53b398a4",
   "changed_source_sha256": {
     ".github/actions/java-test/action.yaml": "3ff24f865e0b76d1e8fb7f991f7ac201294c4fcc7a9491feeb28a3b96823edc2",
     ".github/actions/rust-test/action.yaml": "ae1207a8c531775baf0db3698ea232171ec203675105cf886e87a17198e7016d",
@@ -32,10 +32,10 @@
     "dev/ci/test-maven-model.py": "ae5479b128bd44e4f4ad8fc14d05032ac871e6861fa1316c96c6b38fb285688e",
     "dev/ci/verify-native-windows.py": "38d49357b2672501704f9efa3dcb74ee746e9e06b6ee27f3acb4013d3e9e28cd",
     "dev/release/joom/build-release.sh": "e2ed184d3cf3f7442346115ba1db647519d1f09972abcd4e01e130a7734ec365",
-    "dev/release/joom/test-packaged-runtime.py": "80cacdf2ad1f47301ffaec7f76c65ed3c29921c4c8fb4235fefb3a5c69a4e85d",
-    "dev/release/joom/test-rc-result.py": "0a006d15c4dd3e3f743e52e8eef7fbe9242b0851bc1e721d9f6f995a90bfec09",
-    "dev/release/joom/verify-packaged-runtime.py": "ed27c9bd83a19356c5cbf64874213d234f3bd9114e21e41a89c3d71608b38571",
-    "dev/release/joom/verify-rc-result.py": "a0324a352c9f71282e0c23802ad19f5f2d95628ecb4b095a43559e3082cb0288",
+    "dev/release/joom/test-packaged-runtime.py": "3a3485014b4700b63947913c8a1bea7ab28d2f78a2bc0528709ecb471146811b",
+    "dev/release/joom/test-rc-result.py": "1626e9cb8e7995f238b8c60ef440b8a939b99fda18ab266c31100d527637da4a",
+    "dev/release/joom/verify-packaged-runtime.py": "34d502d756433c57a303df26d6bf3e12ccef5069f08900cfe43c75b2c0762f2f",
+    "dev/release/joom/verify-rc-result.py": "0b0db6eb4a5892393cb423b8a3496fe575da7793603bae6ed893aeeb0a4fc2cf",
     "docs/source/contributor-guide/ci.md": "036cdc86a743069db2edd50fef11166e1b2692bb473379e6983a7497a7ec8b5b",
     "docs/source/contributor-guide/memory_management.md": "0f2c26937260892a239593f7f90d1675a9f54b9412420337f4e0071a4773c36e",
     "native/shuffle/src/spark_unsafe/row.rs": "22c6488f885e95ab56e8b8e2254afbf371d0fde2b31cc9b16cb6f836ade7317b",
@@ -178,10 +178,10 @@
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q80a/extended.txt": "a34a9335a066614f68f632bd865cd50b11842114daa87695209e76116683e878",
     "spark/src/test/resources/tpcds-plan-stability/approved-plans-v2_7/q98/extended.txt": "52b4f6b9d05da636f0edcc5f0e6991ed344742a32fe6ecb7f5a993d52fb75414",
     "spark/src/test/scala/org/apache/comet/CometCoverageStatsSuite.scala": "72737f506b1e83df3e708bd135fa4c9566634d2362f96bc47bdfe2af70ba33f4",
-    "spark/src/test/scala/org/apache/comet/CometSqlFileTestSuite.scala": "cbad7a1b5fc4aef9a5aa5cfe4404fed4cbec7649a0d9794fb17e5ac2737f4b3d",
+    "spark/src/test/scala/org/apache/comet/CometSqlFileTestSuite.scala": "7e302e97fa4b0d95739ba8b923b8cfa5865185cd48215b1440b19356d15b73e9",
     "spark/src/test/scala/org/apache/comet/QueryContextInternerSuite.scala": "aefd438a64a53231a0b97ef2f823b4710d92168ab5723f4c15065ede94496e46",
-    "spark/src/test/scala/org/apache/comet/SqlFileTestParser.scala": "c1167548a3bc375edc72284a2c9533471452e3961987dca97ae961120f012cf2",
-    "spark/src/test/scala/org/apache/comet/SqlFileTestParserSuite.scala": "d2056f7b55a3c4230e0326d3a1bc166d63fb836f587b3eba21ef876b521fd071",
+    "spark/src/test/scala/org/apache/comet/SqlFileTestParser.scala": "0a17b8d0638ad2e333adb3eb07559219321f50aa395a489495b327b782ef9b34",
+    "spark/src/test/scala/org/apache/comet/SqlFileTestParserSuite.scala": "651e967b187d0140fd3b722b7b41beea72ae642fd47f6de30d9fed81a6143e80",
     "spark/src/test/scala/org/apache/comet/exec/CometAggregateSuite.scala": "ce998b0eab782b9a3e22db44b15215bb64e051ebc1792082527d787245345060",
     "spark/src/test/scala/org/apache/comet/exec/CometExec3_4PlusSuite.scala": "fe4a840958ad279578d39058ba07ae4b92497264678d2d286bf6e860fa3fc19f",
     "spark/src/test/scala/org/apache/comet/exec/CometExecSuite.scala": "abaff3006f8c42f8124e69bd307394f791373f4a1544f732c2a0d5bbf97bb1f2",
@@ -202,7 +202,13 @@
     "spark/src/test/scala/org/apache/spark/sql/comet/CometUdfFunctionPoolSuite.scala": "44cb9d55c0c722bc2529a47191d9d898a4abc717dcb4d1897f5b18cea1622a64",
     "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometBlockStoreShuffleReaderSuite.scala": "30907ed867fbca7e203dfb90454839d7746768cb6916190c3846e23b663a3865",
     "spark/src/test/scala/org/apache/spark/sql/comet/execution/shuffle/CometShuffleWriterSemanticsSuite.scala": "7dcca7d052879b3c5d6ba7b74ea5237517a16d63b8fe0281cb38afef11366294",
-    "spark/src/test/scala/org/apache/spark/sql/comet/util/UtilsSuite.scala": "36ddcd4a4828de773e60593208e93054c90af6a917010cd9ea95ae191873c943"
+    "spark/src/test/scala/org/apache/spark/sql/comet/util/UtilsSuite.scala": "36ddcd4a4828de773e60593208e93054c90af6a917010cd9ea95ae191873c943",
+    "spark/src/test/scala/org/apache/comet/CometTimestampComparisonSuite.scala": "ebc22c64919c157aa02d416ac9cc87805d2d569aec7968a2503636f0816c07f5",
+    "spark/src/test/scala/org/apache/comet/exec/CometConditionalEvaluationOrderSuite.scala": "49db5e4be7de615a8eee3d087037ef3f83df693933ff18be2323ec5e4d0ce797",
+    "spark/src/test/scala/org/apache/comet/CometExpressionSuite.scala": "c06a6004ab08295b689d8e4358b2723533ea73af7f60a7fb8b3afc3adc2a9e58",
+    "spark/src/test/resources/sql-tests/iceberg/metadata_column_partition.sql": "084ed0547a6ba1b6c1dee7b6f0b7e45aaa46e33f00fb4f451b236727890f09f7",
+    "spark/src/test/resources/sql-tests/iceberg/nested_schema_pruning.sql": "6c657987a7586f8cffdcdd1ca54df2e8f6e6f2a7e86e47dfb358751e3da9f6af",
+    "spark/src/test/resources/sql-tests/expressions/datetime/trunc_timestamp_label.sql": "cbb6ac3e6783f078455b58f1bca27b733038ca9743072408e2c1e03f24bb0638"
   },
   "plan_profiles": [
     {
@@ -341,7 +347,8 @@
       "canceled": 0,
       "ignored": 0,
       "pending": 0
-    }
+    },
+    "qualification_scope": "HISTORICAL_SOURCE_BOUND_PREPARATION; retain original outcomes/limits. Current v9 local evidence and final pending acceptance are defined by profile_expression_correctness_followup."
   },
   "local_evidence": {
     "native_metric_tests": "4 unique registrations, including tight/roomy/multi-run replay variants; actual pool high-water oracle.",
@@ -350,7 +357,8 @@
     "strict_workspace_clippy": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/strict-workspace-clippy.json",
     "metric_evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/metric-fix-results.json",
     "coverage_inventory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_coverage-audit/coverage-matrix.json",
-    "ci_restoration": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_ci-audit/ci-restoration-audit.json"
+    "ci_restoration": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_ci-audit/ci-restoration-audit.json",
+    "qualification_scope": "HISTORICAL_SOURCE_BOUND_PREPARATION; retain original outcomes/limits. Current v9 local evidence and final pending acceptance are defined by profile_expression_correctness_followup."
   },
   "acceptance_gates": {
     "full_comet_ci": "PENDING_POST_COMMIT_EXACT_SHA",
@@ -358,7 +366,7 @@
     "miri": "PENDING_POST_COMMIT_EXACT_SHA",
     "rc_amd64_arm64": "PENDING_POST_COMMIT_EXACT_SHA",
     "downloaded_artifact_verification": "PENDING_POST_COMMIT_EXACT_SHA",
-    "backlog_reconciliation": "PENDING_ACTUAL_REMOTE_CASE_AND_JOB_EVIDENCE"
+    "backlog_reconciliation": "PENDING_POST_COMMIT_EXACT_SHA"
   },
   "explicit_applicability": {
     "hdfs": "Four native tests require unavailable HDFS cluster; explicitly excluded by user; never counted as passes.",
@@ -649,21 +657,22 @@
     },
     "runtime_tests_note": "These are build/quality checks, not additional runtime-test pass counts. Earlier129-per-profile plan and34C2R/conditional runtime evidence is retained; final exact-SHA full CI remains required.",
     "preservation": "Explicit adaptations and compiler-proven literal bytes; no SQL/result/error/native assertion is relaxed. No new allocation policy, cost coefficient, configuration default, dependency pin or production algorithm changes.",
-    "literal_proof_binding": "Original compiler-tested literals precede formatting; independent final-followup review binds actual formatted files and proves full Delta source-token equivalence against original68133883e, covering layout-only hash drift."
+    "literal_proof_binding": "Original compiler-tested literals precede formatting; independent final-followup review binds actual formatted files and proves full Delta source-token equivalence against original68133883e, covering layout-only hash drift.",
+    "qualification_scope": "HISTORICAL_SOURCE_BOUND_PREPARATION; retain original outcomes/limits. Current v9 local evidence and final pending acceptance are defined by profile_expression_correctness_followup."
   },
   "packaged_acceptance": {
-    "cases_per_architecture": 25,
-    "groups": 12,
+    "cases_per_architecture": 27,
+    "groups": 13,
     "architectures": [
       "amd64",
       "aarch64"
     ],
     "native_and_final_jar_bytes": "Exact loaded bundled native SHA and unchanged release JAR hashes, before/after execution.",
-    "class_origins": "22 unique final Core classes for every group; 2 unique final Delta classes for both Delta groups; exact JAR/SHA/resource_count 1.",
-    "additional_cases": "G08UDFpool1+Delta serialization2;G09cost/mixed/ANSI4+wide-sort1+wide-shuffle1+wide-decimal range1;actualdefaultKryobroadcast1. Original12G01cases retained.",
+    "class_origins": "24 unique final Core classes for every group and two Delta classes for the applicable Delta groups; unique resources, final JAR hashes and bundled native bytes are mandatory.",
+    "additional_cases": "Original12 G01 cases plus G08/G09/default-Kryo11, hash/range UDF shuffle2 and DateAdd/timestamp-cast guards2; all27 prior functional assertions remain required.",
     "source_assertions": "Select existing test registrations; original row/schema/error/native/Kryo checks unchanged.",
-    "local_precheck": "Current-source local key-runtime and36Python controls are scoped local evidence. Actual final Linux packaged25case qualification remains pending.",
-    "boundary_controls": "11runtime fault controls and18receipt/contract controls passed; no bypass for missing/skipped/pending/wrong-origin/duplicate support.",
+    "local_precheck": "Current v9 local profile matrix and41 Python contract controls plus5 source-guard controls passed. Actual final native Linux RC27 execution on both architectures remains pending.",
+    "boundary_controls": "Current17 runtime and24 exporter contract controls passed, plus5 additive source-guard controls. Reject missing/skipped/pending cases, wrong origins, duplicates and changed validator logic; these controls are not packaged runtime execution.",
     "ci_secondary_suite": "Existing CometBroadcastDefaultKryoSuite added beside PayloadSuite in Linux/macOS lists;2actualAQEcases per applicable profile. Source/compiled census finds no other unexpected omission.",
     "python38": "Grammar/API compatibility review passed; actual Focal release execution remains remote gate.",
     "additional_key_transport_cases": {
@@ -705,10 +714,29 @@
           "sha256": "0ff9ebf3eea6aaa57de91f7485486cc05341ca85c508db3a57a9295af1da8794"
         }
       },
-      "limits": "Python fault controls are not actual packaged JVM execution. Both final native Linux architectures must run all25 cases from the new frozen source."
+      "limits": "Historical local controls are not packaged JVM execution. Current acceptance requires all27 cases/13 groups/24 Core plus2 Delta origins on both native Linux architectures at the replacement SHA.",
+      "disposition": "HISTORICAL_V8_ADDITIVE_RC25_STAGE; its25/12/22 counts and36 controls describe the preserved predecessor, not current acceptance."
+    },
+    "additional_expression_guard_cases": {
+      "group": "g10-expression-guards",
+      "new_cases": [
+        "date_add with scalar overflow",
+        "unsupported timestamp casts retain Spark rows and mandatory errors through dispatch or fallback"
+      ],
+      "additional_Core_origins": [
+        "org.apache.comet.expressions.CometCast",
+        "org.apache.comet.expressions.CometCast$"
+      ],
+      "current_cases_per_architecture": 27,
+      "current_groups": 13,
+      "current_Core_origin_classes": 24,
+      "current_Delta_origin_classes": 2,
+      "current_Python_controls": 41,
+      "current_source_guard_controls": 5,
+      "final_runtime_status": "PENDING_POST_COMMIT_EXACT_SHA"
     }
   },
-  "backlog_map": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v8.json",
+  "backlog_map": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v9.json",
   "miri_codec_adaptation": {
     "scope": "One existing test fixture only; same19test registrations and full production prefix preserved.",
     "normal_native": "None,Lz4Frame,Zstd(1), bothwriterentrypoints, sameallfixtures/checksums/byteanddecodedrowassertions. Native19/19pass.",
@@ -1482,7 +1510,8 @@
         }
       ],
       "limits": "Overlapping local cohorts are not one complete final-source run. Raw runner success can include an explicitly identified version-N/A registration. Final same-SHA Linux CI/RC and final JAR delivery remain pending."
-    }
+    },
+    "qualification_scope": "HISTORICAL_SOURCE_BOUND_PREPARATION; retain original outcomes/limits. Current v9 local evidence and final pending acceptance are defined by profile_expression_correctness_followup."
   },
   "approved_target_workload_applicability": {
     "target_workload": {
@@ -1511,9 +1540,9 @@
     "Rust_only_applicability": "Four approved HDFS-environment tests and three manual performance benchmarks are separate from JVM scan cancellations.",
     "migration_feature_scope": "All agreed 58 active cards and historical H01 remain unchanged; workload applicability does not remove implementations or tests."
   },
-  "backlog_map_status": "REQUIREMENTS_AND_ADDITIVE_RC25_SCOPE_ONLY; actual finalSHA/evidence binding pending",
-  "candidate_receipt_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v8.json",
-  "candidate_receipt_status": "EXPECTED_AFTER_CORRECTION_COMMIT; no futureSHA embedded",
+  "backlog_map_status": "UNARMED_REQUIREMENTS_ONLY; final exact source/run binding and15 dispositions pending",
+  "candidate_receipt_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v9.json",
+  "candidate_receipt_status": "EXPECTED_AFTER_COMMIT; no future SHA fabricated",
   "previous_status_before_contract_corrections": "FINAL_SOURCE_FROZEN_FULL_QUALIFICATION_REQUIRED",
   "historical_v7_references_before_shuffle_key_correction": {
     "disposition": "HISTORICAL_ONLY; no old-source credit transfers to the corrected candidate.",
@@ -2055,7 +2084,8 @@
         }
       ],
       "limits": "Source-bound local evidence only; preserve all earlier failed/negative attempts. Actual same-SHA fullCI/CodeQL/Miri/RC25 and finalartifact delivery remain pending."
-    }
+    },
+    "qualification_scope": "HISTORICAL_SOURCE_BOUND_PREPARATION; retain original outcomes/limits. Current v9 local evidence and final pending acceptance are defined by profile_expression_correctness_followup."
   },
   "historical_cf86a3b4_remote_and_artifact_results": {
     "source_commit": "cf86a3b4f3e8850e028aaaae281a2b49fe3baf32",
@@ -2104,5 +2134,202 @@
       "delivery_status": "HISTORICAL; do not deliver these as the corrected final artifacts."
     }
   },
-  "followup_updated_on": "2026-11-21"
+  "followup_updated_on": "2026-11-22",
+  "historical_v8_references_before_profile_expression_correction": {
+    "status": "LOCAL_SHUFFLE_KEY_CORRECTION_VERIFIED_FINAL_SAME_SHA_QUALIFICATION_REQUIRED",
+    "source_manifest": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v8.json",
+    "source_manifest_sha256": "4b5e8e7846f10da67e81804a5b3101e209d90daab5b37ec0f424690c5d1a25e6",
+    "candidate_receipt_expected": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v8.json",
+    "packaged_acceptance": {
+      "cases_per_architecture": 25,
+      "groups": 12,
+      "architectures": [
+        "amd64",
+        "aarch64"
+      ],
+      "native_and_final_jar_bytes": "Exact loaded bundled native SHA and unchanged release JAR hashes, before/after execution.",
+      "class_origins": "22 unique final Core classes for every group; 2 unique final Delta classes for both Delta groups; exact JAR/SHA/resource_count 1.",
+      "additional_cases": "G08UDFpool1+Delta serialization2;G09cost/mixed/ANSI4+wide-sort1+wide-shuffle1+wide-decimal range1;actualdefaultKryobroadcast1. Original12G01cases retained.",
+      "source_assertions": "Select existing test registrations; original row/schema/error/native/Kryo checks unchanged.",
+      "local_precheck": "Current-source local key-runtime and36Python controls are scoped local evidence. Actual final Linux packaged25case qualification remains pending.",
+      "boundary_controls": "11runtime fault controls and18receipt/contract controls passed; no bypass for missing/skipped/pending/wrong-origin/duplicate support.",
+      "ci_secondary_suite": "Existing CometBroadcastDefaultKryoSuite added beside PayloadSuite in Linux/macOS lists;2actualAQEcases per applicable profile. Source/compiled census finds no other unexpected omission.",
+      "python38": "Grammar/API compatibility review passed; actual Focal release execution remains remote gate.",
+      "additional_key_transport_cases": {
+        "cases_per_architecture": 25,
+        "groups": 12,
+        "core_origin_classes": 22,
+        "delta_origin_classes": 2,
+        "previous_23_cases_and_17_Core_origins_preserved": true,
+        "new_group": "g10-udf-shuffle",
+        "new_cases": [
+          "native hash shuffle transports UDF keys separately from child functions",
+          "native range shuffle transports UDF keys separately from child functions"
+        ],
+        "suite": "org.apache.spark.sql.comet.CometUdfFunctionPoolSuite",
+        "new_Core_origin_classes": [
+          "org.apache.spark.sql.comet.execution.shuffle.NativeShuffleSpec",
+          "org.apache.spark.sql.comet.execution.shuffle.NativeShuffleSpec$",
+          "org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec",
+          "org.apache.spark.sql.comet.execution.shuffle.CometShuffleExchangeExec$",
+          "org.apache.spark.sql.comet.execution.shuffle.CometNativeShuffleWriter"
+        ],
+        "exact_old_checks_preserved": "Original row/schema/error/native/Kryo checks, actual bundled library hash, Core/Delta origin/resource-count/JAR-hash proofs and immutable final JAR checks remain required.",
+        "workflow_jobs": 7,
+        "workflow_changed": false,
+        "preservation_proof": {
+          "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_rc-shuffle-qualification/rc25-preservation.json",
+          "sha256": "949cc5b902f9260d65caade1c04f428c13c801c392952ca4eac44dce43fc3bf7"
+        },
+        "actual_project_controls": {
+          "runtime_tests": 15,
+          "receipt_tests": 21,
+          "total": 36,
+          "runtime_receipt": {
+            "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_udf-shuffle-keys/rc25-runtime-controls.json",
+            "sha256": "8f7c337b43cb8c05dccd0fbca855dbf950e4d4d2eb5b91fa35f5272ad2eb17cc"
+          },
+          "receipt_controls_receipt": {
+            "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_udf-shuffle-keys/rc25-receipt-controls.json",
+            "sha256": "0ff9ebf3eea6aaa57de91f7485486cc05341ca85c508db3a57a9295af1da8794"
+          }
+        },
+        "limits": "Python fault controls are not actual packaged JVM execution. Both final native Linux architectures must run all25 cases from the new frozen source."
+      }
+    },
+    "remote": {
+      "source_commit": "4e0f731190ae350e13fe00186676493b33306e29",
+      "disposition": "HISTORICAL_ONLY; does not qualify the replacement candidate.",
+      "full_CI": {
+        "run_id": 44963788842,
+        "status": "CANCELED_AFTER_REAL_OLDER_PROFILE_TEST_CONTRACT_FAILURES"
+      },
+      "RC": {
+        "run_id": 44963792674,
+        "status": "SUCCESS",
+        "cases_per_architecture": 25
+      },
+      "Miri": {
+        "run_id": 44963790704,
+        "status": "SUCCESS",
+        "actual_passed_tests": 107
+      },
+      "CodeQL": {
+        "run_id": 44963769288,
+        "status": "SUCCESS",
+        "language": "GitHub Actions"
+      },
+      "downloaded_artifacts": "Historical v8 archive/JAR verification passed; retain original receipts, never deliver it as corrected final artifacts."
+    }
+  },
+  "profile_expression_correctness_followup": {
+    "status": "LOCAL_V9_CORRECTIVE_MATRIX_VERIFIED_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
+    "updated_on": "2026-11-22",
+    "scope": "13 test/resource/release-validation files; no production, workflow, lockfile, dependency or native runtime change in this follow-up.",
+    "static_review": {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_final-independent-review/final-static-independent-review.json",
+      "sha256": "26e0aa977f20a5e307e6c0217ebfa6815a10e1d055dfa343e326ac9d92a3ec78"
+    },
+    "five_profile_local_matrix": {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_final-independent-review/final-local-matrix.json",
+      "sha256": "4d2ad530db51528f649a441fe778780788ae2c9f30491eab72c305c1565ab33c"
+    },
+    "local_counts": [
+      {
+        "profile": "3.4",
+        "runner_successes": 60,
+        "executed_positive": 60,
+        "version_NA": 0,
+        "elapsed_seconds": 111.32
+      },
+      {
+        "profile": "3.5",
+        "runner_successes": 60,
+        "executed_positive": 60,
+        "version_NA": 0,
+        "elapsed_seconds": 80.54
+      },
+      {
+        "profile": "4.0",
+        "runner_successes": 60,
+        "executed_positive": 60,
+        "version_NA": 0,
+        "elapsed_seconds": 111.58
+      },
+      {
+        "profile": "4.1",
+        "runner_successes": 60,
+        "executed_positive": 60,
+        "version_NA": 0,
+        "elapsed_seconds": 120.72
+      },
+      {
+        "profile": "4.2",
+        "runner_successes": 60,
+        "executed_positive": 58,
+        "version_NA": 2,
+        "elapsed_seconds": 99.06
+      }
+    ],
+    "counts_policy": "Per-profile60/60 raw successes are separate cohorts, not summed as unique tests. Target4.2 has58actual positives plus2logged N/A, never60executed SQL/body positives.",
+    "quality": {
+      "spark42_delta_semantic": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_expression-contracts/final-spark42-delta-semantic.json",
+        "sha256": "c5c383bf713326558abf2f581516d2988f09dfd9c3e5fd248796bd3386167d5e",
+        "exit_code": 0,
+        "elapsed_seconds": 138.94,
+        "log_sha256": "2bcb2192d557d5e31551e26a7d63e199640e22c76e272d4a21ddc1fd6864df40"
+      },
+      "spark35_delta_strict_semantic": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_expression-contracts/final-spark35-delta-semantic-v2.json",
+        "sha256": "4c04d095d63fcf0f30a5539efdfaa06e2acd796d08f8ff08d80bbe437a326778",
+        "exit_code": 0,
+        "elapsed_seconds": 226.88,
+        "log_sha256": "46889e742b2ae94413496f28f022b09de47abbc6daed31682a25695682f27e97"
+      },
+      "initial_offline_spark35": "FAILED before lint execution because its plugin was not cached; preserved separately, not counted as a pass."
+    },
+    "SQL": "All 244 original SQL records, data/configuration/error statements and their order across three resources are preserved; only precise expectation headers/comments change.",
+    "safe_fallback_contracts": "Closed profile/operator rules require actual listed Spark operators and exact reasons; native expression proof and typed native source multiplicity remain mandatory. Every AQE inner plan is checked. An unlisted AQE read is structural only when columnar and backed by the typed Comet shuffle; a real Spark row-shuffle negative control rejects it.",
+    "DateAdd": "One former ignore is active: original 10k-row/dictionary-two input and DATE output oracle, explicit ANSI true/false, real NULL/overflow witnesses, native date_add/unix_date proof and independent 64-bit wrap oracle. Match original Spark rows or its required structured failure; no obsolete Rust-panic expectation.",
+    "TimestampCast": "One coherent case checks seven unsupported native timestamp targets with ANSI true/false and dispatcher default-on/explicit-off: 28 internal variants. Compare original Spark schemas/rows or mandatory errors; assert actual dispatch/native scan or exact Spark Project/native scan. Analysis rejections earn no native execution credit.",
+    "remaining_ignored_expression_cases": "11 inherited ignores remain explicitly classified by source guards/scope; ignored native-unsupported paths are not passes. Actual timestamp dispatcher/fallback behavior is separately exercised by the new 28-variant case.",
+    "RC27": {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261122_rc27-expression-guards/rc27-source-proof.json",
+      "sha256": "5bba3aa24c49a20b8f2aecf62b9c81367a894d1ebe5cae22f22290cc92d37843",
+      "cases_per_architecture": 27,
+      "groups": 13,
+      "Core_origin_classes": 24,
+      "Delta_origin_classes": 2,
+      "Python_contract_controls": 41,
+      "source_guard_controls": 5,
+      "final_Linux_execution": "PENDING_POST_COMMIT_EXACT_SHA"
+    },
+    "final_required_runtime": {
+      "core_cases": 98,
+      "native_window_actions": 88,
+      "additional_corrective_cases": 58,
+      "original_Spark34_SQL_cases": 5,
+      "policy": "Separate source/run/job-bound actual evidence; never infer execution from a green aggregate, a version guard or planned selectors."
+    },
+    "backlog_map": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_metric-audit/acceptance-backlog-map-v9.json",
+    "backlog_items": 15,
+    "backlog_status": "UNARMED_REQUIREMENTS_ONLY; all entries remain open until actual final source/job/artifact evidence.",
+    "source_manifest": {
+      "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/final-source-manifest-v9.json",
+      "sha256": "4900f4c51e5592d17a9fe84c20225f62375d3e26baa6615bcd1ba36b53b398a4"
+    },
+    "replacement_source_commit": null,
+    "replacement_run_ids": {
+      "full_CI": null,
+      "RC": null,
+      "Miri": null,
+      "CodeQL": null
+    },
+    "acceptance": "PENDING full agreed CI, Actions CodeQL, Miri, native AMD64/ARM64 RC27, verified downloaded JARs and all15 backlog dispositions on the same replacement SHA.",
+    "qualification_complete": false,
+    "merge_authorized": false,
+    "stable_tag_authorized": false,
+    "production_authorized": false
+  }
 }

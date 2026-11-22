@@ -334,3 +334,20 @@ local proof and the additive RC25 contract. The old cf86a3b4 archive and
 `${COMET_ROOT}/target/joom-release/gha-44955646404` are historical, not corrected
 final artifacts. Do not delete them automatically. Final corrected artifact
 directories and actual sizes remain pending; shared caches/builds are separate.
+
+### Current profile/expression and RC27 evidence
+
+Keep the dated Nov22 expression-contracts, expression-ignore-audit,
+timestamp-cast-dispatch, native-aqe-structure, final-independent-review,
+rc27-expression-guards, backlog-v9 and final-docs-v9 directories under
+`${MIGRATION_AUX_ROOT}/20261121_comet12-g10`. They retain all failed and successful
+profile/lint logs, original sources/resources, 244-record preservation proofs,
+actual NULL/overflow/dispatch checks and the bounded RC27 controls. Existing
+project targets and standard package caches are reused; the authorized semantic
+retry may add standard Maven build dependencies to the shared cache.
+
+The v8 download `target/joom-release/gha-44963792674` and external archive are
+historical source-bound evidence. Preserve them with their receipts; they are
+not corrected final deliverables. The new exact-SHA RC27 directory, actual sizes
+and verified checksums remain pending post-commit facts. No automatic deletion
+of evidence, source checkouts, shared caches, build outputs or JARs is authorized.
