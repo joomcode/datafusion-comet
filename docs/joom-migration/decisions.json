@@ -1082,5 +1082,27 @@
     "post_commit_integration_receipt": "${MIGRATION_AUX_ROOT}/20261123_comet12-g10-integration/completion.json",
     "receipt_rule": "Actual new SHA, fast-forward and remote-head verification are recorded after commit. If that receipt is absent, remote integration is not established by this authorization alone.",
     "qualified_build_provenance": "Full GHA and final RC JARs identify81474. Subsequent documentation-only commit does not relabel that build SHA or requalify rebuilt/renamed release artifacts."
+  },
+  "java25_authorization": {
+    "date": "2026-11-23",
+    "status": "APPROVED_IMPLEMENTATION_AND_QUALIFICATION_NO_MERGE",
+    "feature": "joom/1.2-java25",
+    "base": "d2a01d4b6bd5a5e05fcfa712a9c74e6e889fcdbb",
+    "runtime": "Eclipse Temurin 25.0.5.1+2",
+    "scope": [
+      "target Spark4.2.1 CI/runtime and final-JAR smoke on native AMD64/ARM64",
+      "prerequisites and actual execution of the previous58pandas scenarios",
+      "feature push and full agreed GitHub Actions control/downloads"
+    ],
+    "excluded": [
+      "merge",
+      "stable tag",
+      "main changes",
+      "JFrog publication",
+      "known SQL semantic exceptions",
+      "production",
+      "datasci"
+    ],
+    "network": "User explicitly approved the stated source scope and all necessary quality-related actions in GHA/on GitHub runners. Local scope remains read-only Python metadata/checksums and existing JDK use; no local package/JDK installation."
   }
 }

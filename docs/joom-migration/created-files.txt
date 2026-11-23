@@ -316,3 +316,11 @@ spark/src/test/scala/org/apache/comet/rules/CostBasedEngineCorrectnessSuite.scal
 spark/src/test/scala/org/apache/comet/rules/WideRowShuffleFallbackSuite.scala
 spark/src/test/scala/org/apache/comet/rules/WideRowSortFallbackSuite.scala
 Source/auxiliary inventory: G09-results.json and ${MIGRATION_AUX_ROOT}/20261121_comet12-g09/completion.json.
+
+Java25 qualification additions (2026-11-23):
+dev/ci/java-runtime.py
+dev/ci/java25-runtime.json
+dev/ci/requirements-spark42-python.txt
+dev/ci/setup-spark42-python.sh
+dev/ci/verify-spark42-python.py
+docs/joom-migration/JAVA25.md

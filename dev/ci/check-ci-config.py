@@ -206,11 +206,11 @@ ROUTING_CASES = [
 # The PR tier is the Linux build and nothing else. Every Spark SQL and Iceberg
 # suite waits for the queue or the nightly run, or for its label.
 PR_TIER = {"build_linux", "build_linux_full"}
-# The queue adds one Spark version (4.1, the default profile) and one Iceberg
-# version (1.11, the only Spark 4.1 coverage), plus the build-level gates.
+# The queue gates production Spark4.2/Delta4.2 plus the existing Iceberg1.11
+# compatibility and build-level gates.
 QUEUE_TIER = PR_TIER | {
-    "spark_4_1",
-    "spark_4_1_hive",
+    "spark_4_2",
+    "delta_4_2",
     "iceberg_1_11",
     "build_macos",
     "build_macos_full",
@@ -225,14 +225,14 @@ QUEUE_TIER = PR_TIER | {
 NIGHTLY_TIER = {
     "spark_3_5",
     "spark_4_0",
-    "spark_4_2",
+    "spark_4_1",
+    "spark_4_1_hive",
     "iceberg_1_8",
     "iceberg_1_9",
     "iceberg_1_10",
     "delta_3_5",
     "delta_4_0",
     "delta_4_1",
-    "delta_4_2",
     "build_linux_all_profiles",
 }
 # Spark 3.4 is deprecated and sits outside the queue and nightly tiers
@@ -677,11 +677,12 @@ def check_local_ci_config():
                     f"local-ci-config.py defaults {suite} to "
                     f"{config[f'{suite}_default']}, which ci.yml has no job for"
                 )
-        if config["dedicated_gate_version"] not in config["spark"]:
-            failures.append(
-                "the DEDICATED_JVM_SBT_TESTS gate names Spark "
-                f"{config['dedicated_gate_version']}, which ci.yml has no job for"
-            )
+        for version in config["dedicated_gate_versions"]:
+            if version not in config["spark"]:
+                failures.append(
+                    "the DEDICATED_JVM_SBT_TESTS gate names Spark "
+                    f"{version}, which ci.yml has no job for"
+                )
         if not config["rows"]:
             failures.append("local-ci-config.py found no Spark SQL matrix rows")
     except Exception as err:  # noqa: BLE001 - any parse failure is the finding
@@ -738,8 +739,8 @@ def check_linux_test_profiles():
     names = lambda rows: [row["name"] for row in rows]
     everything = names(module.select("all"))
     pr, nightly = names(module.select("pr")), names(module.select("nightly"))
-    if pr != ["Spark 4.1, JDK 17"]:
-        failures.append(f"the pr tier must be the default build profile alone, got {pr}")
+    if pr != ["Spark 4.2, Temurin 25"]:
+        failures.append(f"the pr tier must be the production qualification profile alone, got {pr}")
     if not nightly:
         failures.append("the nightly tier is empty (see PROFILES in dev/ci/linux-test-profiles.py)")
     if sorted(pr + nightly) != sorted(everything):
@@ -1566,6 +1567,52 @@ def check_cache_save_scope():
     return not failures
 
 
+def check_java25_qualification():
+    """A green compatibility row must not stand in for the production JVM."""
+    import json
+
+    policy = json.loads(Path("dev/ci/java25-runtime.json").read_text())
+    expected = policy["setup_version"]
+    failures = []
+    profiles = load_ci_module("linux_java25_profiles", "linux-test-profiles.py")
+    target = profiles.select("pr")
+    if len(target) != 1 or target[0]["java_version"] != expected or \
+            target[0]["maven_opts"] != "-Pspark-4.2":
+        failures.append("primary Comet suites must execute Spark 4.2 on the pinned Temurin build")
+    local = load_ci_module("local_java25_config", "local-ci-config.py")
+    calls = local._job_inputs()
+    for job in ["spark_4_2", "delta_4_2"]:
+        if calls[job].get("java") != expected or calls[job].get("java-distribution") != "temurin":
+            failures.append(f"{job} must explicitly select the pinned Temurin runtime")
+    linux = (WORKFLOWS / "pr_build_linux.yml").read_text()
+    blocks = {block.split(":", 1)[0].strip(): block
+              for block in re.split(r"(?=^  [\w-]+:\n)", linux, flags=re.M) if block.startswith("  ")}
+    for job in ["build-native", "linux-test-rust", "verify-benchmark-results-tpch",
+                "verify-benchmark-results-tpcds"]:
+        block = blocks.get(job, "")
+        if f'jdk-version: "{expected}"' not in block or "jdk-distribution: temurin" not in block:
+            failures.append(f"{job} does not select the qualification JVM")
+        if job.startswith("verify-benchmark-results-"):
+            commands = [line for line in block.splitlines() if "mvnw " in line]
+            if not commands or any("-Pspark-4.2" not in line for line in commands):
+                failures.append(f"{job} must build, generate and test with the actual Spark 4.2 profile")
+    setup = Path(".github/actions/setup-builder/action.yaml").read_text()
+    if "distribution: ${{ inputs.jdk-distribution }}" not in setup or \
+            "python3 -B dev/ci/java-runtime.py" not in setup:
+        failures.append("setup-builder must install the requested vendor and verify the actual JVM")
+    rc = (WORKFLOWS / "rc_build_smoke.yml").read_text()
+    if rc.count(f'java-version: "{expected}"') != 2 or 'java-version: "17"' in rc:
+        failures.append("RC source checks and both architecture smoke jobs must use the pinned JVM")
+    spark = (WORKFLOWS / "spark_sql_test_reusable.yml").read_text()
+    if "bash dev/ci/setup-spark42-python.sh" not in spark:
+        failures.append("Spark 4.2 stock SQL prerequisites must fail fast before test discovery")
+    if "4.2" not in local.config()["dedicated_gate_versions"]:
+        failures.append("Spark 4.2 / Java 25 must retain upstream Parquet/ORC process isolation")
+    for failure in failures:
+        print("Java25 qualification: " + failure)
+    return not failures
+
+
 if __name__ == "__main__":
     ok = check_change_filters()
     ok = check_event_policy() and ok
@@ -1582,6 +1629,7 @@ if __name__ == "__main__":
     ok = check_nightly_base_fallback() and ok
     ok = check_cache_save_scope() and ok
     ok = check_local_ci_config() and ok
+    ok = check_java25_qualification() and ok
     if not ok:
         sys.exit(1)
     print("CI config checks passed")

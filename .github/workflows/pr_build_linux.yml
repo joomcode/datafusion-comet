@@ -177,8 +177,8 @@ jobs:
           - name: "Spark 4.1, JDK 17"
             java_version: "17"
             maven_opts: "-Pspark-4.1"
-          - name: "Spark 4.2, JDK 17"
-            java_version: "17"
+          - name: "Spark 4.2, Temurin 25"
+            java_version: "25.0.5.1+2"
             maven_opts: "-Pspark-4.2"
       fail-fast: false
     steps:
@@ -189,6 +189,7 @@ jobs:
         with:
           rust-version: ${{ env.RUST_VERSION }}
           jdk-version: ${{ matrix.profile.java_version }}
+          jdk-distribution: ${{ contains(matrix.profile.maven_opts, '-Pspark-4.2') && 'temurin' || 'zulu' }}
 
       - name: Restore Maven dependencies
         id: maven-cache
@@ -406,7 +407,8 @@ jobs:
         uses: ./.github/actions/setup-builder
         with:
           rust-version: ${{ env.RUST_VERSION }}
-          jdk-version: 17 # JDK only needed for JVM module proto generation
+          jdk-version: "25.0.5.1+2"
+          jdk-distribution: temurin
 
       - name: Restore Cargo cache
         id: cargo-cache
@@ -473,7 +475,8 @@ jobs:
         uses: ./.github/actions/setup-builder
         with:
           rust-version: ${{ env.RUST_VERSION }}
-          jdk-version: 17
+          jdk-version: "25.0.5.1+2"
+          jdk-distribution: temurin
 
       - name: Rust test steps
         uses: ./.github/actions/rust-test
@@ -730,6 +733,7 @@ jobs:
         with:
           rust-version: ${{ env.RUST_VERSION }}
           jdk-version: ${{ matrix.profile.java_version }}
+          jdk-distribution: ${{ contains(matrix.profile.maven_opts, '-Pspark-4.2') && 'temurin' || 'zulu' }}
 
       - name: Download native library
         uses: ./.github/actions/download-artifact-retry
@@ -829,6 +833,8 @@ jobs:
     name: Verify TPC-H Results
     if: ${{ inputs.profiles != 'nightly' }}
     runs-on: ubuntu-24.04
+    env:
+      JAVA_TOOL_OPTIONS: "-Dspark.sql.columnVector.offheap.enabled=false"
     container:
       image: amd64/rust
     env:
@@ -840,7 +846,8 @@ jobs:
         uses: ./.github/actions/setup-builder
         with:
           rust-version: ${{ env.RUST_VERSION }}
-          jdk-version: 17
+          jdk-version: "25.0.5.1+2"
+          jdk-distribution: temurin
 
       - name: Download native library
         uses: ./.github/actions/download-artifact-retry
@@ -868,17 +875,17 @@ jobs:
 
       - name: Build project
         run: |
-          ./mvnw -B -Prelease install -DskipTests
+          ./mvnw -B -Pspark-4.2 -Prelease install -DskipTests
 
       - name: Generate TPC-H data (SF=1)
         if: steps.cache-tpch.outputs.cache-hit != 'true'
         run: |
-          cd spark && MAVEN_OPTS='-Xmx20g' ../mvnw -B -Prelease exec:java -Dexec.mainClass="org.apache.spark.sql.GenTPCHData" -Dexec.classpathScope="test" -Dexec.cleanupDaemonThreads="false" -Dexec.args="--location `pwd`/.. --scaleFactor 1 --numPartitions 1 --overwrite"
+          cd spark && MAVEN_OPTS='-Xmx20g' ../mvnw -B -Pspark-4.2 -Prelease exec:java -Dexec.mainClass="org.apache.spark.sql.GenTPCHData" -Dexec.classpathScope="test" -Dexec.cleanupDaemonThreads="false" -Dexec.args="--location `pwd`/.. --scaleFactor 1 --numPartitions 1 --overwrite"
 
       - name: Run TPC-H queries
         if: ${{ !inputs.cache-refresh-only }}
         run: |
-          SPARK_HOME=`pwd` SPARK_TPCH_DATA=`pwd`/tpch/sf1_parquet ./mvnw -B -Prelease -Dsuites=org.apache.spark.sql.CometTPCHQuerySuite test
+          SPARK_HOME=`pwd` SPARK_TPCH_DATA=`pwd`/tpch/sf1_parquet ./mvnw -B -Pspark-4.2 -Prelease -Dsuites=org.apache.spark.sql.CometTPCHQuerySuite test
 
       # Saved only on main: an entry written from a pull request or a
       # `gh-readonly-queue/*` branch cannot be restored by any later run, and
@@ -903,6 +910,8 @@ jobs:
     name: Verify TPC-DS Results
     if: ${{ inputs.profiles != 'nightly' }}
     runs-on: ubuntu-24.04
+    env:
+      JAVA_TOOL_OPTIONS: "-Dspark.sql.columnVector.offheap.enabled=false"
     container:
       image: amd64/rust
     env:
@@ -914,7 +923,8 @@ jobs:
         uses: ./.github/actions/setup-builder
         with:
           rust-version: ${{ env.RUST_VERSION }}
-          jdk-version: 17
+          jdk-version: "25.0.5.1+2"
+          jdk-distribution: temurin
 
       - name: Download native library
         uses: ./.github/actions/download-artifact-retry
@@ -942,7 +952,7 @@ jobs:
 
       - name: Build project
         run: |
-          ./mvnw -B -Prelease install -DskipTests
+          ./mvnw -B -Pspark-4.2 -Prelease install -DskipTests
 
       - name: Checkout tpcds-kit
         if: steps.cache-tpcds.outputs.cache-hit != 'true'
@@ -961,12 +971,12 @@ jobs:
       - name: Generate TPC-DS data (SF=1)
         if: steps.cache-tpcds.outputs.cache-hit != 'true'
         run: |
-          cd spark && MAVEN_OPTS='-Xmx20g' ../mvnw -B -Prelease exec:java -Dexec.mainClass="org.apache.spark.sql.GenTPCDSData" -Dexec.classpathScope="test" -Dexec.cleanupDaemonThreads="false" -Dexec.args="--dsdgenDir `pwd`/../tpcds-kit/tools --location `pwd`/../tpcds-sf-1 --scaleFactor 1 --numPartitions 1"
+          cd spark && MAVEN_OPTS='-Xmx20g' ../mvnw -B -Pspark-4.2 -Prelease exec:java -Dexec.mainClass="org.apache.spark.sql.GenTPCDSData" -Dexec.classpathScope="test" -Dexec.cleanupDaemonThreads="false" -Dexec.args="--dsdgenDir `pwd`/../tpcds-kit/tools --location `pwd`/../tpcds-sf-1 --scaleFactor 1 --numPartitions 1"
 
       - name: Run TPC-DS queries (Sort merge join)
         if: ${{ !inputs.cache-refresh-only }}
         run: |
-          SPARK_HOME=`pwd` SPARK_TPCDS_DATA=`pwd`/tpcds-sf-1 ./mvnw -B -Prelease -Dsuites=org.apache.spark.sql.CometTPCDSQuerySuite test
+          SPARK_HOME=`pwd` SPARK_TPCDS_DATA=`pwd`/tpcds-sf-1 ./mvnw -B -Pspark-4.2 -Prelease -Dsuites=org.apache.spark.sql.CometTPCDSQuerySuite test
         env:
           SPARK_TPCDS_JOIN_CONF: |
             spark.sql.autoBroadcastJoinThreshold=-1
@@ -975,7 +985,7 @@ jobs:
       - name: Run TPC-DS queries (Broadcast hash join)
         if: ${{ !inputs.cache-refresh-only }}
         run: |
-          SPARK_HOME=`pwd` SPARK_TPCDS_DATA=`pwd`/tpcds-sf-1 ./mvnw -B -Prelease -Dsuites=org.apache.spark.sql.CometTPCDSQuerySuite test
+          SPARK_HOME=`pwd` SPARK_TPCDS_DATA=`pwd`/tpcds-sf-1 ./mvnw -B -Pspark-4.2 -Prelease -Dsuites=org.apache.spark.sql.CometTPCDSQuerySuite test
         env:
           SPARK_TPCDS_JOIN_CONF: |
             spark.sql.autoBroadcastJoinThreshold=10485760
@@ -983,7 +993,7 @@ jobs:
       - name: Run TPC-DS queries (Shuffled hash join)
         if: ${{ !inputs.cache-refresh-only }}
         run: |
-          SPARK_HOME=`pwd` SPARK_TPCDS_DATA=`pwd`/tpcds-sf-1 ./mvnw -B -Prelease -Dsuites=org.apache.spark.sql.CometTPCDSQuerySuite test
+          SPARK_HOME=`pwd` SPARK_TPCDS_DATA=`pwd`/tpcds-sf-1 ./mvnw -B -Pspark-4.2 -Prelease -Dsuites=org.apache.spark.sql.CometTPCDSQuerySuite test
         env:
           SPARK_TPCDS_JOIN_CONF: |
             spark.sql.autoBroadcastJoinThreshold=-1

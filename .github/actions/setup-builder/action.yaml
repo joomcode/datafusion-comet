@@ -26,6 +26,9 @@ inputs:
     description: 'jdk version to install (e.g., 17)'
     required: true
     default: '17'
+  jdk-distribution:
+    description: "JDK distribution; target qualification uses Eclipse Temurin"
+    default: "zulu"
 runs:
   using: "composite"
   steps:
@@ -39,10 +42,15 @@ runs:
     - name: Install JDK ${{inputs.jdk-version}}
       uses: actions/setup-java@v4
       with:
-        # distribution is chosen to be zulu as it still offers JDK 8 with Silicon support, which
-        # is not available in the adopt distribution
-        distribution: 'zulu'
+        # Preserve the existing distribution for compatibility rows; production
+        # Spark4.2 explicitly selects the pinned Eclipse Temurin build.
+        distribution: ${{ inputs.jdk-distribution }}
         java-version: ${{inputs.jdk-version}}
+
+    - name: Verify pinned Temurin qualification runtime
+      if: ${{ startsWith(inputs.jdk-version, '25.') }}
+      shell: bash
+      run: python3 -B dev/ci/java-runtime.py --github-env "$GITHUB_ENV"
 
     - name: Set JAVA_HOME
       shell: bash

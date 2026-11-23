@@ -23,16 +23,16 @@
 # there are three tiers:
 #
 #   pull_request  fast feedback. The Linux build only, with its test matrix
-#                 run against the default Spark profile (4.1) alone.
+#                 run against the production Spark4.2/Temurin25 profile alone.
 #   merge_group   the authoritative gate. The PR tier plus the macOS build,
 #                 the benchmark compile check, the Delta contrib build gate,
-#                 the PyArrow UDF suite, Spark SQL on Spark 4.1 and Iceberg
+#                 the PyArrow UDF suite, Spark SQL on Spark 4.2, Delta4.2 and Iceberg
 #                 1.11, evaluated against the merge result rather than the
 #                 PR head. One Spark version and one Iceberg version, both
 #                 the default profile's.
 #   schedule      the nightly regression sweep of everything else: the Linux
 #                 test matrix against the other Spark profiles, Spark SQL on
-#                 Spark 3.5, 4.0 and 4.2, and Iceberg 1.8/1.9/1.10, routed by
+#                 Spark 3.5, 4.0 and 4.1, and Iceberg 1.8/1.9/1.10, routed by
 #                 the same path filters over what landed on main since the last
 #                 green nightly. A failure opens (or comments on) an issue
 #                 labelled `ci-nightly-failure`.
@@ -462,7 +462,7 @@ jobs:
     with:
       spark-short: '3.4'
       spark-full: '3.4.3'
-      java: 17
+      java: "17"
 
   spark_3_5:
     name: Spark SQL Tests (Spark 3.5)
@@ -473,7 +473,7 @@ jobs:
     with:
       spark-short: '3.5'
       spark-full: '3.5.9'
-      java: 17
+      java: "17"
 
   delta_3_5:
     name: Delta Contrib Tests (Spark 3.5)
@@ -485,7 +485,7 @@ jobs:
     uses: ./.github/workflows/delta_contrib_test.yml
     with:
       spark: '3.5'
-      java: '17'
+      java: "17"
 
   delta_4_0:
     name: Delta Contrib Tests (Spark 4.0)
@@ -497,7 +497,7 @@ jobs:
     uses: ./.github/workflows/delta_contrib_test.yml
     with:
       spark: '4.0'
-      java: '17'
+      java: "17"
 
   delta_4_1:
     name: Delta Contrib Tests (Spark 4.1)
@@ -509,7 +509,7 @@ jobs:
     uses: ./.github/workflows/delta_contrib_test.yml
     with:
       spark: '4.1'
-      java: '17'
+      java: "17"
 
   delta_4_2:
     name: Delta Contrib Tests (Spark 4.2)
@@ -521,25 +521,25 @@ jobs:
     uses: ./.github/workflows/delta_contrib_test.yml
     with:
       spark: '4.2'
-      java: '17'
+      java: "25.0.5.1+2"
+      java-distribution: temurin
 
   spark_4_0:
     name: Spark SQL Tests (Spark 4.0)
     needs: changes
-    # Nightly by default; PRs need the `run-spark-4.0-tests` label. Spark 4.1
-    # is the one Spark SQL suite the queue runs, being the default profile.
+    # Nightly compatibility; PRs can opt in with `run-spark-4.0-tests`.
     if: needs.changes.outputs.spark_4_0 == 'true'
     uses: ./.github/workflows/spark_sql_test_reusable.yml
     with:
       spark-short: '4.0'
       spark-full: '4.0.4'
-      java: 17
+      java: "17"
 
   spark_4_1:
     name: Spark SQL Tests (Spark 4.1)
     needs: changes
-    # Queue-only by default, like every other Spark SQL suite. Two POLICY
-    # outputs feed one call, so the queue gets every module from a single
+    # Nightly compatibility. Two POLICY
+    # outputs feed one call, so the nightly gets every module from a single
     # 40-minute build instead of two. `spark_4_1` covers catalyst and the
     # sql_core shards; `spark_4_1_hive` adds the sql_hive shards. On a pull
     # request `run-spark-4.1-tests` sets both, and `run-spark-4.1-hive-tests`
@@ -549,7 +549,7 @@ jobs:
     with:
       spark-short: '4.1'
       spark-full: '4.1.3'
-      java: 17
+      java: "17"
       modules: >-
         ${{ needs.changes.outputs.spark_4_1 != 'true' && 'hive'
             || needs.changes.outputs.spark_4_1_hive != 'true' && 'core'
@@ -558,16 +558,14 @@ jobs:
   spark_4_2:
     name: Spark SQL Tests (Spark 4.2)
     needs: changes
-    # Nightly by default; PRs need the `run-spark-4.2-tests` label. Spark 4.2
-    # support is still experimental, so it sits in the nightly tier rather
-    # than the queue: a regression there blocks no merge, but it is caught
-    # within a day instead of whenever someone next asks for the suite.
+    # Production Spark 4.2.1 / Temurin 25 qualification gate.
     if: needs.changes.outputs.spark_4_2 == 'true'
     uses: ./.github/workflows/spark_sql_test_reusable.yml
     with:
       spark-short: '4.2'
       spark-full: '4.2.1'
-      java: 17
+      java: "25.0.5.1+2"
+      java-distribution: temurin
 
   iceberg_1_8:
     name: Iceberg Spark SQL Tests (Iceberg 1.8)
@@ -580,7 +578,7 @@ jobs:
       iceberg-full: '1.8.1'
       spark-short: '3.4'
       spark-full: '3.4.3'
-      java: 17
+      java: "17"
 
   iceberg_1_9:
     name: Iceberg Spark SQL Tests (Iceberg 1.9)
@@ -593,7 +591,7 @@ jobs:
       iceberg-full: '1.9.1'
       spark-short: '3.5'
       spark-full: '3.5.9'
-      java: 17
+      java: "17"
 
   iceberg_1_10:
     name: Iceberg Spark SQL Tests (Iceberg 1.10)
@@ -606,7 +604,7 @@ jobs:
       iceberg-full: '1.10.0'
       spark-short: '3.5'
       spark-full: '3.5.9'
-      java: 17
+      java: "17"
 
   iceberg_1_11:
     name: Iceberg Spark SQL Tests (Iceberg 1.11)
@@ -621,7 +619,7 @@ jobs:
       iceberg-full: '1.11.0'
       spark-short: '4.1'
       spark-full: '4.1.3'
-      java: 17
+      java: "17"
 
   # ---------------------------------------------------------------------------
   # required_checks: the single context listed in `required_status_checks` for

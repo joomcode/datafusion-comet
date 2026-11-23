@@ -5,7 +5,7 @@
   "files": [
     {
       "path": "AGENTS.md",
-      "sha256": "bc9d939528184e2b7bd29e5abd118e10e7916fae48bb88086a44f55bb525fde0"
+      "sha256": "c6ca33536a85895fe2d84fab9a18eaa85c3a32156d3de3bc79574bf54cef3f9f"
     },
     {
       "path": "CHECKPOINT-VERIFICATION.json",
@@ -148,8 +148,12 @@
       "sha256": "fba47e0659c9a3dd45a48bc2512dde06f16bdd9888d7f0cd8d7f7828d98bc305"
     },
     {
+      "path": "JAVA25.md",
+      "sha256": "abda34b55a77295a59e9ed72186ab5e8dc676af6427bab37912588c09f995e5b"
+    },
+    {
       "path": "NETWORK.md",
-      "sha256": "27ef2db27e51e92df11873dd6b0b69303fb253d174754c39b69eb25c190b26d9"
+      "sha256": "a44d1e76e3114c12056d2f68467ba46e476b0560c55f3215b47022e08ef46b06"
     },
     {
       "path": "PATHS.md",
@@ -157,7 +161,7 @@
     },
     {
       "path": "PAUSED.md",
-      "sha256": "a36d7284b7741f48b784001ed5f05a4f40c5f781631ca734ef00454cfda3a1c1"
+      "sha256": "2ace4c06042d5b9dfb402ef894e26e6925a5fa095612f165d87377698483049f"
     },
     {
       "path": "PERFORMANCE.md",
@@ -169,15 +173,15 @@
     },
     {
       "path": "README.md",
-      "sha256": "2f1093e6fc985761810872e23f4ad7d57b50fee932c1d85e2f2e7d19300397e7"
+      "sha256": "c08210a5bf2243cea206e0ac585aa540f57ad4abddbb804a4570f37d71547546"
     },
     {
       "path": "RUNTIME-REQUIREMENTS.md",
-      "sha256": "194ddf49f43c70b297b8052cb7065ae8a288834393fb623f61daebfc51ce8ffb"
+      "sha256": "8bc07603492908110c09f000e058adc7e5950dd1ad846c1488a17f4c6795bf81"
     },
     {
       "path": "STATE.json",
-      "sha256": "77caa68dca60e958378b02dd442bd7aba54db67c9667230676eeaf08eba3ffe0"
+      "sha256": "89a7946300188bacbfe69d50cea531a327fd52524ede605eb906b7a13681c5c6"
     },
     {
       "path": "approved-plan.json",
@@ -189,7 +193,7 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "9398ec975fcf20ada6762db0fe2f4879d1ead851e40cb8ad130ff6a254fcda4e"
+      "sha256": "c04b27a5ceced38d2a7d624695133318b497c07f4f7f7f3bb43348ef97a4a5d7"
     },
     {
       "path": "correctness-test-plan.txt",
@@ -197,11 +201,11 @@
     },
     {
       "path": "created-files.txt",
-      "sha256": "f365df6e41efd9e69abd081185835cc1f79157569f3277c2234c39959a5e6352"
+      "sha256": "86922ada8384f0656a607aa3fe273d7c003dadb75489ae68404e53d3e67fb4e3"
     },
     {
       "path": "decisions.json",
-      "sha256": "e60beddc33e0be0658882177d9adae4a9384baaa6a40c90bc2fdbd82d3752779"
+      "sha256": "19f487ad4c2062b99a23626fc7e1fbf52798d95e88d8f93355b9cd4aff53b247"
     },
     {
       "path": "feature-register.json",

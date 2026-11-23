@@ -141,9 +141,11 @@ under the License.
          dev/release/publish-to-maven.sh applies the same rule to the release. -->
     <maven.deploy.skip>true</maven.deploy.skip>
 
-    <!-- For testing with JDK 17 -->
+    <extraJava25TestArgs></extraJava25TestArgs>
+    <!-- Keep bytecode target 17; activate additional runtime flags only on JDK 25. -->
     <extraJavaTestArgs>
       -XX:+IgnoreUnrecognizedVMOptions
+      ${extraJava25TestArgs}
       --add-opens=java.base/java.lang=ALL-UNNAMED
       --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
       --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
@@ -753,6 +755,17 @@ under the License.
       <properties>
         <platform>linux</platform>
         <arch>aarch64</arch>
+      </properties>
+    </profile>
+
+    <profile>
+      <id>java-25-runtime</id>
+      <activation>
+        <jdk>[25,26)</jdk>
+      </activation>
+      <properties>
+        <!-- Match Spark 4.2.1 JavaModuleOptions for Arrow/Unsafe and JNI callers. -->
+        <extraJava25TestArgs>--enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow</extraJava25TestArgs>
       </properties>
     </profile>
 

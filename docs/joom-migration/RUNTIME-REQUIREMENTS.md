@@ -40,8 +40,11 @@ contract. Setting it false does not disable native Comet or change the separatel
 configured Spark off-heap execution pool. Keep the existing Comet memory settings.
 
 The current target remains official Apache Spark 4.2.1 / Scala 2.13.18,
-Comet 1.2.0, Delta 4.4.1 and DataFusion 55.2.0. Java 17 is the qualification
-runtime; Java 21 qualification is deferred. No custom Spark build, replacement
+Comet 1.2.0, Delta 4.4.1 and DataFusion 55.2.0. The newly selected qualification
+runtime is Eclipse Temurin 25.0.5.1+2 (minimum supported Java25 update:25.0.3).
+This new qualification is IN PROGRESS; prior G10 receipts qualify Java17 only.
+See JAVA25.md and dev/ci/java25-runtime.json. Java17 bytecode/build tools do not
+constitute proof of runtime testing on Java25. No custom Spark build, replacement
 Spark classes or production configuration changes are performed by this Comet
 repository work. Pass this requirement to the owner of the Spark image/launcher;
 changes in datasci are outside this task.

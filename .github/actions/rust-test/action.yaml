@@ -76,7 +76,7 @@ runs:
     - name: Build common module (pre-requisite for Rust tests)
       shell: bash
       run: |
-        ./mvnw -B compile -DskipTests
+        ./mvnw -B -Pspark-4.2 compile -DskipTests
 
     - name: Install nextest
       shell: bash

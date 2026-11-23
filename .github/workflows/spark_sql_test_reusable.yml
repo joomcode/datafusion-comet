@@ -33,9 +33,13 @@ on:
         required: true
         type: string
       java:
-        description: "JDK major version, e.g. 17"
+        description: "Exact JDK version for the selected Spark profile"
         required: true
-        type: number
+        type: string
+      java-distribution:
+        description: "JDK distribution"
+        type: string
+        default: zulu
       collect-fallback-logs:
         description: "Whether to collect Comet fallback reasons from spark sql unit test logs"
         required: false
@@ -98,6 +102,7 @@ jobs:
         with:
           rust-version: ${{ env.RUST_VERSION }}
           jdk-version: ${{ inputs.java }}
+          jdk-distribution: ${{ inputs.java-distribution }}
 
       - name: Restore Cargo cache
         id: cargo-cache
@@ -236,6 +241,7 @@ jobs:
         with:
           rust-version: ${{env.RUST_VERSION}}
           jdk-version: ${{ inputs.java }}
+          jdk-distribution: ${{ inputs.java-distribution }}
       - name: Download native library
         uses: ./.github/actions/download-artifact-retry
         with:
@@ -257,6 +263,9 @@ jobs:
           spark-short-version: ${{ inputs.spark-short }}
           skip-native-build: true
           skip-spark-clone: true
+      - name: Install and verify Spark 4.2 pandas prerequisites
+        if: ${{ inputs.spark-short == '4.2' }}
+        run: bash dev/ci/setup-spark42-python.sh
       - name: Run Spark tests
         # Bash rather than the container default `sh`, for the retry below.
         shell: bash
@@ -338,7 +347,14 @@ jobs:
           # thread leaks) under the newer JDKs. project/SparkBuild.scala
           # reads DEDICATED_JVM_SBT_TESTS and forks a separate JVM per
           # listed suite. Empty value is a safe no-op.
-          DEDICATED_JVM_SBT_TESTS: ${{ inputs.spark-short == '4.0' && 'org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormatV1Suite,org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormatV2Suite,org.apache.spark.sql.execution.datasources.orc.OrcSourceV1Suite,org.apache.spark.sql.execution.datasources.orc.OrcSourceV2Suite' || '' }}
+          DEDICATED_JVM_SBT_TESTS: ${{ (inputs.spark-short == '4.0' || inputs.spark-short == '4.2') && 'org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormatV1Suite,org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormatV2Suite,org.apache.spark.sql.execution.datasources.orc.OrcSourceV1Suite,org.apache.spark.sql.execution.datasources.orc.OrcSourceV2Suite' || '' }}
+      - name: Upload Spark 4.2 Python prerequisite proof
+        if: ${{ !cancelled() && inputs.spark-short == '4.2' }}
+        uses: ./.github/actions/upload-artifact-retry
+        with:
+          name: spark42-python-${{ matrix.module.name }}-jdk${{ inputs.java }}
+          path: target/spark42-python/prerequisites.json
+          if-no-files-found: error
       - name: Upload fallback log
         if: ${{ inputs.collect-fallback-logs }}
         uses: ./.github/actions/upload-artifact-retry

@@ -33,7 +33,7 @@ env:
 
 jobs:
   pyarrow-udf:
-    name: PyArrow UDF (${{ matrix.name }}, JDK 17, Python 3.11)
+    name: PyArrow UDF (${{ matrix.name }}, JDK ${{ matrix.java }}, Python 3.11)
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -44,14 +44,20 @@ jobs:
           - name: Spark 4.0
             maven_profiles: "-Pspark-4.0 -Pscala-2.13"
             pyspark: "4.0.4"
+            java: "17"
+            java_distribution: zulu
             native_python_udf: false
           - name: Spark 4.1
             maven_profiles: "-Pspark-4.1"
             pyspark: "4.1.3"
+            java: "17"
+            java_distribution: zulu
             native_python_udf: true
           - name: Spark 4.2
             maven_profiles: "-Pspark-4.2"
             pyspark: "4.2.1"
+            java: "25.0.5.1+2"
+            java_distribution: temurin
             native_python_udf: true
     container:
       # Pinned to the Debian 12 (bookworm) base so the system `python3` is 3.11. The default
@@ -67,7 +73,8 @@ jobs:
         uses: ./.github/actions/setup-builder
         with:
           rust-version: ${{ env.RUST_VERSION }}
-          jdk-version: 17
+          jdk-version: ${{ matrix.java }}
+          jdk-distribution: ${{ matrix.java_distribution }}
 
       - name: Restore Maven dependencies
         id: maven-cache
@@ -87,6 +94,9 @@ jobs:
           python3 -m venv /tmp/venv
           /tmp/venv/bin/pip install --upgrade pip
           /tmp/venv/bin/pip install "pyspark==${{ matrix.pyspark }}" "pyarrow>=14" pandas pytest
+          if [ "${{ matrix.pyspark }}" = "4.2.1" ]; then
+            /tmp/venv/bin/pip install --only-binary=:all: --require-hashes -r dev/ci/requirements-spark42-python.txt
+          fi
 
       - name: Build Comet (debug, ${{ matrix.name }} / Scala 2.13)
         env:

@@ -20,7 +20,7 @@
 #
 # The five Spark profiles cost about the same each, and together they are
 # three quarters of what the Linux build spends on a pull request. Only one of
-# them is the default build profile, so a pull request and the merge queue run
+# them is the primary qualification profile, so a pull request and the merge queue run
 # the Comet test suites against that one and the nightly run covers the other
 # four. A job-level `if:` cannot see `matrix`, so the selection has to happen
 # before the matrix is expanded: the `lint` job runs this script and publishes
@@ -49,9 +49,9 @@ PROFILES = [
     {"name": "Spark 3.4, JDK 17, Scala 2.12", "java_version": "17", "maven_opts": "-Pspark-3.4 -Pscala-2.12", "tier": "nightly"},
     {"name": "Spark 3.5, JDK 17, Scala 2.13", "java_version": "17", "maven_opts": "-Pspark-3.5 -Pscala-2.13", "tier": "nightly"},
     {"name": "Spark 4.0, JDK 21", "java_version": "21", "maven_opts": "-Pspark-4.0", "tier": "nightly"},
-    # The default build profile, and the one a contributor builds locally.
-    {"name": "Spark 4.1, JDK 17", "java_version": "17", "maven_opts": "-Pspark-4.1", "tier": "pr"},
-    {"name": "Spark 4.2, JDK 17", "java_version": "17", "maven_opts": "-Pspark-4.2", "tier": "nightly"},
+    # Keep the former primary profile as compatibility coverage.
+    {"name": "Spark 4.1, JDK 17", "java_version": "17", "maven_opts": "-Pspark-4.1", "tier": "nightly"},
+    {"name": "Spark 4.2, Temurin 25", "java_version": "25.0.5.1+2", "maven_opts": "-Pspark-4.2", "tier": "pr"},
 ]
 
 SELECTORS = ("all", "pr", "nightly")

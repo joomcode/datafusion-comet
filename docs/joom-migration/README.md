@@ -17,6 +17,15 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+## Current continuation: Java25 qualification, 2026-11-23
+
+The user authorized `joom/1.2-java25` from accepted `branch-1.2` at `d2a01d4b6`,
+Temurin25.0.5.1+2, the previous58pandas prerequisites, full agreed GHA and
+RC Build & Smoke on native AMD64/ARM64. See JAVA25.md and
+STATE.json#java25. Known SQL exceptions are outside scope. No merge, stable tag,
+main/datasci changes, publication or production operations are authorized.
+The old G10 Java17 receipts remain historical and do not qualify Java25.
+
 > **Current G10 acceptance, 2026-11-23:** The user accepted final G10 qualification and explicitly authorized committing the final documentation, pushing `joom/1.2-release-qualification`, fast-forward integration into `branch-1.2` and post-integration verification. The qualified non-migration source remains `81474a889489da4a4a4aa8e49330e6398c1937e3`; final JARs retain that build provenance. Actual final SHA and local/remote proof are recorded after commit in `${MIGRATION_AUX_ROOT}/20261123_comet12-g10-integration/completion.json`. A missing receipt is not proof that integration succeeded. Stable tagging, JFrog/external artifact publication, main changes, production and datasci remain excluded. Older merge holds below are historical for G10. See decisions.json#g10_integration_authorization.
 
 ## Current continuation: approved Spark runtime contract, 2026-11-22

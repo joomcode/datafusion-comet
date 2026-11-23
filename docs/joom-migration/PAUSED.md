@@ -17,6 +17,15 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+## Current continuation: Java25 qualification, 2026-11-23
+
+The user authorized `joom/1.2-java25` from accepted `branch-1.2` at `d2a01d4b6`,
+Temurin25.0.5.1+2, the previous58pandas prerequisites, full agreed GHA and
+RC Build & Smoke on native AMD64/ARM64. See JAVA25.md and
+STATE.json#java25. Known SQL exceptions are outside scope. No merge, stable tag,
+main/datasci changes, publication or production operations are authorized.
+The old G10 Java17 receipts remain historical and do not qualify Java25.
+
 ## Current continuation: G10 accepted for integration, 2026-11-23
 
 The user accepted G10 and authorized the final documentation commit, feature

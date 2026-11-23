@@ -30,6 +30,10 @@ on:
         description: 'JDK major version, e.g. 17'
         required: true
         type: string
+      java-distribution:
+        description: "JDK distribution"
+        type: string
+        default: zulu
 
 permissions:
   contents: read
@@ -46,7 +50,6 @@ env:
   LC_ALL: "C.UTF-8"
 
 jobs:
-
   contrib-delta:
     name: Delta contrib (Spark ${{ inputs.spark }})
     runs-on: ubuntu-24.04
@@ -60,6 +63,7 @@ jobs:
         with:
           rust-version: ${{ env.RUST_VERSION }}
           jdk-version: ${{ inputs.java }}
+          jdk-distribution: ${{ inputs.java-distribution }}
 
       - name: Restore Maven dependencies
         id: maven-cache

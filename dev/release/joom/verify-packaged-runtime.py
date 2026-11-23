@@ -131,6 +131,9 @@ CASES = [
 # Reflection keeps this helper independent of the Scala/ScalaTest ABI at compile time.
 # Runner.run returns instead of calling System.exit, so the loaded library can be
 # checked while it still exists, before NativeBase's delete-on-exit cleanup runs.
+JAVA_POLICY = json.loads((Path(__file__).resolve().parents[2] /
+                          "ci/java25-runtime.json").read_text())
+
 PROBE = r'''
 import java.io.File;
 import java.lang.reflect.Field;
@@ -165,7 +168,11 @@ public final class RcPackagedSmoke {
         + ",\"jar_sha256\":" + quote(jarHash) + ",\"resource_count\":" + resources + "}";
   }
   public static void main(String[] args) throws Exception {
-    require(Runtime.version().feature() == 17, "Packaged smoke requires Java 17");
+    require(Runtime.version().feature() == 25 && Runtime.version().update() >= 3,
+        "Packaged smoke requires Java 25.0.3 or newer");
+    require("__JAVA_VENDOR__".equals(System.getProperty("java.vendor"))
+        && "__JAVA_RUNTIME__".equals(System.getProperty("java.runtime.version")),
+        "Packaged smoke requires the pinned Eclipse Temurin build");
     Class<?> sparkPackage = Class.forName("org.apache.spark.package$");
     Object sparkModule = sparkPackage.getField("MODULE$").get(null);
     String sparkVersion = (String) sparkPackage.getMethod("SPARK_VERSION").invoke(sparkModule);
@@ -214,12 +221,16 @@ public final class RcPackagedSmoke {
         + ",\"loaded_native_path\":" + quote(extracted.toString())
         + ",\"spark_version\":" + quote(sparkVersion)
         + ",\"java_version\":" + quote(System.getProperty("java.version"))
+        + ",\"java_runtime_version\":" + quote(System.getProperty("java.runtime.version"))
+        + ",\"java_vendor\":" + quote(System.getProperty("java.vendor"))
         + ",\"required_sql_conf\":{\"spark.sql.columnVector.offheap.enabled\":\"false\","
         + "\"spark.sql.ansi.enabled\":\"true\"}"
         + ",\"class_origins\":{" + String.join(",", classOrigins) + "}}\n");
   }
 }
-'''.replace("__CORE_CLASSES__", ", ".join(json.dumps(name) for name in CORE_ORIGIN_CLASSES)) \
+'''.replace("__JAVA_VENDOR__", JAVA_POLICY["vendor"]) \
+    .replace("__JAVA_RUNTIME__", JAVA_POLICY["runtime_version"]) \
+    .replace("__CORE_CLASSES__", ", ".join(json.dumps(name) for name in CORE_ORIGIN_CLASSES)) \
     .replace("__DELTA_CLASSES__", ", ".join(json.dumps(name) for name in DELTA_ORIGIN_CLASSES))
 
 
@@ -510,6 +521,8 @@ def run(args):
     pom = ET.parse(out / "effective-pom.xml").getroot()
     project = pom if pom.tag.endswith("}project") else pom.find("m:project", ns)
     flags = shlex.split(project.find("m:properties/m:argLine", ns).text)
+    flags += ["--enable-native-access=ALL-UNNAMED",
+              "--sun-misc-unsafe-memory-access=allow"]
     require(not any(flag in ["-cp", "-classpath", "--class-path"] for flag in flags),
             "unexpected classpath override in release POM")
     java_home = Path(os.environ["JAVA_HOME"])

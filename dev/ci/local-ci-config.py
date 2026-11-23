@@ -53,6 +53,7 @@ POLICY_PY = Path("dev/ci/compute-changes.py")
 VERSION = re.compile(r"^\d+\.\d+$")
 FULL_VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 MAJOR = re.compile(r"^\d+$")
+JDK_VERSION = re.compile(r"^\d+(?:\.\d+){0,3}(?:\+\d+)?$")
 
 
 class ConfigError(Exception):
@@ -110,16 +111,21 @@ def _queue_version(prefix, policy):
 
 
 def _dedicated_gate():
-    """The one Spark version whose suites the workflow process-isolates.
+    """The Spark versions whose suites the workflow process-isolates.
 
-    Returns (version, suites). Every other version legitimately gets nothing,
+    Returns (versions, suites). Every other version legitimately gets nothing,
     so the guard is on the line being present and parseable.
     """
     text = SPARK_YML.read_text(encoding="utf-8")
-    match = re.search(r"DEDICATED_JVM_SBT_TESTS:.*?spark-short == '([^']*)' && '([^']*)'", text)
+    match = re.search(r"DEDICATED_JVM_SBT_TESTS:.*?\$\{\{\s*(.*?)\s*&& '([^']*)'", text)
     if not match:
         raise ConfigError(f"no parseable DEDICATED_JVM_SBT_TESTS in {SPARK_YML}")
-    return _check(match.group(1), VERSION, "dedicated-jvm gate"), match.group(2)
+    condition = match.group(1)
+    versions = re.findall(r"inputs\.spark-short == '([^']*)'", condition)
+    remaining = re.sub(r"inputs\.spark-short == '[^']*'", "", condition)
+    if not versions or remaining.strip("()| \t"):
+        raise ConfigError(f"unsupported DEDICATED_JVM_SBT_TESTS condition: {condition}")
+    return [_check(v, VERSION, "dedicated-jvm gate") for v in versions], match.group(2)
 
 
 def _iceberg_scala():
@@ -164,7 +170,7 @@ def config():
     """Every value the script reads, validated. Raises ConfigError on drift."""
     jobs = _job_inputs()
     policy = _load("compute_changes", POLICY_PY).POLICY
-    gate_version, gate_suites = _dedicated_gate()
+    gate_versions, gate_suites = _dedicated_gate()
 
     spark, iceberg = {}, {}
     for job, given in jobs.items():
@@ -172,7 +178,7 @@ def config():
         if re.fullmatch(r"spark_\d+_\d+", job) and "spark-full" in given:
             spark[_check(version, VERSION, job)] = {
                 "full": _check(given.get("spark-full"), FULL_VERSION, f"{job} spark-full"),
-                "java": _check(given.get("java"), MAJOR, f"{job} java"),
+                "java": _check(given.get("java"), JDK_VERSION, f"{job} java"),
             }
         elif re.fullmatch(r"iceberg_\d+_\d+", job) and "iceberg-full" in given:
             iceberg[_check(version, VERSION, job)] = {
@@ -190,7 +196,7 @@ def config():
         "iceberg_default": _queue_version("iceberg", policy),
         "iceberg_scala": _iceberg_scala(),
         "iceberg_shards": _iceberg_shards(),
-        "dedicated_gate_version": gate_version,
+        "dedicated_gate_versions": gate_versions,
         "dedicated_gate_suites": gate_suites,
         "rows": [row["name"] for row in spark_rows()],
     }
@@ -222,7 +228,7 @@ def shell(suite, version, selectors):
             sorted({(r["args1"] or r["args2"]).split("/")[0] for r in rows})
         )
         out["DEDICATED"] = (
-            conf["dedicated_gate_suites"] if version == conf["dedicated_gate_version"] else ""
+            conf["dedicated_gate_suites"] if version in conf["dedicated_gate_versions"] else ""
         )
     else:
         out["FULL"] = known[version]["full"]

@@ -116,6 +116,16 @@ def validate_class_origins(proof, group, jar_hashes):
                 "wrong or nonunique final-JAR class origin: " + group + "/" + name)
 
 
+def validate_java_runtime(proof):
+    policy_path = Path(__file__).resolve().parents[2] / "ci/java25-runtime.json"
+    policy = json.loads(policy_path.read_text())
+    expected = {"java_version": policy["java_version"],
+                "java_runtime_version": policy["runtime_version"],
+                "java_vendor": policy["vendor"]}
+    require(all(proof.get(key) == value for key, value in expected.items()),
+            "loaded-native proof does not identify the pinned Temurin runtime")
+
+
 def validate_case_proof(case, arch, jar_hashes, native_hash):
     """Check one receipt group without filesystem access, including final-JAR origins."""
     group = case["group"]
@@ -134,9 +144,9 @@ def validate_case_proof(case, arch, jar_hashes, native_hash):
     require(proof["architecture"] == arch
             and proof["core_jar_sha256"] == jar_hashes[CORE]
             and proof["loaded_native_sha256"] == native_hash
-            and proof["java_version"].split(".")[0] == "17"
             and proof["spark_version"] == "4.2.1",
             "missing or inconsistent loaded-native proof: " + arch)
+    validate_java_runtime(proof)
     validate_class_origins(proof, group, jar_hashes)
 
 
@@ -197,6 +207,11 @@ def export(out, reports, commit, lock, destination):
                      destination / "linux" / arch / "build-provenance.json")
     proof = {"source_commit": commit, "cargo_lock_sha256": lock,
              "qualification": "RELEASE_BUILD_AND_PACKAGED_SMOKE_PASSED",
+             "qualified_java_runtime": {
+                 key: value for key, value in
+                 json.loads((Path(__file__).resolve().parents[2] /
+                             "ci/java25-runtime.json").read_text()).items()
+                 if key in {"vendor", "java_version", "runtime_version"}},
              "scope": "Targeted final-JAR runtime smoke for Delta, DPP, native reload, ANSI, "
                       "G07 default Kryo, G08 UDF/serialization and G09 engine/boundary paths; "
                       "full Comet CI and production GCP qualification are separate",

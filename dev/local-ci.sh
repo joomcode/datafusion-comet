@@ -97,6 +97,14 @@ load_config() {
 # --- sandbox --------------------------------------------------------------—--
 
 setup_jdk() {
+  if [[ "$1" == 25.* ]]; then
+    # SDKMAN installations need not be registered with macOS java_home.
+    # Use the explicitly selected JDK and verify the same build as remote CI.
+    [ -n "${JAVA_HOME:-}" ] || die "export JAVA_HOME for the pinned Temurin $1"
+    python3 -B dev/ci/java-runtime.py --java "$JAVA_HOME/bin/java" || die "wrong qualification JVM"
+    say "JDK $1: $JAVA_HOME"
+    return
+  fi
   if [ -x /usr/libexec/java_home ]; then
     JAVA_HOME="$(/usr/libexec/java_home -v "$1")" || die "JDK $1 not installed"
     export JAVA_HOME

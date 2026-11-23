@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-23",
-  "phase": "G10_COMPLETE_USER_ACCEPTED_INTEGRATION_AUTHORIZED_RELEASE_HELD",
+  "phase": "JAVA25_LOCAL_PREFLIGHT_REMOTE_QUALIFICATION_PENDING",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -332,7 +332,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Read the G10 post-commit integration receipt for actual branch/ref verification. Stable tag, JFrog publication, production and datasci remain unauthorized until separate user instruction.",
+  "next_step": "Finish local checks, commit/push only the Java25 feature, then full agreed exact-source GHA and dual-architecture RC; no merge or stable tag.",
   "qualification": "G09 accepted:230 native and495 unique JVM/SQL/Delta cases locally passed. Qualified source/test/CI bytes are preserved; final full agreed CI/Linux/release/exact-JAR qualification remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -356,7 +356,7 @@
     "implementation_hold_preserved": true,
     "approved_feature_groups_and_release_milestones_unchanged": true
   },
-  "active_branch": "joom/1.2-release-qualification",
+  "active_branch": "joom/1.2-java25",
   "g01_work_directory": "${MIGRATION_AUX_ROOT}/20261117_comet12-g01",
   "upstream_base_rechecked_on": "2026-11-17",
   "upstream_base_current_sha": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -552,7 +552,7 @@
     "source_commit": "b93d553856a0339af7468bcff2070e735a1a3c71",
     "rc_tag": "joom-1.2-1-rc1; authorized only after final qualification"
   },
-  "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09",
+  "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25",
   "integration_gate": {
     "group": "G10",
     "status": "REPORT_BEFORE_MERGE_AND_STABLE_TAG",
@@ -3814,5 +3814,37 @@
     "checkpoint": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/pause-v9.json",
     "local_candidate_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/candidate-v9.json",
     "receipt_status": "Created and verified externally after the local commit; no future commit SHA is fabricated in committed files."
+  },
+  "java25": {
+    "date": "2026-11-23",
+    "status": "APPROVED_IMPLEMENTATION_AND_QUALIFICATION_NO_MERGE",
+    "feature": "joom/1.2-java25",
+    "base": "d2a01d4b6bd5a5e05fcfa712a9c74e6e889fcdbb",
+    "runtime": "Eclipse Temurin 25.0.5.1+2",
+    "scope": [
+      "target Spark4.2.1 CI/runtime and final-JAR smoke on native AMD64/ARM64",
+      "prerequisites and actual execution of the previous58pandas scenarios",
+      "feature push and full agreed GitHub Actions control/downloads"
+    ],
+    "excluded": [
+      "merge",
+      "stable tag",
+      "main changes",
+      "JFrog publication",
+      "known SQL semantic exceptions",
+      "production",
+      "datasci"
+    ],
+    "network": "User explicitly approved the scoped Python metadata/wheel downloads and official runner JDK downloads; all necessary quality-related operations on GitHub runners are authorized. No local Python installation.",
+    "phase": "IMPLEMENTING_LOCAL_PREFLIGHT",
+    "evidence": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25",
+    "report": "JAVA25.md",
+    "qualified": false,
+    "previous_stage_status": {
+      "phase": "G10_COMPLETE_USER_ACCEPTED_INTEGRATION_AUTHORIZED_RELEASE_HELD",
+      "active_branch": "joom/1.2-release-qualification",
+      "next_step": "Read the G10 post-commit integration receipt for actual branch/ref verification. Stable tag, JFrog publication, production and datasci remain unauthorized until separate user instruction.",
+      "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09"
+    }
   }
 }

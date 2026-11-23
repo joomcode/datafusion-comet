@@ -54,7 +54,9 @@ class ReceiptBoundary(unittest.TestCase):
             native.write_text(arch)
             jars = {name: rc.digest(self.out / name) for name in [rc.CORE, rc.DELTA]}
             proof = {"architecture": arch, "core_jar_sha256": jars[rc.CORE],
-                     "loaded_native_sha256": rc.digest(native), "java_version": "17.0.19",
+                     "loaded_native_sha256": rc.digest(native), "java_version": "25.0.5.1",
+                     "java_runtime_version": "25.0.5.1+2-LTS",
+                     "java_vendor": "Eclipse Adoptium",
                      "spark_version": "4.2.1", "required_sql_conf": dict(rc.REQUIRED_SQL_CONF)}
             cases = []
             for group, count in rc.COUNTS.items():
@@ -133,6 +135,21 @@ class ReceiptBoundary(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "loaded-native proof"):
                 self.validate()
             result["cases"][0]["loaded_native_proof"][field] = old
+
+    def test_wrong_java_vendor_version_or_build_cannot_qualify_release(self):
+        for field, value in [("java_version", "17.0.19"),
+                             ("java_version", "25.0.2"),
+                             ("java_runtime_version", "25.0.5.1+1-LTS"),
+                             ("java_vendor", "Azul Systems, Inc."),
+                             ("java_vendor", None)]:
+            with self.subTest(field=field, value=value):
+                case = self.case("g09-cost")
+                old = case["loaded_native_proof"][field]
+                case["loaded_native_proof"][field] = value
+                with self.assertRaisesRegex(ValueError, "loaded-native proof"):
+                    self.rewrite("amd64")
+                    self.validate()
+                case["loaded_native_proof"][field] = old
 
     def test_missing_or_incompatible_session_defaults_cannot_qualify_release(self):
         case = self.case("g09-cost")

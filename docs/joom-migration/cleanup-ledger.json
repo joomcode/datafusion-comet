@@ -1,6 +1,6 @@
 {
-  "updated_on": "2026-11-22",
-  "stage": "G10_V11_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
+  "updated_on": "2026-11-23",
+  "stage": "JAVA25_QUALIFICATION_IN_PROGRESS",
   "baseline": "resource-baseline.json",
   "no_dependency_downloads_or_release_outputs_yet": false,
   "entries": [
@@ -216,6 +216,16 @@
       "shared": false,
       "contains": "Codegen/expression/serialization proposals, source/oracle reviews, local build/targeted/shaded artifact tests, existing benchmarks and preservation receipts.",
       "preserve_until": "Final migration acceptance/user cleanup decision"
+    },
+    {
+      "type": "java25_qualification",
+      "path": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25",
+      "ownership": "TASK_CREATED",
+      "shared": false,
+      "contains": "baseline hashes; local runtime and harness proof; official PyPI metadata; later GHA receipts and downloads",
+      "local_python_packages_installed": false,
+      "local_java_installations_changed": false,
+      "release_outputs": "not created yet"
     }
   ],
   "preexisting_or_shared": {
@@ -1242,5 +1252,6 @@
     "shared_caches_and_user_sources_preserve": true,
     "no_new_Docker_images_or_volumes_downloaded_during_final_resume": true,
     "deletion_performed": false
-  }
+  },
+  "previous_stage": "G10_V11_FINAL_EXACT_SHA_QUALIFICATION_PENDING"
 }

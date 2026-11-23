@@ -60,7 +60,9 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "25.0.5.1+2"
+      - name: Verify qualification JVM
+        run: python3 -B dev/ci/java-runtime.py --github-env "$GITHUB_ENV"
       - name: Check release-stage boundaries before starting builds
         run: |
           export RC_TEST_TMPDIR="$GITHUB_WORKSPACE/target/rc-unit-tests"
@@ -187,7 +189,9 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "25.0.5.1+2"
+      - name: Verify qualification JVM
+        run: python3 -B dev/ci/java-runtime.py --github-env "$GITHUB_ENV"
       - name: Download final candidate without rebuilding
         uses: ./.github/actions/download-artifact-retry
         with:

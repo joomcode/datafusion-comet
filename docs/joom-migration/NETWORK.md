@@ -165,3 +165,15 @@ Keep authentication restricted to GitHub; do not forward credentials to artifact
 blob hosts. This does not authorize branch-1.2/main changes, merge or release tags
 before the report/approval, Maven/JFrog/Docker publication, production or datasci.
 The original approved dependency/download safety condition remains in force.
+
+## Java25 qualification authorization (2026-11-23)
+
+The user authorized the separate Java25 feature implementation, publication and
+full agreed GHA/RC qualification without merge or stable tagging. The user also
+explicitly approved official Temurin downloads on runners through setup-java
+(api.adoptium.net, GitHub and their normal CDNs), pinned Python package/wheel
+downloads from pypi.org and files.pythonhosted.org inside GHA, and local read-only
+metadata/SHA256 lookup. Local Python environments and Java installations must
+not be changed. All necessary quality-related operations within GHA/runners are
+authorized; main, protected branch/tag changes, artifact publication, production
+and datasci remain outside this scope.
