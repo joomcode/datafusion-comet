@@ -17,7 +17,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-> **G01 finalization authorized:** documentation and history cleanup, followed by exact-SHA RC qualification, are in progress. Integration into `branch-1.2` and `joom-1.2-1-rc1` are conditional on successful checks. G02 and Java 21 work remain on hold.
+> **Historical G01 checkpoint (superseded by final G10 below):** documentation and history cleanup, followed by exact-SHA RC qualification, are in progress. Integration into `branch-1.2` and `joom-1.2-1-rc1` are conditional on successful checks. G02 and Java 21 work remain on hold.
 
 # Cleanup after the migration
 
@@ -30,6 +30,39 @@ paths use the explicit bindings in [PATHS.md](PATHS.md). Verify COMET_ROOT and
 MIGRATION_AUX_ROOT before running any optional cleanup. The guarded shell
 examples intentionally fail if the required root is unset or the selected
 checkout is not a Comet repository root.
+
+## Final G10 delivery and resource snapshot, 2026-11-23
+
+The current qualified output is `target/joom-release/gha-45084227984`; earlier
+RC paths below are historical, not the final delivery. Preserve both JARs and
+all associated provenance/checksums/native/smoke files before considering cleanup.
+No file, cache, image, volume or branch was deleted during final qualification.
+
+Latest allocated sizes are `native/target`74.75GiB, root `target`11.28GiB, and
+`${MIGRATION_AUX_ROOT}/20261121_comet12-g10`8.72GiB. Root target includes nested
+release outputs and the diagnostic worktree; do not add nested sizes twice.
+Exact KiB, resource identities and newly downloaded artifact IDs are recorded in
+cleanup-ledger.json#g10_final_qualification_resources_20261123. Standard Maven,
+Cargo, Ivy/SBT and other user/shared caches are not task-disposable. User-provided
+Spark, Comet, DataFusion and Iceberg sources remain user-owned.
+
+Before removing ANY enclosing root target directory, inspect and archive the
+linked diagnostic worktree. Its source is a separate diagnostic branch, never
+an integration candidate. The following is an optional manual cleanup step
+AFTER preserving needed diagnostics; no force is used and local changes must
+be handled explicitly if Git refuses:
+
+```bash
+git -C "${COMET_ROOT:?Set COMET_ROOT to the intended Comet checkout}" worktree remove target/joom-runtime-memory-diagnostic
+```
+
+Do not remove the primary feature/integration branches or the final release
+directory. The guarded `native/target` cleanup below only removes generated
+compiler outputs; source/vendor and delivered JARs are separate. The auxiliary
+G10 directory contains the immutable qualification receipts and failed-attempt
+history, so archive and review it before any eventual deletion. Preserve
+`20261123_final-closeout/completion.json`, source manifests, original document
+archives and the final exact-source qualification evidence.
 
 ## Sizes
 

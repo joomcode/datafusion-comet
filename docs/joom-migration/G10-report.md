@@ -19,6 +19,69 @@ under the License.
 
 # G10: final integration and release qualification
 
+## User acceptance and integration, 2026-11-23
+
+G10 was accepted. The user authorized one final documentation commit, normal
+feature push and fast-forward integration into `branch-1.2`, with post-integration
+verification and the exact incoming commit list. Preserve all13 substantive
+qualified commits; no checkpoint-history rewrite is necessary.
+
+The documentation-only successor preserves the exact tested non-migration tree
+and existing JAR bytes. Qualification and build manifests continue to identify
+`81474a889489da4a4a4aa8e49330e6398c1937e3`; a new documentation SHA is not
+misrepresented as another tested build. Actual final refs/tree/document hashes
+are in `${MIGRATION_AUX_ROOT}/20261123_comet12-g10-integration/completion.json`
+after commit. Stable tagging and JFrog publication remain explicitly withheld;
+no main, production or datasci changes are authorized.
+
+## Final qualification: ready for user review, 2026-11-23
+
+The existing same-source workflows all succeeded. Qualified source is
+`81474a889489da4a4a4aa8e49330e6398c1937e3` on
+`joom/1.2-release-qualification`; no merge or stable tag has been created.
+The older checkpoint sections below are historical.
+
+| Final evidence                              | Actual result                                                                      |
+| ------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Comet CI45084222684, attempt2               | 138required successes;16structural skips                                           |
+| RC45084227984                               | 27existing cases on each native AMD64/ARM64; same final JAR bytes                  |
+| Miri45084225013 / Actions CodeQL45084212970 | 107selected Miri tests / successful Actions analysis                               |
+| Runtime gates                               | 98required cases,88native window actions,3additional prefetch regressions          |
+| Full fuzz                                   | 31aggregate and33SMJ registrations; no required nonpasses                          |
+| Remaining coverage                          | 20Linux/4Mac JVM cohorts;66CostChoice cases on six profiles;45stock Spark SQL jobs |
+| Deferred obligations                        | All15 original criteria manually reconciled;103required selectors evidenced        |
+
+Separate58 corrective cases and five original Spark3.4 regressions also passed.
+Counts from overlapping profiles/artifacts are not added as unique tests.
+The runtime contract remains official Spark4.2.1 / Scala2.13.18 / Java17,
+Comet1.2.0, Delta4.4.1, DataFusion55.2.0, ANSI=true and
+`spark.sql.columnVector.offheap.enabled=false`; see RUNTIME-REQUIREMENTS.md.
+
+G10 restored full normal CI and strict vendor Clippy, fixed aggregate peak-memory
+recording across spill/replay, native shuffle UDF-key task transport and prefetched
+output cleanup, and completed cross-profile fixture/ABI/package qualification.
+Original Spark result/error comparisons and native/safe-fallback assertions remain.
+No production code was changed merely to make a plan-only fixture pass.
+
+Final JARs are in `target/joom-release/gha-45084227984`. Their hashes, exact
+run/artifact provenance and all15 manual criteria are indexed by
+G10-results.json#final_qualification_20261123 and external
+`20261123_final-closeout/completion.json` under the G10 auxiliary root.
+
+Four HDFS tests and three manual native benchmarks remain deliberate nonpasses.
+Four aggregate cancellation counts in older Spark3.4/3.5 Hive summaries could not
+be assigned extra identities; they retain zero pass credit and are not a target4.2
+identity gap. Quiet old Iceberg Gradle counts remain unknown where not logged.
+Target production uses Parquet/Delta, not Iceberg; Java21 qualification is deferred.
+Miri's recorded pointer-provenance warnings and Actions-only CodeQL scope remain
+explicit. Tests qualify the agreed source/runtime scope, not every possible input
+or production performance.
+
+The original tested documents are archived. These post-dispatch operational
+document updates describe results and are not falsely attributed to the JAR
+build. Source code and protected refs remain unchanged. Await user review before
+merge/tag; no publication, production operation or datasci access is authorized.
+
 ## Current v13 runtime-contract checkpoint (2026-11-22)
 
 The user approved official Spark4.2.1 with heap Spark column vectors and ANSI=true;

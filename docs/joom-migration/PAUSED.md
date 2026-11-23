@@ -17,6 +17,108 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+## Current continuation: G10 accepted for integration, 2026-11-23
+
+The user accepted G10 and authorized the final documentation commit, feature
+push and fast-forward integration into `branch-1.2`. All older merge holds below
+are historical for this operation. Source code is unchanged from qualified
+`81474a889489da4a4a4aa8e49330e6398c1937e3`; the extra commit contains only
+final English, portable migration documentation. Do not rewrite the13 substantive
+qualified commits or relabel the existing JAR provenance.
+
+Actual final branch SHA, incoming commit list, document hashes, exact
+non-migration tree equality and local/remote verification are recorded after
+commit in `${MIGRATION_AUX_ROOT}/20261123_comet12-g10-integration/completion.json`.
+Read that receipt before assuming integration completed; absence means the
+remote outcome still needs verification. Final JARs remain in
+`target/joom-release/gha-45084227984`. No additional full CI is required merely
+for this documentation-only integration.
+
+Stable tag creation and JFrog publication were explicitly withheld. Main,
+production, Java21 qualification and datasci also remain outside the scope.
+Await separate user instruction for release/tag/publication work.
+
+## Current continuation: G10 qualification complete, 2026-11-23
+
+The user resumed the saved runs. All four existing workflows succeeded; periodic
+polling is no longer needed and no replacement workflow was started. Qualified
+source remains `81474a889489da4a4a4aa8e49330e6398c1937e3`.
+
+All15 original deferred obligations are manually reconciled with103required JVM
+selectors, full native/vendor/quality,98core cases,88window actions,3prefetch
+cases, separate58/original5,20Linux/4Mac cohorts and exact66CostChoice cases on
+six remote profiles. RC27 passed on each native AMD64/ARM64; final verified JARs
+remain in `target/joom-release/gha-45084227984`. Read the top of G10-report.md,
+G10-results.json#final_qualification_20261123 and STATE.json.
+
+Durable final evidence is indexed by
+`${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-closeout/completion.json`
+and `20261123_v13-coordination/CONTINUE.json`. Preserve explicit limits and
+nonpositive evidence; do not rerun CI merely because the laptop was closed.
+
+Only operational migration documents changed after the tested source freeze;
+source81474, branch-1.2/main and tags remain unchanged. Original tested documents
+are archived; current MANIFEST describes the intentional new report state.
+Await explicit user permission before merge or stable tag. Publication, production,
+Java21 work and datasci remain excluded. All older pause sections below are
+historical and must not override this result.
+
+## Current pause: laptop shutdown, 2026-11-23
+
+The user explicitly paused this session. **Do not cancel the existing GitHub
+Actions runs.** Local polling stopped; no local build or GET process remains.
+All older continuation sections below are historical and superseded here.
+
+- Feature: `joom/1.2-release-qualification`; tested HEAD
+  `81474a889489da4a4a4aa8e49330e6398c1937e3`. No source change after dispatch.
+- [Comet CI45084222684](https://github.com/joomcode/datafusion-comet/actions/runs/45084222684),
+  attempt2: at03:13:22UTC,135successful,15structural skips, two real exec jobs
+  active: Linux Spark4.2/JDK17 `137433147459`, Mac Spark4.0/JDK17 `137433145104`.
+  The historical Required Checks failure and canceled nightly placeholder await
+  dependency completion; no new failure was known. This is a saved observation,
+  not tomorrow's live status.
+- [RC45084227984](https://github.com/joomcode/datafusion-comet/actions/runs/45084227984)
+  succeeded7/7; final dual-architecture JARs are downloaded and independently
+  verified in `target/joom-release/gha-45084227984`.27cases perarchitecture.
+- [Miri45084225013](https://github.com/joomcode/datafusion-comet/actions/runs/45084225013)
+  succeeded107selected tests; [CodeQL45084212970](https://github.com/joomcode/datafusion-comet/actions/runs/45084212970)
+  succeeded (Actions scope). Native/vendor/strict Clippy, Delta,45stock SQL jobs,
+  all16Iceberg shards/4extensions, separate58 and original5 are independently
+  reviewed. Exact limits/nonpasses remain in their receipts. All15backlogs remain
+  OPEN pending final cross-channel reconciliation.
+
+### Resume in this order
+
+1. Read this file, STATE.json, decisions.json, approved-plan.json and
+   RUNTIME-REQUIREMENTS.md. Resolve external roots through PATHS.md. Read
+   `${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_v13-coordination/CONTINUE.json`
+   for the full durable evidence index and remaining exact commands.
+2. Check local HEAD/MF13 non-migration hashes. The only intentional uncommitted
+   post-dispatch changes are PAUSED.md, STATE.json and MANIFEST.json. Original55
+   migration documents plus MANIFEST are archived under the external
+   `20261123_laptop-pause`; verify its pause-state-verification.json. Do not amend
+   tested history or claim these operational document changes were in the JARs.
+3. Obtain a fresh status of the SAME runs using external `poll-current-v13.py`.
+   Do not trust the stale saved deadline/status or start replacement workflows.
+   If still active, poll every five minutes with one owner. Capped active logs
+   are not progress or stall proof. The earlier false-stall cancellation was
+   corrected; its same-SHA retry is already running and must not be repeated.
+4. If real exec2 succeeds, use the independently reviewed preserved-execution
+   collector in `20261123_successful-job-reuse-v13-proposal` (see its USAGE file).
+   Reused successes have new status aliases but actual original job/attempt1
+   artifacts. Preserve the strict132-pair bridge; never invent attempt2 artifacts
+   for preserved successes or combine partial canceled exec1 with exec2.
+5. Finish actual core98/window88, additional3prefetch, full31aggregate/33SMJ,
+   normal20Linux/4Mac cohorts, six-profile Cost66 and all15 original criteria.
+   Keep the four legacy Hive canceled-count identities unresolved/zero-credit;
+   no new count gate or invented passes. Refresh cleanup inventory after final
+   downloads and report before merge/stable tag.
+
+Production requires official Spark4.2.1, `spark.sql.columnVector.offheap.enabled=false`
+and `spark.sql.ansi.enabled=true`. Deliberate per-test overrides remain. No
+branch-1.2/main/tag changes, merge, stable release, production, external artifact
+publication, Java21 work or datasci access is authorized.
+
 ## Current continuation: approved Spark runtime contract, 2026-11-22
 
 The user explicitly approved official Spark4.2.1 with

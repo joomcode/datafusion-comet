@@ -1203,5 +1203,44 @@
     "release_output": "Final native AMD64/ARM64 artifacts go to target/joom-release/gha-<actual-run-id>; actual path/size/digest recorded after download.",
     "deletion_performed": false,
     "new_shared_cache_locations": []
+  },
+  "g10_final_qualification_resources_20261123": {
+    "qualified_source": "81474a889489da4a4a4aa8e49330e6398c1937e3",
+    "measured_utc": "2026-11-23T10:46:34.465547+00:00",
+    "allocated_KiB": {
+      "${MIGRATION_AUX_ROOT}/20261121_comet12-g10": 9144232,
+      "target": 11829716,
+      "native/target": 78381560
+    },
+    "nested_sizes_must_not_be_added_as_unique": true,
+    "final_deliverables_preserve": "target/joom-release/gha-45084227984: both JARs, build-manifest.json, release-qualification.json, sha256.txt, commit.txt, effective-pom.xml, linux and smoke evidence",
+    "final_evidence_preserve": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-closeout/completion.json and its immutable evidence links; original and pre-final documentation archives",
+    "new_downloads": [
+      {
+        "artifact_id": 14789105669,
+        "bytes": 4327547,
+        "scope": "Actual targetexec2 canonical runtime evidence"
+      },
+      {
+        "artifact_id": 14788173945,
+        "bytes": 40993,
+        "scope": "Actual targetexec2 ordinary complete report"
+      },
+      {
+        "artifact_id": 14781097766,
+        "bytes": 29252,
+        "scope": "Preserved successful expressions1 report fetched by explicit alias-aware canonical collector"
+      }
+    ],
+    "linked_worktree": {
+      "path": "target/joom-runtime-memory-diagnostic",
+      "branch": "joom/1.2-runtime-memory-diagnostic",
+      "HEAD": "cb5154ae7cc50b747f8ea631a5a9035ec99be079",
+      "cleanup": "Inspect and archive first; git worktree remove without --force before any enclosing target deletion. Keep primary feature and integration branches."
+    },
+    "new_shared_cache_locations": [],
+    "shared_caches_and_user_sources_preserve": true,
+    "no_new_Docker_images_or_volumes_downloaded_during_final_resume": true,
+    "deletion_performed": false
   }
 }

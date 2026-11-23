@@ -1060,5 +1060,27 @@
     "merge_allowed": false,
     "stable_tag_allowed": false,
     "regression_variants": "Preserve all deliberate per-test off-heap=true and ANSI=false variants, original data/oracles, native assertions and full fuzz matrices."
+  },
+  "g10_integration_authorization": {
+    "date": "2026-11-23",
+    "status": "APPROVED_EXPLICITLY",
+    "request_translation": "Accept G10. Commit final documentation, push the feature branch to origin, integrate into branch-1.2, verify the resulting state and report every incoming commit. Do not create a stable tag or publish to JFrog.",
+    "qualified_code_commit": "81474a889489da4a4a4aa8e49330e6398c1937e3",
+    "integration_base": "4467d0337089036d3f01d28375260ce3dbcaaca5",
+    "feature_branch": "joom/1.2-release-qualification",
+    "integration_branch": "branch-1.2",
+    "allowed": [
+      "One coherent final English/portable migration-documentation commit",
+      "Normal feature push to origin",
+      "Fast-forward-only integration and normal push of branch-1.2",
+      "Post-integration source/document/ref/JAR provenance verification"
+    ],
+    "stable_tag_allowed": false,
+    "JFrog_publication_allowed": false,
+    "main_changes_allowed": false,
+    "production_or_datasci_allowed": false,
+    "post_commit_integration_receipt": "${MIGRATION_AUX_ROOT}/20261123_comet12-g10-integration/completion.json",
+    "receipt_rule": "Actual new SHA, fast-forward and remote-head verification are recorded after commit. If that receipt is absent, remote integration is not established by this authorization alone.",
+    "qualified_build_provenance": "Full GHA and final RC JARs identify81474. Subsequent documentation-only commit does not relabel that build SHA or requalify rebuilt/renamed release artifacts."
   }
 }

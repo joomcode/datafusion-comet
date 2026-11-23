@@ -1,12 +1,12 @@
 {
-  "updated_on": "2026-11-22",
-  "phase": "G10_V11_LOCAL_ANSI_COST_MATRIX_VERIFIED_FINAL_SOURCE_QUALIFICATION_PENDING",
+  "updated_on": "2026-11-23",
+  "phase": "G10_COMPLETE_USER_ACCEPTED_INTEGRATION_AUTHORIZED_RELEASE_HELD",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
   "observed_code_head_before_documentation_commit": "2b8f80b3f253559bc999f73769b05c88ebcd5fc2",
   "implementation_started": true,
-  "active_writer": "None: paused at explicit user request for laptop shutdown.",
+  "active_writer": "Main chat owns the authorized documentation commit and fast-forward integration; actual local/remote completion is recorded externally after commit.",
   "worker_threads_created": [
     {
       "group": "G01",
@@ -209,9 +209,10 @@
   "reserve": {
     "id": "G10",
     "branch": "joom/1.2-release-qualification",
-    "status": "G10_EXPLICITLY_STARTED",
+    "status": "COMPLETED_ACCEPTED_FOR_INTEGRATION",
     "scope": "Cross-feature tests and necessary limited integration fixes in separate commits. If review of one of the nine groups objectively requires a split, the reserve may be reassigned after discussing the concrete boundary. Do not create an unnecessary empty PR.",
-    "authorization_ref": "decisions.json#g10_authorization"
+    "authorization_ref": "decisions.json#g10_authorization",
+    "completion_receipt": "${MIGRATION_AUX_ROOT}/20261123_comet12-g10-integration/completion.json"
   },
   "docker_checks": {
     "context": "desktop-linux",
@@ -331,7 +332,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Complete local v13 gates, freeze exact source, commit/push only the feature, run full agreed GHA/Miri/CodeQL and RC27 on native AMD64/ARM64, download verified final JARs and reconcile all15 backlogs. No merge/stable tag; no production or datasci changes.",
+  "next_step": "Read the G10 post-commit integration receipt for actual branch/ref verification. Stable tag, JFrog publication, production and datasci remain unauthorized until separate user instruction.",
   "qualification": "G09 accepted:230 native and495 unique JVM/SQL/Delta cases locally passed. Qualified source/test/CI bytes are preserved; final full agreed CI/Linux/release/exact-JAR qualification remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -1368,8 +1369,12 @@
         "owner": "Final migration qualification (G09/G10 if needed)",
         "intended_validation_command_or_job": "Existing full Comet CI matrix plus RC Build & Smoke final artifacts.",
         "native_execution_requirement": "Actual native execution and final loaded library/class-origin proof; no canceled/ignored case counted as passed.",
-        "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "Current local source evidence under ${MIGRATION_AUX_ROOT}/20261119_comet12-g02; final qualified SHA pending."
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
+        "pre_final_qualification_status": "DEFERRED_FINAL_QUALIFICATION",
+        "pre_final_evidence_path_and_source_sha": "Current local source evidence under ${MIGRATION_AUX_ROOT}/20261119_comet12-g02; final qualified SHA pending.",
+        "final_manual_criterion_review": "Actual Linux AMD64 native FFI/extent/cancellation/explode/JNI/partitioned-batch modules and complete TaskContext, task-memory, ownership, timestamp and Boolean JVM selectors passed. Release feature/lock/ELF and exact same final JARs were independently verified on native AMD64/ARM64. Ordinary CI native and release native remain distinct qualified channels; historical local totals were not substituted.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "id": "G02-CANCEL-SPARK-MEMORY-WAIT",
@@ -1381,9 +1386,13 @@
         "owner": "G02 correctness follow-up / final qualification",
         "intended_validation_command_or_job": "Focused cancellation+CometTaskMemoryManager regression before final acceptance; add deterministic scenario if existing agreed suites do not cover it.",
         "native_execution_requirement": "Verify native executing plan, captured Spark task context, actual blocked acquire and reservation accounting before/after cancellation.",
-        "status": "CLOSED_LOCAL_ARM64_VALIDATION",
-        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait/completion.json (final source SHA), tested-source-manifest.json, maven-final-regressions.log and memory-wait-negative-control.json",
-        "actual_evidence": "Both JNI paths x verified fair/greedy pools stop within two seconds with competitor memory held, TaskKilledException, no success batch/EOF, zero native/Spark reservations/live contexts; 16 manager cases cover exact grants, partial spill cleanup, nested/reused threads. Unified 93/93 pass."
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
+        "actual_evidence": "Both JNI paths x verified fair/greedy pools stop within two seconds with competitor memory held, TaskKilledException, no success batch/EOF, zero native/Spark reservations/live contexts; 16 manager cases cover exact grants, partial spill cleanup, nested/reused threads. Unified 93/93 pass.",
+        "pre_final_qualification_status": "CLOSED_LOCAL_ARM64_VALIDATION",
+        "pre_final_evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait/completion.json (final source SHA), tested-source-manifest.json, maven-final-regressions.log and memory-wait-negative-control.json",
+        "final_manual_criterion_review": "All six exact real-JNI memory-wait/race registrations passed, alongside the full manager/task-kill suites. Reviewed assertions require a competing task to retain90bytes, an actual blocked Spark acquire/JNI frame, interruptOnCancel=false, bounded TaskKilledException, no successful batch/EOF and zero owned reservations/native contexts/Arrow allocations after cleanup. Native cancellation witnesses and RC linkage independently supplement these JVM outcomes.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "id": "G02-OFFSET-CONSUMERS",
@@ -1395,30 +1404,38 @@
         "owner": "G06 and G07 integration",
         "intended_validation_command_or_job": "Window/coalescer targeted regressions during their authorized ports; final agreed native/JVM/SQL and exact-JAR qualification.",
         "native_execution_requirement": "Assert actual native window/coalescer/FFI paths with Spark result parity; not incidental fallback.",
-        "status": "G06_G07_CONSUMERS_PASSED_LOCAL_FINAL_PLATFORM_PENDING",
-        "evidence_path_and_source_sha": "Shared offset utility tests and explode tests under ${MIGRATION_AUX_ROOT}/20261119_comet12-g02; future consumer SHA pending.; G06 consumer source/receipts: ${MIGRATION_AUX_ROOT}/20261120_comet12-g06/final-source-manifest.json and native-window-qualified.json.",
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
         "actual_g06_evidence": "G06-results.json; output_coalescing_flushes_at_nested_offset_budget: real consumer flush, isolated List/Map/Struct children, sliced Boolean, exact rows/schema/order/nulls and zero reserved memory.",
-        "actual_g07_evidence": "G07-results.json; nested offset-budget/coalescer, full1.1GiBoffset-boundary and real JVM/native reader matrices; no pending local consumer implementation."
+        "actual_g07_evidence": "G07-results.json; nested offset-budget/coalescer, full1.1GiBoffset-boundary and real JVM/native reader matrices; no pending local consumer implementation.",
+        "pre_final_qualification_status": "G06_G07_CONSUMERS_PASSED_LOCAL_FINAL_PLATFORM_PENDING",
+        "pre_final_evidence_path_and_source_sha": "Shared offset utility tests and explode tests under ${MIGRATION_AUX_ROOT}/20261119_comet12-g02; future consumer SHA pending.; G06 consumer source/receipts: ${MIGRATION_AUX_ROOT}/20261120_comet12-g06/final-source-manifest.json and native-window-qualified.json.",
+        "final_manual_criterion_review": "Actual nested/sliced Boolean/List/Map/Struct FFI, window and coalescer cases passed with row/order/schema and reservation assertions. Native source review binds the real1140850687-byte (~1.0625GiB) allocation and production coalescer boundary test, not a reduced-offset-budget substitute; shared payload blocks that would exceed i32::MAX stay separate. JVM consumer suites passed and RC confirms release linkage.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "group": "G03",
         "feature_cards": ["D11", "D02", "D04", "D03"],
         "native_execution_requirement": "Actual native paths, result/mandatory-error parity, no canceled/ignored case counted as passed.",
-        "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/completion.json; final migration release SHA pending.",
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
         "id": "G03-LINUX-RELEASE",
         "behavior_or_test": "Run the sort/workspace/wide/handoff/cleanup coverage on native Linux and final release-feature graph; qualify exact final JARs on native AMD64/ARM64.",
         "required_inputs_and_settings": "Spark4.2.1/Java17/ANSI=true; same shared lock/vendor graph, full agreed final native/vendor/JVM suites and exact-JAR smoke.",
         "reason_deferred": "User-approved per-group local validation; complete Linux/release and packaged artifact qualification after all feature groups.",
         "owner": "Final migration qualification",
-        "intended_validation_command_or_job": "Full agreed Comet CI plus RC Build & Smoke final artifacts."
+        "intended_validation_command_or_job": "Full agreed Comet CI plus RC Build & Smoke final artifacts.",
+        "pre_final_qualification_status": "DEFERRED_FINAL_QUALIFICATION",
+        "pre_final_evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/completion.json; final migration release SHA pending.",
+        "final_manual_criterion_review": "Complete actual Linux sort/wide-payload, spill, handoff, task-memory, early-drop/cancellation and task-metric selectors passed. Source assertions require original Spark rows, real sort spill and native plans; native witnesses require live spill files/grants, rejection of post-cancel success, zero final native/Spark reservations and removed spill files. ReservationStream deliberately keeps ownership through an error until drop, then releases it. Release-JAR coverage remains the approved representative scope.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "group": "G03",
         "feature_cards": ["D11", "D02", "D04", "D03"],
         "native_execution_requirement": "Actual native paths, result/mandatory-error parity, no canceled/ignored case counted as passed.",
-        "status": "LOCAL_STRICT_PASSED_FINAL_LINUX_CI_PENDING",
-        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/strict-workspace-clippy-final.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/lint-only-source-proof.json",
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
         "id": "G03-WORKSPACE-CLIPPY-TOOLCHAIN",
         "behavior_or_test": "Strict workspace/all-targets Clippy must pass with the approved statement-local deprecated exception and unchanged CI flags.",
         "required_inputs_and_settings": "Actual final Linux CI/release toolchains; cargo clippy --all-targets --workspace -- -D warnings. Only the approved fetch_update statement-local lint exception is allowed; no global diagnostic exemption.",
@@ -1433,7 +1450,11 @@
           "intended_validation_command_or_job": "Resolve toolchain compatibility consistently with release/MSRV or obtain an approved compatible upstream remedy, then run unchanged strict CI. Diagnostic -Adeprecated is not acceptance.",
           "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g03/completion.json; final migration release SHA pending."
         },
-        "decision_ref": "decisions.json#vendor_lint_policy"
+        "decision_ref": "decisions.json#vendor_lint_policy",
+        "pre_final_qualification_status": "LOCAL_STRICT_PASSED_FINAL_LINUX_CI_PENDING",
+        "pre_final_evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/strict-workspace-clippy-final.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04-clippy-exception/lint-only-source-proof.json",
+        "final_manual_criterion_review": "Actual strict locked workspace/all-targets Clippy including the vendored crate succeeded on the recorded Linux toolchain. No workspace vendor exclusion or global deprecated allowance remains; only the explicitly approved statement-local allowance is retained. Full existing CI/quality gates and source-pinned normal automatic routing passed.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "id": "G04-LINUX-RELEASE",
@@ -1457,8 +1478,12 @@
         "owner": "Final migration qualification",
         "intended_validation_command_or_job": "Existing full Comet CI and RC Build & Smoke after all groups and temporary CI cleanup.",
         "native_execution_requirement": "Compare results and mandatory errors; confirm actual native paths and exact loaded artifacts where applicable. Canceled/ignored never count as passed.",
-        "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "G04-results.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json; final release SHA pending."
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
+        "pre_final_qualification_status": "DEFERRED_FINAL_QUALIFICATION",
+        "pre_final_evidence_path_and_source_sha": "G04-results.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json; final release SHA pending.",
+        "final_manual_criterion_review": "Complete aggregate/SortAggregate/specialized/mixed-buffer selectors and native aggregate emit/offset/memory/drain witnesses passed. Source-backed differential SQL checks compare original Spark4.2.1 rows/schema and mandatory overflow error class/SQLSTATE/parameters, including actual native phases/forced spill; independent input-derived ordered/duplicate/Bloom oracles remain. Native PartialMerge spill requires24000 distinct(g,k) outputs and exact counts/max with zero final grants. Native Partial-to-Final versus Single alone is not treated as an independent Spark oracle.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "id": "G04-FULL-FUZZ",
@@ -1482,8 +1507,12 @@
         "owner": "Final migration qualification",
         "intended_validation_command_or_job": "Pass comet.test.aggFuzz.full=true to forked JVM (e.g. JAVA_TOOL_OPTIONS); execute CometFirstLastBoolAggFuzzSuite and verify all full: cases run.",
         "native_execution_requirement": "Compare results and mandatory errors; confirm actual native paths and exact loaded artifacts where applicable. Canceled/ignored never count as passed.",
-        "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "G04-results.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json; final release SHA pending."
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
+        "pre_final_qualification_status": "DEFERRED_FINAL_QUALIFICATION",
+        "pre_final_evidence_path_and_source_sha": "G04-results.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json; final release SHA pending.",
+        "final_manual_criterion_review": "All31 exact aggregate registrations (6default+25full) passed with zero failures/cancellations/ignores. Actual forked JVM full-fuzz flag is present. Source preserves ANSI=true, original Spark differential results/errors, actual native/spill assertions and COUNT DISTINCT PartialMerge spill behavior; neither canceled attempt1 nor isolated local fragments supply positive credit.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "id": "G04-INHERITED-UNRUN",
@@ -1507,15 +1536,19 @@
         "owner": "Final migration qualification",
         "intended_validation_command_or_job": "Resolve the two inherited metric ignores during final qualification. Repeat the passing BloomFilter planning/runtime cases in final CI; do not count ignored cases as passed.",
         "native_execution_requirement": "Compare results and mandatory errors; confirm actual native paths and exact loaded artifacts where applicable. Canceled/ignored never count as passed.",
-        "status": "BLOOM_PLANNING_AND_RUNTIME_PASSED_METRIC_CASES_PENDING",
-        "evidence_path_and_source_sha": "G04-results.json#independent_semantics_review; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/sql-semantic-final.json",
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
         "history_before_independent_review": {
           "behavior_or_test": "Execute or explicitly resolve2Spark4.2 mixedBloom planning cancellations and2ignored metric tests; guards are not evidence of incompatibility.",
           "intended_validation_command_or_job": "Inspect issue#4968 guards and metrics ignores; run applicable scenarios without suppressing correctness failures, or obtain explicit applicability disposition.",
           "status": "DEFERRED_FINAL_QUALIFICATION",
           "evidence_path_and_source_sha": "G04-results.json; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04/completion.json; final release SHA pending."
         },
-        "g10_local_resolution": "Two metric ignores restored and passed after real Final peak fix; six applicable Bloom fixtures pass without Spark4.2cancellation. Full exact-SHA remote suite still required."
+        "g10_local_resolution": "Two metric ignores restored and passed after real Final peak fix; six applicable Bloom fixtures pass without Spark4.2cancellation. Full exact-SHA remote suite still required.",
+        "pre_final_qualification_status": "BLOOM_PLANNING_AND_RUNTIME_PASSED_METRIC_CASES_PENDING",
+        "pre_final_evidence_path_and_source_sha": "G04-results.json#independent_semantics_review; ${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics/sql-semantic-final.json",
+        "final_manual_criterion_review": "Both restored JVM aggregate metric cases and six restored mixed/native Bloom fixtures passed in the full target exec execution. Source checks positive owned aggregate peak with actual original Spark rows and retained range-sampling suppression. All four native recorder/replay witnesses passed. The additional independent Bloom oracle covers all three Spark/native phase combinations and exact binary buffers; source guards no longer cancel the required target cases.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "id": "G05-LINUX-RELEASE",
@@ -1527,8 +1560,12 @@
         "owner": "Final migration qualification",
         "intended_validation_command_or_job": "Final full agreed Comet CI plus RC Build & Smoke.",
         "native_execution_requirement": "Complete rows/multiplicities and mandatory errors, actual native or explicitly safe fallback, real spill where required; canceled/ignored not passes.",
-        "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05/final-source-manifest.json"
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
+        "pre_final_qualification_status": "DEFERRED_FINAL_QUALIFICATION",
+        "pre_final_evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05/final-source-manifest.json",
+        "final_manual_criterion_review": "All10 exact ANSI SMJ registrations passed: duplicates/unmatched FULL rows, lazy branches and mandatory errors, semi/anti matches and AQE clustering. The current source compares original Spark rows/errors before exact native versus approved guarded fallback assertions. The broader ordinary join/SMJ suites and native short-circuit/error-order witnesses passed; inherited explicit legacy ANSI=false fixture variants remain deliberate.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "id": "G05-FULL-FUZZ",
@@ -1540,8 +1577,12 @@
         "owner": "Final migration qualification",
         "intended_validation_command_or_job": "Deliver comet.test.smjFuzz.full=true to forked JVM; run CometSmjJoinFilterFuzzSuite and verify all full: cases execute.",
         "native_execution_requirement": "Complete rows/multiplicities and mandatory errors, actual native or explicitly safe fallback, real spill where required; canceled/ignored not passes.",
-        "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05/final-source-manifest.json"
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
+        "pre_final_qualification_status": "DEFERRED_FINAL_QUALIFICATION",
+        "pre_final_evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g05/final-source-manifest.json",
+        "final_manual_criterion_review": "All33 exact SMJ registrations (10default+23full) passed with zero nonpasses and actual full-matrix JVM flag. Current unchanged source contains4881 internal comparisons, the historical4869 criterion plus12 additive differential route pairs. Original data/seeds/multiset/error/spill checks and the explicit ANSI=true cases are retained; count expansion does not replace or erase the historical criterion.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "id": "G06-LINUX-RELEASE",
@@ -1553,8 +1594,12 @@
         "owner": "Final migration qualification",
         "intended_validation_command_or_job": "Full agreed Comet CI plus RC Build & Smoke; run docs/joom-migration/verify-g06-native-windows.py on the complete merged focused-suite log.",
         "native_execution_requirement": "Independent88-action verifier requires post-execution exact native nodes and window-owned spill metrics; Scala separately asserts original Spark rows/errors and explicit safe fallback. No cancellation/ignore counted as pass.",
-        "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06/final-source-manifest.json; G06-results.json"
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
+        "pre_final_qualification_status": "DEFERRED_FINAL_QUALIFICATION",
+        "pre_final_evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g06/final-source-manifest.json; G06-results.json",
+        "final_manual_criterion_review": "Complete three-window suites plus SparkErrorConverter passed. Original Spark typed ordered rows/schema/errors/clustering, native output metrics and the explicitly approved suffix SUM/AVG/floating MIN/MAX and LEAD/LAG IGNORE NULLS fallbacks are preserved. The unchanged merged-log verifier independently revalidated88/88 actual actions and three positive window-owned spill_count/spilled_bytes actions. Native aggregate window helper spill sums alone were not used for this owned-metric criterion. Two window manual benchmarks remain approved nonpasses.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "id": "G07-LINUX-RELEASE",
@@ -1579,8 +1624,12 @@
         "owner": "Final migration qualification / G09 as specified",
         "intended_validation_command_or_job": "Full agreed Comet CI and RC Build & Smoke after all approved groups and temporary CI cleanup.",
         "native_execution_requirement": "Actual native or explicitly safe fallback, full result/schema/mandatory-error oracle where applicable; final loaded artifacts verified. No ignored/canceled case counted as pass.",
-        "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/final-source-manifest.json; G07-results.json"
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
+        "pre_final_qualification_status": "DEFERRED_FINAL_QUALIFICATION",
+        "pre_final_evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g07/final-source-manifest.json; G07-results.json",
+        "final_manual_criterion_review": "Complete C2R/projection/pooling/broadcast/payload/writer/spill/direct-read/coalescer selectors passed, with the existing Spark4.0 profile retained. Actual source checks original Spark values and execution layout, coalescing/buffer ownership and cancellation/error cleanup. The full target default-Kryo/payload regression matrix and the real shaded AQE=true default-Kryo RC case passed. Same immutable final JARs, bundled native and Java class origins were independently verified on both architectures; no requirement to repeat every functional suite inside release JARs was invented.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "id": "G07-G09-BROADCAST-COST-MATRIX",
@@ -1592,9 +1641,13 @@
         "owner": "Final migration qualification / G09 as specified",
         "intended_validation_command_or_job": "Repeat original J25 matrix and G07 C2R/broadcast regressions during authorized G09 integration, then final full CI.",
         "native_execution_requirement": "Actual native or explicitly safe fallback, full result/schema/mandatory-error oracle where applicable; final loaded artifacts verified. No ignored/canceled case counted as pass.",
-        "status": "PASSED_LOCAL_G09_FINAL_PLATFORM_PENDING",
-        "evidence_path_and_source_sha": "G09-results.json; ${MIGRATION_AUX_ROOT}/20261121_comet12-g09/final-source-manifest.json",
-        "actual_evidence": "G09 final-qualified-regressions: four original skewed/staged broadcast cases with cost=false/true and maxFields3/100, complete Spark rows and actual expected native/fallback paths."
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
+        "actual_evidence": "G09 final-qualified-regressions: four original skewed/staged broadcast cases with cost=false/true and maxFields3/100, complete Spark rows and actual expected native/fallback paths.",
+        "pre_final_qualification_status": "PASSED_LOCAL_G09_FINAL_PLATFORM_PENDING",
+        "pre_final_evidence_path_and_source_sha": "G09-results.json; ${MIGRATION_AUX_ROOT}/20261121_comet12-g09/final-source-manifest.json",
+        "final_manual_criterion_review": "All four exact staged/skewed broadcast registrations passed for cost=false/true by maxFields3/100. Source explicitly fixes ANSI=true/AQE/skew settings, compares original Spark rows, requires an actual skewed Spark SMJ and one Spark broadcast hash join reading a Comet broadcast stage, and checks the expected codegen boundary. These are actual remote outcomes, not local G09 evidence.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "id": "G08-FINAL-LINUX-RELEASE-AND-FULL-CI",
@@ -1606,8 +1659,12 @@
         "owner": "Final migration qualification after all authorized groups",
         "intended_validation_command_or_job": "Full agreed Comet CI and RC Build & Smoke after all temporary CI mechanisms are removed.",
         "native_execution_requirement": "Verify actual final classes/libraries and expected native/dispatcher/fallback plans; no canceled/ignored case counted passed.",
-        "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g08/final-source-manifest.json; final release SHA remains pending."
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
+        "pre_final_qualification_status": "DEFERRED_FINAL_QUALIFICATION",
+        "pre_final_evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261120_comet12-g08/final-source-manifest.json; final release SHA remains pending.",
+        "final_manual_criterion_review": "Complete scalar/codegen/HOF/short-circuit/conditional/UDF-pool/serde/QueryContext/late-injection selectors passed. Current source compares original Spark rows/schema/mandatory errors and verifies actual dispatcher/native or approved fallback behavior, shared captures and per-task identity/cleanup. The separate58 and original five source-bound regression gates passed. RC27 includes the agreed shaded UDF-pool and Delta serialization selectors with actual class/native origins; unsupported ignored native cast combinations receive no pass credit.",
+        "closure_does_not_authorize_production_or_merge": true
       },
       {
         "id": "G09-FINAL-LINUX-RELEASE-AND-FULL-CI",
@@ -1619,8 +1676,12 @@
         "owner": "Final migration qualification after explicit authorization",
         "intended_validation_command_or_job": "Remove all tracked temporary CI mechanisms; full agreed Comet CI, then RC Build & Smoke of exact final bytes on native AMD64/ARM64.",
         "native_execution_requirement": "Verify real producer/consumer/writer engines and loaded artifact provenance; do not count canceled/ignored as passed.",
-        "status": "DEFERRED_FINAL_QUALIFICATION",
-        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09/final-source-manifest.json; G09-results.json"
+        "status": "CLOSED_FINAL_QUALIFICATION_81474_APPROVED_RUNTIME",
+        "evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json; tested source 81474a889489da4a4a4aa8e49330e6398c1937e3",
+        "pre_final_qualification_status": "DEFERRED_FINAL_QUALIFICATION",
+        "pre_final_evidence_path_and_source_sha": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09/final-source-manifest.json; G09-results.json",
+        "final_manual_criterion_review": "All boundary/wide-sort/wide-shuffle/cost correctness selectors and both target TPC plan-stability suites passed in the ordinary invocation without golden generation. Source checks four cost/boundary modes, original Spark rows/schema/mandatory errors and actual native/consumer/writer/fallback layouts, including retained serialized native final consuming Spark partial SUM/AVG/Bloom buffers. Exact66 CostChoice names passed on all six existing remote profiles. RC27 includes all seven agreed engine/wide/hash/range selectors; copied historical tag13 plan snapshots were not used as fresh qualification.",
+        "closure_does_not_authorize_production_or_merge": true
       }
     ],
     "final_gate": "No unresolved/unverified applicable cases. Require actual passing evidence; retain only applicability exclusions explicitly agreed with the user (such as the existing HDFS-cluster exclusion)."
@@ -1645,8 +1706,8 @@
         "purpose": "Historical temporary pristine-vendor toolchain warning bypass",
         "owner": "G10 final qualification",
         "restore_or_remove_action": "Remove workspace package exclusion; retain only the approved statement-local deprecated allowance and strict remaining warnings.",
-        "status": "REMOVED_LOCAL_STRICT_PASSED_FINAL_LINUX_CI_REQUIRED",
-        "removal_evidence": ".github/actions/rust-test/action.yaml; ${MIGRATION_AUX_ROOT}/20261121_comet12-g10/strict-workspace-clippy.json; actual final Linux verdict in post-commit completion receipt."
+        "status": "REMOVED_FINAL_STRICT_LINUX_CI_PASSED",
+        "removal_evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_native-v13-independent-acceptance/native-acceptance-v13.json; ${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-ci-inventory-independent-review/final-inventory-independent-review.json; source 81474a889489da4a4a4aa8e49330e6398c1937e3"
       }
     ],
     "final_gate": "Audit actual CI, remove all temporary mechanisms, restore normal automatic triggers and full agreed coverage, then run full final GHA and exact final-JAR AMD64/ARM64 packaged smoke. An empty list alone is not proof of restoration."
@@ -2274,15 +2335,15 @@
     ]
   },
   "g10": {
-    "status": "LOCAL_V13_GATES_PASSED_EXACT_SHA_REMOTE_QUALIFICATION_PENDING",
+    "status": "COMPLETED_ACCEPTED_FOR_INTEGRATION",
     "branch": "joom/1.2-release-qualification",
     "base": "4467d0337089036d3f01d28375260ce3dbcaaca5",
     "authorization_ref": "decisions.json#g10_authorization",
     "evidence": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10",
-    "checkpoint": "59 local JVM regressions, five actual false/true session defaults, 46 RC fault tests, static CI checks and independent scope review passed. Exact-SHA full GHA/RC remains required.",
+    "checkpoint": "All existing exact-source GHA and native AMD64/ARM64 RC27 succeeded; all15 original deferred criteria manually reconciled. Source81474 remains unmerged; await user review. Detailed limits and immutable receipts are in final_qualification_20261123.",
     "full_gha_allowed": true,
     "rc_build_smoke_allowed": true,
-    "merge_allowed": false,
+    "merge_allowed": true,
     "stable_tag_allowed": false,
     "active_runs": [],
     "ci_restoration_audit": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261121_ci-audit/ci-restoration-audit.json",
@@ -3524,7 +3585,210 @@
         "independent_read_only_review": "No blockers: original CASES27/origin sets and explicit offHeap/ANSI variant source files unchanged; session marker represents startup defaults only.",
         "qualification_credit": "LOCAL_GATES_ONLY; full final-source remote coverage remains mandatory."
       }
-    }
+    },
+    "operational_pause_20261123": {
+      "paused_utc": "2026-11-23T03:17:08.646058+00:00",
+      "reason": "User is shutting down the laptop; resume G10 monitoring and qualification tomorrow.",
+      "source_commit": "81474a889489da4a4a4aa8e49330e6398c1937e3",
+      "feature_branch": "joom/1.2-release-qualification",
+      "local_poller_stopped": true,
+      "remote_workflows_cancelled": false,
+      "latest_observed_snapshot": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/poll-20261123T031322Z-81474a889489.json",
+      "snapshot_sha256": "d79a9a6475226921ac03e6777aac4e4abf19de7fcd54d9a5d058c5010332c153",
+      "observed_at_utc": "2026-11-23T03:13:22Z",
+      "qualification_runs": [
+        {
+          "id": 45084227984,
+          "name": "RC Build & Smoke",
+          "head_sha": "81474a889489da4a4a4aa8e49330e6398c1937e3",
+          "run_attempt": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/joomcode/datafusion-comet/actions/runs/45084227984"
+        },
+        {
+          "id": 45084225013,
+          "name": "Run Miri Safety Checks",
+          "head_sha": "81474a889489da4a4a4aa8e49330e6398c1937e3",
+          "run_attempt": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/joomcode/datafusion-comet/actions/runs/45084225013"
+        },
+        {
+          "id": 45084222684,
+          "name": "Comet CI",
+          "head_sha": "81474a889489da4a4a4aa8e49330e6398c1937e3",
+          "run_attempt": 2,
+          "status": "in_progress",
+          "conclusion": null,
+          "html_url": "https://github.com/joomcode/datafusion-comet/actions/runs/45084222684"
+        },
+        {
+          "id": 45084212970,
+          "name": "CodeQL",
+          "head_sha": "81474a889489da4a4a4aa8e49330e6398c1937e3",
+          "run_attempt": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "html_url": "https://github.com/joomcode/datafusion-comet/actions/runs/45084212970"
+        }
+      ],
+      "real_active_jobs": [
+        {
+          "id": 137433147459,
+          "name": "PR Build (Linux) / Spark 4.2, JDK 17 [exec]",
+          "url": "https://github.com/joomcode/datafusion-comet/actions/runs/45084222684/job/137433147459"
+        },
+        {
+          "id": 137433145104,
+          "name": "PR Build (macOS) / macos-15/Spark 4.0, JDK 17, Scala 2.13 [exec]",
+          "url": "https://github.com/joomcode/datafusion-comet/actions/runs/45084222684/job/137433145104"
+        }
+      ],
+      "resume": "Read PAUSED.md and external 20261123_v13-coordination/CONTINUE.json; first fresh GET via poll-current-v13.py, then five-minute monitoring if still running. Do not repeat workflows merely because the laptop was closed.",
+      "all15_backlogs_open": true,
+      "qualified_JAR_directory": "target/joom-release/gha-45084227984",
+      "pending_documentation_only_changes": [
+        "docs/joom-migration/PAUSED.md",
+        "docs/joom-migration/STATE.json",
+        "docs/joom-migration/MANIFEST.json"
+      ],
+      "tested_source_provenance": "HEAD and all204 non-migration MF13 paths remain81474. Only these uncommitted operational documents change after dispatch. Original55 documents plus MANIFEST are backed up externally; do not amend/rebase source or relabel old build receipts.",
+      "original_document_backup": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_laptop-pause/original-81474-migration-documents.zip",
+      "merge_allowed": false,
+      "stable_tag_allowed": false,
+      "production_allowed": false,
+      "datasci_access_allowed": false,
+      "status_after_resume": "RESUMED_EXISTING_RUNS_ALL_SUCCEEDED_FINAL_QUALIFICATION_REVIEW_COMPLETE"
+    },
+    "final_qualification_20261123": {
+      "date": "2026-11-23",
+      "status": "FINAL_QUALIFICATION_PASSED_PENDING_USER_REVIEW_NOT_MERGED",
+      "qualified_source_commit": "81474a889489da4a4a4aa8e49330e6398c1937e3",
+      "feature_branch": "joom/1.2-release-qualification",
+      "protected_integration_base": "4467d0337089036d3f01d28375260ce3dbcaaca5",
+      "runtime_contract": {
+        "Spark": "official4.2.1 unchanged",
+        "Scala": "2.13.18",
+        "Comet": "1.2.0",
+        "Delta": "4.4.1",
+        "DataFusion": "55.2.0",
+        "Java": "17",
+        "spark.sql.ansi.enabled": "true",
+        "spark.sql.columnVector.offheap.enabled": "false"
+      },
+      "workflows": {
+        "Comet CI": {
+          "run_id": 45084222684,
+          "attempt": 2,
+          "successes": 138,
+          "structural_skips": 16,
+          "conclusion": "success"
+        },
+        "RC Build & Smoke": {
+          "run_id": 45084227984,
+          "successes": 7,
+          "cases_per_arch": 27,
+          "native_architectures": ["AMD64", "ARM64"],
+          "conclusion": "success"
+        },
+        "Miri": {
+          "run_id": 45084225013,
+          "selected_tests_passed": 107,
+          "structural_skips": 1,
+          "conclusion": "success"
+        },
+        "CodeQL": {
+          "run_id": 45084212970,
+          "scope": "Actions",
+          "conclusion": "success"
+        }
+      },
+      "actual_required_gates": {
+        "core_cases": 98,
+        "native_window_actions": 88,
+        "additional_prefetch_cases": 3,
+        "aggregate_fuzz_registrations": 31,
+        "SMJ_fuzz_registrations": 33,
+        "additional_corrective_cases": 58,
+        "original_Spark34_regressions": 5,
+        "normal_Linux_JVM_cohorts": 20,
+        "normal_Mac_JVM_cohorts": 4,
+        "remote_CostChoice_profiles": 6,
+        "CostChoice_cases_per_profile": 66,
+        "stock_Spark_SQL_jobs": 45,
+        "original_deferred_obligations_closed": 15,
+        "required_JVM_selectors_verified": 103
+      },
+      "manual_semantic_closeout": {
+        "path": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json",
+        "sha256": "499519ca44b906bdc1ec5f235a375394ae1e9bcca07e2af95b9ba752bdce3774"
+      },
+      "completion_receipt": "${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-closeout/completion.json",
+      "final_JARs": {
+        "comet-spark-spark4.2_2.13-1.2.0.jar": {
+          "path": "target/joom-release/gha-45084227984/comet-spark-spark4.2_2.13-1.2.0.jar",
+          "bytes": 101590496,
+          "sha256": "353974112e4a11d24f1781074385cb913d7f10dc1f2de397e339286f0573815e"
+        },
+        "comet-contrib-delta-spark4.2_2.13-1.2.0.jar": {
+          "path": "target/joom-release/gha-45084227984/comet-contrib-delta-spark4.2_2.13-1.2.0.jar",
+          "bytes": 148053,
+          "sha256": "7f5880dc11533a35c891e15111254e4e2bc979dbdefd81b81f3aa85d0fe0b444"
+        }
+      },
+      "G10_changes": [
+        "Restored full agreed CI and normal automatic triggers; removed the temporary vendor-Clippy exclusion while retaining the approved statement-local deprecated allowance.",
+        "Corrected aggregate peak-memory recording across spill/replay, driver-to-task transport of native shuffle UDF keys, and cleanup of imported prefetched output.",
+        "Adapted cross-profile compilation, fixture engine expectations and SQL-version expectations while retaining original Spark result/error oracles and native/fallback assertions; plan snapshots were regenerated from real supported-version execution.",
+        "Expanded final same-byte packaged checks to27 existing cases per architecture, including shaded dependency ABI, default Kryo, UDF/Delta serialization and cross-feature cost/boundary/wide cases.",
+        "Recorded the explicitly approved official-Spark4.2.1 heap-vector runtime contract and actual RC session defaults."
+      ],
+      "limits": [
+        "Correctness claims cover actual agreed tests/assertions on this frozen source and runtime, not a proof for every possible input or production workload.",
+        "All observed cancellations/ignores/version-return bodies remain zero positive credit; four older Hive summary cancellation identities remain explicitly unresolved without inventing a new pass/count gate.",
+        "Four HDFS tests and three manual native benchmarks remain deliberately unrun; target production does not use HDFS or Iceberg. Java21 target qualification remains deferred.",
+        "Existing accepted correctness fallbacks and explicit per-test ANSI/offheap variants are preserved. No production performance percentage is established.",
+        "CodeQL is Actions scope; Miri107 retains its recorded integer-to-pointer provenance warnings.",
+        "CI native and release-native artifacts are distinct; full functional CI plus agreed bounded same-byte dualarch RC smoke provide the two promised channels.",
+        "Post-dispatch operational documentation is separate from tested source81474; original tested documents and source-bound criteria are archived and explicitly verified."
+      ],
+      "documentation_provenance": "The original tested81474 source/documents remain immutable. These uncommitted post-dispatch operational documents report actual outcomes; they were not inputs to the JAR build. No source, history, merge or stable-tag change is performed.",
+      "merge_allowed": false,
+      "stable_tag_allowed": false,
+      "production_allowed": false,
+      "external_artifact_publication_allowed": false,
+      "datasci_access_allowed": false
+    },
+    "pre_final_qualification_checkpoint": "59 local JVM regressions, five actual false/true session defaults, 46 RC fault tests, static CI checks and independent scope review passed. Exact-SHA full GHA/RC remains required.",
+    "pre_integration_qualification_status": "FINAL_QUALIFICATION_PASSED_PENDING_USER_REVIEW_NOT_MERGED",
+    "integration_authorization": {
+      "date": "2026-11-23",
+      "status": "APPROVED_EXPLICITLY",
+      "request_translation": "Accept G10. Commit final documentation, push the feature branch to origin, integrate into branch-1.2, verify the resulting state and report every incoming commit. Do not create a stable tag or publish to JFrog.",
+      "qualified_code_commit": "81474a889489da4a4a4aa8e49330e6398c1937e3",
+      "integration_base": "4467d0337089036d3f01d28375260ce3dbcaaca5",
+      "feature_branch": "joom/1.2-release-qualification",
+      "integration_branch": "branch-1.2",
+      "allowed": [
+        "One coherent final English/portable migration-documentation commit",
+        "Normal feature push to origin",
+        "Fast-forward-only integration and normal push of branch-1.2",
+        "Post-integration source/document/ref/JAR provenance verification"
+      ],
+      "stable_tag_allowed": false,
+      "JFrog_publication_allowed": false,
+      "main_changes_allowed": false,
+      "production_or_datasci_allowed": false,
+      "post_commit_integration_receipt": "${MIGRATION_AUX_ROOT}/20261123_comet12-g10-integration/completion.json",
+      "receipt_rule": "Actual new SHA, fast-forward and remote-head verification are recorded after commit. If that receipt is absent, remote integration is not established by this authorization alone.",
+      "qualified_build_provenance": "Full GHA and final RC JARs identify81474. Subsequent documentation-only commit does not relabel that build SHA or requalify rebuilt/renamed release artifacts."
+    },
+    "integration_receipt": "${MIGRATION_AUX_ROOT}/20261123_comet12-g10-integration/completion.json",
+    "JFrog_publication_allowed": false,
+    "qualified_code_commit": "81474a889489da4a4a4aa8e49330e6398c1937e3",
+    "integration_preserves_qualified_nonmigration_tree": true
   },
   "historical_pause_before_G10_v9_shutdown": {
     "status": "HISTORICAL_PAUSES_RESUMED_G01_FINALIZATION_AUTHORIZED",
