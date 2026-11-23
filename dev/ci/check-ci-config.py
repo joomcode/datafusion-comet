@@ -1567,6 +1567,43 @@ def check_cache_save_scope():
     return not failures
 
 
+def duplicate_job_fields(text):
+    """Reject duplicate job names/fields before GitHub rejects the workflow."""
+    in_jobs, job = False, None
+    seen_jobs, fields, failures = set(), set(), []
+    for number, line in enumerate(text.splitlines(), 1):
+        if line == "jobs:":
+            in_jobs = True
+            continue
+        if not in_jobs:
+            continue
+        if re.match(r"^[A-Za-z]", line):
+            in_jobs, job = False, None
+            continue
+        header = re.fullmatch(r"  ([\w-]+):\s*", line)
+        if header:
+            job, fields = header.group(1), set()
+            if job in seen_jobs:
+                failures.append(f"line {number}: duplicate job {job}")
+            seen_jobs.add(job)
+        field = re.match(r"^    ([\w-]+):", line)
+        if job and field:
+            name = field.group(1)
+            if name in fields:
+                failures.append(f"line {number}: duplicate {job}.{name}")
+            fields.add(name)
+    return failures
+
+
+def check_unique_job_fields():
+    failures = []
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        failures.extend(f"{path}: {error}" for error in duplicate_job_fields(path.read_text()))
+    for failure in failures:
+        print("workflow fields: " + failure)
+    return not failures
+
+
 def check_java25_qualification():
     """A green compatibility row must not stand in for the production JVM."""
     import json
@@ -1598,7 +1635,8 @@ def check_java25_qualification():
                 failures.append(f"{job} must build, generate and test with the actual Spark 4.2 profile")
     setup = Path(".github/actions/setup-builder/action.yaml").read_text()
     if "distribution: ${{ inputs.jdk-distribution }}" not in setup or \
-            "python3 -B dev/ci/java-runtime.py" not in setup:
+            "python3 -B dev/ci/java-runtime.py" not in setup or \
+            "uses: actions/setup-java@v6" not in setup:
         failures.append("setup-builder must install the requested vendor and verify the actual JVM")
     rc = (WORKFLOWS / "rc_build_smoke.yml").read_text()
     if rc.count(f'java-version: "{expected}"') != 2 or 'java-version: "17"' in rc:
@@ -1630,6 +1668,7 @@ if __name__ == "__main__":
     ok = check_cache_save_scope() and ok
     ok = check_local_ci_config() and ok
     ok = check_java25_qualification() and ok
+    ok = check_unique_job_fields() and ok
     if not ok:
         sys.exit(1)
     print("CI config checks passed")

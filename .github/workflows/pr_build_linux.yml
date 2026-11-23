@@ -718,10 +718,14 @@ jobs:
       # JAVA_TOOL_OPTIONS reaches Maven's forked test JVM, unlike MAVEN_OPTS.
       # Keep the existing module exports for every row and enable the complete
       # differential matrices on the production Spark profile.
+      # Java 25 fast-throw omits messages on hot ArithmeticException paths. Keep
+      # strict error-text assertions in expressions; final-JAR smoke retains
+      # the ordinary JVM fast-throw setting and mandatory-error checks.
       JAVA_TOOL_OPTIONS: >-
         --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED
         ${{ contains(matrix.profile.maven_opts, '-Pspark-4.2') && '-Dspark.sql.columnVector.offheap.enabled=false' || '' }}
         ${{ matrix.suite.name == 'exec' && contains(matrix.profile.maven_opts, '-Pspark-4.2') && '-Dcomet.test.aggFuzz.full=true -Dcomet.test.smjFuzz.full=true' || '' }}
+        ${{ matrix.suite.name == 'expressions' && contains(matrix.profile.maven_opts, '-Pspark-4.2') && '-XX:-OmitStackTraceInFastThrow' || '' }}
     container:
       image: amd64/rust
 
@@ -833,12 +837,10 @@ jobs:
     name: Verify TPC-H Results
     if: ${{ inputs.profiles != 'nightly' }}
     runs-on: ubuntu-24.04
-    env:
-      JAVA_TOOL_OPTIONS: "-Dspark.sql.columnVector.offheap.enabled=false"
     container:
       image: amd64/rust
     env:
-      JAVA_TOOL_OPTIONS: --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED
+      JAVA_TOOL_OPTIONS: --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED -Dspark.sql.columnVector.offheap.enabled=false
     steps:
       - uses: actions/checkout@v7
 
@@ -910,12 +912,10 @@ jobs:
     name: Verify TPC-DS Results
     if: ${{ inputs.profiles != 'nightly' }}
     runs-on: ubuntu-24.04
-    env:
-      JAVA_TOOL_OPTIONS: "-Dspark.sql.columnVector.offheap.enabled=false"
     container:
       image: amd64/rust
     env:
-      JAVA_TOOL_OPTIONS: --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED
+      JAVA_TOOL_OPTIONS: --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED -Dspark.sql.columnVector.offheap.enabled=false
     steps:
       - uses: actions/checkout@v7
 

@@ -177,3 +177,8 @@ metadata/SHA256 lookup. Local Python environments and Java installations must
 not be changed. All necessary quality-related operations within GHA/runners are
 authorized; main, protected branch/tag changes, artifact publication, production
 and datasci remain outside this scope.
+
+The user's broader Java25 reply authorizes all necessary quality-related GHA
+runner operations. This includes pinned actionlint1.7.9 from the standard Go
+module/checksum infrastructure on the hosted RC source runner. No local Go,
+actionlint or Python installation is performed.

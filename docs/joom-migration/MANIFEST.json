@@ -149,11 +149,11 @@
     },
     {
       "path": "JAVA25.md",
-      "sha256": "abda34b55a77295a59e9ed72186ab5e8dc676af6427bab37912588c09f995e5b"
+      "sha256": "fd18c206db15017248c82cbff0c043103ec6f926f20de7ce8f74eb24a225775c"
     },
     {
       "path": "NETWORK.md",
-      "sha256": "a44d1e76e3114c12056d2f68467ba46e476b0560c55f3215b47022e08ef46b06"
+      "sha256": "24745583365e442abd7cf9de116604500e60da02b50fdbc7f6f5b1e31c1dad49"
     },
     {
       "path": "PATHS.md",
@@ -181,7 +181,7 @@
     },
     {
       "path": "STATE.json",
-      "sha256": "89a7946300188bacbfe69d50cea531a327fd52524ede605eb906b7a13681c5c6"
+      "sha256": "19168c571ed51495ff94e69aed035dfc047d40d701d768a398937d1fff6c0f3c"
     },
     {
       "path": "approved-plan.json",

@@ -19,6 +19,8 @@
 
 package org.apache.comet
 
+import java.time.ZoneId
+
 import scala.util.Random
 
 import org.apache.spark.SparkThrowable
@@ -143,7 +145,11 @@ class CometTemporalExpressionSuite extends CometTestBase with AdaptiveSparkPlanH
       "+08:00:00" -> Some("+08:00"),
       "GMT+8" -> Some("+08:00"),
       "UTC+08:00" -> Some("+08:00"),
-      "EST" -> Some("-05:00"),
+      // Java 25 maps these short IDs to regions, while Java 17 uses fixed offsets.
+      // Use the JDK's table as the independent oracle; Spark resolves the same aliases.
+      "EST" -> Some(ZoneId.SHORT_IDS.get("EST")),
+      "MST" -> Some(ZoneId.SHORT_IDS.get("MST")),
+      "HST" -> Some(ZoneId.SHORT_IDS.get("HST")),
       "PST" -> Some("America/Los_Angeles"),
       "IST" -> Some("Asia/Kolkata"),
       "America/Los_Angeles" -> Some("America/Los_Angeles"),

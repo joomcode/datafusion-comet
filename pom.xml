@@ -90,7 +90,8 @@ under the License.
     <hadoop.version>3.3.4</hadoop.version>
     <arrow.version>18.3.0</arrow.version>
     <codehaus.jackson.version>1.9.13</codehaus.jackson.version>
-    <spotless.version>2.43.0</spotless.version>
+    <!-- Includes google-java-format 1.28.0 for Java 25 javac compatibility. -->
+    <spotless.version>3.0.0</spotless.version>
     <!-- semanticdb-scalac is published per Scala patch version, so the 2.13 profiles need a
          release that exists for each of their Scala versions (2.13.16, 2.13.17 and 2.13.18). -->
     <semanticdb.version>4.13.10</semanticdb.version>

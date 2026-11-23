@@ -40,7 +40,7 @@ runs:
         apt-get install -y clang
 
     - name: Install JDK ${{inputs.jdk-version}}
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@v6
       with:
         # Preserve the existing distribution for compatibility rows; production
         # Spark4.2 explicitly selects the pinned Eclipse Temurin build.

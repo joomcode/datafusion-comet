@@ -63,11 +63,16 @@ jobs:
           java-version: "25.0.5.1+2"
       - name: Verify qualification JVM
         run: python3 -B dev/ci/java-runtime.py --github-env "$GITHUB_ENV"
+      - name: Validate workflow syntax and reusable input types
+        # This new check validates the Actions schema and expression types.
+        # Existing shell/Python quality jobs retain their original coverage.
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.9 -shellcheck= -pyflakes=
       - name: Check release-stage boundaries before starting builds
         run: |
           export RC_TEST_TMPDIR="$GITHUB_WORKSPACE/target/rc-unit-tests"
           mkdir -p "$RC_TEST_TMPDIR"
           export PYTHONDONTWRITEBYTECODE=1
+          python3 -B dev/ci/check-ci-config.py
           python3 dev/release/joom/test-native-build-provenance.py --work-dir "$RC_TEST_TMPDIR"
           python3 dev/release/joom/test-packaged-runtime.py
           python3 dev/release/joom/test-rc-result.py

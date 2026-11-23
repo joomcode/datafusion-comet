@@ -3836,7 +3836,7 @@
       "datasci"
     ],
     "network": "User explicitly approved the scoped Python metadata/wheel downloads and official runner JDK downloads; all necessary quality-related operations on GitHub runners are authorized. No local Python installation.",
-    "phase": "IMPLEMENTING_LOCAL_PREFLIGHT",
+    "phase": "RUNTIME_ORACLE_LOCAL_CHECKS_PASSED_REPLACEMENT_SOURCE_PENDING",
     "evidence": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25",
     "report": "JAVA25.md",
     "qualified": false,
@@ -3845,6 +3845,65 @@
       "active_branch": "joom/1.2-release-qualification",
       "next_step": "Read the G10 post-commit integration receipt for actual branch/ref verification. Stable tag, JFrog publication, production and datasci remain unauthorized until separate user instruction.",
       "current_qualification_directory": "${MIGRATION_AUX_ROOT}/20261121_comet12-g09"
-    }
+    },
+    "attempts": [
+      {
+        "source": "382812035bad1bb34f9100b1c06d4c4c09e869d7",
+        "rc_run": 45274526038,
+        "source_preflight": "PASSED_ON_PINNED_TEMURIN25",
+        "outcome": "CANCELED_FOR_SOURCE_CORRECTION",
+        "reason": "duplicate TPC env mappings; no runtime test failure asserted",
+        "invalid_workflow_run": 45274458245,
+        "historical_codeql": 45274460806
+      },
+      {
+        "source": "11299ba20cc5aa73e902d19560f7a3e05a6b85be",
+        "ci_run": 45275125268,
+        "ci_outcome": "STARTUP_FAILURE_NO_TEST_JOBS",
+        "rc_run": 45275117723,
+        "miri_run": 45275131628,
+        "outcome": "CANCELED_FOR_REUSABLE_INPUT_TYPE_CORRECTION",
+        "backup_ref": "refs/joom-migration/backups/java25-before-input-type-fix-20261123"
+      },
+      {
+        "source": "006ea1d02ba014c410d6b156a977bc04ba8967de",
+        "ci_run": 45276446103,
+        "rc_run": 45276015510,
+        "miri_run": 45276452768,
+        "outcome": "CANCELED_FOR_SETUP_JAVA_VERSION_SUPPORT",
+        "rc_source_preflight": "ACTIONLINT_RUNTIME_AND_UNIT_CHECKS_PASSED",
+        "target_failures": "6targetjobs stoppedbeforetests: setup-java@v4 cannot parse25.0.5.1+2",
+        "correction": "Use the already successful setup-java@v6 in the common setup; exactpin unchanged",
+        "backup_ref": "refs/joom-migration/backups/java25-before-setup-java-v6-20261123"
+      },
+      {
+        "source": "8c387fca0ec1af1510118972078efa6a5fbb05cc",
+        "ci_run": 45278537996,
+        "rc_run": 45279620571,
+        "miri_run": 45278543530,
+        "outcome": "CANCELED_FOR_JAVAC_FORMATTER_COMPATIBILITY",
+        "failure_job": 138057269294,
+        "reason": "Before tests: google-java-format1.19.2 invokes removed javac getDiagnostics method",
+        "correction": "Spotless3.0.0 bundles Java25-compatible google-java-format1.28.0; retain all original format/license/import checks",
+        "backup_ref": "refs/joom-migration/backups/java25-before-spotless3-20261123"
+      },
+      {
+        "source": "955453772026ff0a8987435bea1919f51d62f78d",
+        "ci_run": 45281111217,
+        "ci_outcome": "CANCELED_FOR_INDEPENDENTLY_PROVED_JAVA25_TEST_ORACLES",
+        "failed_expression_job": 138079097004,
+        "actual_failed_test_registrations": 3,
+        "production_code_changes": false,
+        "rc_run": 45281150607,
+        "rc_result": "PASSED27EACHARCH_DOWNLOADED_AND_VERIFIED_HISTORICAL",
+        "miri_run": 45281126767,
+        "miri_result": "107PASSED",
+        "codeql_run": 45281097025,
+        "codeql_result": "PASSED_ACTIONS_SCOPE",
+        "other_failures": "15pretestMaven429 plus3dependent missing-shard guards; RequiredChecks correctly rejects incompleteCI",
+        "backup_ref": "refs/joom-migration/backups/java25-before-runtime-oracle-fix-20261123",
+        "correction": "Keep strictSQLerror/native assertions; full diagnostics only in targetexpressions CI. JDKSHORT_IDS oracle for shortzonealiases. No production changes."
+      }
+    ]
   }
 }
