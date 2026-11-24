@@ -17,6 +17,29 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+## Java 25 accepted for integration, 2026-11-24
+
+The user accepted the completed Java25 qualification and explicitly authorized
+committing the final documentation, pushing `joom/1.2-java25`, integrating it
+into `branch-1.2` and verifying the local/remote result. This supersedes older
+merge holds and uncommitted-review instructions for this integration.
+
+Qualified executable source remains
+`7e3b6bcf87389f9cdcbe27db6f74562b5e792c05`; delivered JARs retain that exact
+provenance. Preserve the two tested CI commits and add one documentation-only
+acceptance commit. Fast-forward integration does not change qualified executable
+bytes and does not require repeating the successful full CI or packaged smoke.
+
+Actual final SHA, incoming commits, document hashes, local/remote references and
+source/JAR preservation are recorded after integration in
+`${MIGRATION_AUX_ROOT}/20261124_comet12-java25-integration/completion.json`.
+Read that receipt before assuming integration completed; absence means the
+outcome still needs verification. Earlier qualification receipts remain immutable.
+
+Stable tag creation and JFrog publication remain explicitly withheld. Main,
+datasci and production operations remain outside scope. Older status sections
+below are historical; no additional implementation or release step is started.
+
 ## Current continuation: Java25 qualification, 2026-11-23
 
 The user authorized `joom/1.2-java25` from accepted `branch-1.2` at `d2a01d4b6`,

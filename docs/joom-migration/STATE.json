@@ -1,6 +1,6 @@
 {
   "updated_on": "2026-11-23",
-  "phase": "JAVA25_LOCAL_PREFLIGHT_REMOTE_QUALIFICATION_PENDING",
+  "phase": "JAVA25_COMPLETE_USER_ACCEPTED_INTEGRATION_AUTHORIZED_RELEASE_HELD",
   "repository": "${COMET_ROOT}",
   "integration_branch": "branch-1.2",
   "upstream_base_commit": "93cc6f9d71136bd0d87f77dd901989144d8c09fb",
@@ -332,7 +332,7 @@
     "correctness_tests_unchanged": true
   },
   "pending_setup": [],
-  "next_step": "Finish local checks, commit/push only the Java25 feature, then full agreed exact-source GHA and dual-architecture RC; no merge or stable tag.",
+  "next_step": "Commit the final documentation, publish the feature and fast-forward branch-1.2; verify exact executable-tree/JAR/document preservation and local/remote refs in the post-integration receipt. No stable tag, JFrog publication, main/datasci or production changes.",
   "qualification": "G09 accepted:230 native and495 unique JVM/SQL/Delta cases locally passed. Qualified source/test/CI bytes are preserved; final full agreed CI/Linux/release/exact-JAR qualification remains mandatory.",
   "local_comet_project_id": "79ec4996-572a-4070-96f7-2344b555eb2c",
   "cleanup_ledger": "cleanup-ledger.json",
@@ -3817,7 +3817,7 @@
   },
   "java25": {
     "date": "2026-11-23",
-    "status": "APPROVED_IMPLEMENTATION_AND_QUALIFICATION_NO_MERGE",
+    "status": "USER_ACCEPTED_INTEGRATION_AUTHORIZED_RELEASE_HELD",
     "feature": "joom/1.2-java25",
     "base": "d2a01d4b6bd5a5e05fcfa712a9c74e6e889fcdbb",
     "runtime": "Eclipse Temurin 25.0.5.1+2",
@@ -3836,10 +3836,10 @@
       "datasci"
     ],
     "network": "User explicitly approved the scoped Python metadata/wheel downloads and official runner JDK downloads; all necessary quality-related operations on GitHub runners are authorized. No local Python installation.",
-    "phase": "RUNTIME_ORACLE_LOCAL_CHECKS_PASSED_REPLACEMENT_SOURCE_PENDING",
+    "phase": "JAVA25_COMPLETE_INTEGRATION_AUTHORIZED",
     "evidence": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25",
     "report": "JAVA25.md",
-    "qualified": false,
+    "qualified": true,
     "previous_stage_status": {
       "phase": "G10_COMPLETE_USER_ACCEPTED_INTEGRATION_AUTHORIZED_RELEASE_HELD",
       "active_branch": "joom/1.2-release-qualification",
@@ -3903,7 +3903,175 @@
         "other_failures": "15pretestMaven429 plus3dependent missing-shard guards; RequiredChecks correctly rejects incompleteCI",
         "backup_ref": "refs/joom-migration/backups/java25-before-runtime-oracle-fix-20261123",
         "correction": "Keep strictSQLerror/native assertions; full diagnostics only in targetexpressions CI. JDKSHORT_IDS oracle for shortzonealiases. No production changes."
+      },
+      {
+        "source": "7e3b6bcf87389f9cdcbe27db6f74562b5e792c05",
+        "CI_run": 45292058669,
+        "final_attempt": 3,
+        "CI_outcome": "SUCCESS138JOBS_16ORIGINAL_STRUCTURAL_SKIPS",
+        "RC_run": 45292086072,
+        "Miri_run": 45292072441,
+        "CodeQL_run": 45292009717,
+        "outcome": "AGREED_JAVA25_QUALIFICATION_PASSED",
+        "source_changes_after_dispatch": false,
+        "retry_reason": "PretestMavenCentral429 andGradlebootstrap only; no source/test weakening",
+        "final_Delta41_actual_passed": 295
       }
-    ]
+    ],
+    "source_commit": "7e3b6bcf87389f9cdcbe27db6f74562b5e792c05",
+    "pause_20261124": {
+      "requested_utc": "2026-11-24T02:31:56.361209+00:00",
+      "source_commit": "7e3b6bcf87389f9cdcbe27db6f74562b5e792c05",
+      "feature": "joom/1.2-java25",
+      "all_current_workflows_terminal": true,
+      "active_GHA_jobs": 0,
+      "Comet_CI": {
+        "run": 45292058669,
+        "attempt": 1,
+        "conclusion": "failure",
+        "success": 125,
+        "failure": 13,
+        "structural_skips": 16,
+        "target_exec_job": 138113940919,
+        "target_exec_conclusion": "success",
+        "failure_disposition": "10pretest MavenCentral429 +1Gradlewrapper bootstrap +1dependent Icebergcoverage +1RequiredChecks aggregate; no source correction currently indicated"
+      },
+      "RC": {
+        "run": 45292086072,
+        "conclusion": "success",
+        "cases_per_native_architecture": 27,
+        "downloaded_directory": "target/joom-release/gha-45292086072"
+      },
+      "Miri": {
+        "run": 45292072441,
+        "conclusion": "success",
+        "selected_passed": 107
+      },
+      "CodeQL": {
+        "run": 45292009717,
+        "conclusion": "success",
+        "scope": "Actions"
+      },
+      "actual_pandas58": "58 named positive cases in8concrete suites; no cancellation/ignore",
+      "pending_evidence": "Targetruntime98/window88/prefetch3,44of103 selectors,24thnormalcohort and6thCostChoice66 profile need actual report collection; targetexec has nowpassed but details notyetcredited",
+      "evidence": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25",
+      "pause_receipt": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25/20261124_laptop-pause/pause-state-verification.json",
+      "original_documents_archive": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25/20261124_laptop-pause/documents-before-pause.zip",
+      "original_documents_archive_sha256": "a41d2afdd36a8073aaa4804b73603137c81304912c798b5ed3416d452a938677",
+      "no_GHA_cancel_rerun_or_dispatch_during_pause": true,
+      "no_local_build_or_poller_left_running": true,
+      "intentional_uncommitted_documents": [
+        "PAUSED.md",
+        "STATE.json",
+        "MANIFEST.json"
+      ]
+    },
+    "resume_20261124": {
+      "verified_saved_pause": true,
+      "source_commit": "7e3b6bcf87389f9cdcbe27db6f74562b5e792c05",
+      "runtime_gates": {
+        "core98_windows88_prefetch3": "20261124_java25-runtime-evidence/collection-receipt.json",
+        "required103": "required103-current-execution-proof.json",
+        "normal24": "normal-cohorts-index.json",
+        "six_CostChoice66": "cost66-six-profile-proof.json",
+        "pandas58": "pandas58-execution-proof.json",
+        "all_passed": true
+      },
+      "same_source_failed_retry2": {
+        "request": "20261124T104612847941Z-rerun-failed-45292058669.json",
+        "request_sha256": "472623271b3789effab17894a5be27537776c495e2085e261a897a7938a29512",
+        "http_status": 201,
+        "run": 45292058669,
+        "source": "7e3b6bcf87389f9cdcbe27db6f74562b5e792c05",
+        "original_successes_preserved": 125,
+        "failed_jobs_requested": 13,
+        "before_snapshot": "20261124_failed-only-retry2/before-retry.json",
+        "after_execution_evidence": "PENDING; metadata aliases are not new executions"
+      },
+      "current_evidence": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25",
+      "merge_allowed": false,
+      "stable_tag_allowed": false
+    },
+    "qualification_20261124": {
+      "source_commit": "7e3b6bcf87389f9cdcbe27db6f74562b5e792c05",
+      "recorded_utc": "2026-11-24T12:28:57.427260+00:00",
+      "actual_gates": {
+        "SQL_shards": 9,
+        "SQL_passed": 34876,
+        "SQL_failed": 0,
+        "SQL_canceled_zero_credit": 9,
+        "SQL_ignored_zero_credit": 7922,
+        "pandas_registrations": 58,
+        "required_migration_selectors": 103,
+        "normal_JVM_cohorts": 24,
+        "cost_profiles": 6,
+        "cost_cases_per_profile": 66,
+        "core_cases": 98,
+        "native_window_actions": 88,
+        "additional_prefetch": 3,
+        "full_aggregate_registrations": 31,
+        "full_SMJ_registrations": 33,
+        "separate_corrective_registrations": 58,
+        "legacy_Spark34_regressions": 5,
+        "Miri_selected_passed": 107,
+        "RC_cases_each_native_architecture": 27,
+        "actual_legacy_Delta41_ScalaTest_passed": 295
+      },
+      "CI": {
+        "run": 45292058669,
+        "attempt": 3,
+        "success": 138,
+        "structural_skips": 16,
+        "original_skip_set_preserved": true
+      },
+      "RC": {
+        "run": 45292086072,
+        "cases_per_native_architecture": 27,
+        "output": "target/joom-release/gha-45292086072"
+      },
+      "Miri": {
+        "run": 45292072441,
+        "selected_passed": 107
+      },
+      "CodeQL": {
+        "run": 45292009717,
+        "scope": "Actions"
+      },
+      "actual_success_producer_attempts": {
+        "1": 125,
+        "2": 11,
+        "3": 2
+      },
+      "source_changed_during_resume": false,
+      "known_SQL_exceptions_unchanged": true,
+      "final_receipt": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25/20261124_final-closeout/completion.json",
+      "current_JAR_SHA256": {
+        "comet-spark-spark4.2_2.13-1.2.0.jar": "d1dd1b5bcbfcf5b27577ea687ecc5a046b7da73e64d1af81bd5185f4c752e870",
+        "comet-contrib-delta-spark4.2_2.13-1.2.0.jar": "7f5880dc11533a35c891e15111254e4e2bc979dbdefd81b81f3aa85d0fe0b444"
+      },
+      "merge_allowed": false,
+      "stable_tag_allowed": false,
+      "external_publication_allowed": false,
+      "production_allowed": false,
+      "documentation_only_closeout_uncommitted": true
+    },
+    "integration_authorization_20261124": {
+      "recorded_utc": "2026-11-24T13:46:49.490360+00:00",
+      "user_instruction_English": "Accept Java25 qualification; commit documentation, push joom/1.2-java25, merge into branch-1.2 and verify/report incoming commits. No stable tag or JFrog publication.",
+      "qualified_source": "7e3b6bcf87389f9cdcbe27db6f74562b5e792c05",
+      "integration_base": "d2a01d4b6bd5a5e05fcfa712a9c74e6e889fcdbb",
+      "feature": "joom/1.2-java25",
+      "target": "branch-1.2",
+      "commit_documentation": true,
+      "push_feature": true,
+      "fast_forward_and_push_target": true,
+      "preserve_qualified_CI_commits": true,
+      "exact_executable_tree_and_JARs_unchanged": true,
+      "repeat_CI_for_documentation_only": false,
+      "stable_tag_allowed": false,
+      "JFrog_allowed": false,
+      "main_datasci_production_allowed": false,
+      "actual_outcome_receipt": "${MIGRATION_AUX_ROOT}/20261124_comet12-java25-integration/completion.json"
+    }
   }
 }

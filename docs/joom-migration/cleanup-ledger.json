@@ -1253,5 +1253,29 @@
     "no_new_Docker_images_or_volumes_downloaded_during_final_resume": true,
     "deletion_performed": false
   },
-  "previous_stage": "G10_V11_FINAL_EXACT_SHA_QUALIFICATION_PENDING"
+  "previous_stage": "G10_V11_FINAL_EXACT_SHA_QUALIFICATION_PENDING",
+  "java25_resource_snapshot_20261124": {
+    "source_commit": "7e3b6bcf87389f9cdcbe27db6f74562b5e792c05",
+    "auxiliary": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25",
+    "current_RC": "target/joom-release/gha-45292086072",
+    "historical_RC": "target/joom-release/gha-45281150607",
+    "allocated_KiB": {
+      "measured_utc": "2026-11-24T11:11:52Z",
+      "auxiliary_Java25": 682044,
+      "root_target_including_RC_outputs": 12870472,
+      "native_target": 78381560,
+      "historical_nested_RC": 519880,
+      "current_nested_RC": 519852,
+      "nested_sizes_included_in_root_target": true
+    },
+    "current_qualified_bundle_files": 97,
+    "current_RC_cases_per_native_architecture": 27,
+    "whole_CI_qualification": "PASSED_FULL_AGREED_CI138SUCCESS_16STRUCTURAL_SKIPS",
+    "new_local_Python_or_JDK_installation": false,
+    "new_local_Docker_images_for_this_qualification": false,
+    "shared_caches_and_user_SDK_not_disposable": true,
+    "no_deletion_performed": true,
+    "evidence": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25/storage-inventory.json",
+    "final_evidence": "${MIGRATION_AUX_ROOT}/20261123_comet12-java25/20261124_final-closeout/completion.json"
+  }
 }

@@ -19,9 +19,11 @@ under the License.
 
 # Spark 4.2.1 deployment requirements
 
-These requirements were explicitly approved on 2026-11-22 for the current
-Comet 1.2 migration. They apply to the eventual deployment, not permission to use
-an unqualified candidate in production. G10 and final acceptance remain open.
+The Spark SQL requirements were approved on 2026-11-22. G10 Java17
+qualification was subsequently accepted; the separately requested Java25
+qualification passed on source `7e3b6bcf8`; see JAVA25.md for its actual
+full-CI, native AMD64/ARM64 packaged-smoke receipts and explicit limits. These requirements govern the eventual deployment and do not authorize
+production use, merge, a stable tag or publication.
 
 ## Required Spark SQL defaults
 
@@ -42,7 +44,8 @@ configured Spark off-heap execution pool. Keep the existing Comet memory setting
 The current target remains official Apache Spark 4.2.1 / Scala 2.13.18,
 Comet 1.2.0, Delta 4.4.1 and DataFusion 55.2.0. The newly selected qualification
 runtime is Eclipse Temurin 25.0.5.1+2 (minimum supported Java25 update:25.0.3).
-This new qualification is IN PROGRESS; prior G10 receipts qualify Java17 only.
+This exact runtime passed the agreed full CI and packaged qualification on both
+native architectures. Prior G10 receipts remain historical Java17 evidence.
 See JAVA25.md and dev/ci/java25-runtime.json. Java17 bytecode/build tools do not
 constitute proof of runtime testing on Java25. No custom Spark build, replacement
 Spark classes or production configuration changes are performed by this Comet

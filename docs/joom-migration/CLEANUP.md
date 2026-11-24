@@ -31,6 +31,48 @@ MIGRATION_AUX_ROOT before running any optional cleanup. The guarded shell
 examples intentionally fail if the required root is unset or the selected
 checkout is not a Comet repository root.
 
+## Java 25 artifact and resource snapshot, 2026-11-24
+
+The current Java 25 RC output is `target/joom-release/gha-45292086072` on source
+`7e3b6bcf87389f9cdcbe27db6f74562b5e792c05`. Its 27 packaged cases passed on each
+native AMD64/ARM64. The full agreed Java25
+qualification also passed; this section does not authorize production use. Preserve both JARs and
+the complete 97-file output, including provenance, checksums, native libraries
+and smoke receipts. See JAVA25.md for the actual JAR hashes and runtime contract.
+The G10 Java 17 delivery below remains historical evidence for that earlier stage.
+
+The Java 25 auxiliary root is
+`${MIGRATION_AUX_ROOT}/20261123_comet12-java25`. At the 11:11 UTC allocated-size
+snapshot it used 682044 KiB (about 0.65 GiB), before the final small report downloads.
+Root `target` used 12870472 KiB (about 12.27 GiB), including both nested RC outputs;
+`native/target` used 78381560 KiB (about 74.75 GiB), accumulated during the migration.
+Do not add nested RC sizes to the enclosing root target size again. The exact
+snapshot and subsequent receipt inventory are in cleanup-ledger.json and the
+auxiliary storage-inventory.json. No automatic cleanup has been performed.
+
+After retaining the required evidence, the following are optional manual cleanup
+candidates; review and archive them first:
+
+- `target/joom-release/gha-45281150607`: the historical source 955 Java 25 candidate,
+  519880 KiB. It does not qualify the current source. Keep its failure-history and
+  receipt references before removing this old extracted bundle.
+- `qualified-artifact-45281150607.zip` in the Java 25 auxiliary root: the duplicate
+  historical downloaded ZIP,197859653 bytes.
+- `qualified-artifact-45292086072.zip` in the same auxiliary root: the current
+  downloaded ZIP,197930477 bytes. Remove it only after independently preserving
+  the complete verified extracted output and its API/archive SHA256 receipt.
+
+Keep the current extracted RC folder, all final source/execution manifests,
+real attempt 1/2 producer bindings, API inventories, final receipts, original-Spark
+oracle witnesses and document archives. The auxiliary root can eventually be
+archived as one unit; do not delete it merely because its parent is named temp.
+No Python environment or new JDK was installed locally for this qualification.
+The user-provided Temurin25 SDK and standard Maven/Cargo/Ivy/SBT caches are shared
+resources, not disposable task outputs. Maven may contain the compatible
+Spotless 3/google-java-format 1.28 and Java 25 compiler-bridge artifacts; do not
+remove an entire shared cache. New CI environments and Docker downloads on
+GitHub runners did not consume laptop storage.
+
 ## Final G10 delivery and resource snapshot, 2026-11-23
 
 The current qualified output is `target/joom-release/gha-45084227984`; earlier

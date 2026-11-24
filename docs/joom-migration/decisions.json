@@ -1104,5 +1104,16 @@
       "datasci"
     ],
     "network": "User explicitly approved the stated source scope and all necessary quality-related actions in GHA/on GitHub runners. Local scope remains read-only Python metadata/checksums and existing JDK use; no local package/JDK installation."
+  },
+  "java25_integration_authorization_20261124": {
+    "date": "2026-11-24",
+    "decision": "User accepted the exact Temurin25 qualification and authorized one final English documentation commit, feature publication and integration into branch-1.2.",
+    "qualified_source": "7e3b6bcf87389f9cdcbe27db6f74562b5e792c05",
+    "preserve_existing_two_qualified_CI_commits": true,
+    "integration": "Fast-forward; no unrelated changes or executable-source rewrite.",
+    "verification": "Exact source/JAR/document hashes and local/remote refs; outcome under ${MIGRATION_AUX_ROOT}/20261124_comet12-java25-integration/completion.json.",
+    "stable_tag": false,
+    "JFrog_publication": false,
+    "main_datasci_production_operations": false
   }
 }

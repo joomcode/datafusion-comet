@@ -17,6 +17,143 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+## Java 25 accepted for integration, 2026-11-24
+
+The user accepted the completed Java25 qualification and explicitly authorized
+committing the final documentation, pushing `joom/1.2-java25`, integrating it
+into `branch-1.2` and verifying the local/remote result. This supersedes older
+merge holds and uncommitted-review instructions for this integration.
+
+Qualified executable source remains
+`7e3b6bcf87389f9cdcbe27db6f74562b5e792c05`; delivered JARs retain that exact
+provenance. Preserve the two tested CI commits and add one documentation-only
+acceptance commit. Fast-forward integration does not change qualified executable
+bytes and does not require repeating the successful full CI or packaged smoke.
+
+Actual final SHA, incoming commits, document hashes, local/remote references and
+source/JAR preservation are recorded after integration in
+`${MIGRATION_AUX_ROOT}/20261124_comet12-java25-integration/completion.json`.
+Read that receipt before assuming integration completed; absence means the
+outcome still needs verification. Earlier qualification receipts remain immutable.
+
+Stable tag creation and JFrog publication remain explicitly withheld. Main,
+datasci and production operations remain outside scope. Older status sections
+below are historical; no additional implementation or release step is started.
+
+## Current continuation: Java 25 qualified, 2026-11-24
+
+The agreed qualification passed on unchanged source
+`7e3b6bcf87389f9cdcbe27db6f74562b5e792c05` in `joom/1.2-java25`.
+Comet CI45292058669 attempt3 succeeded138jobs with the same16structural skips.
+RC45292086072 passed27existing cases on each native AMD64/ARM64; Miri107 and
+Actions CodeQL also passed. Final actual Delta4.1 passed295ScalaTest cases.
+All9targetJava25 SQL shards,58pandas registrations,103migration selectors,
+24JVM cohorts, core98/window88/prefetch3 and six CostChoice66 profiles passed.
+No tests or executable source changed during this resume; no successful task
+was rerun. The API's retry aliases retain their real attempt1/2 producers.
+
+All workflows are terminal; polling stopped. Verified JARs remain in
+`target/joom-release/gha-45292086072`. Read JAVA25.md, STATE.json#java25 and
+`${MIGRATION_AUX_ROOT}/20261123_comet12-java25/20261124_final-closeout/completion.json`
+for final exact-source, file/document hashes, preservation and scope checks.
+The current documentation-only closeout remains uncommitted for user review;
+do not discard it or amend the qualified source blindly. Existing pending and
+pause sections below are historical. Do not start another run merely because
+the laptop or chat was reopened.
+
+The tested HEAD stays pinned for this report; documentation is left ready for
+review and later coherent integration. Await explicit permission for merging
+into branch-1.2. Stable tagging, JFrog publication, main/datasci changes and
+production operations remain excluded. ANSI=true and
+`spark.sql.columnVector.offheap.enabled=false` remain the approved runtime
+contract. Previously excluded known SQL semantic exceptions are unchanged.
+
+## Current continuation: Java25 resumed, 2026-11-24
+
+The user explicitly resumed qualification. Source and all saved pause hashes
+were verified before continuing. Tested HEAD remains
+`7e3b6bcf87389f9cdcbe27db6f74562b5e792c05` on `joom/1.2-java25`.
+Actual current-source core98/window88,3prefetch,103migration selectors,
+24normal JVM cohorts, six CostChoice66 profiles and58pandas cases passed.
+Exact Temurin25.0.5.1+2 properties were verified in8required XML suites.
+
+At10:46:12UTC, GitHub accepted failed-only retry of CI45292058669 on the SAME
+SHA. All125actual original successes, the complete154-job terminal inventory
+and62artifact inventory are preserved. This is not a replacement full CI.
+RC45292086072, Miri45292072441 and CodeQL45292009717 remain successful; do not
+repeat them merely for an infrastructure retry. Poll active jobs every five
+minutes and diagnose each failure. Status aliases must never receive new test
+execution credit; original successful artifacts retain attempt1 provenance.
+
+Read `${MIGRATION_AUX_ROOT}/20261123_comet12-java25/LIVE.json`, CONTINUE.json
+and `20261124_failed-only-retry2` for current deadlines, immutable evidence and
+remaining work. Full qualification is still pending. No merge, stable tag,
+main/datasci changes, JFrog publication, excluded SQL exception changes or
+production operations are authorized. Older pause sections below are historical.
+
+## Current pause: Java25 qualification, laptop shutdown, 2026-11-24
+
+The user explicitly paused this session. Do not cancel GitHub Actions, start a
+retry/replacement run, push, merge or tag while paused. All older continuation
+sections below are historical. The last GET snapshot at 02:28:36 UTC shows that
+all current workflows are already terminal; no GHA job was stopped for this pause.
+
+- Feature `joom/1.2-java25`, unchanged tested HEAD
+  `7e3b6bcf87389f9cdcbe27db6f74562b5e792c05`, already pushed.
+- [Comet CI45292058669](https://github.com/joomcode/datafusion-comet/actions/runs/45292058669),
+  attempt1:125successful,13failed,16structural skips. Target Spark4.2/Temurin25
+  exec job138113940919 succeeded. The failures are10pretest MavenCentral429,
+  one Gradle-wrapper bootstrap, one dependent Iceberg shard-coverage guard and
+  the correctly failing Required Checks aggregate. No source correction is
+  currently indicated; all failures retain zero positive credit.
+- [RC45292086072](https://github.com/joomcode/datafusion-comet/actions/runs/45292086072)
+  succeeded7/7,27existing cases on each native AMD64/ARM64, actual pinned
+  Temurin25. Final verified JARs are in `target/joom-release/gha-45292086072`.
+- [Miri45292072441](https://github.com/joomcode/datafusion-comet/actions/runs/45292072441)
+  passed107selected tests; [CodeQL45292009717](https://github.com/joomcode/datafusion-comet/actions/runs/45292009717)
+  passed (Actions scope). All58previous pandas cancellations are actual positive
+  executions in8concrete suites. The collector corrected12old guard-stack suite
+  attributions using original Spark4.2.1 source; no test/assertion was changed.
+
+### Resume in this order
+
+1. Read STATE.json#java25, JAVA25.md, RUNTIME-REQUIREMENTS.md and the auxiliary
+   `LIVE.json`/`CONTINUE.json` under
+   `${MIGRATION_AUX_ROOT}/20261123_comet12-java25`. Read the verification receipt
+   in its `20261124_laptop-pause` directory. Only PAUSED.md, STATE.json and
+   MANIFEST.json intentionally differ from the tested source; do not discard
+   these uncommitted operational updates or amend the qualified source blindly.
+2. Obtain fresh status of the SAME runs. Do not start a new full CI or repeat
+   successful RC/Miri/CodeQL merely because the laptop was closed. All125actual
+   successful attempt1 records and the62artifact inventory are frozen in the
+   pause directory; an aggregate failure does not invalidate them.
+3. Before failed-only retry, run external `collect-java25-runtime.py` for actual
+   core98/window88 plus the unchanged3prefetch XML cases and exact JVM properties.
+   Run `collect-normal-cohorts.py` and `reconcile-required103.py`;23of24cohorts
+   and59of103selectors were already verified, and the last exec is now successful
+   but not yet collected. Finish all103 and six CostChoice66 profile checks.
+   Never award pending cases credit from the job color alone.
+4. Then retry only failed jobs of CI45292058669 on the SAME source, preserving
+   original successful executions/artifacts. The API requires a terminal parent
+   run; that condition now holds. `github-control.py rerun-failed --run
+45292058669` is the existing authorized helper. Freeze the actual retry receipt
+   and use `preserved-execution-policy.py` for strict same-source original-success
+   to status-alias binding; never invent attempt2 artifacts or test executions.
+5. Poll any resumed jobs every five minutes, diagnose every new failure, close
+   the infrastructure obligations and collect all final evidence. Update final
+   English portable documentation and cleanup inventory, then report before
+   merge/stable tag. Source changes require honest new qualification; historical
+   source955RC and old G10 Java17 results are not current Java25 evidence.
+
+Full Java25 qualification remains incomplete. Preserve ANSI=true and official
+Spark4.2.1 with `spark.sql.columnVector.offheap.enabled=false`; deliberate test
+variants remain. Known SQL semantic exceptions, main/datasci changes, merge,
+stable tag, JFrog publication and production remain outside authorization.
+
+No local build, downloader or periodic poller remains running. Original tested
+migration documents are archived in `20261124_laptop-pause/documents-before-pause.zip`;
+its digest and exact source/document/ref preservation checks are in the receipt.
+
 ## Current continuation: Java25 qualification, 2026-11-23
 
 The user authorized `joom/1.2-java25` from accepted `branch-1.2` at `d2a01d4b6`,

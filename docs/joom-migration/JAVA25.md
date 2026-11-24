@@ -29,6 +29,10 @@ GitHub Actions operations are included. **Do not merge, create a stable tag,
 publish to JFrog, modify main or datasci, or deploy to production.** The known SQL
 semantic exceptions discussed after G10 are explicitly outside this change.
 
+The later2026-11-24 user acceptance explicitly authorizes the documentation
+commit, feature push and branch-1.2 integration. It supersedes the original
+merge hold above for this operation; stable tag/publication holds remain.
+
 - Base: `d2a01d4b6bd5a5e05fcfa712a9c74e6e889fcdbb`.
 - Feature: `joom/1.2-java25`.
 - Target: official Spark 4.2.1, Scala 2.13.18, Comet 1.2.0, Delta 4.4.1,
@@ -63,22 +67,80 @@ honest provenance. Historical G10 Java17 results are not Java25 evidence.
    verify final JAR checksums, loaded classes/native bytes and native AMD64/ARM64
    execution. Preserve failures and skips without awarding positive credit.
 
-## Current progress and evidence
+## Current qualification status, 2026-11-24
 
-Implementation is in progress; **Java25 qualification is not complete**.
-Local preflight verified the installed Temurin vendor/full build. The current
-RC harness has 19 passing tests and the receipt validator has 28, including
-rejection of a wrong vendor, old Java and a different build. CI routing checks
-pass; Maven's offline effective POM resolves on the selected JDK.
+**The agreed Java 25 qualification passed** on source
+`7e3b6bcf87389f9cdcbe27db6f74562b5e792c05` in `joom/1.2-java25`.
+Full Comet CI succeeded with 138 successful jobs and the same 16 structural skips
+as the original complete run. Failed-only retries resolved the pretest Maven
+Central 429 and Gradle-wrapper bootstrap failures without changing source,
+weakening tests or restarting successful executions. The final Delta 4.1 retry
+actually passed 295 ScalaTest cases and 18 separate encryption JUnit cases; an
+empty reactor-module summary receives zero test credit. All original failures
+remain preserved as historical failures.
 
-Auxiliary evidence, baseline hashes, logs, metadata and later run identities are
-under `${MIGRATION_AUX_ROOT}/20261123_comet12-java25`. The baseline preserves
-protected branch/main/tag refs and all tracked file hashes. Do not infer remote
-success from this document; record actual run IDs, source SHA and receipts.
+| Gate                               | Current actual evidence                                                                                                                                                                                       |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Spark 4.2.1 / exact Temurin 25 SQL | All 9 shards succeeded: 34,876 passed, 0 failed, 9 canceled, 7,922 ignored. Nonpasses receive zero positive credit.                                                                                           |
+| Original migration requirements    | 103 selectors, 24 normal JVM cohorts, 6 CostChoice profiles with 66 exact cases each.                                                                                                                         |
+| Native/ANSI/windows                | 98 core cases, 88 native window actions, 31 aggregate and 33 SMJ full-fuzz registrations; 3 additional prefetch cleanup cases.                                                                                |
+| Python prerequisites               | All 58 previously canceled pandas registrations passed in 8 concrete suites; dependencies installed only in CI.                                                                                               |
+| Additional regressions             | 58 corrective cases passed on target Java 25; 5 original Spark 3.4 Scala-UDF cases passed in the retained Java 17 compatibility row. These 58 corrective cases are separate from the 58 pandas registrations. |
+| Native/vendor/quality              | Full native/vendor/JNI and strict Clippy passed. Miri 107 selected tests and Actions CodeQL passed. Preserve each invocation's separate counts and explicit skips.                                            |
+| Final release bytes                | RC 27 existing cases passed on each native Linux AMD64/ARM64, with actual vendor/build, class origins and bundled native-library checks.                                                                      |
 
-Poll active GHA at five-minute intervals. Diagnose genuine failures promptly;
-if a source change requires a replacement full run, report before canceling the
-old run. A quiet or stale live-log tail alone is not proof of a hang.
+Actual Temurin properties were verified in 8 required runtime XML suites, and
+separately in both architecture smoke receipts. The complete expressions text
+report confirms the 58 corrective registrations; its generic artifact does not
+contain those XML cases, so no XML coverage is invented. Existing cancellations,
+ignores and version-dependent early-return bodies retain their original limits.
+The 9 stock SQL cancellations are named in `spark42-all-nine-actual-SQL-proof.json`.
+
+Current workflow IDs are [Comet CI 45292058669](https://github.com/joomcode/datafusion-comet/actions/runs/45292058669),
+[RC 45292086072](https://github.com/joomcode/datafusion-comet/actions/runs/45292086072),
+[Miri 45292072441](https://github.com/joomcode/datafusion-comet/actions/runs/45292072441)
+and [Actions CodeQL 45292009717](https://github.com/joomcode/datafusion-comet/actions/runs/45292009717).
+The immutable actual executions and artifact producers are retained separately
+from GitHub's retry status aliases: 125 successful executions originated in
+attempt 1 and 11 in attempt 2. The final Delta 4.1 job and Required Checks
+executed in attempt 3. No alias is a new execution or a new artifact producer.
+
+Verified JARs and all 97 associated provenance/native/smoke files are in
+`target/joom-release/gha-45292086072`:
+
+| File                                          | SHA256                                                             |
+| --------------------------------------------- | ------------------------------------------------------------------ |
+| `comet-spark-spark4.2_2.13-1.2.0.jar`         | `d1dd1b5bcbfcf5b27577ea687ecc5a046b7da73e64d1af81bd5185f4c752e870` |
+| `comet-contrib-delta-spark4.2_2.13-1.2.0.jar` | `7f5880dc11533a35c891e15111254e4e2bc979dbdefd81b81f3aa85d0fe0b444` |
+
+The release builder still uses Java 17 and Java 17 bytecode to preserve the existing
+build/GLIBC contract; actual packaged runtime qualification uses the pinned
+Temurin 25 build. Do not relabel compiler provenance as Java 25. No production
+algorithm, DataFusion vendor patch or SQL fixture changed in this Java 25 step.
+The only changed Spark SQL test file follows the independently verified JDK
+SHORT_IDS semantics described below. RC verifier unit fixtures were also updated
+for the pinned vendor/build; SQL inputs and strict result/error/native assertions
+remain unchanged.
+The known SQL semantic exceptions excluded by the user are unchanged.
+
+Evidence, source manifests, real execution maps, local preflight checks and the
+full failed-attempt history remain under
+`${MIGRATION_AUX_ROOT}/20261123_comet12-java25`; start with LIVE.json,
+CONTINUE.json and current-evidence-index.json. The current closeout preparation
+preserves all 57 prior documents in
+`20261124_closeout-preparation/documents-before-finalization.zip`.
+The corresponding archive receipt records its SHA256. Nothing was deleted.
+
+All four workflows are complete; periodic polling has stopped. Final evidence
+is indexed by `20261124_final-closeout/completion.json` in the auxiliary root.
+The user accepted this qualification on2026-11-24 and authorized the final
+English documentation commit, feature push and integration into branch-1.2.
+The qualified executable source SHA and delivered JAR provenance are unchanged.
+Actual integration identities and preservation checks are recorded in
+`${MIGRATION_AUX_ROOT}/20261124_comet12-java25-integration/completion.json`.
+The documentation-only acceptance commit does not requalify or relabel JARs.
+Stable tagging, JFrog publication, main/datasci changes and production operations
+remain excluded.
 
 ## First remote preflight and correction
 

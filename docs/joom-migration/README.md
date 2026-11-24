@@ -17,6 +17,57 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+## Java 25 accepted for integration, 2026-11-24
+
+The user accepted the completed Java25 qualification and explicitly authorized
+committing the final documentation, pushing `joom/1.2-java25`, integrating it
+into `branch-1.2` and verifying the local/remote result. This supersedes older
+merge holds and uncommitted-review instructions for this integration.
+
+Qualified executable source remains
+`7e3b6bcf87389f9cdcbe27db6f74562b5e792c05`; delivered JARs retain that exact
+provenance. Preserve the two tested CI commits and add one documentation-only
+acceptance commit. Fast-forward integration does not change qualified executable
+bytes and does not require repeating the successful full CI or packaged smoke.
+
+Actual final SHA, incoming commits, document hashes, local/remote references and
+source/JAR preservation are recorded after integration in
+`${MIGRATION_AUX_ROOT}/20261124_comet12-java25-integration/completion.json`.
+Read that receipt before assuming integration completed; absence means the
+outcome still needs verification. Earlier qualification receipts remain immutable.
+
+Stable tag creation and JFrog publication remain explicitly withheld. Main,
+datasci and production operations remain outside scope. Older status sections
+below are historical; no additional implementation or release step is started.
+
+## Current continuation: Java 25 qualified, 2026-11-24
+
+The agreed qualification passed on unchanged source
+`7e3b6bcf87389f9cdcbe27db6f74562b5e792c05` in `joom/1.2-java25`.
+Comet CI45292058669 attempt3 succeeded138jobs with the same16structural skips.
+RC45292086072 passed27existing cases on each native AMD64/ARM64; Miri107 and
+Actions CodeQL also passed. Final actual Delta4.1 passed295ScalaTest cases.
+All9targetJava25 SQL shards,58pandas registrations,103migration selectors,
+24JVM cohorts, core98/window88/prefetch3 and six CostChoice66 profiles passed.
+No tests or executable source changed during this resume; no successful task
+was rerun. The API's retry aliases retain their real attempt1/2 producers.
+
+All workflows are terminal; polling stopped. Verified JARs remain in
+`target/joom-release/gha-45292086072`. Read JAVA25.md, STATE.json#java25 and
+`${MIGRATION_AUX_ROOT}/20261123_comet12-java25/20261124_final-closeout/completion.json`
+for final exact-source, file/document hashes, preservation and scope checks.
+The current documentation-only closeout remains uncommitted for user review;
+do not discard it or amend the qualified source blindly. Existing pending and
+pause sections below are historical. Do not start another run merely because
+the laptop or chat was reopened.
+
+The tested HEAD stays pinned for this report; documentation is left ready for
+review and later coherent integration. Await explicit permission for merging
+into branch-1.2. Stable tagging, JFrog publication, main/datasci changes and
+production operations remain excluded. ANSI=true and
+`spark.sql.columnVector.offheap.enabled=false` remain the approved runtime
+contract. Previously excluded known SQL semantic exceptions are unchanged.
+
 ## Current continuation: Java25 qualification, 2026-11-23
 
 The user authorized `joom/1.2-java25` from accepted `branch-1.2` at `d2a01d4b6`,

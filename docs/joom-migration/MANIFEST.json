@@ -1,11 +1,11 @@
 {
   "created_on": "2026-11-17",
-  "updated_on": "2026-11-23",
+  "updated_on": "2026-11-24",
   "purpose": "Durable approved migration package; update checksums when documents intentionally change.",
   "files": [
     {
       "path": "AGENTS.md",
-      "sha256": "c6ca33536a85895fe2d84fab9a18eaa85c3a32156d3de3bc79574bf54cef3f9f"
+      "sha256": "1ccfeae292c99ffb06c508a9c03b81c302e02d6b6fa89418e7da723fad471e52"
     },
     {
       "path": "CHECKPOINT-VERIFICATION.json",
@@ -13,7 +13,7 @@
     },
     {
       "path": "CLEANUP.md",
-      "sha256": "f24462a510cd718e30984cfb2bfe8f4df97855df5e59ae50e3c8bdc09d15bb13"
+      "sha256": "16ad2de245fa47410a497626d345e2a8300a23e4831a183ebdf35f714e3319fe"
     },
     {
       "path": "G01-CLOSEOUT.md",
@@ -149,7 +149,7 @@
     },
     {
       "path": "JAVA25.md",
-      "sha256": "fd18c206db15017248c82cbff0c043103ec6f926f20de7ce8f74eb24a225775c"
+      "sha256": "0d083d27e935c8cd83f518e1c8fcc39a68b1d5f7a5b0299a185bf4805dc1675c"
     },
     {
       "path": "NETWORK.md",
@@ -161,7 +161,7 @@
     },
     {
       "path": "PAUSED.md",
-      "sha256": "2ace4c06042d5b9dfb402ef894e26e6925a5fa095612f165d87377698483049f"
+      "sha256": "b9f222bb0f5ed9078bd78ee6356a455ac3fde4edee710d4ffc7882537d42325e"
     },
     {
       "path": "PERFORMANCE.md",
@@ -173,15 +173,15 @@
     },
     {
       "path": "README.md",
-      "sha256": "c08210a5bf2243cea206e0ac585aa540f57ad4abddbb804a4570f37d71547546"
+      "sha256": "935d5b9d09352a897cf786161362f394d8a4c3307ca4af3dfcc8b46096faecb5"
     },
     {
       "path": "RUNTIME-REQUIREMENTS.md",
-      "sha256": "8bc07603492908110c09f000e058adc7e5950dd1ad846c1488a17f4c6795bf81"
+      "sha256": "7826cc3e6469a2f7c0bb59072646b865c3810fe9b6660330c3dc616eddd66312"
     },
     {
       "path": "STATE.json",
-      "sha256": "19168c571ed51495ff94e69aed035dfc047d40d701d768a398937d1fff6c0f3c"
+      "sha256": "3c5f3b5b676822de775343bc3e291ab73cb69a592ecef1dd1cec57f5c8cb7e7f"
     },
     {
       "path": "approved-plan.json",
@@ -193,7 +193,7 @@
     },
     {
       "path": "cleanup-ledger.json",
-      "sha256": "c04b27a5ceced38d2a7d624695133318b497c07f4f7f7f3bb43348ef97a4a5d7"
+      "sha256": "4600730bcfa8d57ca8af4f5b07b0e86af33160822575f14cad70ddb7db5bc4af"
     },
     {
       "path": "correctness-test-plan.txt",
@@ -205,7 +205,7 @@
     },
     {
       "path": "decisions.json",
-      "sha256": "19f487ad4c2062b99a23626fc7e1fbf52798d95e88d8f93355b9cd4aff53b247"
+      "sha256": "93b902e21a63f8cf2729ba293f8a070e373afbfeffa275ef840714edac4d79ec"
     },
     {
       "path": "feature-register.json",
