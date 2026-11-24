@@ -19,11 +19,10 @@ under the License.
 
 # Runtime contract and correctness limits
 
-This is the maintenance contract for Joom `branch-1.2`. Accepted qualification,
+This is the maintenance contract for Joom `branch-1.2`. Qualification results,
 source/JAR identities and remaining coverage limits are in
 [QUALIFICATION.md](QUALIFICATION.md). Passing qualification is evidence for the
-executed cases, not proof of equivalence for every possible query or permission
-to publish, tag or deploy.
+executed cases, not proof of equivalence for every possible query.
 
 ## Versions and deployment settings
 
@@ -47,17 +46,16 @@ spark.sql.columnVector.offheap.enabled=false
 
 Retain existing Comet memory settings. Disabling Spark off-heap column vectors
 does not disable native Comet or change Spark's separate execution-memory pool.
-The production-default decision of November 24, 2026 keeps ANSI disabled to
-preserve the previous Spark 3.5 ANSI setting during migration. This supersedes
-the earlier ANSI=true deployment target; enabling ANSI is a separate decision.
+The production default keeps ANSI disabled, matching the previous Spark 3.5
+ANSI setting.
 Do not change the independent `spark.sql.storeAssignmentPolicy` default `ANSI`.
-Keep explicit ANSI=true and off-heap regression variants. The accepted earlier
+Keep explicit ANSI=true and off-heap regression variants. The
 qualification used ANSI=true, as recorded in [QUALIFICATION.md](QUALIFICATION.md);
-this configuration decision does not relabel those runs or requalify the JARs.
+this deployment setting does not relabel those runs or requalify the JARs.
 Comet supports both modes at runtime; changing this setting does not require
 different Comet artifacts. Existing regressions exercise both modes, but no
 separate full qualification with ANSI=false as the primary default was performed
-for this decision. Known semantic exceptions below remain applicable.
+for this deployment configuration. Known semantic exceptions below remain applicable.
 
 Direct Java launchers must preserve Spark's module exports/opens and include:
 
@@ -140,7 +138,7 @@ are permanent product eligibility decisions, not temporary CI bypasses:
   `allowIncompatible` options to regain native coverage.
 - **Cost/format choice:** cost-based engine and wide-row sort/shuffle rules may
   intentionally choose Spark. An AQE wide-row fallback is sticky. Engine-choice
-  changes must preserve result/error semantics and approved safety guards.
+  changes must preserve result/error semantics and safety guards.
 
 Spark fallback usually replaces an operator and may include siblings sharing it
 (e.g. all expressions of one aggregate/window). Other supported subtrees can
@@ -150,14 +148,14 @@ fallback is limited to one scalar expression. JVM dispatch is different: Spark
 code computes the expression while the Comet pipeline remains in use.
 
 Tag13 attempted native execution for some paths now guarded above. Retaining
-those paths verbatim would restore known correctness risks. The user accepted the
-safe fallbacks rather than additional native implementations. Do not infer that
+those paths verbatim would restore known correctness risks. The current fork uses
+safe fallbacks for these cases. Do not infer that
 every current fallback is a newly lost tag13 feature: many are inherited upstream.
 
 ## Known remaining semantic exceptions
 
-The user explicitly left these known exceptions outside the completed migration
-and Java 25 work. They can affect results or required failures; ANSI=true alone
+These known exceptions remain in the current fork. They can affect results or
+required failures; ANSI=true alone
 does not eliminate them. The existing, maintained upstream documentation remains
 the detailed inventory, including cases beyond the summaries below:
 
@@ -194,5 +192,3 @@ Docker Registry metadata checked on 2026-11-24 confirms that
 uses the same Java release/build, but its current base is **Ubuntu 26.04** and
 its package is **JRE**. The tag metadata is not execution of that image or of a
 derived Spark image. The final Spark image still needs its own packaged smoke.
-The manifest/config comparison is saved under
-`${MIGRATION_AUX_ROOT}/20261124_comet12-java25-image-check/comparison.json`.

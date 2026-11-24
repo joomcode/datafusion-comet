@@ -92,7 +92,7 @@ The final retained implementation commits are:
 - Narrow lint exception: `5133f0ab7`.
 - Final aggregate metrics: `73cf036b7`.
 
-## Test integration and accepted baseline adaptations
+## Test integration and baseline adaptations
 
 The pristine archive is unchanged in its import commit. Integration deliberately
 adapted two spill metric tests in `src/spill/mod.rs` and `spill_pool.rs` to compare
@@ -116,7 +116,7 @@ cargo clippy --locked --all-targets --workspace --no-deps -- -D warnings
 These are the calls from
 [the Rust CI action](../../.github/actions/rust-test/action.yaml). Use the existing
 project setup/JVM-library environment and [VALIDATION.md](VALIDATION.md) when
-running locally. They are maintenance commands, not evidence of a new execution.
+running locally.
 Selecting only the vendor from an isolated manifest or resolving its nested lock
 can test a different feature graph. Test-only dev dependencies may add entries to
 the root lock; inspect runtime graph changes separately.
@@ -133,10 +133,10 @@ In particular retain:
 - `joins/sort_merge_join/tests.rs` and the Comet SMJ ANSI/fuzz suites: all outer
   joins, duplicates/NULLs, constant filters and eager-evaluation hazards.
 
-The statement-local deprecated allowance is permanent and specifically approved.
+The statement-local deprecated allowance preserves the existing atomic algorithm.
 Rust 1.100 renamed this API to try_update; do not change production atomic code
 solely to silence it. All other warnings remain errors, including vendor tests
-and benches. A command-line `-A deprecated` is not the accepted strict CI policy.
+and benches. A command-line `-A deprecated` does not satisfy strict CI.
 
 ## Updating the vendor safely
 
@@ -167,7 +167,6 @@ git diff 5a9cbf8569721ce18733cf0cf18c73bc57abd48f -- native/vendor/datafusion-ph
 
 This compares the pristine import with the current working state, including
 manifest/test/style integration. Restrict a historical comparison to a second
-explicit SHA when diagnosing an incident. Old provenance JSON used intermediate
-pre-consolidation commit IDs; the retained import/integration IDs above are the
-ones actually reachable in branch history. The archive checksum and upstream
-origin did not change during history consolidation.
+explicit SHA when diagnosing an incident. The import/integration commits above
+identify the retained branch history; the archive checksum pins the published
+crate independently of later patch commits.

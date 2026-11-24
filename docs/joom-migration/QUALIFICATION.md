@@ -17,24 +17,24 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Accepted qualification and artifact identity
+# Qualification and artifact identity
 
-This is the maintenance record for the accepted Spark 4.2.1 / Joom Comet 1.2
+This is the maintenance record for the Spark 4.2.1 / Joom Comet 1.2
 qualification. Use [FEATURES.md](FEATURES.md) to follow each improvement to its
 implementation and regression tests, [VALIDATION.md](VALIDATION.md) to validate a
 future fix, and [RUNTIME-REQUIREMENTS.md](RUNTIME-REQUIREMENTS.md) for deployment
 requirements and known limits. Finite test coverage does not prove equality for
 all inputs or production workloads.
 
-The production-default decision of November 24, 2026 sets ANSI=false for the
-gradual Spark migration; see [RUNTIME-REQUIREMENTS.md](RUNTIME-REQUIREMENTS.md).
-The frozen record below retains the actual earlier ANSI=true qualification
-settings. No source/JAR identity or recorded result changes with this decision.
+The production default is ANSI=false; see
+[RUNTIME-REQUIREMENTS.md](RUNTIME-REQUIREMENTS.md). The frozen record below
+retains the actual ANSI=true qualification settings. Changing the deployment
+default does not change the recorded source/JAR identities or test results.
 
-The accepted expressions cohort already executed non-ANSI `abs`, the native cast
+The expressions cohort executed non-ANSI `abs`, the native cast
 suite (ANSI=false by default, with explicit ANSI opt-ins), and timestamp
-regressions exercising both modes. Named evidence is in
-`${MIGRATION_AUX_ROOT}/20261123_comet12-java25/normal-cohort-138113940824-proof.json`.
+regressions exercising both modes in the
+[Spark 4.2 expressions job](https://github.com/joomcode/datafusion-comet/actions/runs/45292058669/job/138113940824).
 This is existing mode-specific coverage, not a new full ANSI=false qualification.
 
 ## Frozen source and runtime
@@ -42,7 +42,7 @@ This is existing mode-specific coverage, not a new full ANSI=false qualification
 | Identity                                  | Accepted value                                                                                                             |
 | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Qualified executable/test/workflow source | `7e3b6bcf87389f9cdcbe27db6f74562b5e792c05`                                                                                 |
-| Java 25 acceptance/integration commit     | `586bbbf614823d70535a9ec1a384ea63aff7f4e0`                                                                                 |
+| Java 25 integration commit                | `586bbbf614823d70535a9ec1a384ea63aff7f4e0`                                                                                 |
 | Feature / integration branch              | `joom/1.2-java25` / `branch-1.2`                                                                                           |
 | Java 25 integration base                  | `d2a01d4b6bd5a5e05fcfa712a9c74e6e889fcdbb`                                                                                 |
 | Spark / Scala                             | Official Apache Spark 4.2.1 / 2.13.18                                                                                      |
@@ -54,11 +54,9 @@ This is existing mode-specific coverage, not a new full ANSI=false qualification
 
 The Java 25 step changed CI/build tools, validation helpers and one timezone test;
 it changed no production Comet algorithm, DataFusion patch or SQL fixture. The
-documentation acceptance commit did not rebuild or relabel the JARs. Later
+documentation-only integration commit did not rebuild or relabel the JARs. Later
 maintenance-documentation-only revisions also retain the qualified source above.
 Any future executable/dependency/runtime change needs evidence for its own SHA.
-Stable tagging, JFrog publication and production deployment have not been
-performed by this qualification.
 
 ## Actual successful workflows
 
@@ -85,7 +83,7 @@ Counts below identify separate, overlapping gates; do not add them together as a
 unique-test total. Assertions on actual results, mandatory errors and execution
 paths remain authoritative.
 
-| Gate                              | Actual accepted Java 25 evidence                                                                                                                                                |
+| Gate                              | Actual Java 25 evidence                                                                                                                                                         |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Target stock Spark SQL            | All 9 shards: 34,876 passed, 0 failed, **9 canceled and 7,922 ignored**; all nonpasses receive zero positive credit                                                             |
 | Migration regression selection    | 103 required selectors; 24 normal JVM cohorts (20 Linux, 4 macOS)                                                                                                               |
@@ -98,8 +96,7 @@ paths remain authoritative.
 | Native and tooling                | Full native/vendor/JNI, strict Clippy and existing quality gates passed; each invocation retains its own skips/counts                                                           |
 | Release artifacts                 | Exact final JARs, bundled native bytes and loaded class origins checked on both native Linux architectures; this bounded smoke does not rerun every CI test inside release JARs |
 
-The target SQL cancellations are fully named in
-`spark42-all-nine-actual-SQL-proof.json` under the Java 25 evidence root:
+The target SQL cancellations were:
 
 - `Tags set from session are prefixed with session UUID`: existing Comet timing
   guard in `SparkSessionJobTaggingAndCancellationSuite` (1).
@@ -118,48 +115,45 @@ Four anonymous cancellation units in older Java 17 Hive summaries could not be
 bound to names; that historical reporting gap was not presented as new passes.
 The Java 25 target's nine cancellations above are separately identified. Existing
 version guards, ignored tests and early-return bodies remain outside positive
-coverage. Four HDFS-cluster tests are inapplicable to the agreed environment;
+coverage. Four HDFS-cluster tests were not executed because no HDFS cluster was available;
 three manual native performance benchmarks remain unrun. Target workloads use
 Parquet/Delta, not Iceberg; existing older-profile Iceberg CI was nevertheless
 retained. Some Iceberg extension artifacts contain writer JSONL, not JUnit XML:
 actual task success and observed event lower bounds were recorded without
 inventing an exact XML count.
 
-## The fifteen previously deferred obligations
+## Integration validation criteria
 
-All fifteen were closed on the approved runtime in G10 source
+All fifteen passed on the qualified runtime in G10 source
 `81474a889489da4a4a4aa8e49330e6398c1937e3`; the Java 25 pass above repeats the
-required runtime, cohorts, selector, fuzz, cost and packaged gates. They are not
-fifteen outstanding defects. Preserve these criteria when changing the relevant
-feature; a green job alone is insufficient.
+required runtime, cohort, selector, fuzz, cost and packaged gates. Preserve these
+criteria when changing the relevant feature; a green job alone is insufficient.
 
-| Original obligation                 | Closure criterion retained for maintenance                                                                                                                                                                                                                   |
+| Validation ID                       | Criterion retained for maintenance                                                                                                                                                                                                                           |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | G02-LINUX-AMD64-RELEASE             | Actual Linux FFI/extent/cancellation/explode/JNI/partitioned-batch and JVM TaskContext/ownership/timestamp/Boolean paths; separate release linkage on both architectures                                                                                     |
 | G02-CANCEL-SPARK-MEMORY-WAIT        | Six real-JNI wait/race registrations: competing memory remains held, actual blocked Spark acquisition, `interruptOnCancel=false`, bounded TaskKilledException, no successful batch/EOF, zero final reservations/contexts/Arrow allocations                   |
 | G02-OFFSET-CONSUMERS                | Real window/coalescer nested and sliced Boolean/List/Map/Struct consumers; full 1,140,850,687-byte allocation and offset-boundary witness, correct rows/schema/order and ownership                                                                           |
 | G03-LINUX-RELEASE                   | Sort/wide payload/spill/handoff/early-drop/cancellation/metrics; native spill/grants, no post-cancel success, zero final reservations and removed spill files; ReservationStream owns an error result until drop                                             |
-| G03-WORKSPACE-CLIPPY-TOOLCHAIN      | Strict locked whole-workspace/all-targets lint; no vendor exclusion or global deprecated allowance; only approved statement-local exemption                                                                                                                  |
+| G03-WORKSPACE-CLIPPY-TOOLCHAIN      | Strict locked whole-workspace/all-targets lint; no vendor exclusion or global deprecated allowance; only the statement-local exemption                                                                                                                       |
 | G04-LINUX-RELEASE                   | Aggregate/SortAggregate/specialized/mixed-buffer semantics and emit/offset/memory/drain; native PartialMerge pressure must spill and produce 24,000 exact distinct `(g,k)` outputs/counts/max with zero final grants                                         |
 | G04-FULL-FUZZ                       | All 31 exact registrations, actual full-matrix JVM flag, original Spark results/errors and actual native/spill paths                                                                                                                                         |
 | G04-INHERITED-UNRUN                 | Two aggregate metric and six mixed/native Bloom fixtures restored; positive owned aggregate peak, four native recorder/replay witnesses and exact original-Spark Bloom buffers in all three Spark/native phase combinations                                  |
-| G05-LINUX-RELEASE                   | Ten exact ANSI SMJ cases, FULL unmatched/duplicate rows, lazy branches/mandatory errors, semi/anti and AQE clustering; original Spark oracle plus native or approved guarded fallback                                                                        |
+| G05-LINUX-RELEASE                   | Ten exact ANSI SMJ cases, FULL unmatched/duplicate rows, lazy branches/mandatory errors, semi/anti and AQE clustering; original Spark oracle plus native or guarded fallback                                                                                 |
 | G05-FULL-FUZZ                       | All 33 exact registrations and full flag; 4,881 internal comparisons retain the original 4,869 criterion plus 12 additive route pairs; seeds/multiset/error/spill checks preserved                                                                           |
-| G06-LINUX-RELEASE                   | Three window suites plus SparkErrorConverter; 88/88 native actions and three positive window-owned spill-count/bytes actions; approved suffix and IGNORE NULLS fallbacks retained                                                                            |
+| G06-LINUX-RELEASE                   | Three window suites plus SparkErrorConverter; 88/88 native actions and three positive window-owned spill-count/bytes actions; suffix and IGNORE NULLS fallbacks retained                                                                                     |
 | G07-LINUX-RELEASE                   | C2R/pooling/broadcast/payload/writer/spill/direct-reader/coalescer and default-Kryo selectors; exact final JAR/class/native origins on both architectures                                                                                                    |
 | G07-G09-BROADCAST-COST-MATRIX       | Four staged/skewed cases: cost false/true × maxFields 3/100; original Spark rows, actual skewed Spark SMJ and Spark BHJ reading a Comet broadcast stage, expected codegen boundary                                                                           |
 | G08-FINAL-LINUX-RELEASE-AND-FULL-CI | Scalar/codegen/HOF/short-circuit/conditional/UDF/serde/QueryContext/injection; rows/schema/mandatory errors, dispatcher/native/fallback and per-task capture ownership; separate 58+5 regression gates and shaded UDF/Delta serialization                    |
 | G09-FINAL-LINUX-RELEASE-AND-FULL-CI | Boundary/wide-sort/wide-shuffle/cost selectors, both ordinary TPC plan-stability suites without golden generation, four boundary/cost modes, mixed Spark SUM/AVG/Bloom buffers, all six 66-case profiles and seven packaged engine/wide/hash/range selectors |
 
-The G10 semantic closeout is
-`${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-backlog-reconciliation/all15-manual-semantic-closeout.json`
-(SHA256 `499519ca44b906bdc1ec5f235a375394ae1e9bcca07e2af95b9ba752bdce3774`).
 The temporary vendor-Clippy exclusion was removed before that complete CI;
-normal automatic routing and all agreed quality gates were restored.
+normal automatic routing and all standard quality gates were restored.
 
 ## Immutable delivered JARs and receipts
 
-Current delivery: `target/joom-release/gha-45292086072`.
+Qualified export: `rc-build-smoke-7e3b6bcf87389f9cdcbe27db6f74562b5e792c05`
+from [RC run 45292086072](https://github.com/joomcode/datafusion-comet/actions/runs/45292086072).
 
 | JAR                                           | SHA256                                                             |
 | --------------------------------------------- | ------------------------------------------------------------------ |
@@ -169,7 +163,7 @@ Current delivery: `target/joom-release/gha-45292086072`.
 All 97 extracted release/provenance/native/smoke files were verified against the
 API-digest archive. Preserve `release-qualification.json`, `sha256.txt`, native
 build/provenance records, both smoke receipts and the JARs together. Future Maven
-publication requires a separate approved immutable Joom version; a filename with
+publication uses an immutable Joom version; a filename with
 `1.2.0` alone does not distinguish this fork or qualify any downloaded artifact.
 See [RC-BUILD-SMOKE.md](RC-BUILD-SMOKE.md).
 
@@ -180,23 +174,6 @@ Its Core JAR SHA256 was
 its Delta JAR matched the current Delta hash above. Those are historical Java 17
 proofs, not substitutes for the current runtime or Core JAR.
 
-External evidence uses the literal portable roots defined in [README.md](README.md):
-
-- Java 25 evidence root: `${MIGRATION_AUX_ROOT}/20261123_comet12-java25`.
-  Entry points: `20261124_final-closeout/completion.json`,
-  `current-evidence-index.json`, `artifact-download-verification-45292086072.json`.
-- Named execution proofs: `required103-current-execution-proof.json`,
-  `normal-cohorts-index.json`, `cost66-six-profile-proof.json`,
-  `pandas58-execution-proof.json`, `corrective58-current-java25-proof.json`,
-  `original-five-current-execution-proof.json`,
-  `20261124_java25-runtime-evidence/collection-receipt.json`,
-  `delta41-final-actual-execution-proof.json` and the stock SQL proof above.
-- Accepted integration/ref/source/JAR preservation:
-  `${MIGRATION_AUX_ROOT}/20261124_comet12-java25-integration/completion.json`.
-- Earlier G10 details: `${MIGRATION_AUX_ROOT}/20261121_comet12-g10/20261123_final-closeout/completion.json`.
-  Deleted migration reports remain retrievable from Git commit `586bbbf61` when
-  a historical implementation/invocation needs investigation.
-
 ## Docker image correspondence, not image qualification
 
 Registry metadata verified on 2026-11-24 for
@@ -204,8 +181,7 @@ Registry metadata verified on 2026-11-24 for
 AMD64 and ARM64. Its index digest was
 `sha256:4ed132f6832e9804b123e89a849a7b4502756ae64a4ee08ebab939d9d5d0a9fa`.
 It contains a **JRE on Ubuntu 26.04**. Packaged qualification used the exact
-Temurin **JDK on Ubuntu 24.04** native runners. No layers of that JRE image were
-downloaded or executed for this comparison, and a derived Spark image was not
-tested. Version/build correspondence is not exact-container qualification.
+Temurin **JDK on Ubuntu 24.04** native runners. The JRE image and any derived
+Spark image were not runtime-qualified by these workflows. Version/build
+correspondence is not exact-container qualification.
 Preserve that distinction until smoke executes inside the actual target image.
-Receipt: `${MIGRATION_AUX_ROOT}/20261124_comet12-java25-image-check/comparison.json`.

@@ -22,7 +22,7 @@ under the License.
 The manual **RC Build & Smoke** workflow is
 `.github/workflows/rc_build_smoke.yml`. It builds entirely on native GitHub
 runners, verifies the final dual-architecture JARs, and neither creates tags nor
-publishes to JFrog/production. Current accepted source, runs and immutable JAR
+publishes to JFrog/production. Qualified source, runs and immutable JAR
 checksums are in [QUALIFICATION.md](QUALIFICATION.md); deployment requirements are
 in [RUNTIME-REQUIREMENTS.md](RUNTIME-REQUIREMENTS.md).
 
@@ -72,8 +72,7 @@ packaged smoke serve complementary purposes. See [VALIDATION.md](VALIDATION.md).
 
 Run from a clean Comet checkout at the selected source commit. Choose a new output
 directory, for example `target/joom-release/<candidate-name>`; do not overwrite a
-prior qualified output. These are recipes, not an instruction to execute builds
-or network operations without the applicable authorization:
+prior qualified output:
 
 ```shell
 # All native and packaging stages locally (Docker required).
@@ -89,8 +88,8 @@ PREPARE_SMOKE=1 dev/release/joom/build-release.sh --package amd64 \
 `--package` selects only the Maven builder architecture; both libraries must already
 exist and must match the current source/lockfile/provenance. It never rebuilds a
 missing native stage. The all-in-one mode defaults to an ARM64 packaging builder.
-On an ARM64 laptop AMD64 emulation may be slow or hang in child-JVM launch; use
-native AMD64 GHA rather than treating a stalled emulated run as passing.
+Use native runners for both architectures; emulated JVM execution is not a
+substitute for the native packaged-smoke stage.
 
 The script refuses dirty source, changed HEAD/lockfile and an existing final
 `sha256.txt`; the native provenance validator rejects stale, cross-commit,
@@ -103,8 +102,7 @@ Useful controls are `DOCKER_CONTEXT`, `M2_DIR` (default `${HOME}/.m2`),
 `MVN_OFFLINE=1`, `CARGO_JOBS` (default4), `TARGET_DIR`, `WORK_DIR`,
 `CARGO_REGISTRY` (per-architecture registry volume prefix) and `CARGO_GIT`
 (shared Git-source cache). `PREPARE_SMOKE=1` creates matching test support.
-Keep source/dependency caches separate from disposable outputs; see
-[CLEANUP.md](CLEANUP.md). Do not broadly clear shared caches to resolve a failure.
+Source/dependency caches are separate from release output directories.
 
 `verify-release.py` checks assembled provenance/JARs; `verify-packaged-runtime.py`
 implements `prepare` and `run`; `verify-rc-result.py` binds both receipts and
@@ -131,16 +129,14 @@ ZIP's GitHub digest and validate it on download as well as the files inside it.
 
 Workflow artifact names are `rc-native-<arch>-<SHA>` (3 days),
 `rc-candidate-<SHA>` (7 days), `rc-smoke-<arch>-<SHA>` (14 days) and
-`rc-build-smoke-<SHA>` (14 days). The last is the accepted qualified export, not
+`rc-build-smoke-<SHA>` (14 days). The last is the qualified export, not
 the intermediate candidate. Download durable evidence before GitHub retention
 expires. Caches are restore-only in this workflow.
 
 ## Tags and optional JFrog publication
 
-Tags denote immutable source commits. Existing `joom-1.2-1-rc1` is historical;
-the stable `joom-1.2-1` has **not** been authorized or created by this maintenance
-work. Stable tagging, JFrog publication and production deployment remain separate
-explicit user decisions. Neither cleanup nor successful CI grants permission.
+Tags denote immutable source commits. `joom-1.2-1-rc1` identifies the earlier
+baseline release candidate; stable versions use `joom-1.2-N`.
 Do not move an existing tag or relabel a JAR built at another commit merely to
 match the branch's newer documentation-only HEAD.
 
@@ -165,4 +161,3 @@ is not a successful release and the overwrite guard must not be bypassed.
 Maven coordinates are
 `org.apache.datafusion:comet-spark-spark4.2_2.13:<joom-version>` and
 `org.apache.datafusion:comet-contrib-delta-spark4.2_2.13:<joom-version>`.
-No tag creation or publication command is run as part of documentation maintenance.

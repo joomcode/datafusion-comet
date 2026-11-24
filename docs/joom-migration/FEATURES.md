@@ -46,7 +46,8 @@ Use [VALIDATION.md](VALIDATION.md) when modifying a contract,
 Use upstream implementations when they replace Joom behavior; add missing
 residuals and retain regressions. Equivalent rows are not claims of unique Joom
 invention. Do not mechanically copy historical modules over newer upstream
-architecture, resurrect reverted rules, include post-tag13 work or add PR #5889.
+architecture or resurrect reverted rules. Post-tag13 work and PR #5889 are not
+part of this feature map.
 Cost-table recalibration requires separate review.
 
 ## Scope and integration
@@ -743,7 +744,7 @@ Retain whole-plan cost selection, initial/AQE decisions, schema-width/nested/shu
   need not cause fallback. Unsafe nested AND/OR RHS join conditions retain a
   targeted Spark join fallback. Preserve streamed ordering and duplicate counts.
 - **G06:** floating whole-partition accumulation follows input order. Preserve
-  accepted suffix SUM/AVG, suffix nested floating-extrema and IGNORE NULLS
+  suffix SUM/AVG, suffix nested floating-extrema and IGNORE NULLS
   fallback. FILTER/DISTINCT must be rejected before native construction loses
   their meaning. Partition windows default false; SortedWindow defaults true.
   Some scratch/coalescing/suffix scalar memory remains outside pool accounting.
@@ -766,8 +767,8 @@ Retain whole-plan cost selection, initial/AQE decisions, schema-width/nested/shu
   over replay (`73cf036b7`), dictionary writer safety under Miri (`f700491ad`),
   native-shuffle UDF task transport (`4e0f73119`) and unconsumed prefetch release
   (`81474a889`). Keep the restored complete CI and release-support ABI checks.
-  Profile/fixture adaptations do not authorize weakening rows/errors or replacing
-  official Spark.
+  Profile/fixture adaptations preserve row/error assertions and the official
+  Spark reference.
 
 ## Configuration contracts
 
@@ -798,16 +799,10 @@ Explicit `spark.comet.datafusion.*` overrides take precedence after D11's initia
 different problems. Projection-instance pools retain schema/count/buffer caps;
 returning a pool entry requires all readers to have finished.
 
-## Later upstream upgrades and historical detail
+## Later upstream upgrades
 
 The equivalence audit concerned the pinned 1.2/55.2 base. DF56 workspace lending
 and clustered aggregation, larger-offset proposals, partition-window accounting
-and upstream lazy evaluation are partial/alternative overlaps, not permission to
-drop residuals or silently upgrade dependencies. Recheck exact code and semantics
+and upstream lazy evaluation are partial/alternative overlaps; they do not
+replace residual patches or justify unverified dependency upgrades. Recheck exact code and semantics
 before replacement; a similarly named open PR is not a qualified substitute.
-
-For original per-stage commands or the complete initial audit, Git object
-`586bbbf614823d70535a9ec1a384ea63aff7f4e0` retains the former paths
-`docs/joom-migration/feature-register.json`, G01-results.json through
-G10-results.json and vendor-provenance.json. Those are historical snapshots,
-not current instructions; no runtime code depends on those removed documents.

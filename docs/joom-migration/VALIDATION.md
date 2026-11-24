@@ -19,7 +19,7 @@ under the License.
 
 # Validating changes to Joom Comet 1.2
 
-The current accepted evidence is in [QUALIFICATION.md](QUALIFICATION.md).
+The recorded qualification evidence is in [QUALIFICATION.md](QUALIFICATION.md).
 [FEATURES.md](FEATURES.md) maps the original Joom improvements to current code,
 regression tests and upstream replacements. Preserve that chain when fixing a
 production issue: record the input/trigger, independent reference, changed code,
@@ -30,7 +30,7 @@ regression identity, source SHA and any newly qualified JARs.
 Use official Apache Spark 4.2.1 (revision
 `617618396087429b5627a86ce933bb0f5d6645cb`) **without Comet** as the independent
 reference, then run the same query/input snapshot with Comet enabled and identical
-significant settings. Keep the agreed Java 25 runtime and SQL defaults from
+significant settings. Use the Java 25 runtime and SQL defaults from
 [RUNTIME-REQUIREMENTS.md](RUNTIME-REQUIREMENTS.md).
 
 - Compare complete values, types/schema, NULLs, duplicate rows, grouping keys and
@@ -52,9 +52,9 @@ significant settings. Keep the agreed Java 25 runtime and SQL defaults from
   Include AQE, cost/boundary modes, forced spill, sliced/nested arrays and resource
   cleanup whenever the changed path interacts with them.
 - Keep lazy AND/OR/CASE/UDF and SMJ evaluation order, native windows and their
-  approved fallback guards. Errors may be avoided only when original Spark would
-  avoid evaluating that expression. `ansi=true` is not approval for
-  `allowIncompatible=true`.
+  fallback guards. Errors may be avoided only when original Spark would
+  avoid evaluating that expression. `ansi=true` does not make
+  `allowIncompatible=true` implementations safe.
 - A negative control deliberately runs a bounded regression without the proposed
   fix to demonstrate that it detects the defect; restore and verify the final
   source afterward. A deliberately failing control is not an unfixed final test.
@@ -71,8 +71,7 @@ strengthened to check every group/key/count/NULL/duplicate, require PartialMerge
 itself to spill, and compare exact Bloom bytes in all three engine combinations.
 Native Partial-to-Final versus Single shares implementation and is complementary
 evidence, **not** a fully independent Spark oracle. Original Spark runtime classes
-were resolved from official Maven JARs, without Comet shadow copies; historical
-proof: `${MIGRATION_AUX_ROOT}/20261119_comet12-g04-independent-semantics`.
+were resolved from official Maven JARs, without Comet shadow copies.
 
 ## Local builds and targeted regressions
 
@@ -117,7 +116,7 @@ cargo nextest run --locked --manifest-path native/Cargo.toml \
   -E 'package(datafusion-physical-plan) & test(statistics::)'
 ```
 
-The approved deprecated `fetch_update` allowance is **statement-local** inside
+The deprecated `fetch_update` allowance is **statement-local** inside
 vendored DataFusion. Keep that algorithm and all other strict warnings; do not
 exclude the vendor from Clippy or add a global `-A deprecated` acceptance path.
 Full CI separately covers Python UDF and jemalloc feature variants and native
@@ -165,20 +164,20 @@ Current routing is defined by `.github/workflows/ci.yml`,
   manual tiers. Spark 3.4 SQL is opt-in/manual.
 - A PR targeting `branch-N.M` requests all three tiers, still through path
   filters. A direct push to `branch-1.2` does **not** start all 138 jobs. Manual
-  **Comet CI** dispatch on the selected ref requests the complete agreed matrix.
+  **Comet CI** dispatch on the selected ref requests the complete matrix.
 - Main-only push/cache refresh and default-branch scheduled runs are separate
-  inherited triggers. Do not create additional main commits for this branch's CI.
+  inherited triggers.
 - `Required Checks`, suite-inventory guards, the native-window verifier, lint,
-  vendor, compatibility, Spark/Delta/SQL and other agreed quality gates remain
+  vendor, compatibility, Spark/Delta/SQL and other quality gates remain
   required where applicable. Audit actual outcomes rather than relying on a green
   aggregate or assuming all version-return/ignored bodies executed.
 
 Use `dev/local-ci.sh spark 4.2 sql_core-1` for an affected stock SQL shard when
-appropriate; `COMET_LOCAL_CI_HOME` must explicitly select a dated auxiliary
-location. Inspect the runner first: preparation downloads sources and sweeps the
+appropriate; `COMET_LOCAL_CI_HOME` selects its working location.
+Inspect the runner first: preparation downloads sources and sweeps the
 shared Maven repository. `SKIP_PREPARE=1` also skips installing Comet and must not
 be used after a source change. Prefer focused GHA when a local full job would add
-hours or duplicate the same agreed check.
+hours or duplicate the same CI check.
 
 The target SQL workflow installs only CI-contained, wheel/hash-locked NumPy
 2.3.5, pandas 2.3.3, PyArrow 22.0.0 and their four pinned dependencies via
@@ -192,7 +191,7 @@ For a release candidate after executable/runtime changes:
 
 1. Freeze the final source/dependencies/configuration, remove temporary CI
    bypasses and restore normal automatic coverage before the final run.
-2. Execute full agreed Comet CI plus Miri and Actions CodeQL on that exact source.
+2. Execute full Comet CI plus Miri and Actions CodeQL on that exact source.
    Inspect individual passed/failed/canceled/ignored/pending counts and required
    named selectors/cohorts. Resolve every applicable deferred check.
 3. Run separate manual **RC Build & Smoke** with `expected_commit` equal to the
@@ -208,7 +207,7 @@ actual producer attempt, runner, timestamps, steps, source and artifact identiti
 retry status aliases never create positive test credit. If source changes, qualify
 the resulting executable state and JARs rather than borrowing earlier results.
 All canceled/ignored/unrun tests receive zero credit. Four HDFS tests and three
-manual native benchmarks remain explicitly outside the agreed acceptance, and
+manual native benchmarks remain unexecuted, and
 Iceberg is outside target production workload, without removing legacy CI.
 
 ## Java 25 test-oracle decisions
@@ -224,8 +223,7 @@ invoked a removed javac API. All license/import/Scala/Java formatting checks rem
 public `ZoneId.SHORT_IDS`: on the selected Java 25, original Spark resolves them
 to America/Panama, America/Phoenix and Pacific/Honolulu, whereas Java 17 uses fixed
 offsets. This is an independently checked Java-version oracle, not a Comet
-production behavior change. Original-Spark-only proof is under
-`${MIGRATION_AUX_ROOT}/20261123_comet12-java25/20261123_stock-spark-probe`.
+production behavior change.
 
 The expressions CI cohort alone sets `-XX:-OmitStackTraceInFastThrow` so hot
 ArithmeticException paths retain the strict existing `long overflow` text and
@@ -246,7 +244,7 @@ parameters, allocation/ownership checks and measurement limits. Existing
 replace ANSI=true correctness. Select bounded data sizes and account for generated
 files. `make benchmark-*` builds a release first; inspect targets before running.
 `benchmarks/micro/run.py` may install/clone/build/publish, so do not run those side
-effects casually. AWS provisioning is outside this GCP-only work.
+effects without inspecting the runner.
 
 | Area / existing tool                                                                          | Retained measurement and interpretation                                                                                                                                                                                                                                                                                                                                                               |
 | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -256,7 +254,7 @@ effects casually. AWS provisioning is outside this GCP-only work.
 | Native windows; `native/operators/benches/window.rs` and `sorted_window.rs`                   | Paired DataFusion/custom quick dev measurements: ROW_NUMBER 206.27→3.7279 ms, LEAD 348.13→6.1067 ms; whole SUM/COUNT at 1/10/1000 rows per key 3.1344 s→247.69 ms / 329.61→38 ms / 21.394→16.533 ms; suffix FIRST_VALUE IGNORE NULLS 7.9966 s→681.92 ms. Custom path made 1,347 pool calls for 2 million partitions; baseline zero calls meant absent accounting, not zero memory use.                |
 | Dictionary fallback; Criterion `row_columnar`                                                 | Same 256-row/64 KiB fixture: plain 9.0696→8.6473 ms and dictionary 41.625→40.071 ms, p=0.08; no established change. Separate regressions prove buffer reuse/lifetime.                                                                                                                                                                                                                                 |
 | Binary C2R copy; `CometBinaryRowCopyBenchmark`                                                | Ordinary→borrowed ns/row: 32 B 11.977→10.988; 4 KiB 203.609→69.457; 192 KiB 8102.885→3190.165. Large intermediate arrays avoided (about 3,663/175,119→45 allocated B/row); 32 B allocation slightly higher (43.5→45). This tests borrowing, not the separate instance-pool benefit or whole-query speed.                                                                                              |
-| Wide shuffle read; `CometWideShuffleReadBenchmark`                                            | Four modes completed measured iterations; final standard summary failed at sandbox-denied CPU metadata `sysctl`, so the command is **not passed**. Raw medians 307/267/307/247 ms for direct/direct+coalescing/JVM/JVM+coalescing are diagnostic only.                                                                                                                                                |
+| Wide shuffle read; `CometWideShuffleReadBenchmark`                                            | Four modes completed measured iterations; CPU-metadata collection through `sysctl` failed, so the complete benchmark command is **not passed**. Raw medians 307/267/307/247 ms for direct/direct+coalescing/JVM/JVM+coalescing are diagnostic only.                                                                                                                                                   |
 | Conditional evaluation; `native/spark-expr/benches/conditional.rs`                            | 56 registrations/28 pairs; final ordinary strings retain the exact upstream vector kernel (quick differences −0.85…+0.80%). Correct ANSI masking has operator differences −50.36…+181.52% across cast/selectivity/NULL/AND/OR fixtures. An early 20–30× string regression was fixed by concrete implementation/type/alignment checks; guards must not be relaxed to regain unsafe eager evaluation.   |
 
 All these local measurements used macOS ARM64 and mostly debug/dev native code,
@@ -271,37 +269,16 @@ added as a new project performance framework.
 
 Each Spark task owns its manager lock and fair_unified already serializes native
 acquisition in Rust; frequent tiny reservations and greedy_unified parallel
-workers remain conditions to watch. The accepted expectation of usually
-fractional-percent whole-job impact is engineering judgment, **not** a production
-measurement, upper bound or promise. Retain the cancellation safety fix.
+workers remain conditions to watch. These microbenchmarks do not establish a
+bound on whole-job impact. Retain the cancellation safety fix.
 No optimized dualarch production GCP speedup, slowdown percentage or universal
 no-regression claim has been established. Real workload measurements remain useful
-when production issues are investigated. Do not bypass sandbox metadata denial.
+when production issues are investigated.
 
 Aggregate `aggregate_misc_pair/max_by` had only three debug diagnostic timings
 (40.653/40.829/41.534 ms), not a before/after comparison; the original FIRST/LAST
 benchmark was restored and compiles. Cost-model coefficients/calibration were
 preserved without recalibration; its new standard benchmark platform query was
-blocked by sandbox `sysctl`, so no successful G09 full benchmark is claimed.
+not completed because its `sysctl` platform query failed, so no successful G09
+full benchmark is claimed.
 Keep those limits when interpreting the cost model or planning future measurements.
-
-Reproduction logs, commands and per-case results remain under:
-
-- `${MIGRATION_AUX_ROOT}/20261119_comet12-g02-performance` (`summary.json`,
-  `completion.json`, `analysis.json`, `concurrent-analysis.json`).
-- `${MIGRATION_AUX_ROOT}/20261119_comet12-g03` (`payload-kernel-benchmark-quiet-measured.log`,
-  source-lifetime positive/negative controls).
-- `${MIGRATION_AUX_ROOT}/20261119_comet12-g04/aggregate-misc-benchmark.json`.
-- `${MIGRATION_AUX_ROOT}/20261120_comet12-g05` and
-  `${MIGRATION_AUX_ROOT}/20261120_comet12-g06` (paired existing SMJ/window
-  benchmark logs, pool-call witnesses and matching correctness controls).
-- `${MIGRATION_AUX_ROOT}/20261120_comet12-g07` (`performance-results.json`,
-  binary-copy/dictionary/wide-shuffle logs).
-- `${MIGRATION_AUX_ROOT}/20261120_comet12-g08` (`performance-summary.json`,
-  `conditional-benchmarks-qualified.log`, `string-benchmark-before.log`).
-- `${MIGRATION_AUX_ROOT}/20261121_comet12-g09/performance-platform-probe.json`.
-
-These paths are evidence pointers, not permission to delete shared caches or user
-sources. See [CLEANUP.md](CLEANUP.md). Original detailed migration reports can be
-retrieved from Git commit `586bbbf61`; active maintenance instructions above
-supersede their historical stage/authorization banners.
