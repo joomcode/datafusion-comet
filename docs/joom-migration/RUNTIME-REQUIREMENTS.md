@@ -41,14 +41,23 @@ Set the following before sessions/queries start, in the Spark image defaults or
 launcher. Audit application/session overrides:
 
 ```properties
-spark.sql.ansi.enabled=true
+spark.sql.ansi.enabled=false
 spark.sql.columnVector.offheap.enabled=false
 ```
 
 Retain existing Comet memory settings. Disabling Spark off-heap column vectors
 does not disable native Comet or change Spark's separate execution-memory pool.
-ANSI=false and explicit off-heap regression variants remain useful tests, but
-are not the agreed production-default qualification contract.
+The production-default decision of November 24, 2026 keeps ANSI disabled to
+preserve the previous Spark 3.5 ANSI setting during migration. This supersedes
+the earlier ANSI=true deployment target; enabling ANSI is a separate decision.
+Do not change the independent `spark.sql.storeAssignmentPolicy` default `ANSI`.
+Keep explicit ANSI=true and off-heap regression variants. The accepted earlier
+qualification used ANSI=true, as recorded in [QUALIFICATION.md](QUALIFICATION.md);
+this configuration decision does not relabel those runs or requalify the JARs.
+Comet supports both modes at runtime; changing this setting does not require
+different Comet artifacts. Existing regressions exercise both modes, but no
+separate full qualification with ANSI=false as the primary default was performed
+for this decision. Known semantic exceptions below remain applicable.
 
 Direct Java launchers must preserve Spark's module exports/opens and include:
 

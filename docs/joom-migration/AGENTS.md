@@ -23,9 +23,9 @@ Read README.md, RUNTIME-REQUIREMENTS.md, FEATURES.md and QUALIFICATION.md before
 changing this fork. Follow the repository root contributor instructions as well.
 The migration and Java 25 qualification are accepted and integrated; there are no
 unfinished G01-G10 stages. A new implementation needs its own user instruction.
-The current request authorizes consolidating this documentation and deleting
-obsolete documentation only. It does not authorize code/CI changes, another
-qualification run, push, stable tags, artifact publication or production work.
+Use the latest explicit user instruction to determine the authorized work.
+Documentation and historical stage approvals do not themselves authorize new
+implementation, qualification runs, pushes, tags, publication or production work.
 
 ## Boundaries and durable knowledge
 
@@ -46,8 +46,10 @@ qualification run, push, stable tags, artifact publication or production work.
 
 ## Correctness and verification
 
-- Keep the agreed production/qualification settings: ANSI=true and Spark column
-  vectors offheap=false. Changes to that contract need explicit review.
+- The production-default decision of November 24, 2026 is ANSI=false and Spark
+  column vectors offheap=false. The accepted historical qualification used
+  ANSI=true; retain that evidence and explicit ANSI correctness regressions.
+  Changes to the production contract need explicit review.
 - Compare original Spark 4.2.1 without/with Comet using identical inputs/settings:
   exact results, required errors, ordering where specified, and actual native
   coverage. Do not turn a wrong result into a passing test or remove a required

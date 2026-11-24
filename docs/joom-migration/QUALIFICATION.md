@@ -26,6 +26,17 @@ future fix, and [RUNTIME-REQUIREMENTS.md](RUNTIME-REQUIREMENTS.md) for deploymen
 requirements and known limits. Finite test coverage does not prove equality for
 all inputs or production workloads.
 
+The production-default decision of November 24, 2026 sets ANSI=false for the
+gradual Spark migration; see [RUNTIME-REQUIREMENTS.md](RUNTIME-REQUIREMENTS.md).
+The frozen record below retains the actual earlier ANSI=true qualification
+settings. No source/JAR identity or recorded result changes with this decision.
+
+The accepted expressions cohort already executed non-ANSI `abs`, the native cast
+suite (ANSI=false by default, with explicit ANSI opt-ins), and timestamp
+regressions exercising both modes. Named evidence is in
+`${MIGRATION_AUX_ROOT}/20261123_comet12-java25/normal-cohort-138113940824-proof.json`.
+This is existing mode-specific coverage, not a new full ANSI=false qualification.
+
 ## Frozen source and runtime
 
 | Identity                                  | Accepted value                                                                                                             |
