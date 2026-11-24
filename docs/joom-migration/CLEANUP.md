@@ -17,455 +17,206 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-> **Historical G01 checkpoint (superseded by final G10 below):** documentation and history cleanup, followed by exact-SHA RC qualification, are in progress. Integration into `branch-1.2` and `joom-1.2-1-rc1` are conditional on successful checks. G02 and Java 21 work remain on hold.
+# Build resources, evidence and optional cleanup
 
-# Cleanup after the migration
+This is an inventory and manual guide. The documentation consolidation deletes
+obsolete tracked migration documents only. It does not delete downloaded files,
+build outputs, caches, images, volumes, evidence, checkouts or Git refs. A parent
+directory named temp does not make its contents disposable.
 
-All commands below are for manual execution AFTER the entire migration and preservation of the required artifacts. Caches are still needed by subsequent groups and RCs. Nothing has been deleted automatically.
+## Retain before cleanup
 
-Keep the final JARs, both `.so` files, sha256.txt, commit.txt, build-manifest.json, effective-pom.xml, linux/* metadata/toolchain/ELF imports, smoke evidence and docs/joom-migration. Do not remove the entire root target directory: it contains release artifacts and the Spark fixture.
+- Current accepted Java 25 bundle: `target/joom-release/gha-45292086072`, all 97
+  files, not just the two JARs. Keep native libraries, commit/lock/build manifests,
+  SHA256 lists, effective POM, both architecture smoke receipts and qualification.
+  Source and JAR hashes are in QUALIFICATION.md.
+- Immutable Java 25 qualification evidence under
+  `${MIGRATION_AUX_ROOT}/20261123_comet12-java25`, especially
+  `20261124_final-closeout/completion.json`, actual source/execution manifests,
+  original report/SQL oracle proofs, API inventories and real retry producer
+  bindings. The downloaded ZIP/API-digest receipt verifies the extracted bundle.
+- Java 17 G10 bundle `target/joom-release/gha-45084227984` and its source-bound
+  evidence under `${MIGRATION_AUX_ROOT}/20261121_comet12-g10`, especially
+  `20261123_final-closeout/completion.json`. It is historical evidence, not a
+  substitute for the Java 25 qualification.
+- Actual integration receipts under the dated g10/java25 integration directories,
+  and any evidence needed to reproduce a production finding. GitHub workflow
+  retention is finite; do not rely on hosted artifacts being available forever.
+- User source checkouts, SDKMAN JDKs, installed tools and shared caches.
 
-All Comet paths below are relative to the selected checkout root; external
-paths use the explicit bindings in [PATHS.md](PATHS.md). Verify COMET_ROOT and
-MIGRATION_AUX_ROOT before running any optional cleanup. The guarded shell
-examples intentionally fail if the required root is unset or the selected
-checkout is not a Comet repository root.
+## Recorded disk snapshot
 
-## Java 25 artifact and resource snapshot, 2026-11-24
+These are allocated-size snapshots, not a fresh measurement or attribution of
+every byte to this task. Nested values are already included in their parent.
 
-The current Java 25 RC output is `target/joom-release/gha-45292086072` on source
-`7e3b6bcf87389f9cdcbe27db6f74562b5e792c05`. Its 27 packaged cases passed on each
-native AMD64/ARM64. The full agreed Java25
-qualification also passed; this section does not authorize production use. Preserve both JARs and
-the complete 97-file output, including provenance, checksums, native libraries
-and smoke receipts. See JAVA25.md for the actual JAR hashes and runtime contract.
-The G10 Java 17 delivery below remains historical evidence for that earlier stage.
+| Resource                             | Recorded size              | Time / meaning                                                 |
+| ------------------------------------ | -------------------------- | -------------------------------------------------------------- |
+| `native/target`                      | 78,381,560 KiB (74.75 GiB) | 2026-11-24; accumulated native compiler/test/benchmark output  |
+| Root `target`                        | 12,870,472 KiB (12.27 GiB) | 2026-11-24; includes nested RC outputs and diagnostic worktree |
+| Java 25 auxiliary directory          | 682,044 KiB                | 2026-11-24 11:11 UTC, before the final small report downloads  |
+| G10 auxiliary directory              | 9,144,232 KiB (8.72 GiB)   | 2026-11-23; includes diagnostics and qualification evidence    |
+| Current Java 25 RC directory         | 519,852 KiB                | Nested in root target at the 2026-11-24 snapshot               |
+| Earlier Java 25 RC `gha-45281150607` | 519,880 KiB                | Historical source955 candidate; not current qualification      |
 
-The Java 25 auxiliary root is
-`${MIGRATION_AUX_ROOT}/20261123_comet12-java25`. At the 11:11 UTC allocated-size
-snapshot it used 682044 KiB (about 0.65 GiB), before the final small report downloads.
-Root `target` used 12870472 KiB (about 12.27 GiB), including both nested RC outputs;
-`native/target` used 78381560 KiB (about 74.75 GiB), accumulated during the migration.
-Do not add nested RC sizes to the enclosing root target size again. The exact
-snapshot and subsequent receipt inventory are in cleanup-ledger.json and the
-auxiliary storage-inventory.json. No automatic cleanup has been performed.
+Exact historical resource inventories remain recoverable from Git baseline
+`586bbbf614823d70535a9ec1a384ea63aff7f4e0:docs/joom-migration/cleanup-ledger.json`.
+The Java 25 auxiliary `storage-inventory.json` records its exact snapshot.
+Consolidation creates only small documentation/review files under
+`${MIGRATION_AUX_ROOT}/20261124_comet12-docs-consolidation`; no runtime rebuild,
+new package environment or image download is needed.
 
-After retaining the required evidence, the following are optional manual cleanup
-candidates; review and archive them first:
+## Optional build-output cleanup
 
-- `target/joom-release/gha-45281150607`: the historical source 955 Java 25 candidate,
-  519880 KiB. It does not qualify the current source. Keep its failure-history and
-  receipt references before removing this old extracted bundle.
-- `qualified-artifact-45281150607.zip` in the Java 25 auxiliary root: the duplicate
-  historical downloaded ZIP,197859653 bytes.
-- `qualified-artifact-45292086072.zip` in the same auxiliary root: the current
-  downloaded ZIP,197930477 bytes. Remove it only after independently preserving
-  the complete verified extracted output and its API/archive SHA256 receipt.
-
-Keep the current extracted RC folder, all final source/execution manifests,
-real attempt 1/2 producer bindings, API inventories, final receipts, original-Spark
-oracle witnesses and document archives. The auxiliary root can eventually be
-archived as one unit; do not delete it merely because its parent is named temp.
-No Python environment or new JDK was installed locally for this qualification.
-The user-provided Temurin25 SDK and standard Maven/Cargo/Ivy/SBT caches are shared
-resources, not disposable task outputs. Maven may contain the compatible
-Spotless 3/google-java-format 1.28 and Java 25 compiler-bridge artifacts; do not
-remove an entire shared cache. New CI environments and Docker downloads on
-GitHub runners did not consume laptop storage.
-
-## Final G10 delivery and resource snapshot, 2026-11-23
-
-The current qualified output is `target/joom-release/gha-45084227984`; earlier
-RC paths below are historical, not the final delivery. Preserve both JARs and
-all associated provenance/checksums/native/smoke files before considering cleanup.
-No file, cache, image, volume or branch was deleted during final qualification.
-
-Latest allocated sizes are `native/target`74.75GiB, root `target`11.28GiB, and
-`${MIGRATION_AUX_ROOT}/20261121_comet12-g10`8.72GiB. Root target includes nested
-release outputs and the diagnostic worktree; do not add nested sizes twice.
-Exact KiB, resource identities and newly downloaded artifact IDs are recorded in
-cleanup-ledger.json#g10_final_qualification_resources_20261123. Standard Maven,
-Cargo, Ivy/SBT and other user/shared caches are not task-disposable. User-provided
-Spark, Comet, DataFusion and Iceberg sources remain user-owned.
-
-Before removing ANY enclosing root target directory, inspect and archive the
-linked diagnostic worktree. Its source is a separate diagnostic branch, never
-an integration candidate. The following is an optional manual cleanup step
-AFTER preserving needed diagnostics; no force is used and local changes must
-be handled explicitly if Git refuses:
-
-```bash
-git -C "${COMET_ROOT:?Set COMET_ROOT to the intended Comet checkout}" worktree remove target/joom-runtime-memory-diagnostic
-```
-
-Do not remove the primary feature/integration branches or the final release
-directory. The guarded `native/target` cleanup below only removes generated
-compiler outputs; source/vendor and delivered JARs are separate. The auxiliary
-G10 directory contains the immutable qualification receipts and failed-attempt
-history, so archive and review it before any eventual deletion. Preserve
-`20261123_final-closeout/completion.json`, source manifests, original document
-archives and the final exact-source qualification evidence.
-
-## Sizes
-
-Measurements use du (allocated KiB); see cleanup-ledger.json for the detailed snapshot and timestamp. Nested sizes are included in their parent and must not be counted twice.
-
-- `native/target`: 26.01 GiB.
-- `target/joom-spark-4.2.1`: 0.80 GiB.
-- `target/joom-release/joom-1.2-1-rc1`: 5.49 GiB.
-- `target/joom-release/joom-1.2-1-rc1/cargo-target`: 4.94 GiB.
-- `target/joom-release/joom-1.2-1-rc1/.work`: 0.00 GiB.
-- `target/joom-release-validator-cases`: 0.00 GiB.
-- `common/target`: 0.00 GiB.
-- `contrib/delta-spark/target`: 0.00 GiB.
-- `spark/target`: 0.39 GiB.
-- `spark-integration/target`: 0.00 GiB.
-
-## Targeted cleanup after the last RC
-
-Native host build outputs, not source/vendor
-
-```bash
-(cd -- "${COMET_ROOT:?Set COMET_ROOT to the intended Comet checkout}" && test -f pom.xml && test -f native/Cargo.toml && comet_prefix=$(git rev-parse --show-prefix) && test -z "$comet_prefix" && rm -rf -- native/target)
-```
-
-Generated Spark qualification checkout; original user Spark checkout remains untouched
-
-```bash
-(cd -- "${COMET_ROOT:?Set COMET_ROOT to the intended Comet checkout}" && test -f pom.xml && test -f native/Cargo.toml && comet_prefix=$(git rev-parse --show-prefix) && test -z "$comet_prefix" && rm -rf -- target/joom-spark-4.2.1)
-```
-
-Release compiler intermediates only; keeps final JARs/manifests/native files/smoke
-
-```bash
-(cd -- "${COMET_ROOT:?Set COMET_ROOT to the intended Comet checkout}" && test -f pom.xml && test -f native/Cargo.toml && comet_prefix=$(git rev-parse --show-prefix) && test -z "$comet_prefix" && rm -rf -- target/joom-release/joom-1.2-1-rc1/cargo-target target/joom-release/joom-1.2-1-rc1/.work)
-```
-
-Synthetic negative-validator fixtures
-
-```bash
-(cd -- "${COMET_ROOT:?Set COMET_ROOT to the intended Comet checkout}" && test -f pom.xml && test -f native/Cargo.toml && comet_prefix=$(git rev-parse --show-prefix) && test -z "$comet_prefix" && rm -rf -- target/joom-release-validator-cases)
-```
-
-Only these task-exclusive builder tags, after no task containers remain; no force and no prune
-
-```bash
-docker --context desktop-linux image rm comet-joom-builder-focal:1.2-arm64 comet-joom-builder-focal:1.2-amd64
-```
-
-Only these task-created dependency volumes, after no task containers remain; no force and no prune
-
-```bash
-docker --context desktop-linux volume rm comet-joom-1.2-cargo-arm64 comet-joom-1.2-cargo-amd64 comet-joom-1.2-cargo-git
-```
-
-## Shared caches and sources
-
-`~/.m2`, `~/.cargo`, `~/.rustup`, `~/.sbt`, `~/.ivy2`, Coursier and ProtocBridge were measured only as shared usage. Their entire size cannot be attributed to this migration; do not clear them wholesale. Preserve the user-installed JDK/Rust/Homebrew and source checkouts, including `${MIGRATION_AUX_ROOT}/src`.
-
-Docker builder images: ARM de016db98def..., AMD92564ee97ddb...; exact IDs/sizes are in the ledger. The three named volumes did not exist in the baseline and were created by this task. Docker build cache/shared Desktop disk usage cannot be precisely attributed by owner. Do not use system/builder/volume prune, forced removal, root Maven clean or git clean -fdx.
-
-## Auxiliary materials
-
-Current logs/scripts/receipts: `${MIGRATION_AUX_ROOT}/20261117_comet12-g01-final-qualification`; previous: `${MIGRATION_AUX_ROOT}/20261117_comet12-g01-resumed`, `${MIGRATION_AUX_ROOT}/20261117_comet12-g01`. Historical audit directories and their purposes are listed in cleanup-ledger.json. After preserving results, a selected exact task directory may be removed manually; the name temp does not itself authorize deletion.
-
-## G01 corrections after the first full CI
-
-Auxiliary patches, local test logs, checkpoint and new GHA snapshots: `${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes`. This directory was created for the current task; preserve it until acceptance. The temporary pristine copy of 121 Spark files was already removed after equality was confirmed. Rebuilds reused existing `native/target`, `spark/target`, `contrib/delta-spark/target`, `target/joom-spark-4.2.1` and standard caches; do not remove them automatically. No final JARs were released by this iteration.
-
-Snapshot after targeted checks: auxiliary directory ~6.3MiB; existing `native/target` ~39.7GiB total; Spark fixture with outputs ~831MiB. These are entire directory sizes, not the increase caused by the iteration.
-
-The next follow-up GHA is stored separately in `${MIGRATION_AUX_ROOT}/20261117_comet12-g01-ci-fixes/20261117_followup-gha`; the first run is frozen in the parent directory. Standard Maven caches and existing targets were also used for Scala2.12/Spark3.5 and Spark4.1 compatibility controls. No new Rust/Docker/release builds occurred in the follow-up. Full large SQL console logs were not retained: only selected lines, SHA receipts and bounded tails.
-
-Final snapshot on 2026-11-18: G01 CI-fix auxiliary data ~21.4MiB, existing native/target ~39.7GiB, Spark fixture ~829MiB (entire sizes, not increases). Run44205897075 and all three attempts are preserved in `20261117_followup-gha`; only small API/log/report receipts were saved, without extracting large archives. Continued use may slightly increase the directory size. No automatic cleanup occurred; old release JARs are not the current qualified RC.
-
-## Manual RC Build & Smoke: 2026-11-18
-
-Currently checked runtime JARs/checksums/provenance/smoke: `target/joom-release/gha-44388252264` (~410MiB for the entire directory). Keep these until the migration ends; two JARs are used by the image. The older `target/joom-release/joom-1.2-1-rc1` belongs to source2b8f80b3f and is historical, not this checked artifact set.
-
-Raw API/logs/control scripts/fault tests/actionlint: `${MIGRATION_AUX_ROOT}/20261118_comet12-rc-workflow`. It also contains the GitHub ZIP `qualified-artifact-44388252264.zip` (~181MiB); after archiving evidence and acceptance, that specifically selected task directory may be removed manually. No new local release/native builds occurred; Docker probes used existing images and --rm containers. Native builds and multi-gigabyte test dependencies ran on GHA; their caches were not downloaded to the laptop. Local RAT checks may have updated the ordinary M2 cache and `target/rat.txt`; preserve the shared cache.
-
-GitHub artifact retention: native3 days, candidate/test support7 days, smoke/qualified14 days. Current qualified artifact ID14469302529; expiry is configured by the workflow, while the local copy does not expire. No JFrog/Docker-registry publication occurred.
-
-## Final G01 translation, history and RC1 acceptance
-
-- Auxiliary archive, mappings, checks, API snapshots, final ZIP and completion receipt: `${MIGRATION_AUX_ROOT}/20261118_comet12-g01-finalization`. Retain `documentation-before.zip` and `completion.json` until the handoff is verified.
-- The final qualified output is `target/joom-release/gha-<run-id>`, where the final run ID is recorded in the annotated `joom-1.2-1-rc1` tag and `completion.json`. Expect approximately 410 MiB unpacked plus a 190 MiB downloaded ZIP. No local native rebuild is needed for this finalization.
-- Preserve the final JARs, checksum/build/provenance and smoke receipts before any optional cleanup. Old `gha-44388252264` artifacts remain historical and are not the final rewritten RC1.
-- Recovery refs `refs/joom-migration/checkpoints/20261118-before-finalization`, `refs/joom-migration/checkpoints/20261118-rebuilt-code` and the existing earlier checkpoint refs are local recovery evidence. Do not delete them automatically. No shared cache or user checkout is made disposable by this step.
-
-After retaining the final handoff, optional deletion of only the final downloaded ZIP is:
+Review each exact target, preserve artifacts/evidence and stop related builds
+first. Rebuilding later will cost time. Do not delete the entire root target:
+it contains release evidence and a linked diagnostic Git worktree.
 
 ```bash
 (
-  : "${MIGRATION_AUX_ROOT:?Set the approved auxiliary root}"
-  : "${RC_RUN_ID:?Set the verified final RC run ID}"
-  case "$RC_RUN_ID" in *[!0-9]*|'') exit 1 ;; esac
-  test -f "${MIGRATION_AUX_ROOT}/20261118_comet12-g01-finalization/completion.json" || exit 1
-  rm -- "${MIGRATION_AUX_ROOT}/20261118_comet12-g01-finalization/qualified-artifact-${RC_RUN_ID}.zip"
+set -eu
+cd -- "${COMET_ROOT:?Set the intended Comet checkout}" || exit 1
+test -f pom.xml && test -f native/Cargo.toml && test -z "$(git rev-parse --show-prefix)" || exit 1
+# Optional commands below, after the checks above succeed:
+rm -rf -- native/target
+rm -rf -- target/joom-spark-4.2.1
+rm -rf -- target/joom-release-validator-cases
+rm -rf -- target/joom-release/joom-1.2-1-rc1/cargo-target target/joom-release/joom-1.2-1-rc1/.work
 )
 ```
 
-Set `RC_RUN_ID` to the verified final run ID. Consult `completion.json` for exact paths, archive/JAR sizes and hashes. Nothing is automatically removed.
+`target/joom-spark-4.2.1` is the task-created Spark SQL test fixture; it is not the
+user's original Spark checkout. Native sources/vendor and final JARs are separate
+from `native/target`. Inspect standard `spark/target`, `common/target`,
+`contrib/delta-spark/target`, `native/target/criterion` and `target/criterion`
+individually if more space is required; retain reports needed for diagnosis.
 
-## G02 local implementation and validation
+The diagnostic worktree `target/joom-runtime-memory-diagnostic` on
+`joom/1.2-runtime-memory-diagnostic` must be removed through Git after preserving
+its diagnostic state, before considering any enclosing directory removal:
 
-Auxiliary evidence and snapshots: `${MIGRATION_AUX_ROOT}/20261119_comet12-g02`.
-It contains build/test logs, earlier and final JVM reports, source hashes, reviews
-and the final local completion receipt. Preserve it through final qualification.
+```bash
+git -C "${COMET_ROOT:?Set the intended Comet checkout}" worktree list
+git -C "${COMET_ROOT:?Set the intended Comet checkout}" worktree remove target/joom-runtime-memory-diagnostic
+```
 
-The normal build outputs under `native/target` and `spark/target` were reused and
-updated (approximately 47 GiB and 1 GiB respectively at the local checkpoint).
-Those sizes include earlier project builds and are not all new G02 data. Shared
-Maven/Cargo/JDK caches, the user's checkouts and G01 qualified release artifacts
-were preserved. No new Docker image or release artifact was produced for G02.
+No force is used; resolve any local changes if Git refuses. Do not delete primary
+branches, qualified refs or backup refs as a side effect of freeing build space.
 
-After the migration and after preserving final release JARs/provenance, the
-existing optional native/spark target cleanup described above also covers G02
-outputs. Do not clean those caches during remaining feature implementation
-unless the user asks; it would force substantial rebuilds. Nothing is deleted
-automatically. Exact final local sizes are recorded in the G02 completion receipt.
+## Docker resources created by the migration
 
-G02 memory-wait follow-up evidence is under `${MIGRATION_AUX_ROOT}/20261119_comet12-g02/20261119_memory-wait`: positive and intentionally failing negative-control logs, JVM reports, source hashes, history-rewrite proof, final diff and push receipt. The negative-control source change is restored before the final passing build and is never committed. Reused native/spark targets and shared caches remain subject to the same preservation rules. No new Docker/release artifacts were created. Preserve this directory through final acceptance; nothing is automatically deleted.
+After no related containers/builds remain, the task-specific resources below can
+be inspected and individually removed. Record actual identities before removal;
+tags may have moved since the snapshot.
 
-## G02 bookkeeping performance comparison
+| Image tag                            | Recorded image ID                                                         |
+| ------------------------------------ | ------------------------------------------------------------------------- |
+| `comet-joom-builder-focal:1.2-arm64` | `sha256:de016db98defac03c0715462aeddb86738cb89b44c34656d6be0ce511f082e7c` |
+| `comet-joom-builder-focal:1.2-amd64` | `sha256:92564ee97ddb02f4b12cf71243936c313dd774878603221f59abaac281095a49` |
 
-Evidence/source copies/compiled classes/commands/raw logs/GC logs/results are under `${MIGRATION_AUX_ROOT}/20261119_comet12-g02-performance`. Dated run directories under its `20261119_results` contain Spark-managed temporary files. The benchmark uses the existing native dylib and cached dependencies; it created no release JAR, Docker image, production data or extra package cache. Preserve the report and raw evidence through migration acceptance. After preserving evidence, only this specifically selected task directory may be removed manually. Do not remove shared caches, source checkouts or native/target as part of this performance cleanup. Exact whole-directory sizes are in its completion.json.
+```bash
+docker --context desktop-linux image rm comet-joom-builder-focal:1.2-arm64 comet-joom-builder-focal:1.2-amd64
+docker --context desktop-linux volume rm comet-joom-1.2-cargo-arm64 comet-joom-1.2-cargo-amd64 comet-joom-1.2-cargo-git
+```
 
-## G02 accepted integration
+These three volumes were task-created, unlike pre-existing Spark Docker volumes.
+Shared Docker build-cache/Desktop disk usage cannot be attributed wholly to this
+migration. Do not run system/builder/volume prune or forced cleanup.
 
-Archive, service-change diff, ref snapshots, final RAT/audit and push/completion receipts: `${MIGRATION_AUX_ROOT}/20261119_comet12-g02-integration`. Recovery ref: `refs/joom-migration/checkpoints/20261119-g02-before-integration`. Preserve these together with the existing implementation/performance evidence until final migration acceptance; do not automatically delete recovery refs or shared caches. Integration creates no native build, Docker image or release JAR. Exact final auxiliary size and source identity are in completion.json.
+## Task-created local nightly toolchain
 
-## Portable documentation conversion
+G10 installed `nightly-2026-11-21-aarch64-apple-darwin` with `miri` and `rust-src`
+under `${HOME}/.rustup/toolchains`, recorded at 532,552 KiB. The default stable
+toolchain was unchanged. Local Miri sysroot preparation was blocked; this install
+is not evidence that Miri tests ran locally. Accepted Miri execution is in GHA.
+Unlike the pre-existing user toolchains, this specific task-created toolchain is
+an optional manual cleanup candidate if it is no longer needed:
 
-`${MIGRATION_AUX_ROOT}/20261119_comet12-portable-paths` contains the exact original
-documentation archive, local-only root bindings, replacement/reference audits
-and completion receipt. Only documentation and local audit files were created;
-no builds, dependency downloads, artifact moves or automatic cleanup occurred.
-Preserve the archive and bindings through acceptance so normalized paths remain
-resolvable. Consult completion.json for the final identity and directory size.
+```bash
+rustup toolchain list
+rustup toolchain uninstall nightly-2026-11-21
+```
 
-## G03 sort/workspace implementation
+Do not remove the default/user toolchains or the entire `.rustup` directory.
 
-`${MIGRATION_AUX_ROOT}/20261119_comet12-g03` contains source/port/review manifests,
-local validation logs, the positive/negative ownership proof, benchmark results
-and the final receipt. It includes a 437362352-byte copy of the G02 native debug
-library for a possible existing SQL benchmark comparison; it is not a release JAR.
-At the measured checkpoint the whole auxiliary directory used 427884 KiB.
+## Downloaded bundles and auxiliary material
 
-Existing native/target used53881884KiB and spark/target
-used1124536KiB in total; these include earlier builds and
-are not G03 growth. Criterion manages outputs under the target/criterion paths
-listed in cleanup-ledger.json. No new Docker image, toolchain installation or
-release artifact was created. Keep this evidence, original shared caches, user
-checkouts and existing qualified G01 JARs through final migration acceptance.
-Nothing is automatically deleted; optional targeted cleanup remains manual.
+The Java 25 auxiliary root contains `qualified-artifact-45292086072.zip`
+(197,930,477 bytes) and historical `qualified-artifact-45281150607.zip`
+(197,859,653 bytes). After separately preserving and verifying the extracted
+current bundle and archive digest receipt, a duplicate ZIP may be unnecessary.
+An older downloaded artifact or extracted RC never qualifies newer source.
 
-## G03 accepted integration
+The following dated top-level directories are referenced by the original
+migration inventory, plus the subsequent qualification/integration/documentation
+tasks. Resolve them relative to `${MIGRATION_AUX_ROOT}`. Review contents and
+ownership before deciding what can be archived or deleted; the list is NOT a
+deletion command. Some are research sources for decisions rather than build waste.
 
-`${MIGRATION_AUX_ROOT}/20261119_comet12-g03-integration` contains the original
-documentation ZIP, source/ref manifests, acceptance audit, RAT/static-check logs
-and push/completion receipts. Recovery ref:
-`refs/joom-migration/checkpoints/20261119-g03-before-integration`. The earlier
-G03 implementation receipt and raw test/benchmark evidence remain unchanged.
-Preserve both directories and the recovery ref through final migration acceptance;
-no automatic deletion is authorized. No runtime build, new release artifact or
-Docker image is created by integration. Exact source/ref identities and auxiliary
-size are recorded in the integration completion receipt.
+- `20261115_comet-upstream-audit`
+- `20261115_comet-upstream-branches-pr-audit`
+- `20261115_datasci-spark4-audit`
+- `20261115_spark4-code-audit`
+- `20261115_spark4-comet-migration`
+- `20261116_comet-ansi-pr5889-followup`
+- `20261116_comet-build-ancestry-support`
+- `20261116_comet-fork-ancestry`
+- `20261116_comet-release-build`
+- `20261116_comet12-branch-release-plan`
+- `20261116_comet12-consolidated-plan`
+- `20261116_comet12-execution-setup`
+- `20261116_comet12-migration-register`
+- `20261116_datasci-comet-selection-audit`
+- `20261117_comet12-g01`
+- `20261117_comet12-g01-ci-fixes`
+- `20261117_comet12-g01-final-qualification`
+- `20261117_comet12-g01-pr-qualification`
+- `20261117_comet12-g01-resumed`
+- `20261117_comet12-g01-runner-fix`
+- `20261117_comet12-network-approval`
+- `20261117_comet12-session-setup`
+- `20261118_comet12-g01-finalization`
+- `20261118_comet12-rc-workflow`
+- `20261119_comet12-g02`
+- `20261119_comet12-g02-integration`
+- `20261119_comet12-g02-performance`
+- `20261119_comet12-g03`
+- `20261119_comet12-g03-integration`
+- `20261119_comet12-g04`
+- `20261119_comet12-g04-clippy-exception`
+- `20261119_comet12-g04-independent-semantics`
+- `20261119_comet12-portable-paths`
+- `20261120_comet12-g04-integration`
+- `20261120_comet12-g05`
+- `20261120_comet12-g05-integration`
+- `20261120_comet12-g06`
+- `20261120_comet12-g06-integration`
+- `20261120_comet12-g07`
+- `20261120_comet12-g07-integration`
+- `20261120_comet12-g08`
+- `20261121_comet12-g08-integration`
+- `20261121_comet12-g09`
+- `20261121_comet12-g09-integration`
+- `20261121_comet12-g10`
+- `20261123_comet12-g10-integration`
+- `20261123_comet12-java25`
+- `20261124_comet12-docs-consolidation`
+- `20261124_comet12-java25-image-check`
+- `20261124_comet12-java25-integration`
 
-## G04 local qualification
+The user-provided Iceberg checkout is a separate source at
+`${MIGRATION_AUX_ROOT}/20261122_iceberg-source`; preserve it like the upstream
+Comet/DataFusion/Spark and old Joom Spark checkouts. Do not clean other task
+directories merely because their names resemble these entries.
 
-`${MIGRATION_AUX_ROOT}/20261119_comet12-g04` holds source/command manifests,
-reviews, benchmarks, failed receipts and intentional ordering negative controls.
-Preserve it through review/final acceptance; exact current auxiliary/shared-target
-sizes are in `completion.json`. G04 reused `native/target`, `spark/target` and
-existing caches; their full size is not G04 growth. Maven copied the debug dylib
-to runtime resources; these are not release JARs. No Docker image, toolchain or
-release artifact was created. Use existing manual cleanup instructions after
-all migration builds finish; nothing is automatically deleted.
+Preserve standard shared `${HOME}/.m2`, `.cargo`, `.rustup`, `.sbt`, `.ivy2`,
+Gradle, Coursier and ProtocBridge caches, installed Rust/Prettier/Git tools and
+SDKMAN JDKs. No local Python environment or JDK was installed for Java 25
+qualification. Builds and Python environments on GitHub runners do not consume
+laptop storage. Avoid broad Maven clean, `git clean -fdx`, global cache deletion
+or automatic Git ref deletion.
 
-## G06 local windows qualification
-
-`${MIGRATION_AUX_ROOT}/20261120_comet12-g06` holds source proposals and snapshots, independent reviews, all failed/passing build/test logs, intentionally failing old-logic controls, existing paired benchmark outputs, verifier controls and the final completion receipt. The complete final log is required to recheck all 88 native/fallback actions. Preserve this evidence through review and final migration acceptance.
-
-Reused `native/target`, `spark/target`, `common/target` and Criterion output directories are listed with whole-directory checkpoint sizes in cleanup-ledger.json. Their total size is not G06-only growth. No Docker image, new toolchain or release JAR was produced. Keep shared caches and prior qualified release artifacts; do not clean build outputs while later groups need them. Only after preserving required evidence and a user cleanup decision may this specific task directory be removed manually. No automatic deletion is authorized.
-
-## G06 accepted integration
-
-`${MIGRATION_AUX_ROOT}/20261120_comet12-g06-integration` contains the qualified
-documentation archive, source/ref snapshots, preservation checks, license/static
-logs and actual completion receipt. `refs/joom-migration/g06-qualified` retains
-the original qualified commit. Preserve this evidence and original G06 logs
-through final acceptance; nothing is automatically deleted. Integration creates
-no runtime build, release JAR or Docker image. Final auxiliary size and exact
-local/remote source identities are in this directory's completion.json.
-
-## G07 local outputs
-
-Keep `${MIGRATION_AUX_ROOT}/20261120_comet12-g07` through final migration acceptance.
-It contains source/review snapshots, positive and negative logs, library/source
-checksums, incomplete optional benchmark evidence and the completion receipt.
-Builds reused `native/target`, `spark/target`, `common/target`,
-`native/target/criterion` and `target/criterion`; no G07 release artifacts, Docker
-images or new toolchains were created. See `cleanup-ledger.json#g07_resources`
-and the completion receipt for measured whole-directory sizes.
-
-After saving accepted artifacts/evidence and explicitly choosing cleanup, the
-existing guarded build-output cleanup commands in this guide apply. Do not delete
-shared Maven/Cargo/SDKMAN caches or source checkouts merely because G07 used them.
-No cleanup is performed automatically, including the task auxiliary directory.
-
-## G07 accepted integration
-
-`${MIGRATION_AUX_ROOT}/20261120_comet12-g07-integration` retains the qualified
-documentation archive, pre-integration refs/source snapshot, independent audit,
-static/license logs, preservation proof and exact publication/completion receipt.
-`refs/joom-migration/g07-qualified` retains the original qualified commit.
-Preserve this evidence through final acceptance; no automatic cleanup is performed.
-No new runtime build, release JAR or Docker image is created by integration.
-
-## G08 local codegen/serialization qualification
-
-Keep `${MIGRATION_AUX_ROOT}/20261120_comet12-g08` through final acceptance. It holds
-all source/audit snapshots, failure and old-library controls, final test XML/logs,
-existing Criterion output and isolated shaded-JAR support/receipts. The auxiliary
-test-support POM only relocates a copy of the local test JAR with existing project
-Shade/ASM tools; it changes no production POM or dependency. The first empty support
-archive/run was a harness failure and is superseded by the successful 13-case proof.
-
-Reused outputs include `native/target`, `spark/target`, `common/target`,
-`contrib/delta-spark/target` and Criterion directories. Measured whole sizes and
-baseline growth are in `cleanup-ledger.json#g08_resources` and the completion
-receipt. The Darwin/debug developer JARs are not Linux release artifacts. G08 used
-offline dependency caches without Maven install, new toolchains, Docker or external
-publication. Standard RAT may temporarily download its pinned official jar.
-
-After preserving required evidence and stopping all migration builds, the existing
-guarded target-cleaning commands in this guide apply. The dated G08 auxiliary tree
-can be removed manually only after final acceptance and a user cleanup decision.
-Keep shared caches, source checkouts and accepted release artifacts. No automatic
-cleanup or deletion of migration evidence is performed.
-
-## G08 accepted integration
-
-`${MIGRATION_AUX_ROOT}/20261121_comet12-g08-integration` retains the qualified
-documentation archive, source/ref snapshot, independent audit, static/formatting
-checks, preservation proof and exact publication/completion receipt.
-`refs/joom-migration/g08-qualified` retains the original qualified commit.
-Keep these records through final acceptance; nothing is automatically deleted.
-No runtime rebuild, release JAR, Docker image or dependency download is created
-by this integration.
-
-## G10 full qualification
-
-Keep `${MIGRATION_AUX_ROOT}/20261121_comet12-g10` through final acceptance. It holds
-initial documentation/source archives, all positive/intermediate-failure controls,
-plan-generation and ordinary-verification logs/XML, independent audits, exact-SHA
-GitHub run/job/artifact receipts and the downloaded release archive. Build outputs
-reuse `native/target`, `common/target`, `spark/target` and existing Maven/Cargo/Scala
-caches; whole-directory sizes do not represent G10-only growth. No host Docker
-images or global tools are installed for G10; native release builds run in GHA.
-
-Final downloaded artifacts reside in `target/joom-release/gha-<RC_RUN_ID>`.
-The final external completion receipt supplies the actual run ID, byte sizes,
-checksums, source and loaded-library provenance. Preserve the accepted JARs and
-receipts separately before choosing manual cleanup. No automatic deletion of
-source checkouts, shared caches, migration evidence or user resources is authorized.
-After all builds stop and evidence is preserved, use this guide's existing guarded
-manual target-cleaning commands; deleting a shared target forces future rebuilds.
-
-## G10 additional Rust safety toolchain
-
-The task installed official `nightly-2026-11-21-aarch64-apple-darwin` with Miri and
-rust-src under `${HOME}/.rustup/toolchains/` (532,552 KiB, about 520 MiB). Stable
-remains the default. Local Miri sysroot setup was blocked by sandbox permissions;
-no local Miri tests ran and no standard cache was relocated. After completion and
-an explicit user cleanup decision, `rustup toolchain uninstall nightly-2026-11-21`
-removes only this added toolchain. Keep shared stable Rust and package caches.
-No toolchain or migration evidence is deleted automatically.
-
-### G10 scan and SQL correction evidence
-
-Keep the scan-contract-fix, fallback-plan-audit, metric-audit and broad-test-evidence
-subdirectories under `${MIGRATION_AUX_ROOT}/20261121_comet12-g10`. They preserve
-failed and positive cohorts, original SQL copies, profile/XML logs, source proofs
-and deduplicated case evidence. No extra tools or shared-cache changes were needed.
-Treat older candidate artifacts as historical; final corrected JARs and their actual
-RC directory/checksums remain pending. Do not delete evidence, shared caches or
-user resources automatically.
-
-The measured G10 task-tree inventory includes two large copied cumulative Spark
-unit-tests logs containing history since November 17; they are not the size of
-one new profile run. Keep those copies and receipt paths. Future captures record
-only newly appended ranges. Shared package caches and project build directories
-are separate from task-only occupancy. No cleanup is performed automatically.
-
-### Shuffle UDF key follow-up evidence
-
-Keep the udf-shuffle-keys, shuffle-udf-key-fix, rc-shuffle-qualification and
-v8-final-docs dated subdirectories under `${MIGRATION_AUX_ROOT}/20261121_comet12-g10`.
-They preserve negative source restoration, failed compatibility attempts, final
-local proof and the additive RC25 contract. The old cf86a3b4 archive and
-`${COMET_ROOT}/target/joom-release/gha-44955646404` are historical, not corrected
-final artifacts. Do not delete them automatically. Final corrected artifact
-directories and actual sizes remain pending; shared caches/builds are separate.
-
-### Current profile/expression and RC27 evidence
-
-Keep the dated Nov22 expression-contracts, expression-ignore-audit,
-timestamp-cast-dispatch, native-aqe-structure, final-independent-review,
-rc27-expression-guards, backlog-v9 and final-docs-v9 directories under
-`${MIGRATION_AUX_ROOT}/20261121_comet12-g10`. They retain all failed and successful
-profile/lint logs, original sources/resources, 244-record preservation proofs,
-actual NULL/overflow/dispatch checks and the bounded RC27 controls. Existing
-project targets and standard package caches are reused; the authorized semantic
-retry may add standard Maven build dependencies to the shared cache.
-
-The v8 download `target/joom-release/gha-44963792674` and external archive are
-historical source-bound evidence. Preserve them with their receipts; they are
-not corrected final deliverables. The new exact-SHA RC27 directory, actual sizes
-and verified checksums remain pending post-commit facts. No automatic deletion
-of evidence, source checkouts, shared caches, build outputs or JARs is authorized.
-
-### V9 actual downloads and v10 fixture-integration evidence
-
-Preserve `target/joom-release/gha-45009573016` and the matching external
-`qualified-artifact-45009573016.zip`: verified v9 historical RC27 evidence,
-not final replacement deliverables. The archive is 198386497 bytes and extracted
-content 533203031 bytes (logical sizes; shared disk allocation can differ).
-Keep the dated Nov22 Spark SQL contracts/fixtures, range-sampling, Spark42101,
-Spark40exec, generator/map, exported-generator-batches, dynamic-filter,
-plan-equality-super, decimal-promotion and candidate-v10-finalization directories
-under `${MIGRATION_AUX_ROOT}/20261121_comet12-g10`. They retain actual logs,
-failed controls, restored source copies, exact official local shared Spark clones
-and tree proofs. Those isolated clones depend on the user's Spark object store;
-do not remove or modify the user's checkout. New final JAR paths/sizes/checksums
-are recorded externally only after actual download. Standard caches and project
-targets are reused and remain shared. No automatic cleanup is authorized.
-
-### V10 historical downloads and v11 ANSI-fixture evidence
-
-Preserve `target/joom-release/gha-45020346881` and its matching external archive
-and verification receipt as historical RC27 evidence for source `c3f4fdef`.
-These are not final v11 deliverables. Keep the dated Nov22
-`cost-join-contracts`, `native-v10-acceptance` and `job-logs-v10` directories
-under `${MIGRATION_AUX_ROOT}/20261121_comet12-g10`. They contain the actual failed
-CI/local diagnostics, reviewed AUX proposal, byte-preservation proof, successful
-profile logs/XML archives and boundary-oracle checks. The proposal and draft-doc
-subdirectories are nested under `20261122_cost-join-contracts`.
-
-This correction reuses existing Java/Maven tools, project build targets and
-standard shared caches. Record the eventual final RC directory, archive sizes
-and checksums only after the new exact-SHA download. Preserve all existing
-failed and passing evidence; no deletion, cache pruning or source cleanup is
-authorized.
-
-## G10 guarded-SMJ fixture follow-up
-
-Keep the v11 RC archive and target/joom-release/gha-45029701852 as historical
-source-bound evidence. New local diagnostics, completed job-log proofs, failed
-transport partials, unarmed v12 helpers and the pre-edit document archive stay
-under the dated external G10 root. No new toolchain or cache setup is required.
-Preserve the user-provided Iceberg checkout and all original/shared sources and
-caches. Refresh the final inventory after replacement artifacts arrive; nothing
-has been automatically removed.
+The remaining standard cache/configuration locations include `${HOME}/.gradle`,
+`${HOME}/Library/Caches/Coursier`,
+`${HOME}/Library/Caches/com.thesamet.scalapb.protocbridge.protocbridge`,
+`${HOME}/.docker/buildx` and `${HOME}/.sdkman/candidates/java`.
+These are shared/user resources, not task-owned cleanup targets.
