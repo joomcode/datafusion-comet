@@ -1385,15 +1385,35 @@ class CometCodegenSuite
     checkSparkAnswerAndOperator(df)
   }
 
+  test("codegen takes unresolved scalar subqueries as runtime inputs") {
+    withTable("codegen_strings", "codegen_patterns") {
+      sql("CREATE TABLE codegen_strings (s STRING) USING parquet")
+      // Both rows must reach the same batch: separate one-row files hide scalar broadcasting bugs.
+      sql(
+        "INSERT INTO codegen_strings SELECT /*+ COALESCE(1) */ * " +
+          "FROM VALUES ('abc123'), ('def456') AS v(s)")
+      sql("CREATE TABLE codegen_patterns (pattern STRING) USING parquet")
+      sql("INSERT INTO codegen_patterns VALUES ('([0-9]+)')")
+      for (aggregate <- Seq("max(pattern)", "max(pattern) FILTER (WHERE false)")) {
+        assertCodegenRan {
+          checkSparkAnswerAndOperator(
+            sql(s"SELECT regexp_extract(s, (SELECT $aggregate FROM codegen_patterns), 1) " +
+              "FROM codegen_strings"))
+        }
+      }
+      // A second execution must use its own subquery value, even when the kernel is cached.
+      sql("INSERT OVERWRITE codegen_patterns VALUES ('([a-z]+)')")
+      assertCodegenRan {
+        checkSparkAnswerAndOperator(
+          sql("SELECT regexp_extract(s, (SELECT max(pattern) FROM codegen_patterns), 1) " +
+            "FROM codegen_strings"))
+      }
+    }
+  }
+
   test("ScalaUDF composed with reused scalar subquery across projection and filter") {
-    // The same scalar subquery appears in two sites: the projection (which the dispatcher
-    // compiles into a fused kernel) and the filter (a separate operator). Each site holds its
-    // own `ScalarSubquery` expression instance with its own `@volatile result` field. Each
-    // surrounding operator's inherited `SparkPlan.waitForSubqueries` populates its instance's
-    // `result` before the dispatcher's bridge serializes the expression. The populated value
-    // travels through closure serialization into the cache key's bytes, so different subquery
-    // values compile distinct kernels. Exercises the full subquery-correctness invariant
-    // documented on `CometBatchKernelCodegen.canHandle`.
+    // Exercise reused subqueries beside a dispatched expression in separate operators.
+    // The preceding regression also puts a subquery inside the dispatched expression.
     spark.udf.register("addOne", (i: Int) => i + 1)
     withTable("t", "t2") {
       sql("CREATE TABLE t (x INT) USING parquet")

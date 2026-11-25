@@ -22,7 +22,8 @@ package org.apache.comet.serde
 import scala.util.control.NonFatal
 
 import org.apache.spark.SparkEnv
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, AttributeSeq, BindReferences, Expression, Literal, RuntimeReplaceable, ScalaUDF}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, AttributeSeq, BindReferences, BoundReference, Expression, Literal, RuntimeReplaceable, ScalaUDF}
+import org.apache.spark.sql.execution.ScalarSubquery
 import org.apache.spark.sql.types.BinaryType
 
 import org.apache.comet.CometConf
@@ -95,7 +96,13 @@ object CometScalaUDF extends CometExpressionSerde[ScalaUDF] {
     // Bind against only the AttributeReferences the tree actually reads, so ordinals align with
     // the data args we ship.
     val attrs = target.collect { case a: AttributeReference => a }.distinct
-    val boundExpr = BindReferences.bindReference(target, AttributeSeq(attrs))
+    // Subqueries are resolved after planning. Ship their values as native arguments rather
+    // than capturing an unresolved ScalarSubquery in the serialized codegen closure.
+    val subqueries = target.collect { case s: ScalarSubquery => s }.distinct
+    val withSubqueryInputs = target.transform { case s: ScalarSubquery =>
+      BoundReference(attrs.length + subqueries.indexOf(s), s.dataType, s.nullable)
+    }
+    val boundExpr = BindReferences.bindReference(withSubqueryInputs, AttributeSeq(attrs))
 
     // Gate at plan time. Surface the reason via withFallbackReason rather than crashing Janino
     // at execute.
@@ -143,7 +150,7 @@ object CometScalaUDF extends CometExpressionSerde[ScalaUDF] {
       return None
     }
 
-    val dataArgs = attrs.map { a =>
+    val dataArgs = (attrs ++ subqueries).map { a =>
       exprToProtoInternal(a, inputs, binding).getOrElse {
         withFallbackReason(expr, s"$exprName: codegen dispatch: could not serialize data arg $a")
         return None

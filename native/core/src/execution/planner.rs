@@ -43,7 +43,7 @@ use crate::execution::{
     expressions::subquery::Subquery,
     operators::{
         CometFilterExec, ExecutionError, ExpandExec, ExplodeExec, ParquetCompression,
-        ParquetWriterExec, SampleExec, ScanExec, ShuffleScanExec,
+        ParquetWriterExec, PartitionAggregateWindowExec, SampleExec, ScanExec, ShuffleScanExec,
     },
     planner::expression_registry::ExpressionRegistry,
     planner::operator_registry::OperatorRegistry,
@@ -2430,20 +2430,27 @@ impl PhysicalPlanner {
                 // trigger a retract call.
                 let window_expr = window_expr?;
                 let all_bounded = window_expr.iter().all(|e| e.uses_bounded_memory());
-                let window_agg: Arc<dyn ExecutionPlan> = if all_bounded {
-                    Arc::new(BoundedWindowAggExec::try_new(
-                        window_expr,
-                        Arc::clone(&child.native_plan),
-                        InputOrderMode::Sorted,
-                        !partition_exprs.is_empty(),
-                    )?)
-                } else {
-                    Arc::new(WindowAggExec::try_new(
-                        window_expr,
-                        Arc::clone(&child.native_plan),
-                        !partition_exprs.is_empty(),
-                    )?)
-                };
+                let window_agg: Arc<dyn ExecutionPlan> =
+                    if PartitionAggregateWindowExec::supports(&window_expr) {
+                        Arc::new(PartitionAggregateWindowExec::new(WindowAggExec::try_new(
+                            window_expr,
+                            Arc::clone(&child.native_plan),
+                            !partition_exprs.is_empty(),
+                        )?))
+                    } else if all_bounded {
+                        Arc::new(BoundedWindowAggExec::try_new(
+                            window_expr,
+                            Arc::clone(&child.native_plan),
+                            InputOrderMode::Sorted,
+                            !partition_exprs.is_empty(),
+                        )?)
+                    } else {
+                        Arc::new(WindowAggExec::try_new(
+                            window_expr,
+                            Arc::clone(&child.native_plan),
+                            !partition_exprs.is_empty(),
+                        )?)
+                    };
 
                 // DataFusion's window functions don't always return the same Arrow
                 // type that Spark expects (e.g. `row_number` returns UInt64 while
